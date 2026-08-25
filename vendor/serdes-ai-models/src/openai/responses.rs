@@ -647,7 +647,7 @@ pub struct OutputTokensDetails {
 ///
 /// let response = model.request(&messages, &settings, &params).await?;
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenAIResponsesModel {
     model_name: String,
     client: Client,
@@ -658,6 +658,16 @@ pub struct OpenAIResponsesModel {
     profile: ModelProfile,
     default_timeout: Duration,
     default_settings: OpenAIResponsesModelSettings,
+}
+
+impl std::fmt::Debug for OpenAIResponsesModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenAIResponsesModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl OpenAIResponsesModel {

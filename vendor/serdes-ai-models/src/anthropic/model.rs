@@ -21,7 +21,7 @@ use serdes_ai_tools::ToolDefinition;
 use std::time::Duration;
 
 /// Anthropic Claude model.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AnthropicModel {
     model_name: String,
     client: Client,
@@ -37,6 +37,16 @@ pub struct AnthropicModel {
     enable_caching: bool,
     /// Anthropic API version.
     api_version: String,
+}
+
+impl std::fmt::Debug for AnthropicModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AnthropicModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl AnthropicModel {

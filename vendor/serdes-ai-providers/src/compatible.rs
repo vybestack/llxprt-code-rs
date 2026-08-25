@@ -12,7 +12,6 @@ use serdes_ai_models::ModelProfile;
 // ============================================================================
 
 /// Base implementation for OpenAI-compatible providers.
-#[derive(Debug)]
 pub struct OpenAICompatibleProvider {
     name: String,
     config: ProviderConfig,
@@ -20,6 +19,19 @@ pub struct OpenAICompatibleProvider {
     default_base_url: String,
     env_prefix: String,
     aliases: Vec<&'static str>,
+}
+
+impl std::fmt::Debug for OpenAICompatibleProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAICompatibleProvider")
+            .field("name", &self.name)
+            .field("config", &self.config)
+            .field("client", &"[hidden]")
+            .field("default_base_url", &"[hidden]")
+            .field("env_prefix", &self.env_prefix)
+            .field("aliases", &self.aliases)
+            .finish()
+    }
 }
 
 impl OpenAICompatibleProvider {
@@ -542,5 +554,20 @@ mod tests {
         assert_eq!(provider.base_url(), "https://api.cohere.ai/v2");
 
         assert!(provider.model_profile("command-r-plus").is_some());
+    }
+
+    #[test]
+    fn compatible_provider_debug_hides_credentials_and_endpoint() {
+        let provider = OpenAICompatibleProvider::new(
+            "marker-provider",
+            "api-key-marker",
+            "https://endpoint-marker.invalid/?token=query-marker",
+        );
+        let rendered = format!("{provider:?}");
+        assert!(!rendered.contains("api-key-marker"));
+        assert!(!rendered.contains("endpoint-marker"));
+        assert!(!rendered.contains("query-marker"));
+        assert!(rendered.contains("[redacted]"));
+        assert!(rendered.contains("[hidden]"));
     }
 }

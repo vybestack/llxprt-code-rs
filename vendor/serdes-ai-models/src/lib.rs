@@ -577,7 +577,7 @@ mod tests {
 ///
 /// This struct allows configuring advanced model features like extended thinking
 /// for Claude models, reasoning effort for OpenAI o1/o3, etc.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ExtendedModelConfig {
     /// API key (overrides environment variable)
     pub api_key: Option<String>,
@@ -593,6 +593,21 @@ pub struct ExtendedModelConfig {
     pub thinking_budget: Option<u64>,
     /// Reasoning effort (OpenAI o1/o3)
     pub reasoning_effort: Option<String>,
+}
+
+impl std::fmt::Debug for ExtendedModelConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExtendedModelConfig")
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field("base_url", &self.base_url.as_ref().map(|_| "[configured]"))
+            .field("timeout", &self.timeout)
+            .field("client", &self.client.as_ref().map(|_| "[configured]"))
+            .field("enable_thinking", &self.enable_thinking)
+            .field("thinking_budget", &self.thinking_budget)
+            .field("reasoning_effort", &self.reasoning_effort)
+            .finish()
+    }
 }
 
 impl ExtendedModelConfig {
@@ -823,5 +838,70 @@ pub fn build_model_extended(
         _ => Err(ModelError::Configuration(format!(
             "Unknown or unsupported provider: '{provider}'. Supported providers depend on enabled features."
         ))),
+    }
+}
+
+#[cfg(all(test, feature = "full"))]
+mod credential_debug_tests {
+    const MARKER: &str = "credential-marker-that-must-not-appear";
+
+    fn assert_redacted(value: &impl std::fmt::Debug) {
+        let rendered = format!("{value:?}");
+        assert!(
+            !rendered.contains(MARKER),
+            "credential leaked through Debug"
+        );
+        assert!(
+            rendered.contains("[redacted]"),
+            "Debug omitted redaction marker"
+        );
+    }
+
+    #[test]
+    fn every_secret_bearing_model_debug_is_redacted() {
+        assert_redacted(&crate::openai::OpenAIChatModel::new("model", MARKER));
+        assert_redacted(&crate::openai::OpenAIResponsesModel::new("model", MARKER));
+        assert_redacted(&crate::anthropic::AnthropicModel::new("model", MARKER));
+        assert_redacted(&crate::antigravity::AntigravityModel::new(
+            "model", MARKER, "project",
+        ));
+        assert_redacted(&crate::chatgpt_oauth::ChatGptOAuthModel::new(
+            "model", MARKER,
+        ));
+        assert_redacted(&crate::claude_code_oauth::ClaudeCodeOAuthModel::new(
+            "model", MARKER,
+        ));
+        assert_redacted(&crate::cohere::CohereModel::new("model", MARKER));
+        assert_redacted(&crate::google::GoogleModel::new("model", MARKER));
+        assert_redacted(&crate::huggingface::HuggingFaceModel::new("model", MARKER));
+        assert_redacted(&crate::mistral::MistralModel::new("model", MARKER));
+        assert_redacted(&crate::openrouter::OpenRouterModel::new("model", MARKER));
+
+        let config = crate::ExtendedModelConfig::new()
+            .with_api_key(MARKER)
+            .with_base_url(format!("https://example.invalid/?secret={MARKER}"));
+        assert_redacted(&config);
+    }
+
+    #[test]
+    fn public_endpoint_configs_hide_configured_urls() {
+        let mut antigravity = crate::antigravity::AntigravityConfig::default();
+        antigravity.endpoint = format!("https://{MARKER}.invalid/?secret={MARKER}");
+        antigravity.fallback_endpoints = vec![antigravity.endpoint.clone()];
+        let mut chatgpt = crate::chatgpt_oauth::ChatGptConfig::default();
+        chatgpt.api_base_url = antigravity.endpoint.clone();
+        let mut claude = crate::claude_code_oauth::ClaudeCodeConfig::default();
+        claude.api_base_url = antigravity.endpoint.clone();
+        let ollama = crate::ollama::OllamaModel::new("model").with_base_url(&antigravity.endpoint);
+
+        for rendered in [
+            format!("{antigravity:?}"),
+            format!("{chatgpt:?}"),
+            format!("{claude:?}"),
+            format!("{ollama:?}"),
+        ] {
+            assert!(!rendered.contains(MARKER));
+            assert!(rendered.contains("[hidden]"));
+        }
     }
 }

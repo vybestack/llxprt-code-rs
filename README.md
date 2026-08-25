@@ -378,8 +378,9 @@ manifest `THIRD_PARTY_LICENSES/source-bundle.sha256`. The 11 retained
 an exact match with `vendor/`. It never contains `.git`,
 `target/`, `dist/`, `llxprt-parity-out/`, logs, `.DS_Store`, or cargo-vendor
 scratch, and the build fails if one is found where it would be bundled. The archive has a
-single top-level `bundle/` directory. The builder rejects symlink inputs and output paths
-inside the included source tree outside `dist/`. Verification snapshots the archive before
+single top-level `bundle/` directory. The builder rejects symlink inputs. An output must be outside
+the physical source tree or a proper descendant of its physical `dist/` directory; `dist/` itself
+is not a file destination. Verification snapshots the archive before
 validation, validates all member names and types before extraction, rejects paths outside
 `bundle/`, links, and special files, requires zero-size directory payloads, and enforces limits
 of 32 MiB compressed input, 16 MiB per regular member, less than 128 MiB aggregate

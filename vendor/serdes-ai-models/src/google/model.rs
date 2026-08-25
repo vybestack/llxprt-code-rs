@@ -20,7 +20,7 @@ use serdes_ai_tools::ToolDefinition;
 use std::time::Duration;
 
 /// Google AI / Vertex AI model.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GoogleModel {
     model_name: String,
     client: Client,
@@ -39,6 +39,16 @@ pub struct GoogleModel {
     enable_code_execution: bool,
     /// Enable Google Search grounding.
     enable_search: bool,
+}
+
+impl std::fmt::Debug for GoogleModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GoogleModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl GoogleModel {

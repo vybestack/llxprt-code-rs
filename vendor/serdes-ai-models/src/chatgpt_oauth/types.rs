@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// ChatGPT Codex API configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChatGptConfig {
     /// Base URL for the Codex API
     pub api_base_url: String,
@@ -15,6 +15,17 @@ pub struct ChatGptConfig {
     pub prefix: String,
     /// Default context length
     pub context_length: usize,
+}
+
+impl std::fmt::Debug for ChatGptConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChatGptConfig")
+            .field("api_base_url", &"[hidden]")
+            .field("prefix", &self.prefix)
+            .field("context_length", &self.context_length)
+            .finish()
+    }
 }
 
 impl Default for ChatGptConfig {

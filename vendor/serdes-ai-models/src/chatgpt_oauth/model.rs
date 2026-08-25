@@ -25,7 +25,7 @@ const CODEX_SYSTEM_PROMPT: &str = include_str!("codex_system_prompt.md");
 ///
 /// Uses OAuth access tokens to authenticate with the ChatGPT Codex API.
 /// This is an OpenAI-compatible API but with a different endpoint.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChatGptOAuthModel {
     model_name: String,
     access_token: String,
@@ -33,6 +33,16 @@ pub struct ChatGptOAuthModel {
     client: Client,
     config: ChatGptConfig,
     profile: ModelProfile,
+}
+
+impl std::fmt::Debug for ChatGptOAuthModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChatGptOAuthModel")
+            .field("model_name", &self.model_name)
+            .field("access_token", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ChatGptOAuthModel {

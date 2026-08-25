@@ -17,7 +17,7 @@ def main() -> int:
     if not os.path.isabs(requested):
         requested = os.path.join(root, requested)
     output = os.path.realpath(requested)
-    dist = os.path.join(root, "dist")
+    dist = os.path.realpath(os.path.join(root, "dist"))
 
     try:
         inside_root = os.path.commonpath((root, output)) == root
@@ -26,9 +26,9 @@ def main() -> int:
         inside_root = False
         inside_dist = False
 
-    if inside_root and (not inside_dist or output == dist):
+    if output == dist or (inside_root and not inside_dist):
         print(
-            f"output inside the source tree is only permitted under dist/: {output}",
+            "output must be outside the source tree or a proper descendant of physical dist/",
             file=sys.stderr,
         )
         return 1

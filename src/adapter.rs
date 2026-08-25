@@ -394,3 +394,20 @@ pub fn assistant_request(result: &LlmResult) -> ModelRequest {
         )));
     req
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn public_openai_model_debug_redacts_credentials_and_endpoint_values() {
+        let marker = "adapter-debug-secret-marker";
+        let model = super::openai_chat_model(
+            "model",
+            marker,
+            &format!("http://127.0.0.1:9/v1?credential={marker}"),
+            std::time::Duration::from_secs(1),
+        );
+        let rendered = format!("{model:?}");
+        assert!(!rendered.contains(marker));
+        assert!(rendered.contains("[redacted]"));
+    }
+}

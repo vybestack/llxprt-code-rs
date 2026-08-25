@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Settings for model generation.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModelSettings {
     /// Maximum tokens to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,6 +55,24 @@ pub struct ModelSettings {
     /// Extra provider-specific settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Value>,
+}
+
+impl std::fmt::Debug for ModelSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelSettings")
+            .field("max_tokens", &self.max_tokens)
+            .field("temperature", &self.temperature)
+            .field("top_p", &self.top_p)
+            .field("top_k", &self.top_k)
+            .field("frequency_penalty", &self.frequency_penalty)
+            .field("presence_penalty", &self.presence_penalty)
+            .field("stop", &self.stop)
+            .field("seed", &self.seed)
+            .field("timeout", &self.timeout)
+            .field("parallel_tool_calls", &self.parallel_tool_calls)
+            .field("extra", &self.extra.as_ref().map(|_| "[redacted]"))
+            .finish()
+    }
 }
 
 impl ModelSettings {
@@ -309,5 +327,16 @@ mod tests {
         assert_eq!(settings.temperature, parsed.temperature);
         // Duration comparison (might have slight floating point differences)
         assert!(parsed.timeout.is_some());
+    }
+
+    #[test]
+    fn model_settings_debug_redacts_provider_specific_values() {
+        let settings = ModelSettings {
+            extra: Some(serde_json::json!({"api_key": "extra-secret-marker"})),
+            ..ModelSettings::default()
+        };
+        let rendered = format!("{settings:?}");
+        assert!(!rendered.contains("extra-secret-marker"));
+        assert!(rendered.contains("[redacted]"));
     }
 }

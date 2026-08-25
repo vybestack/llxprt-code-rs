@@ -24,7 +24,7 @@ use std::collections::HashMap;
 /// assert_eq!(server.unique_id(), "mcp_server:my-server");
 /// assert_eq!(server.label(), "MCP: my-server");
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MCPServerTool {
     /// Unique identifier for this MCP server.
     pub id: String,
@@ -44,6 +44,21 @@ pub struct MCPServerTool {
     pub headers: Option<HashMap<String, String>>,
     /// The kind identifier for this tool type.
     pub kind: String,
+}
+
+impl std::fmt::Debug for MCPServerTool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MCPServerTool")
+            .field("id", &self.id)
+            .field("url", &"[configured]")
+            .field(
+                "authorization_token",
+                &self.authorization_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field("headers", &self.headers.as_ref().map(|_| "[redacted]"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl MCPServerTool {
@@ -140,6 +155,22 @@ impl MCPServerTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_server_debug_redacts_authorization_and_headers() {
+        let marker = "mcp-secret-marker";
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), marker.to_string());
+        let server = MCPServerTool::new(
+            "server",
+            format!("https://example.invalid/?secret={marker}"),
+        )
+        .with_auth(marker)
+        .with_headers(headers);
+        let rendered = format!("{server:?}");
+        assert!(!rendered.contains(marker));
+        assert!(rendered.contains("[redacted]"));
+    }
 
     #[test]
     fn test_mcp_server_new() {

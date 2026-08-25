@@ -126,10 +126,22 @@ stage=""
 archive_tmp=""
 publisher_pid=""
 coordination_dir=""
+stop_publisher() {
+  local pid="$1"
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in {1..100}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      return
+    fi
+    sleep 0.01
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
 cleanup() {
   if [[ -n "$publisher_pid" ]]; then
-    kill "$publisher_pid" 2>/dev/null || true
-    wait "$publisher_pid" 2>/dev/null || true
+    stop_publisher "$publisher_pid"
   fi
   exec 8>&- 2>/dev/null || true
   exec 9>&- 2>/dev/null || true

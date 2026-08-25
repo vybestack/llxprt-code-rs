@@ -37,7 +37,7 @@ use serdes_ai_core::{
 };
 
 /// Mistral AI model client.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MistralModel {
     /// Model name.
     model_name: String,
@@ -51,6 +51,16 @@ pub struct MistralModel {
     profile: ModelProfile,
     /// Default timeout.
     default_timeout: Duration,
+}
+
+impl std::fmt::Debug for MistralModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MistralModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl MistralModel {

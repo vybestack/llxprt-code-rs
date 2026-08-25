@@ -105,7 +105,7 @@ impl std::fmt::Display for SearchContextSize {
 }
 
 /// Configuration for the web search tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WebSearchConfig {
     /// Maximum number of results to return.
     pub max_results: usize,
@@ -139,6 +139,17 @@ pub struct WebSearchConfig {
     /// If None, unlimited searches are allowed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_uses: Option<u32>,
+}
+
+impl std::fmt::Debug for WebSearchConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WebSearchConfig")
+            .field("max_results", &self.max_results)
+            .field("search_depth", &self.search_depth)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for WebSearchConfig {
@@ -961,6 +972,16 @@ pub trait WebSearchProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_search_config_debug_redacts_api_key() {
+        let marker = "web-search-secret-marker";
+        let mut config = WebSearchConfig::default();
+        config.api_key = Some(marker.to_string());
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains(marker));
+        assert!(rendered.contains("[redacted]"));
+    }
 
     #[test]
     fn test_search_context_size_default() {

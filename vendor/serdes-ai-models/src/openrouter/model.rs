@@ -18,7 +18,7 @@ use std::time::Duration;
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
 /// OpenRouter model - routes requests to multiple providers.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenRouterModel {
     model_name: String,
     client: Client,
@@ -30,6 +30,16 @@ pub struct OpenRouterModel {
     transforms: Option<Vec<String>>,
     profile: ModelProfile,
     default_timeout: Duration,
+}
+
+impl std::fmt::Debug for OpenRouterModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenRouterModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl OpenRouterModel {

@@ -202,4 +202,20 @@ mod tests {
         let result = OpenAIProvider::from_env();
         assert!(result.is_err());
     }
+
+    #[test]
+    fn provider_debug_hides_credentials_and_configured_endpoint() {
+        const MARKER: &str = "credential-marker-that-must-not-appear";
+        let provider = OpenAIProvider::from_config(
+            ProviderConfig::new()
+                .with_api_key(MARKER)
+                .with_base_url(format!("https://{MARKER}.invalid/?secret={MARKER}"))
+                .with_organization(MARKER),
+        )
+        .unwrap();
+        let rendered = format!("{provider:?}");
+        assert!(!rendered.contains(MARKER));
+        assert!(rendered.contains("[redacted]"));
+        assert!(rendered.contains("[configured]"));
+    }
 }

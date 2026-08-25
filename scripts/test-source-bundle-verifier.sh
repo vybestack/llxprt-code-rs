@@ -14,7 +14,7 @@
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verify="$root/scripts/verify-source-bundle.sh"
 build="$root/scripts/build-source-bundle.sh"
 tmp="$(mktemp -d)"
@@ -538,7 +538,8 @@ EOF
 chmod +x "$tmp/pass-bin/cargo"
 published_one="$tmp/published-one.tar.gz"
 published_two="$tmp/published-two.tar.gz"
-if git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1; then
+if git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1 &&
+    [[ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ]]; then
   PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_one" >"$tmp/stdout" 2>"$tmp/stderr"
   PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_two" >"$tmp/stdout" 2>"$tmp/stderr"
   if [[ ! -f "$published_one" || ! -f "$published_two" ]]; then
@@ -550,7 +551,7 @@ if git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1; then
     exit 1
   fi
   bash "$verify" "$published_one" >"$tmp/stdout" 2>"$tmp/stderr"
-else
+elif ! git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1; then
   if PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_one" >"$tmp/stdout" 2>"$tmp/stderr"; then
     echo "source-bundle builder published without a committed HEAD" >&2
     exit 1
@@ -559,6 +560,8 @@ else
     echo "HEAD-less source-bundle attempt created a destination" >&2
     exit 1
   fi
+else
+  echo "skipping successful builder publication checks for a dirty worktree" >&2
 fi
 
 # The builder starts the publisher before archive construction and waits until the publisher has
@@ -568,6 +571,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 
 publisher, temporary = sys.argv[1:]
 root = pathlib.Path(temporary) / "builder-publisher-handoff"
@@ -653,6 +657,160 @@ if process.wait(timeout=30) == 0:
     raise SystemExit("publisher succeeded after an absent output component appeared")
 if victim.read_bytes() != b"victim" or missing_destination.exists():
     raise SystemExit("failed output setup changed the substituted component")
+
+
+def await_publication(candidate, output):
+    source_read, source_write = os.pipe()
+    ready_read, ready_write = os.pipe()
+    child = subprocess.Popen(
+        [sys.executable, publisher, "--await-source", str(output), str(ready_write), "--", "/usr/bin/true"],
+        stdin=source_read,
+        pass_fds=(ready_write,),
+        stderr=subprocess.PIPE,
+    )
+    os.close(source_read)
+    os.close(ready_write)
+    try:
+        if os.read(ready_read, 6) != b"READY\n":
+            raise SystemExit("size-cap publisher did not become ready")
+        os.write(source_write, b"PREPARE\0")
+        if os.read(ready_read, 13) != b"PARENT_READY\n":
+            raise SystemExit("size-cap publisher did not retain its output parent")
+        os.write(source_write, os.fsencode(candidate) + b"\0")
+    finally:
+        os.close(source_write)
+        os.close(ready_read)
+    stderr = child.communicate(timeout=30)[1]
+    return child.returncode, stderr
+
+
+exact = root / "await-exact-cap"
+with exact.open("wb") as handle:
+    handle.truncate(32 * 1024 * 1024)
+exact_output = root / "await-exact-output"
+status, stderr = await_publication(exact, exact_output)
+if status != 0 or exact_output.stat().st_size != 32 * 1024 * 1024:
+    raise SystemExit(f"await-source rejected exact-cap sparse input: {stderr!r}")
+
+over = root / "await-over-cap"
+with over.open("wb") as handle:
+    handle.truncate(32 * 1024 * 1024 + 1)
+over_output = root / "await-over-output"
+status, stderr = await_publication(over, over_output)
+if status == 0 or b"32 MiB" not in stderr or over_output.exists():
+    raise SystemExit("await-source accepted cap-plus-one sparse input")
+
+await_growth = root / "await-growth"
+await_growth.write_bytes(b"verified candidate")
+await_growth_writer = await_growth.open("r+b")
+await_growth_output = root / "await-growth-output"
+verifier_started = root / "await-growth-verifier-started"
+verifier = root / "await-growth-verifier.sh"
+verifier.write_text(
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n"
+    f"touch {str(verifier_started)!r}\n"
+    "sleep 1\n",
+    encoding="utf-8",
+)
+verifier.chmod(0o700)
+source_read, source_write = os.pipe()
+ready_read, ready_write = os.pipe()
+child = subprocess.Popen(
+    [sys.executable, publisher, "--await-source", str(await_growth_output), str(ready_write), "--", str(verifier)],
+    stdin=source_read,
+    pass_fds=(ready_write,),
+    stderr=subprocess.PIPE,
+)
+os.close(source_read)
+os.close(ready_write)
+try:
+    if os.read(ready_read, 6) != b"READY\n":
+        raise SystemExit("growth publisher did not become ready")
+    os.write(source_write, b"PREPARE\0")
+    if os.read(ready_read, 13) != b"PARENT_READY\n":
+        raise SystemExit("growth publisher did not retain its output parent")
+    os.write(source_write, os.fsencode(await_growth) + b"\0")
+finally:
+    os.close(source_write)
+    os.close(ready_read)
+deadline = time.monotonic() + 10
+while not verifier_started.exists() and child.poll() is None and time.monotonic() < deadline:
+    time.sleep(0.01)
+if not verifier_started.exists():
+    child.kill()
+    child.wait()
+    raise SystemExit("await-source growth verifier did not start")
+await_growth_writer.truncate(32 * 1024 * 1024 + 1)
+await_growth_writer.flush()
+os.fsync(await_growth_writer.fileno())
+await_growth_writer.close()
+stderr = child.communicate(timeout=30)[1]
+if child.returncode == 0 or await_growth_output.exists():
+    raise SystemExit(f"await-source accepted concurrent source growth: {stderr!r}")
+PY
+
+# Cancelling the publisher terminates and reaps a verifier process group, including a blocking
+# descendant, rather than leaving verifier or Cargo grandchildren running.
+python3 - "$root/scripts/source-bundle-publish.py" "$tmp" <<'PY'
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+
+publisher, temporary = sys.argv[1:]
+root = pathlib.Path(temporary) / "publisher-cancellation"
+root.mkdir()
+source = root / "source"
+source.write_bytes(b"verified candidate")
+destination = root / "destination"
+pid_file = root / "descendant.pid"
+verifier = root / "blocking-verifier.sh"
+verifier.write_text(
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n"
+    "(\n"
+    "  trap '' TERM\n"
+    "  while :; do sleep 300; done\n"
+    ") &\n"
+    f"echo $! > {str(pid_file)!r}\n"
+    "wait\n",
+    encoding="utf-8",
+)
+verifier.chmod(0o700)
+process = subprocess.Popen(
+    [sys.executable, publisher, str(source), str(destination), "--", str(verifier)],
+    stderr=subprocess.PIPE,
+)
+deadline = time.monotonic() + 10
+while not pid_file.exists() and process.poll() is None and time.monotonic() < deadline:
+    time.sleep(0.01)
+if not pid_file.exists():
+    if process.poll() is None:
+        process.kill()
+    stderr = process.communicate(timeout=5)[1]
+    raise SystemExit(f"blocking verifier descendant did not start: {stderr!r}")
+descendant = int(pid_file.read_text(encoding="utf-8"))
+process.send_signal(signal.SIGTERM)
+try:
+    process.wait(timeout=10)
+except subprocess.TimeoutExpired:
+    process.kill()
+    process.wait()
+    raise SystemExit("publisher did not terminate after cancellation")
+if process.returncode == 0 or destination.exists():
+    raise SystemExit("cancelled publisher succeeded or installed a destination")
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    try:
+        os.kill(descendant, 0)
+    except ProcessLookupError:
+        break
+    time.sleep(0.01)
+else:
+    raise SystemExit("cancelled publisher left a blocking verifier descendant")
 PY
 
 # Publication retains the source file and destination directory descriptors across verification.
@@ -660,9 +818,9 @@ PY
 # final bytes; and a late destination directory is never used as a container.
 python3 - "$root/scripts/source-bundle-publish.py" "$tmp" <<'PY'
 import importlib.util
+import os
 import pathlib
 import sys
-import types
 
 module_path, temp_path = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("bundle_publish", module_path)
@@ -717,8 +875,36 @@ module.publish(str(source), str(destination), command)
 if source.exists() or destination.read_bytes() != verified:
     raise SystemExit("atomic publication did not install the exact candidate")
 
+# The public direct publication path accepts the exact 32 MiB limit, including a sparse source,
+# and rejects cap-plus-one before invoking the verifier or creating a destination.
+real_run = module.run_verifier
+module.run_verifier = lambda *args, **kwargs: 0
+exact_source = root / "exact-cap-source"
+exact_destination = root / "exact-cap-destination"
+with exact_source.open("wb") as handle:
+    handle.truncate(module.SOURCE_BUNDLE_MAX_BYTES)
+module.publish(str(exact_source), str(exact_destination), command)
+if exact_destination.stat().st_size != module.SOURCE_BUNDLE_MAX_BYTES:
+    raise SystemExit("exact-cap sparse source was not published exactly")
+
+over_source = root / "over-cap-source"
+over_destination = root / "over-cap-destination"
+with over_source.open("wb") as handle:
+    handle.truncate(module.SOURCE_BUNDLE_MAX_BYTES + 1)
+try:
+    module.publish(str(over_source), str(over_destination), command)
+except RuntimeError as error:
+    if "32 MiB" not in str(error):
+        raise
+else:
+    raise SystemExit("cap-plus-one sparse source was accepted")
+if over_destination.exists():
+    raise SystemExit("cap-plus-one source created a destination")
+module.run_verifier = real_run
+
 real_open = module.os.open
 parent_opens = 0
+physical_root = os.path.realpath(root)
 source = root / "shared-parent-source"
 destination = root / "shared-parent-destination"
 source.write_bytes(verified)
@@ -726,7 +912,7 @@ source.write_bytes(verified)
 
 def count_parent_opens(path, *args, **kwargs):
     global parent_opens
-    if path == str(root):
+    if path == physical_root:
         parent_opens += 1
     return real_open(path, *args, **kwargs)
 
@@ -737,7 +923,7 @@ module.os.open = real_open
 if parent_opens != 1 or destination.read_bytes() != verified:
     raise SystemExit("shared source/destination parent was reopened instead of duplicated")
 
-real_run = module.subprocess.run
+real_run = module.run_verifier
 source = root / "source-race"
 destination = root / "source-race-destination"
 source.write_bytes(verified)
@@ -745,13 +931,40 @@ source.write_bytes(verified)
 
 def substitute_source(*args, **kwargs):
     source.write_bytes(b"substituted bytes")
-    return types.SimpleNamespace(returncode=0)
+    return 0
 
 
-module.subprocess.run = substitute_source
+module.run_verifier = substitute_source
 module.publish(str(source), str(destination), command)
 if destination.read_bytes() != verified or source.read_bytes() != b"substituted bytes":
     raise SystemExit("source-name substitution changed the published candidate")
+
+growth_source = root / "growth-source"
+growth_destination = root / "growth-destination"
+growth_source.write_bytes(verified)
+growth_writer = growth_source.open("r+b")
+
+
+def grow_retained_source(*args, **kwargs):
+    growth_writer.truncate(module.SOURCE_BUNDLE_MAX_BYTES + 1)
+    growth_writer.flush()
+    os.fsync(growth_writer.fileno())
+    return 0
+
+
+module.run_verifier = grow_retained_source
+try:
+    module.publish(str(growth_source), str(growth_destination), command)
+except RuntimeError as error:
+    if "32 MiB" not in str(error):
+        raise
+else:
+    raise SystemExit("source growth during verification was accepted")
+finally:
+    growth_writer.close()
+if growth_destination.exists():
+    raise SystemExit("source growth during verification created a destination")
+module.run_verifier = real_run
 
 source = root / "destination-race-source"
 destination = root / "destination-race"
@@ -760,10 +973,10 @@ source.write_bytes(verified)
 
 def substitute_destination(*args, **kwargs):
     destination.mkdir()
-    return types.SimpleNamespace(returncode=0)
+    return 0
 
 
-module.subprocess.run = substitute_destination
+module.run_verifier = substitute_destination
 try:
     module.publish(str(source), str(destination), command)
 except RuntimeError:
@@ -785,16 +998,16 @@ def substitute_parent(*args, **kwargs):
     parent.rename(moved)
     parent.mkdir()
     (parent / "parent-race-source").write_bytes(b"substituted bytes")
-    return types.SimpleNamespace(returncode=0)
+    return 0
 
 
-module.subprocess.run = substitute_parent
+module.run_verifier = substitute_parent
 module.publish(str(source), str(destination), command)
 if (moved / destination.name).read_bytes() != verified:
     raise SystemExit("output-parent substitution redirected publication")
 if (parent / destination.name).exists():
     raise SystemExit("publication appeared in the substituted output parent")
-module.subprocess.run = real_run
+module.run_verifier = real_run
 
 real_unlink = module.os.unlink
 source_parent = root / "unlink-parent"
@@ -972,7 +1185,7 @@ module.os.fsync = real_fsync
 if destination.read_bytes() != verified:
     raise SystemExit("directory fsync failure lost the installed artifact")
 destination.unlink()
-module.subprocess.run = real_run
+module.run_verifier = real_run
 PY
 
 
@@ -1040,6 +1253,27 @@ if [[ "$normalized_dist" != "$root/dist/.bundle-output-$$.tar.gz" ]]; then
   echo "source-bundle output policy did not normalize the allowed dist path" >&2
   exit 1
 fi
+if python3 "$output_policy" "$source_alias" "$source_alias/dist" \
+    >"$tmp/stdout" 2>"$tmp/stderr"; then
+  echo "source-bundle output policy accepted the dist directory itself" >&2
+  exit 1
+fi
+policy_root="$tmp/policy-root"
+physical_dist="$tmp/physical-dist"
+mkdir "$policy_root" "$physical_dist"
+physical_dist_real="$(cd "$physical_dist" && pwd -P)"
+ln -s "$physical_dist" "$policy_root/dist"
+normalized_symlinked_dist="$(python3 "$output_policy" "$policy_root" \
+  "$policy_root/dist/bundle.tar.gz")"
+if [[ "$normalized_symlinked_dist" != "$physical_dist_real/bundle.tar.gz" ]]; then
+  echo "source-bundle output policy did not normalize a symlinked dist directory" >&2
+  exit 1
+fi
+if python3 "$output_policy" "$policy_root" "$policy_root/dist" \
+    >"$tmp/stdout" 2>"$tmp/stderr"; then
+  echo "source-bundle output policy accepted a symlinked dist directory itself" >&2
+  exit 1
+fi
 normalized_external="$(python3 "$output_policy" "$source_alias" \
   "$tmp/.bundle-output-$$.tar.gz")"
 case "$normalized_external" in
@@ -1054,7 +1288,7 @@ if bash "$source_alias/scripts/build-source-bundle.sh" \
   echo "source-bundle builder accepted an aliased in-tree output" >&2
   exit 1
 fi
-if ! grep -q 'output inside the source tree is only permitted under dist/' "$tmp/stderr"; then
+if ! grep -q 'output must be outside the source tree or a proper descendant of physical dist/' "$tmp/stderr"; then
   echo "source-bundle builder did not apply physical output containment before Git checks" >&2
   exit 1
 fi

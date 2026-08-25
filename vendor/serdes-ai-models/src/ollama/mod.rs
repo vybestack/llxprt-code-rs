@@ -44,7 +44,7 @@ use serdes_ai_core::{
 };
 
 /// Ollama model client.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OllamaModel {
     /// Model name.
     model_name: String,
@@ -58,6 +58,20 @@ pub struct OllamaModel {
     keep_alive: Option<String>,
     /// Default timeout.
     default_timeout: Duration,
+}
+
+impl std::fmt::Debug for OllamaModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OllamaModel")
+            .field("model_name", &self.model_name)
+            .field("client", &"[hidden]")
+            .field("base_url", &"[hidden]")
+            .field("profile", &self.profile)
+            .field("keep_alive", &self.keep_alive)
+            .field("default_timeout", &self.default_timeout)
+            .finish()
+    }
 }
 
 impl OllamaModel {

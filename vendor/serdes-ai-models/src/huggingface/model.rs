@@ -20,7 +20,7 @@ pub const HF_INFERENCE_URL: &str = "https://api-inference.huggingface.co/models"
 /// HuggingFace model client.
 ///
 /// Supports both the HuggingFace Inference API and self-hosted TGI endpoints.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HuggingFaceModel {
     /// Model ID (e.g., "meta-llama/Llama-3.1-8B-Instruct").
     model_id: String,
@@ -34,6 +34,16 @@ pub struct HuggingFaceModel {
     profile: ModelProfile,
     /// Default timeout.
     default_timeout: Duration,
+}
+
+impl std::fmt::Debug for HuggingFaceModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HuggingFaceModel")
+            .field("model_id", &self.model_id)
+            .field("api_token", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl HuggingFaceModel {

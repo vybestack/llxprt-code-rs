@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Claude Code API configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClaudeCodeConfig {
     /// Base URL for the API
     pub api_base_url: String,
@@ -17,6 +17,18 @@ pub struct ClaudeCodeConfig {
     pub context_length: usize,
     /// Anthropic API version header
     pub anthropic_version: String,
+}
+
+impl std::fmt::Debug for ClaudeCodeConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaudeCodeConfig")
+            .field("api_base_url", &"[hidden]")
+            .field("prefix", &self.prefix)
+            .field("context_length", &self.context_length)
+            .field("anthropic_version", &self.anthropic_version)
+            .finish()
+    }
 }
 
 impl Default for ClaudeCodeConfig {

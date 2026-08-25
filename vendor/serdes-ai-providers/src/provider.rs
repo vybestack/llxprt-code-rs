@@ -46,7 +46,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
 pub type BoxedProvider = Arc<dyn Provider>;
 
 /// Common configuration for providers.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ProviderConfig {
     /// API key for authentication.
     pub api_key: Option<String>,
@@ -62,6 +62,24 @@ pub struct ProviderConfig {
     pub project: Option<String>,
     /// Region/location (for cloud providers).
     pub region: Option<String>,
+}
+
+impl std::fmt::Debug for ProviderConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderConfig")
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field("base_url", &self.base_url.as_ref().map(|_| "[configured]"))
+            .field("timeout", &self.timeout)
+            .field("max_retries", &self.max_retries)
+            .field(
+                "organization",
+                &self.organization.as_ref().map(|_| "[configured]"),
+            )
+            .field("project", &self.project.as_ref().map(|_| "[configured]"))
+            .field("region", &self.region)
+            .finish()
+    }
 }
 
 impl ProviderConfig {
@@ -182,6 +200,19 @@ pub enum ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_config_debug_redacts_credentials_and_request_metadata() {
+        let marker = "provider-config-secret-marker";
+        let config = ProviderConfig::new()
+            .with_api_key(marker)
+            .with_base_url(format!("https://example.invalid/?secret={marker}"))
+            .with_organization(marker)
+            .with_project(marker);
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains(marker));
+        assert!(rendered.contains("[redacted]"));
+    }
 
     #[test]
     fn test_provider_config_builder() {

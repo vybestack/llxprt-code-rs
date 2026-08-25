@@ -155,7 +155,7 @@ impl ModelRetry {
 }
 
 /// API error from the model provider.
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Clone)]
 pub struct ModelApiError {
     /// HTTP status code.
     pub status_code: u16,
@@ -173,16 +173,26 @@ pub struct ModelApiError {
     pub retry_after: Option<u64>,
 }
 
+impl fmt::Debug for ModelApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ModelApiError")
+            .field("status_code", &self.status_code)
+            .field("body", &"[redacted]")
+            .field("headers", &"[redacted]")
+            .field("message", &self.message.as_ref().map(|_| "[redacted]"))
+            .field(
+                "error_code",
+                &self.error_code.as_ref().map(|_| "[redacted]"),
+            )
+            .field("retryable", &self.retryable)
+            .field("retry_after", &self.retry_after)
+            .finish()
+    }
+}
+
 impl fmt::Display for ModelApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Model API error (status {})", self.status_code)?;
-        if let Some(ref msg) = self.message {
-            write!(f, ": {}", msg)?;
-        }
-        if let Some(ref code) = self.error_code {
-            write!(f, " [{}]", code)?;
-        }
-        Ok(())
+        write!(f, "Model API error (status {})", self.status_code)
     }
 }
 
@@ -712,5 +722,35 @@ mod tests {
         );
         assert_eq!(group.len(), 2);
         assert!(!group.is_empty());
+    }
+
+    #[test]
+    fn model_api_error_debug_redacts_provider_payloads() {
+        let err = ModelApiError {
+            status_code: 401,
+            body: "body-secret-marker".to_string(),
+            headers: [(
+                "authorization".to_string(),
+                "header-secret-marker".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            message: Some("message-secret-marker".to_string()),
+            error_code: Some("code-secret-marker".to_string()),
+            retryable: false,
+            retry_after: None,
+        };
+        let debug = format!("{err:?}");
+        let display = err.to_string();
+        for marker in [
+            "body-secret",
+            "header-secret",
+            "message-secret",
+            "code-secret",
+        ] {
+            assert!(!debug.contains(marker));
+            assert!(!display.contains(marker));
+        }
+        assert!(debug.contains("[redacted]"));
     }
 }

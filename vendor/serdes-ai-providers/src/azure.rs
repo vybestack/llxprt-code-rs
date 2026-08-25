@@ -7,7 +7,6 @@ use serdes_ai_models::profile::openai_gpt4o_profile;
 use serdes_ai_models::ModelProfile;
 
 /// Azure OpenAI provider.
-#[derive(Debug)]
 pub struct AzureProvider {
     config: ProviderConfig,
     client: Client,
@@ -20,6 +19,18 @@ pub struct AzureProvider {
 impl AzureProvider {
     /// Default API version.
     pub const DEFAULT_API_VERSION: &'static str = "2024-08-01-preview";
+impl std::fmt::Debug for AzureProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AzureProvider")
+            .field("config", &self.config)
+            .field("client", &"[hidden]")
+            .field("resource_name", &"[hidden]")
+            .field("api_version", &self.api_version)
+            .finish()
+    }
+}
+
 
     /// Create a new Azure OpenAI provider.
     pub fn new(api_key: impl Into<String>, resource_name: impl Into<String>) -> Self {

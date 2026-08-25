@@ -31,7 +31,7 @@ You are pair programming with a USER to solve their coding task. The task may re
 /// Antigravity OAuth model.
 ///
 /// Uses OAuth access tokens to authenticate with Google's Cloud Code API.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AntigravityModel {
     model_name: String,
     access_token: String,
@@ -47,6 +47,16 @@ pub struct AntigravityModel {
     thinking_level: Option<String>,
     /// Location for regional routing.
     location: String,
+}
+
+impl std::fmt::Debug for AntigravityModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AntigravityModel")
+            .field("model_name", &self.model_name)
+            .field("access_token", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl AntigravityModel {

@@ -48,7 +48,7 @@ pub fn chat_url(base: &str) -> String {
 }
 
 /// OpenAI Chat Completions model.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenAIChatModel {
     model_name: String,
     client: Client,
@@ -58,6 +58,16 @@ pub struct OpenAIChatModel {
     project: Option<String>,
     profile: ModelProfile,
     default_timeout: Duration,
+}
+
+impl std::fmt::Debug for OpenAIChatModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenAIChatModel")
+            .field("model_name", &self.model_name)
+            .field("api_key", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl OpenAIChatModel {

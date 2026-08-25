@@ -29,7 +29,7 @@ const TOOL_PREFIX: &str = "cp_";
 /// Claude Code OAuth model.
 ///
 /// Uses OAuth access tokens to authenticate with the Anthropic API.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClaudeCodeOAuthModel {
     model_name: String,
     access_token: String,
@@ -40,6 +40,16 @@ pub struct ClaudeCodeOAuthModel {
     enable_thinking: bool,
     /// Thinking budget tokens.
     thinking_budget: Option<u64>,
+}
+
+impl std::fmt::Debug for ClaudeCodeOAuthModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaudeCodeOAuthModel")
+            .field("model_name", &self.model_name)
+            .field("access_token", &"[redacted]")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClaudeCodeOAuthModel {

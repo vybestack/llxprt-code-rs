@@ -109,7 +109,6 @@ impl Provider for GoogleProvider {
 }
 
 /// Vertex AI provider.
-#[derive(Debug)]
 #[allow(dead_code)]
 pub struct VertexAIProvider {
     config: ProviderConfig,
@@ -119,6 +118,18 @@ pub struct VertexAIProvider {
 }
 
 impl VertexAIProvider {
+impl std::fmt::Debug for VertexAIProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("VertexAIProvider")
+            .field("config", &self.config)
+            .field("client", &"[hidden]")
+            .field("project_id", &"[hidden]")
+            .field("location", &self.location)
+            .finish()
+    }
+}
+
     /// Create a new Vertex AI provider.
     pub fn new(project_id: impl Into<String>, location: impl Into<String>) -> Self {
         let project_id = project_id.into();

@@ -362,6 +362,66 @@ pub struct ShellConfig {
     pub allow_shell: bool,
 }
 
+/// Maximum time a file-writing tool waits for another cooperating process to finish.
+const WORKSPACE_WRITE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const WORKSPACE_WRITE_LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
+
+#[derive(Debug, PartialEq, Eq)]
+enum WorkspaceLockError {
+    Timeout,
+    System(String),
+}
+
+impl std::fmt::Display for WorkspaceLockError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => formatter.write_str("workspace write lock timed out"),
+            Self::System(message) => write!(formatter, "lock workspace for write: {message}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WorkspaceLockGuard(std::os::unix::io::RawFd);
+
+impl Drop for WorkspaceLockGuard {
+    fn drop(&mut self) {
+        // SAFETY: the retained workspace descriptor outlives this guard. Unlocking cannot
+        // violate memory safety, and an unlock failure cannot be recovered during Drop.
+        unsafe {
+            libc::flock(self.0, libc::LOCK_UN);
+        }
+    }
+}
+
+fn acquire_workspace_write_lock(
+    fd: std::os::unix::io::RawFd,
+    timeout: std::time::Duration,
+) -> Result<WorkspaceLockGuard, WorkspaceLockError> {
+    let deadline = std::time::Instant::now()
+        .checked_add(timeout)
+        .ok_or(WorkspaceLockError::Timeout)?;
+    loop {
+        // SAFETY: the caller passes the valid retained workspace directory descriptor.
+        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(WorkspaceLockGuard(fd));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted
+            && error.kind() != std::io::ErrorKind::WouldBlock
+        {
+            return Err(WorkspaceLockError::System(error.to_string()));
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Err(WorkspaceLockError::Timeout);
+        }
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            std::thread::sleep(WORKSPACE_WRITE_LOCK_RETRY.min(deadline.duration_since(now)));
+        }
+    }
+}
+
 /// Serialize `write_file` and `replace` across every cooperating process that retained this
 /// workspace directory. The lock is advisory: unrelated programs can still modify workspace
 /// entries, so `replace` also performs its optimistic pre-publication identity/content check.
@@ -371,29 +431,9 @@ fn with_workspace_write_lock<T>(
 ) -> Result<T, String> {
     use std::os::unix::io::AsRawFd;
 
-    struct Guard(std::os::unix::io::RawFd);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            // SAFETY: the retained workspace descriptor outlives this guard. Unlocking cannot
-            // violate memory safety, and an unlock failure cannot be recovered during Drop.
-            unsafe {
-                libc::flock(self.0, libc::LOCK_UN);
-            }
-        }
-    }
-
-    let fd = cap.root_dir().as_raw_fd();
-    loop {
-        // SAFETY: `fd` is the valid retained workspace directory descriptor.
-        if unsafe { libc::flock(fd, libc::LOCK_EX) } == 0 {
-            break;
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::Interrupted {
-            return Err(format!("lock workspace for write: {error}"));
-        }
-    }
-    let _guard = Guard(fd);
+    let _guard =
+        acquire_workspace_write_lock(cap.root_dir().as_raw_fd(), WORKSPACE_WRITE_LOCK_TIMEOUT)
+            .map_err(|error| error.to_string())?;
     operation()
 }
 

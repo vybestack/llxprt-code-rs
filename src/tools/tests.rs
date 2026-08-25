@@ -537,60 +537,184 @@ fn search_honors_configured_output_limit_at_exact_and_plus_one() {
 }
 
 const WORKSPACE_LOCK_CHILD_ROOT: &str = "LLXPRT_TEST_WORKSPACE_LOCK_CHILD_ROOT";
+const WORKSPACE_LOCK_CHILD_MODE: &str = "LLXPRT_TEST_WORKSPACE_LOCK_CHILD_MODE";
+
+struct ChildGuard(Option<std::process::Child>);
+
+impl ChildGuard {
+    fn wait_until(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> Result<std::process::ExitStatus, String> {
+        loop {
+            let child = self.0.as_mut().expect("child is present");
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| format!("poll cooperating writer: {error}"))?
+            {
+                self.0 = None;
+                return Ok(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("cooperating writer did not terminate before its deadline".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn spawn_lock_child(root: &std::path::Path, mode: &str) -> ChildGuard {
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tools::tests::workspace_lock_subprocess_helper",
+            "--nocapture",
+        ])
+        .env(WORKSPACE_LOCK_CHILD_ROOT, root)
+        .env(WORKSPACE_LOCK_CHILD_MODE, mode)
+        .spawn()
+        .unwrap();
+    ChildGuard(Some(child))
+}
+
+fn wait_for_marker(path: &std::path::Path, deadline: std::time::Instant) {
+    while !path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cooperating writer did not produce its contention proof"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 #[test]
 fn workspace_lock_subprocess_helper() {
+    use std::os::unix::io::AsRawFd;
+
     let Some(root) = std::env::var_os(WORKSPACE_LOCK_CHILD_ROOT) else {
         return;
     };
     let root = std::path::PathBuf::from(root);
-    std::fs::write(root.join("child-ready"), b"ready").unwrap();
+    if std::env::var(WORKSPACE_LOCK_CHILD_MODE).as_deref() == Ok("idle") {
+        std::fs::write(root.join("child-idle"), b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(60));
+        return;
+    }
     let config = cfg(&root);
+    let fd = config.ws.root_dir().as_raw_fd();
+    loop {
+        // SAFETY: `fd` is the child's valid retained workspace directory descriptor.
+        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            panic!("child acquired a workspace lock that the parent claims to hold");
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        break;
+    }
+    std::fs::write(root.join("child-contended"), b"would-block").unwrap();
     let (ok, body) = execute_tool(
         &root,
         "write_file",
         json!({"path": "locked.txt", "content": "writer"}),
         &config,
     );
-    assert!(ok, "{body}");
+    if std::env::var(WORKSPACE_LOCK_CHILD_MODE).as_deref() == Ok("timeout") {
+        assert!(!ok);
+        assert_eq!(body, "workspace write lock timed out");
+        std::fs::write(root.join("child-timed-out"), b"timed-out").unwrap();
+    } else {
+        assert!(ok, "{body}");
+    }
 }
 
 #[test]
-fn cooperating_processes_wait_for_the_workspace_lock() {
+fn cooperating_processes_prove_contention_then_wait_for_the_workspace_lock() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().to_path_buf();
     let config = cfg(&root);
     let mut child = with_workspace_write_lock(&config.ws, || {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tools::tests::workspace_lock_subprocess_helper",
-                "--nocapture",
-            ])
-            .env(WORKSPACE_LOCK_CHILD_ROOT, &root)
-            .spawn()
-            .map_err(|error| format!("spawn cooperating writer: {error}"))?;
+        let mut child = spawn_lock_child(&root, "contend");
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while !root.join("child-ready").exists() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "cooperating writer did not reach the lock"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "a cooperating writer completed while another workspace write lock was held"
-        );
+        wait_for_marker(&root.join("child-contended"), deadline);
+        assert!(child.0.as_mut().unwrap().try_wait().unwrap().is_none());
+        assert!(!root.join("locked.txt").exists());
         Ok(child)
     })
     .unwrap();
-    assert!(child.wait().unwrap().success());
+    let status = child
+        .wait_until(std::time::Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    assert!(status.success());
     assert_eq!(
         std::fs::read_to_string(root.join("locked.txt")).unwrap(),
         "writer"
     );
+}
+
+#[test]
+fn child_guard_kills_and_reaps_on_early_failure() {
+    let d = tempfile::tempdir().unwrap();
+    let child = spawn_lock_child(d.path(), "idle");
+    wait_for_marker(
+        &d.path().join("child-idle"),
+        std::time::Instant::now() + Duration::from_secs(5),
+    );
+    let process_id = child.0.as_ref().unwrap().id();
+    drop(child);
+    // A reaped PID no longer names this child. ESRCH is the expected result.
+    let result = unsafe { libc::kill(process_id as libc::pid_t, 0) };
+    assert_eq!(result, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
+#[test]
+fn subprocess_lock_timeout_is_bounded_and_cannot_mutate() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().to_path_buf();
+    let config = cfg(&root);
+    with_workspace_write_lock(&config.ws, || {
+        let mut child = spawn_lock_child(&root, "timeout");
+        let status = child
+            .wait_until(std::time::Instant::now() + Duration::from_secs(7))
+            .map_err(|error| format!("wait for lock timeout: {error}"))?;
+        assert!(status.success());
+        assert!(root.join("child-timed-out").exists());
+        assert!(!root.join("locked.txt").exists());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn workspace_lock_timeout_is_typed_and_does_not_run_the_operation() {
+    let d = tempfile::tempdir().unwrap();
+    let first = cfg(d.path());
+    let second = cfg(d.path());
+    use std::os::unix::io::AsRawFd;
+    let _held =
+        acquire_workspace_write_lock(first.ws.root_dir().as_raw_fd(), Duration::from_secs(1))
+            .unwrap();
+    let start = std::time::Instant::now();
+    let error =
+        acquire_workspace_write_lock(second.ws.root_dir().as_raw_fd(), Duration::from_millis(50))
+            .unwrap_err();
+    assert_eq!(error, WorkspaceLockError::Timeout);
+    assert!(start.elapsed() < Duration::from_secs(1));
 }
 
 #[test]

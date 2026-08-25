@@ -6,9 +6,11 @@ import ctypes
 import errno
 import hashlib
 import os
+import signal
 import stat
 import subprocess
 import sys
+import time
 
 
 class PublicationInstalledError(RuntimeError):
@@ -23,13 +25,33 @@ def close_quietly(fd: int) -> None:
         pass
 
 
+SOURCE_BUNDLE_MAX_BYTES = 32 * 1024 * 1024
+READ_CHUNK_BYTES = 1024 * 1024
+
+
+def checked_size(fd: int) -> None:
+    """Reject an already-oversized file before reading any of its content."""
+    size = os.fstat(fd).st_size
+    if size < 0 or size > SOURCE_BUNDLE_MAX_BYTES:
+        raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
+
+
 def digest_fd(fd: int) -> str:
+    checked_size(fd)
     os.lseek(fd, 0, os.SEEK_SET)
     digest = hashlib.sha256()
-    while chunk := os.read(fd, 1024 * 1024):
-        digest.update(chunk)
-    os.lseek(fd, 0, os.SEEK_SET)
-    return digest.hexdigest()
+    total = 0
+    try:
+        while chunk := os.read(
+            fd, min(READ_CHUNK_BYTES, SOURCE_BUNDLE_MAX_BYTES + 1 - total)
+        ):
+            total += len(chunk)
+            if total > SOURCE_BUNDLE_MAX_BYTES:
+                raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
+            digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        os.lseek(fd, 0, os.SEEK_SET)
 
 
 def destination_exists(directory_fd: int, name: str) -> bool:
@@ -45,13 +67,22 @@ def copy_anonymous_candidate(source_fd: int, directory_fd: int, expected: str) -
     flags = os.O_RDWR | os.O_TMPFILE | os.O_CLOEXEC
     target_fd = os.open(".", flags, 0o600, dir_fd=directory_fd)
     digest = hashlib.sha256()
+    total = 0
     try:
+        checked_size(source_fd)
         os.lseek(source_fd, 0, os.SEEK_SET)
-        while chunk := os.read(source_fd, 1024 * 1024):
+        while chunk := os.read(
+            source_fd, min(READ_CHUNK_BYTES, SOURCE_BUNDLE_MAX_BYTES + 1 - total)
+        ):
+            total += len(chunk)
+            if total > SOURCE_BUNDLE_MAX_BYTES:
+                raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
             digest.update(chunk)
             view = memoryview(chunk)
             while view:
                 written = os.write(target_fd, view)
+                if written == 0:
+                    raise RuntimeError("source-bundle candidate write made no progress")
                 view = view[written:]
         if digest.hexdigest() != expected:
             raise RuntimeError("verified source bundle changed before publication")
@@ -100,6 +131,72 @@ def open_installed(directory_fd: int, name: str) -> int:
     return fd
 
 
+ACTIVE_VERIFIER: subprocess.Popen[bytes] | None = None
+ACTIVE_VERIFIER_CANCELLED = False
+VERIFIER_TERMINATE_SECONDS = 1.0
+
+
+def terminate_verifier_group(
+    process: subprocess.Popen[bytes], cancellation_forwarded: bool
+) -> int:
+    """Terminate the retained verifier group before reaping its reserved leader PID."""
+    signalled = cancellation_forwarded
+    if not cancellation_forwarded:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            signalled = True
+        except (ProcessLookupError, PermissionError):
+            pass
+    if signalled:
+        time.sleep(VERIFIER_TERMINATE_SECONDS)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        return process.wait(timeout=VERIFIER_TERMINATE_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("source-bundle verifier could not be reaped") from error
+
+
+def verifier_signal(signum: int, _frame: object) -> None:
+    """Forward cancellation; bounded waiting occurs after the interrupted wait unwinds."""
+    global ACTIVE_VERIFIER_CANCELLED
+    if ACTIVE_VERIFIER is not None:
+        try:
+            os.killpg(ACTIVE_VERIFIER.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        ACTIVE_VERIFIER_CANCELLED = True
+    raise InterruptedError(f"source-bundle publisher interrupted by signal {signum}")
+
+
+def run_verifier(command: list[str], environment: dict[str, str], source_fd: int) -> int:
+    """Run verification in an owned process group and remove every surviving descendant."""
+    global ACTIVE_VERIFIER, ACTIVE_VERIFIER_CANCELLED
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        pass_fds=(source_fd,),
+        start_new_session=True,
+    )
+    ACTIVE_VERIFIER = process
+    ACTIVE_VERIFIER_CANCELLED = False
+    reaped = False
+    try:
+        # Observe completion without reaping the group leader. Keeping its PID reserved prevents
+        # process-group reuse until every descendant has been terminated.
+        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+        result = terminate_verifier_group(process, ACTIVE_VERIFIER_CANCELLED)
+        reaped = True
+        return result
+    finally:
+        if not reaped:
+            terminate_verifier_group(process, ACTIVE_VERIFIER_CANCELLED)
+        ACTIVE_VERIFIER = None
+        ACTIVE_VERIFIER_CANCELLED = False
+
+
 def publish(
     source: str,
     destination: str,
@@ -111,6 +208,8 @@ def publish(
         raise RuntimeError("a verification command is required")
     source = os.path.abspath(source)
     source_parent, source_name = os.path.split(source)
+    source_parent = os.path.realpath(source_parent)
+    source = os.path.join(source_parent, source_name)
     destination_parent, destination_name = os.path.split(os.path.abspath(destination))
     destination_parent = os.path.realpath(destination_parent)
     destination = os.path.join(destination_parent, destination_name)
@@ -154,14 +253,9 @@ def publish(
 
         environment = os.environ.copy()
         environment["LLXPRT_BUNDLE_SOURCE_FD"] = str(source_fd)
-        result = subprocess.run(
-            command,
-            check=False,
-            env=environment,
-            pass_fds=(source_fd,),
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"source-bundle verification exited {result.returncode}")
+        returncode = run_verifier(command, environment, source_fd)
+        if returncode != 0:
+            raise RuntimeError(f"source-bundle verification exited {returncode}")
 
         if digest_fd(source_fd) != expected:
             raise RuntimeError("verified source bundle changed before publication")
@@ -324,6 +418,9 @@ def await_source_and_publish(
 
 
 def main() -> None:
+    signal.signal(signal.SIGTERM, verifier_signal)
+    signal.signal(signal.SIGINT, verifier_signal)
+    signal.signal(signal.SIGHUP, verifier_signal)
     try:
         if len(sys.argv) >= 6 and sys.argv[1] == "--await-source" and sys.argv[4] == "--":
             await_source_and_publish(sys.argv[2], int(sys.argv[3]), sys.argv[5:])

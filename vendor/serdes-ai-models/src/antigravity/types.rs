@@ -425,7 +425,7 @@ pub struct UsageMetadata {
 // ============================================================================
 
 /// Antigravity model configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AntigravityConfig {
     /// Base API endpoint.
     pub endpoint: String,
@@ -433,6 +433,17 @@ pub struct AntigravityConfig {
     pub fallback_endpoints: Vec<String>,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
+}
+
+impl std::fmt::Debug for AntigravityConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AntigravityConfig")
+            .field("endpoint", &"[hidden]")
+            .field("fallback_endpoints", &"[hidden]")
+            .field("timeout_secs", &self.timeout_secs)
+            .finish()
+    }
 }
 
 impl Default for AntigravityConfig {

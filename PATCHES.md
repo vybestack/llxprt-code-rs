@@ -55,7 +55,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 `SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives to
 `vendor/`, including path-dependency rewrites and source compatibility changes
 needed by `FinishReason::Other`. Its SHA-256 is
-`b08e218f33ee83ae6dcc200599e49d7f813afb5a2f50133a6cd57fe8856575a5`.
+`451a7e9771a59162da018873dc20325dba6f4fe457acd1136337d4bffb3bc350`.
 The 11 exact archives are retained under `vendor-upstream/`. To reproduce the vendored tree:
 
 1. Verify the retained archives against the checksums above.
@@ -140,6 +140,17 @@ constraints prevent configured endpoints, redirect targets, and ambient `HTTP_PR
 `HTTPS_PROXY`, or `ALL_PROXY` values from receiving credentials or request content. Loopback
 regressions cover redirect statuses 301, 302, 303, 307, and 308 and all uppercase and lowercase
 proxy variables over IPv4, IPv6, and `localhost`.
+
+## Patch 6 - credential-safe public formatting
+
+Public model, provider, endpoint, agent-builder, and tool configuration types that retain API keys,
+OAuth tokens, authorization headers, configured endpoints, or HTTP clients implement explicit
+`Debug` formatting. Credentials render as `[redacted]`; endpoints, clients, provider metadata, and
+arbitrary header maps render as `[hidden]`. Wrapper formatters delegate only to these scrubbed
+implementations. `ModelApiError` retains status and retry metadata while hiding provider-controlled
+body, header, message, and error-code text in `Debug`; its `Display` reports only the status.
+Retained-feature marker tests require credential and endpoint sentinels to be absent from all of
+these representations.
 
 ## Tests
 

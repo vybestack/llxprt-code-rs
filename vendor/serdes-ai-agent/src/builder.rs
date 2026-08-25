@@ -90,7 +90,7 @@ use std::time::Duration;
 ///     .with_api_key("your-key")
 ///     .with_base_url("https://your-proxy.com/v1");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ModelConfig {
     /// Model spec in `provider:model` format (e.g., "openai:gpt-4o")
     pub spec: String,
@@ -100,6 +100,18 @@ pub struct ModelConfig {
     pub base_url: Option<String>,
     /// Optional request timeout
     pub timeout: Option<Duration>,
+}
+
+impl std::fmt::Debug for ModelConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelConfig")
+            .field("spec", &self.spec)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field("base_url", &self.base_url.as_ref().map(|_| "[configured]"))
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 impl ModelConfig {
@@ -842,6 +854,17 @@ pub fn agent_with_deps<Deps: Send + Sync + 'static, M: Model + 'static>(
 mod tests {
     use super::*;
     use serdes_ai_models::MockModel;
+
+    #[test]
+    fn model_config_debug_redacts_credentials_and_endpoint() {
+        let marker = "agent-config-secret-marker";
+        let config = ModelConfig::new("openai:model")
+            .with_api_key(marker)
+            .with_base_url(format!("https://example.invalid/?secret={marker}"));
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains(marker));
+        assert!(rendered.contains("[redacted]"));
+    }
 
     fn create_mock_model() -> MockModel {
         MockModel::new("test-model")
