@@ -42,8 +42,11 @@ Workflow-artifact retention is a hosting limitation; the bundle remains reproduc
 
 The repository must enable immutable releases. It must also have an active, no-bypass ruleset that
 applies to the exact release tag (or all refs) and prohibits tag updates and deletion. The publisher
-checks both settings before release creation and rechecks the annotated tag afterward. Its token
-therefore needs repository administration-read and contents-write permissions. No remote is
+requires GitHub to return an explicit empty `bypass_actors` array for the detailed ruleset; omitted,
+null, malformed, inherited-but-hidden, and nonempty bypass data fail closed. A supplied
+`current_user_can_bypass` must be `never`. The publisher checks both settings before release creation
+and rechecks the annotated tag afterward. Its token therefore needs repository administration-read
+and contents-write permissions. No remote is
 configured in the current local repository, so those settings and remote publication have not been
 observed here.
 

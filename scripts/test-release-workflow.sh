@@ -87,21 +87,33 @@ elif endpoint.endswith("/immutable-releases"):
     emit({"enabled": os.environ.get("MOCK_IMMUTABLE_DISABLED") != "1", "enforced_by_owner": True})
 elif "/rulesets?" in endpoint:
     enforcement = "evaluate" if os.environ.get("MOCK_RULESET_INACTIVE") == "1" else "active"
-    emit([[{"id": 7, "target": "tag", "enforcement": enforcement}]])
+    summary = {"id": 7, "target": "tag", "enforcement": enforcement}
+    if os.environ.get("MOCK_INHERITED_RULESET_HIDES_BYPASS") == "1":
+        summary["source_type"] = "Organization"
+    emit([[summary]])
 elif endpoint.endswith("/rulesets/7"):
     bypass = [{"actor_type": "User"}] if os.environ.get("MOCK_RULESET_BYPASS") == "1" else []
     exclusions = ["refs/tags/v0.1.0"] if os.environ.get("MOCK_RULESET_EXCLUDES_TAG") == "1" else []
     rules = [{"type": "update"}]
     if os.environ.get("MOCK_RULESET_WEAK") != "1":
         rules.append({"type": "deletion"})
-    emit({
+    detail = {
         "id": 7,
         "target": "tag",
         "enforcement": "active",
         "bypass_actors": bypass,
         "conditions": {"ref_name": {"include": ["refs/tags/v0.1.0"], "exclude": exclusions}},
         "rules": rules,
-    })
+    }
+    if os.environ.get("MOCK_RULESET_BYPASS_OMITTED") == "1" or os.environ.get("MOCK_INHERITED_RULESET_HIDES_BYPASS") == "1":
+        del detail["bypass_actors"]
+    elif os.environ.get("MOCK_RULESET_BYPASS_NULL") == "1":
+        detail["bypass_actors"] = None
+    elif os.environ.get("MOCK_RULESET_BYPASS_MALFORMED") == "1":
+        detail["bypass_actors"] = "hidden"
+    if os.environ.get("MOCK_CURRENT_USER_CAN_BYPASS") == "1":
+        detail["current_user_can_bypass"] = "always"
+    emit(detail)
 elif "/releases?per_page=" in endpoint:
     emit([[json.loads(release_file.read_text())] if release_file.exists() else []])
 elif endpoint.endswith("/releases") and method == "POST":
@@ -198,7 +210,17 @@ JSON
 done
 
 # Policy failures stop before the release-create operation.
-for mode in MOCK_IMMUTABLE_DISABLED MOCK_RULESET_BYPASS MOCK_RULESET_INACTIVE MOCK_RULESET_WEAK MOCK_RULESET_EXCLUDES_TAG; do
+for mode in \
+  MOCK_IMMUTABLE_DISABLED \
+  MOCK_RULESET_BYPASS \
+  MOCK_RULESET_BYPASS_OMITTED \
+  MOCK_RULESET_BYPASS_NULL \
+  MOCK_RULESET_BYPASS_MALFORMED \
+  MOCK_INHERITED_RULESET_HIDES_BYPASS \
+  MOCK_CURRENT_USER_CAN_BYPASS \
+  MOCK_RULESET_INACTIVE \
+  MOCK_RULESET_WEAK \
+  MOCK_RULESET_EXCLUDES_TAG; do
   reset_state
   export "$mode=1"
   if publish >/dev/null 2>&1; then

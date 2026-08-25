@@ -134,6 +134,31 @@ fn stop_with_tool_call_fails() {
     assert!(err.contains("stop"), "{err}");
 }
 
+/// Protocol-invalid response envelopes fail in the provider parser, before a tool call can reach
+/// the host executor.
+#[test]
+fn invalid_response_role_and_tool_type_fail_before_execution() {
+    let call = r#"{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"created.txt\",\"content\":\"must not run\"}"}}"#;
+    let invalid_role = chat_body("tool_calls", Some(call)).replacen(
+        r#""role":"assistant""#,
+        r#""role":"user""#,
+        1,
+    );
+    let invalid_type = chat_body("tool_calls", Some(call)).replacen(
+        r#""type":"function""#,
+        r#""type":"not_function""#,
+        1,
+    );
+
+    for body in [invalid_role, invalid_type] {
+        let addr = serve(body);
+        assert!(
+            request_one(&config(addr)).is_err(),
+            "invalid provider envelope reached the host"
+        );
+    }
+}
+
 /// `tool_call` with zero calls must fail.
 #[test]
 fn tool_call_with_no_calls_fails() {

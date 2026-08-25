@@ -403,9 +403,9 @@ impl OpenAIChatModel {
 
     /// Parse OpenAI response to our format.
     ///
-    /// Patch 2: tool-call arguments are kept exactly as the provider emitted them via
-    /// `ToolCallArgs::from` so malformed args surface raw instead of being silently
-    /// normalized to `{}`. Patch 1: unknown provider `finish_reason` strings are
+    /// Patch 2: tool-call arguments pass through `ToolCallArgs::from`; malformed args remain
+    /// exact raw strings instead of being silently normalized to `{}`. Valid JSON is a semantic
+    /// value and may be normalized on serialization. Patch 1: unknown provider `finish_reason` strings are
     /// preserved verbatim in `FinishReason::Other` instead of being coerced to `Stop`.
     fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
         let choice = resp
@@ -413,6 +413,12 @@ impl OpenAIChatModel {
             .into_iter()
             .next()
             .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
+
+        if choice.message.role != "assistant" {
+            return Err(ModelError::invalid_response(
+                "OpenAI response message role is not assistant",
+            ));
+        }
 
         let mut parts = Vec::new();
 
@@ -436,6 +442,11 @@ impl OpenAIChatModel {
 
         if let Some(tool_calls) = choice.message.tool_calls {
             for tc in tool_calls {
+                if tc.tool_type != "function" {
+                    return Err(ModelError::invalid_response(
+                        "OpenAI response tool call type is not function",
+                    ));
+                }
                 // Patch 2: `ToolCallArgs::from` yields `ToolCallArgs::Json` for
                 // well-formed JSON and keeps a raw `String` for malformed arguments.
                 let args = ToolCallArgs::from(tc.function.arguments.clone());

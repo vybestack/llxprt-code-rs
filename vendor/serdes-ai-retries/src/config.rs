@@ -159,7 +159,11 @@ pub enum WaitStrategy {
 
 impl WaitStrategy {
     /// Calculate the wait duration for a given attempt.
+    ///
+    /// Attempt zero is treated as the first attempt. Invalid public floating-point parameters
+    /// produce no delay rather than panicking; overflow saturates at the strategy maximum.
     pub fn calculate(&self, attempt: u32, retry_after: Option<Duration>) -> Duration {
+        let ordinal = attempt.saturating_sub(1);
         match self {
             WaitStrategy::None => Duration::ZERO,
             WaitStrategy::Fixed(d) => *d,
@@ -167,34 +171,60 @@ impl WaitStrategy {
                 initial,
                 max,
                 multiplier,
-            } => {
-                let delay = initial.as_secs_f64() * multiplier.powi(attempt as i32 - 1);
-                Duration::from_secs_f64(delay.min(max.as_secs_f64()))
-            }
+            } => exponential_delay(*initial, *max, *multiplier, ordinal),
             WaitStrategy::ExponentialJitter {
                 initial,
                 max,
                 multiplier,
                 jitter,
             } => {
-                let base = initial.as_secs_f64() * multiplier.powi(attempt as i32 - 1);
-                let jitter_amount = base * jitter * random_jitter();
-                let delay = (base + jitter_amount).min(max.as_secs_f64());
-                Duration::from_secs_f64(delay)
+                if !jitter.is_finite() || !(0.0..=1.0).contains(jitter) {
+                    return Duration::ZERO;
+                }
+                let base = exponential_seconds(*initial, *multiplier, ordinal);
+                let delay = if *jitter == 0.0 {
+                    base
+                } else {
+                    base + base * jitter * random_jitter()
+                };
+                bounded_float_delay(delay, *max)
             }
             WaitStrategy::Linear {
                 initial,
                 increment,
                 max,
-            } => {
-                let delay = *initial + *increment * (attempt - 1);
-                delay.min(*max)
-            }
+            } => increment
+                .checked_mul(ordinal)
+                .and_then(|incremented| initial.checked_add(incremented))
+                .unwrap_or(*max)
+                .min(*max),
             WaitStrategy::RetryAfter { fallback, max_wait } => retry_after
                 .map(|d| d.min(*max_wait))
                 .unwrap_or_else(|| fallback.calculate(attempt, None)),
         }
     }
+}
+
+fn exponential_delay(initial: Duration, max: Duration, multiplier: f64, ordinal: u32) -> Duration {
+    bounded_float_delay(exponential_seconds(initial, multiplier, ordinal), max)
+}
+
+pub(crate) fn exponential_seconds(initial: Duration, multiplier: f64, ordinal: u32) -> f64 {
+    if !multiplier.is_finite() || multiplier < 0.0 {
+        return f64::NAN;
+    }
+    let exponent = i32::try_from(ordinal).unwrap_or(i32::MAX);
+    initial.as_secs_f64() * multiplier.powi(exponent)
+}
+
+pub(crate) fn bounded_float_delay(seconds: f64, max: Duration) -> Duration {
+    if seconds.is_nan() || seconds <= 0.0 || max.is_zero() {
+        return Duration::ZERO;
+    }
+    if !seconds.is_finite() || seconds >= max.as_secs_f64() {
+        return max;
+    }
+    Duration::try_from_secs_f64(seconds).unwrap_or(max)
 }
 
 /// Condition for retrying.
@@ -338,6 +368,50 @@ mod tests {
 
         // Without retry-after header (uses fallback)
         assert_eq!(strategy.calculate(1, None), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn wait_calculation_is_total_for_public_edge_inputs() {
+        let linear = WaitStrategy::Linear {
+            initial: Duration::from_millis(100),
+            increment: Duration::MAX,
+            max: Duration::from_secs(10),
+        };
+        assert_eq!(linear.calculate(0, None), Duration::from_millis(100));
+        assert_eq!(linear.calculate(u32::MAX, None), Duration::from_secs(10));
+
+        for multiplier in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let strategy = WaitStrategy::ExponentialBackoff {
+                initial: Duration::from_secs(1),
+                max: Duration::from_secs(10),
+                multiplier,
+            };
+            assert_eq!(strategy.calculate(u32::MAX, None), Duration::ZERO);
+        }
+
+        let overflowing = WaitStrategy::ExponentialBackoff {
+            initial: Duration::MAX,
+            max: Duration::MAX,
+            multiplier: 2.0,
+        };
+        assert_eq!(overflowing.calculate(u32::MAX, None), Duration::MAX);
+        let overflowing_jitter = WaitStrategy::ExponentialJitter {
+            initial: Duration::MAX,
+            max: Duration::MAX,
+            multiplier: 2.0,
+            jitter: 0.0,
+        };
+        assert_eq!(overflowing_jitter.calculate(u32::MAX, None), Duration::MAX);
+
+        for jitter in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
+            let strategy = WaitStrategy::ExponentialJitter {
+                initial: Duration::from_secs(1),
+                max: Duration::from_secs(10),
+                multiplier: 2.0,
+                jitter,
+            };
+            assert_eq!(strategy.calculate(2, None), Duration::ZERO);
+        }
     }
 
     #[test]

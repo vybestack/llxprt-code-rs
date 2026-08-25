@@ -55,7 +55,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 `SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives to
 `vendor/`, including path-dependency rewrites and source compatibility changes
 needed by `FinishReason::Other`. Its SHA-256 is
-`64e6bd09d5f2e5477cf23fbb2d418b2093286582f85b045307f1a082ee47951e`.
+`08cf84799c600850a1d3b90ff5321ad75edfd6eaba0c9491435a10de220daac7`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 archives in a temporary
 Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
@@ -97,16 +97,16 @@ clean stop and applies the public diagnostic scrubbing boundary before display.
 
 ## Patch 2 - raw malformed tool-call arguments
 
-OpenAI Chat, OpenAI Responses, Mistral, and OpenRouter tool-call arguments are kept exactly as the
-provider emitted them:
+OpenAI Chat, OpenAI Responses, Mistral, and OpenRouter pass provider argument strings through
+`ToolCallArgs::from`. Well-formed JSON becomes a semantic `ToolCallArgs::Json` value and may be
+normalized when serialized. Malformed JSON remains the exact raw `String` long enough for the host
+to reject it instead of receiving a silently substituted `{}`. OpenAI Chat also requires the
+response message role to be `assistant` and every tool-call type to be `function` before it maps any
+call into the executable host representation:
 
 ```rust
 let args = ToolCallArgs::from(tc.function.arguments.clone());
 ```
-
-`ToolCallArgs::from` yields `ToolCallArgs::Json` for well-formed JSON and keeps a
-raw `String` for malformed arguments, so malformed args survive parsing and the host can
-reject them instead of receiving a silently normalized `{}`.
 
 ## Patch 3 - endpoint routing (`vendor/serdes-ai-models/src/openai/chat.rs`, `endpoint_url` + `chat_url`)
 
@@ -160,6 +160,13 @@ Generic `ModelError::Http` formatting is similarly fixed and value-free. Upstrea
 previously expected provider response text were corrected to assert these public redaction contracts.
 Retained-feature marker tests require credential and endpoint sentinels to be absent from all of
 these representations.
+
+## Patch 7 - total retry-delay calculations
+
+Public retry-delay calculations in both retry APIs handle attempt zero, checked-integer overflow,
+and invalid or non-finite floating-point configuration without panicking. Linear and exponential
+overflow saturates at the configured maximum delay. Invalid multipliers or jitter produce a
+deterministic zero delay rather than reaching panicking `Duration` conversion APIs.
 
 ## Tests
 

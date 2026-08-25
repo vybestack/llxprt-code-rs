@@ -57,7 +57,8 @@ pub struct ToolCallRecord {
     /// The provider-assigned tool call id (persisted and replayed verbatim).
     pub id: String,
     pub name: String,
-    /// The raw arguments JSON exactly as the model produced them.
+    /// Valid argument-object JSON in the adapter's semantic representation. Providers preserve
+    /// malformed raw strings only long enough for the host to reject them before execution.
     pub args: String,
     /// Whether the tool run reported success.
     pub ok: bool,

@@ -1338,6 +1338,30 @@ case "$normalized_external" in
     exit 1
     ;;
 esac
+# Shell command substitution strips trailing newlines. Reject all output-path controls before the
+# normalized path crosses that boundary, rather than silently publishing under a sibling name.
+for control in $'\n' $'\r' $'\t' $'\177'; do
+  if python3 "$output_policy" "$source_alias" "$tmp/output${control}suffix.tar.gz" \
+      >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle output policy accepted a control character" >&2
+    exit 1
+  fi
+  grep -q 'output path contains a control character' "$tmp/stderr"
+done
+python3 - "$output_policy" "$source_alias" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+script, root = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("source_bundle_output", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.argv = [script, root, str(pathlib.Path(root) / "dist" / "nul\0name.tar.gz")]
+if module.main() == 0:
+    raise SystemExit("source-bundle output policy accepted NUL")
+PY
+
 if bash "$source_alias/scripts/build-source-bundle.sh" \
     "$source_alias/scripts/.bundle-output-integrated-$$.tar.gz" \
     >"$tmp/stdout" 2>"$tmp/stderr"; then

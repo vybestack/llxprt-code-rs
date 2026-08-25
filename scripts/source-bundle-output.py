@@ -14,6 +14,9 @@ def main() -> int:
 
     root = os.path.realpath(sys.argv[1])
     requested = sys.argv[2]
+    if any(ord(char) < 32 or ord(char) == 127 for char in requested):
+        print("output path contains a control character", file=sys.stderr)
+        return 1
     if not os.path.isabs(requested):
         requested = os.path.join(root, requested)
     output = os.path.realpath(requested)

@@ -46,11 +46,20 @@ impl ExponentialBackoff {
     }
 
     /// Calculate delay for an attempt.
+    ///
+    /// Invalid floating-point configuration produces no delay; overflow saturates at
+    /// `max_delay`.
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let base_delay = self.initial_delay.as_secs_f64() * self.multiplier.powi(attempt as i32);
-        let jitter = base_delay * self.jitter * rand_jitter();
-        let delay = (base_delay + jitter).min(self.max_delay.as_secs_f64());
-        Duration::from_secs_f64(delay.max(0.0))
+        if !self.jitter.is_finite() || !(0.0..=1.0).contains(&self.jitter) {
+            return Duration::ZERO;
+        }
+        let base = crate::config::exponential_seconds(self.initial_delay, self.multiplier, attempt);
+        let delay = if self.jitter == 0.0 {
+            base
+        } else {
+            base + base * self.jitter * rand_jitter()
+        };
+        crate::config::bounded_float_delay(delay, self.max_delay)
     }
 }
 
@@ -199,10 +208,13 @@ impl LinearBackoff {
         }
     }
 
-    /// Calculate delay for an attempt.
+    /// Calculate delay for an attempt. Overflow saturates at `max_delay`.
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let delay = self.initial_delay + self.increment * attempt.saturating_sub(1);
-        delay.min(self.max_delay)
+        self.increment
+            .checked_mul(attempt.saturating_sub(1))
+            .and_then(|incremented| self.initial_delay.checked_add(incremented))
+            .unwrap_or(self.max_delay)
+            .min(self.max_delay)
     }
 }
 
@@ -285,6 +297,46 @@ mod tests {
         // Even with large multiplier, should cap at max
         let delay = backoff.calculate_delay(5);
         assert!(delay <= Duration::from_secs(5));
+    }
+
+    #[test]
+    fn public_backoff_calculations_are_total_for_edge_configuration() {
+        for multiplier in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let backoff = ExponentialBackoff {
+                multiplier,
+                ..ExponentialBackoff::default()
+            };
+            assert_eq!(backoff.calculate_delay(u32::MAX), Duration::ZERO);
+        }
+        for jitter in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
+            let backoff = ExponentialBackoff {
+                jitter,
+                ..ExponentialBackoff::default()
+            };
+            assert_eq!(backoff.calculate_delay(u32::MAX), Duration::ZERO);
+        }
+        let overflowing_exponential = ExponentialBackoff {
+            initial_delay: Duration::MAX,
+            max_delay: Duration::MAX,
+            multiplier: 2.0,
+            jitter: 0.0,
+            ..ExponentialBackoff::default()
+        };
+        assert_eq!(
+            overflowing_exponential.calculate_delay(u32::MAX),
+            Duration::MAX
+        );
+
+        let overflowing_linear = LinearBackoff::new(
+            Duration::from_secs(1),
+            Duration::MAX,
+            Duration::from_secs(10),
+            u32::MAX,
+        );
+        assert_eq!(
+            overflowing_linear.calculate_delay(u32::MAX),
+            Duration::from_secs(10)
+        );
     }
 
     #[test]

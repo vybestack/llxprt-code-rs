@@ -60,7 +60,9 @@ while IFS= read -r ruleset_id; do
   if jq -e --arg ref "refs/tags/$RELEASE_TAG" '
     .target == "tag" and
     .enforcement == "active" and
-    ((.bypass_actors // []) | length == 0) and
+    has("bypass_actors") and
+    (.bypass_actors | type == "array" and length == 0) and
+    ((has("current_user_can_bypass") | not) or .current_user_can_bypass == "never") and
     ((.conditions.ref_name.exclude // []) | length == 0) and
     ((.conditions.ref_name.include // []) | any(. == $ref or . == "~ALL")) and
     (([.rules[]?.type] | index("update")) != null) and
