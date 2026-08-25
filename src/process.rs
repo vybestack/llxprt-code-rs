@@ -452,20 +452,35 @@ mod tests {
     fn timeout_sweeps_descendant_after_direct_child_exits_and_closes_pipes() {
         let directory = tempfile::tempdir().unwrap();
         let pidfile = directory.path().join("descendant.pid");
-        let command = format!(
+        let script = format!(
             "trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) </dev/null >/dev/null 2>&1 & echo $! > '{}'; while :; do :; done",
             pidfile.display()
         );
-        let outcome = run_sh(
-            &command,
-            Some(directory.path()),
-            Duration::from_millis(50),
-            1024,
-            Vec::new(),
-        )
-        .unwrap();
-        assert!(outcome.timed_out);
-        assert_eq!(outcome.status, Some(0));
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(script)
+            .current_dir(directory.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cfg_setsid(&mut command);
+        let child = command.spawn().unwrap();
+
+        let ready_deadline = Instant::now() + Duration::from_secs(2);
+        while !pidfile.is_file() {
+            assert!(
+                Instant::now() < ready_deadline,
+                "direct child did not report descendant readiness"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let deadline = Instant::now() + Duration::from_millis(50);
+        let escalation_deadline = deadline + TERM_GRACE;
+        let done = AtomicUsize::new(0);
+        let (status, timed_out) = supervise(child, deadline, escalation_deadline, &done, 0);
+        assert!(timed_out);
+        assert_eq!(status, Some(0));
 
         let descendant: i32 = std::fs::read_to_string(&pidfile)
             .unwrap()
