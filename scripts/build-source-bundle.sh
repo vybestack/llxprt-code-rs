@@ -21,8 +21,9 @@
 #
 # Allows: crate files (Cargo.toml/Cargo.lock/LICENSE/README.md/PATCHES.md/.gitignore),
 # the whole src/, tests/, scripts/, docs/, provenance/, .github/, THIRD_PARTY_LICENSES/,
-# the checksum-pinned vendor-upstream/ crate archives, .cargo/config.toml, and xtask sources,
-# and the required vendored serdes-ai crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock.
+# the checksum-pinned vendor-upstream/ crate archives, the complete checksum-locked
+# registry-vendor/ source closure, .cargo/config.toml, xtask sources, and the required vendored
+# serdes-ai crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock.
 # All retained vendor lockfiles are source-provenance inputs. The models lockfile is also required
 # for the --locked direct provider test (CARGO_TARGET_DIR=... cargo test --offline --locked
 # --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai). The explicit allow-list is
@@ -64,7 +65,9 @@ vendor_crates=(
 manifest_rel='THIRD_PARTY_LICENSES/source-bundle.txt'
 digest_rel='THIRD_PARTY_LICENSES/source-bundle.sha256'
 
-# Emit one allow-listed source tree while pruning every generated path that the build rejects.
+# Emit one allow-listed first-party source tree while pruning every generated path that the build
+# rejects. Registry packages use a separate exact emitter because legitimate crate sources can
+# contain directories named target, dist, or tests for these path-handling cases.
 emit_tree() {
   local tree="$1"
   find "$tree" \( -name .git -o -name target -o -name dist -o \
@@ -74,6 +77,11 @@ emit_tree() {
     ! -name '*.log' ! -name '*.tmp' ! -name '*.temp' ! -name '.DS_Store' ! -name '*.pyc' \
     ! -name '.cargo-ok' ! -name '.rustc_info.json' \
     ! -path "$manifest_rel" ! -path "$digest_rel" -print
+}
+
+emit_registry_tree() {
+  find registry-vendor -type d -print | sed 's#$#/#'
+  find registry-vendor -type f -print
 }
 
 # Emit the member lines (bundle-relative; directories end with "/") for exactly the
@@ -86,6 +94,7 @@ emit_manifest() {
     for d in "${source_dirs[@]}"; do
       emit_tree "$d"
     done
+    emit_registry_tree
     printf '%s\n' '.cargo/' "${config_files[@]}"
     printf '%s\n' 'xtask/' "${xtask_files[@]}"
     find xtask/src -type d -print | sed 's#$#/#'
@@ -203,9 +212,10 @@ archive_tmp="$(mktemp "${TMPDIR:-/tmp}/.llxprt-source.XXXXXX")"
 for f in "${top_files[@]}"; do
   [[ -f "$f" && ! -L "$f" ]] || { echo "missing top-level file: $f" >&2; exit 1; }
 done
-for d in "${source_dirs[@]}"; do
+for d in "${source_dirs[@]}" registry-vendor; do
   [[ -d "$d" && ! -L "$d" ]] || { echo "missing source directory: $d" >&2; exit 1; }
 done
+python3 scripts/verify-registry-vendor.py
 for d in .cargo xtask xtask/src; do
   [[ -d "$d" && ! -L "$d" ]] || { echo "missing or symlinked quality-gate directory: $d" >&2; exit 1; }
 done
@@ -233,9 +243,11 @@ for c in "${vendor_crates[@]}"; do
   fi
   [[ -d "$c/src" ]] || { echo "vendored crate missing src: $c" >&2; exit 1; }
 done
-included_tree_roots=("${source_dirs[@]}" xtask/src)
+included_tree_roots=("${source_dirs[@]}" registry-vendor xtask/src)
+pruned_tree_roots=("${source_dirs[@]}" xtask/src)
 for c in "${vendor_crates[@]}"; do
   included_tree_roots+=("$c/src")
+  pruned_tree_roots+=("$c/src")
 done
 scratch="$(find "${included_tree_roots[@]}" \
   \( -name .cargo-ok -o -name .rustc_info.json \) -print)"
@@ -274,7 +286,7 @@ while IFS= read -r -d '' path; do
       ;;
   esac
 done < <(find "${included_tree_roots[@]}" -mindepth 1 -print0)
-for d in "${included_tree_roots[@]}"; do
+for d in "${pruned_tree_roots[@]}"; do
   bad="$( { find "$d" -name .git -print
              find "$d" -type d \( -name target -o -name dist -o -name llxprt-parity-out -o -name __pycache__ \) -print
              find "$d" -type f \( -name '*.log' -o -name '*.tmp' -o -name '*.temp' -o -name '*.pyc' -o -name '.DS_Store' \) -print
@@ -295,11 +307,12 @@ emit_manifest | while IFS= read -r member; do
   fi
 done | bash scripts/verify-source-inputs-git.sh "$root" "$commit"
 
-# Stage bytes directly from the immutable commit verified above. Live-tree edits after the
-# cleanliness check cannot enter the candidate because no source byte is copied from a pathname.
+# Stage every regular-file byte directly from the immutable commit verified above. Live-tree edits
+# after the cleanliness check cannot enter the candidate because no source byte is copied from a
+# pathname. A blob materializer is used instead of git archive because dependency crates can carry
+# their own export-ignore attributes, which must not remove checksum-inventoried source files.
 bundle="$stage/bundle"
-mkdir -p "$bundle"
-git -C "$root" archive --format=tar "$commit" | tar -xf - -C "$bundle"
+python3 scripts/materialize-git-tree.py "$root" "$commit" "$bundle"
 # Bind every committed regular-file byte to the verifier's matching checked source tree.
 # Generated manifests are excluded because one contains this digest list and the other contains
 # the final member list.

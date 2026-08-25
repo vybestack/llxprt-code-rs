@@ -10,8 +10,8 @@
 #   a local advisory cache exists, so in an offline checkout this is skipped, never a
 #   false "no fetch" claim), the release build, and finally the source bundle build +
 #   verify (which itself re-runs tests + release build from the extraction). Those extracted
-#   checks prove source completeness against the caller's pre-populated offline Cargo cache;
-#   registry dependency archives are not embedded in the source bundle.
+#   checks use an empty Cargo home and disabled network, proving that the embedded
+#   checksum-locked registry source closure is complete.
 #
 # Deps: cargo, rustc, bash, tar, gzip, python3. Run from the crate root.
 set -euo pipefail
@@ -25,6 +25,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 release_archive=$(python3 scripts/release-version.py --value archive)
+
+echo "== checksum-locked registry source closure =="
+python3 scripts/verify-registry-vendor.py
 
 echo "== fmt =="
 cargo +1.88.0 fmt --all -- --check
@@ -40,6 +43,8 @@ echo "== production Rust LOC and complexity =="
 cargo +1.88.0 xtask quality
 
 echo "== source and release publication adversarial cases =="
+python3 scripts/verify-source-object-policy.py
+python3 scripts/test-source-oci-publication.py
 bash scripts/test-source-bundle-verifier.sh
 bash scripts/test-release-workflow.sh
 

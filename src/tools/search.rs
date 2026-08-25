@@ -115,12 +115,20 @@ pub(super) fn push_search_result(
     false
 }
 pub(super) fn render_search_results(results: &[String], note: &str, limit: usize) -> String {
+    const MIN_TRUNCATION_MARKER: &str = "...";
+
     let joined = results.join("\n");
-    let mut out = utf8_prefix(&joined, limit).to_string();
-    if !note.is_empty() {
-        let remaining = limit.saturating_sub(out.len());
-        out.push_str(utf8_prefix(note, remaining));
+    if note.is_empty() {
+        return utf8_prefix(&joined, limit).to_string();
     }
+    let rendered_note = if note.len() <= limit {
+        note
+    } else {
+        utf8_prefix(MIN_TRUNCATION_MARKER, limit)
+    };
+    let result_limit = limit.saturating_sub(rendered_note.len());
+    let mut out = utf8_prefix(&joined, result_limit).to_string();
+    out.push_str(rendered_note);
     out
 }
 

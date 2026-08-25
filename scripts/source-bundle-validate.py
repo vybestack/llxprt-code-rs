@@ -36,12 +36,12 @@ MAX_MEMBERS = 1_000_000
 # rejected the moment that sum meets the aggregate cap, still while iterating the stream. All
 # three caps are enforced before extraction, so a hostile archive cannot force unbounded
 # expansion on disk.
-MAX_COMPRESSED_BYTES = 32 * 1024 * 1024
+MAX_COMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
-MAX_AGGREGATE_BYTES = 128 * 1024 * 1024
+MAX_AGGREGATE_BYTES = 384 * 1024 * 1024
 # Includes tar headers, padding, extension records, and member data. This closes the
 # decompression-bomb path before tarfile can consume an oversized metadata record.
-MAX_EXPANDED_STREAM_BYTES = 160 * 1024 * 1024
+MAX_EXPANDED_STREAM_BYTES = 448 * 1024 * 1024
 
 BUNDLE = "bundle"
 MANIFEST_REL = "THIRD_PARTY_LICENSES/source-bundle.txt"

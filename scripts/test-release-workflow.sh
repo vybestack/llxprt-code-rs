@@ -22,7 +22,8 @@ for production_path in \
   scripts/build-source-bundle.sh \
   scripts/verify-source-bundle.sh \
   scripts/release-gates.sh \
-  scripts/publish-release.sh; do
+  scripts/publish-release.sh \
+  scripts/publish-source-oci.py; do
   if grep -Fq 'llxprt-code-rs-0.1.0-source.tar.gz' "$root/$production_path"; then
     echo "$production_path contains a hard-coded release archive version" >&2
     exit 1
@@ -145,6 +146,11 @@ reset_state() {
 }
 
 publish() {
+  local archive_digest sidecar_digest manifest_digest oci_base
+  archive_digest=$(sha256sum "$tmp/dist/$archive" | awk '{print $1}')
+  sidecar_digest=$(sha256sum "$tmp/dist/$sidecar" | awk '{print $1}')
+  manifest_digest="sha256:$(printf manifest | sha256sum | awk '{print $1}')"
+  oci_base=https://ghcr.io/v2/owner/repo-source
   (
     cd "$tmp"
     PATH="$tmp/bin:$PATH" \
@@ -152,6 +158,10 @@ publish() {
       GH_TOKEN=test GITHUB_REPOSITORY=owner/repo GITHUB_SERVER_URL=https://example.invalid \
       GITHUB_RUN_ID=123 RELEASE_TAG=v0.1.0 EXPECTED_COMMIT=expected-commit \
       RELEASE_ARCHIVE="$archive" RELEASE_SIDECAR="$sidecar" \
+      SOURCE_OCI_MANIFEST_DIGEST="${SOURCE_OCI_TEST_MANIFEST_DIGEST:-$manifest_digest}" \
+      SOURCE_OCI_MANIFEST_URL="${SOURCE_OCI_TEST_MANIFEST_URL:-$oci_base/manifests/$manifest_digest}" \
+      SOURCE_OCI_ARCHIVE_URL="${SOURCE_OCI_TEST_ARCHIVE_URL:-$oci_base/blobs/sha256:$archive_digest}" \
+      SOURCE_OCI_SIDECAR_URL="${SOURCE_OCI_TEST_SIDECAR_URL:-$oci_base/blobs/sha256:$sidecar_digest}" \
       bash "$root/scripts/publish-release.sh"
   )
 }
@@ -187,13 +197,33 @@ jq -e --arg archive "$archive" '
   .immutable == true and
   (.assets | length == 0) and
   (.body | contains($archive)) and
-  (.body | contains("https://example.invalid/owner/repo/actions/runs/123"))
+  (.body | contains("https://example.invalid/owner/repo/actions/runs/123")) and
+  (.body | contains("https://ghcr.io/v2/owner/repo-source/blobs/sha256:")) and
+  (.body | contains("https://ghcr.io/v2/owner/repo-source/manifests/sha256:"))
 ' "$tmp/state/release.json" >/dev/null
 grep -q '"--method", "POST"' "$tmp/state/calls"
 if grep -Eq 'PATCH|"release", "upload"|"release", "download"' "$tmp/state/calls"; then
   echo "publisher used a non-atomic draft or release-asset operation" >&2
   exit 1
 fi
+
+# Digest-qualified durable-object URLs are bound to the locally verified files and expected GHCR
+# package. Any mismatch fails before release creation.
+for assignment in \
+  'SOURCE_OCI_TEST_MANIFEST_DIGEST=sha256:bad' \
+  'SOURCE_OCI_TEST_ARCHIVE_URL=https://ghcr.io/v2/owner/repo-source/blobs/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  'SOURCE_OCI_TEST_SIDECAR_URL=https://attacker.invalid/sidecar'; do
+  reset_state
+  name=${assignment%%=*}
+  value=${assignment#*=}
+  export "$name=$value"
+  if publish >/dev/null 2>&1; then
+    echo "publisher accepted mismatched durable source identity: $assignment" >&2
+    exit 1
+  fi
+  unset "$name"
+  [[ ! -e "$tmp/state/release.json" ]]
+done
 
 # Existing attacker-controlled drafts or public releases are never resumed or edited.
 for draft in true false; do

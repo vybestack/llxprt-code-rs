@@ -36,6 +36,10 @@ fi
 : "${RELEASE_SIDECAR:?RELEASE_SIDECAR is required}"
 : "${GITHUB_SERVER_URL:?GITHUB_SERVER_URL is required}"
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+: "${SOURCE_OCI_MANIFEST_DIGEST:?SOURCE_OCI_MANIFEST_DIGEST is required}"
+: "${SOURCE_OCI_MANIFEST_URL:?SOURCE_OCI_MANIFEST_URL is required}"
+: "${SOURCE_OCI_ARCHIVE_URL:?SOURCE_OCI_ARCHIVE_URL is required}"
+: "${SOURCE_OCI_SIDECAR_URL:?SOURCE_OCI_SIDECAR_URL is required}"
 
 release_json=$(mktemp)
 immutable_json=$(mktemp)
@@ -89,18 +93,33 @@ digest=$(awk 'NR == 1 { print $1 } NR > 1 { exit 2 }' "dist/$RELEASE_SIDECAR") \
 [[ $digest =~ ^[0-9a-f]{64}$ ]] || die "release checksum sidecar has an invalid digest"
 [[ $(awk 'NR == 1 { sub(/^[0-9a-f]+[[:space:]]+[*]?/, ""); print }' "dist/$RELEASE_SIDECAR") == "$RELEASE_ARCHIVE" ]] \
   || die "release checksum sidecar names another archive"
+sidecar_digest=$(sha256sum "dist/$RELEASE_SIDECAR" | awk '{print $1}')
+[[ $SOURCE_OCI_MANIFEST_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || die "OCI source manifest digest is invalid"
+repository_lower=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+oci_base="https://ghcr.io/v2/${repository_lower}-source"
+[[ $SOURCE_OCI_MANIFEST_URL == "$oci_base/manifests/$SOURCE_OCI_MANIFEST_DIGEST" ]] \
+  || die "OCI source manifest URL is not the expected digest-qualified GHCR URL"
+[[ $SOURCE_OCI_ARCHIVE_URL == "$oci_base/blobs/sha256:$digest" ]] \
+  || die "OCI source archive URL does not name the verified archive digest"
+[[ $SOURCE_OCI_SIDECAR_URL == "$oci_base/blobs/sha256:$sidecar_digest" ]] \
+  || die "OCI source sidecar URL does not name the verified sidecar digest"
 
 artifact_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-release_body=$(printf '%s\n\n%s\n\n%s\n%s\n' \
-  "The source bundle and checksum sidecar were generated and signed with GitHub build provenance." \
-  "Attested workflow artifact: $artifact_url" \
+release_body=$(printf '%s\n\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+  "The source bundle, checksum sidecar, and OCI manifest have GitHub build provenance attestations." \
+  "Workflow evidence: $artifact_url" \
   "Archive: \`$RELEASE_ARCHIVE\`" \
-  "SHA-256: \`$digest\`")
+  "Archive SHA-256: \`$digest\`" \
+  "Durable archive: $SOURCE_OCI_ARCHIVE_URL" \
+  "Durable checksum sidecar: $SOURCE_OCI_SIDECAR_URL" \
+  "OCI manifest: $SOURCE_OCI_MANIFEST_URL" \
+  "OCI manifest digest: \`$SOURCE_OCI_MANIFEST_DIGEST\`")
 
 # GitHub has no compare-and-set operation for publishing a draft with an asset allowlist. Therefore
 # this publisher does not create or resume drafts and does not attach release assets. It creates the
 # immutable public release, deterministic metadata, and empty asset list in one server operation.
-# The exact source bundle remains the separately attested workflow artifact identified above.
+# The exact source files remain in the separately attested, public digest-addressed OCI artifact.
 jq -n \
   --arg tag "$RELEASE_TAG" \
   --arg commit "$EXPECTED_COMMIT" \

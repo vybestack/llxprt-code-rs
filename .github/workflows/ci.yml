@@ -21,6 +21,13 @@ jobs:
     name: ${{ matrix.os }} (Rust ${{ matrix.rust }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+      CARGO_NET_OFFLINE: true
+      HTTP_PROXY: http://127.0.0.1:9
+      HTTPS_PROXY: http://127.0.0.1:9
+      ALL_PROXY: http://127.0.0.1:9
     strategy:
       fail-fast: false
       matrix:
@@ -36,10 +43,13 @@ jobs:
           components: rustfmt, clippy
       - name: Shell syntax check
         run: bash -n scripts/*.sh
-      - name: Fetch locked dependencies for offline gates
+      - name: Verify shipped dependency sources and empty Cargo home
         run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path xtask/Cargo.toml
+          rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          python3 scripts/verify-registry-vendor.py
+          cargo metadata --offline --locked --no-deps --format-version 1 >/dev/null
+          test ! -e "$CARGO_HOME/registry"
       - name: Cargo fmt check
         run: cargo fmt --all -- --check && cargo fmt --all --manifest-path xtask/Cargo.toml -- --check
       - name: xtask tests and production quality limits
@@ -51,8 +61,6 @@ jobs:
         run: cargo clippy --offline --locked --workspace --all-targets --all-features -- -D warnings
       - name: Cargo test (offline locked workspace/all targets/features)
         run: cargo test --offline --locked --workspace --all-targets --all-features
-      - name: Fetch vendored provider test dependencies
-        run: cargo fetch --locked --manifest-path vendor/serdes-ai-models/Cargo.toml
       - name: Direct offline vendored SerdesAI OpenAI provider clippy and tests
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/serdes-ai-models-target
@@ -74,8 +82,8 @@ jobs:
 
   release-build:
     needs: [test, shellcheck, doc, audit]
-    # Fetch the locked registry graph once, then run the same strict offline gates used
-    # by maintainers. The script builds and verifies the allow-listed source bundle.
+    # Resolve only from the shipped checksum-locked registry closure, then run the same strict
+    # offline gates used by maintainers. The script builds and verifies the allow-listed bundle.
     name: release build + source bundle
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -103,11 +111,17 @@ jobs:
           fi
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 scripts/release-version.py "${args[@]}"
-      - name: Fetch locked dependencies for offline gates
+      - name: Verify clean-cache offline dependency closure
         run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path xtask/Cargo.toml
-          cargo fetch --locked --manifest-path vendor/serdes-ai-models/Cargo.toml
+          python3 scripts/verify-registry-vendor.py
+          empty_home="$(mktemp -d)"
+          empty_target="$(mktemp -d)"
+          trap 'rm -rf "$empty_home" "$empty_target"' EXIT
+          CARGO_HOME="$empty_home" CARGO_TARGET_DIR="$empty_target" \
+            CARGO_NET_OFFLINE=true HTTP_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 \
+            cargo metadata --offline --locked --no-deps --format-version 1 >/dev/null
+          test ! -e "$empty_home/registry/cache"
       - name: Source-bundle tooling present (python3 runs the robust archive validator)
         run: |
           python3 --version
@@ -144,6 +158,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      packages: write
       id-token: write
       attestations: write
     steps:
@@ -176,13 +191,34 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: bash scripts/publish-release.sh --verify-tag-only
-      - name: Attest exact source artifacts
+      - name: Publish durable digest-addressed source objects
+        id: source-oci
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ARCHIVE: ${{ steps.release.outputs.archive }}
+          RELEASE_SIDECAR: ${{ steps.release.outputs.sidecar }}
+        run: |
+          python3 scripts/verify-source-object-policy.py
+          (cd dist && sha256sum --check "${{ steps.release.outputs.sidecar }}")
+          python3 scripts/publish-source-oci.py
+      - name: Attest exact source files
         # actions/attest-build-provenance@v4.2.2
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: |
             dist/${{ steps.release.outputs.archive }}
             dist/${{ steps.release.outputs.sidecar }}
+      - name: Attest published OCI manifest
+        # actions/attest-build-provenance@v4.2.2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-name: ${{ steps.source-oci.outputs.repository }}
+          subject-digest: ${{ steps.source-oci.outputs.manifest-digest }}
+          push-to-registry: true
       - name: Create atomic immutable release record
         env:
           # Administration-read is required to verify immutable-release policy. This fine-grained
@@ -195,6 +231,10 @@ jobs:
           EXPECTED_COMMIT: ${{ github.sha }}
           RELEASE_ARCHIVE: ${{ steps.release.outputs.archive }}
           RELEASE_SIDECAR: ${{ steps.release.outputs.sidecar }}
+          SOURCE_OCI_MANIFEST_DIGEST: ${{ steps.source-oci.outputs.manifest-digest }}
+          SOURCE_OCI_MANIFEST_URL: ${{ steps.source-oci.outputs.manifest-url }}
+          SOURCE_OCI_ARCHIVE_URL: ${{ steps.source-oci.outputs.archive-url }}
+          SOURCE_OCI_SIDECAR_URL: ${{ steps.source-oci.outputs.sidecar-url }}
         run: |
           (cd dist && sha256sum --check "$RELEASE_SIDECAR")
           bash scripts/publish-release.sh
@@ -210,14 +250,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b
         with:
           toolchain: 1.88.0
-      - name: Fetch locked dependencies for offline docs
+      - name: Verify shipped dependency sources for offline docs
+        run: python3 scripts/verify-registry-vendor.py
+      - name: crate and xtask docs from an empty Cargo home (warnings denied)
         run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path xtask/Cargo.toml
-      - name: crate and xtask docs (warnings denied)
-        run: |
+          empty_home="$RUNNER_TEMP/doc-cargo-home"
+          empty_target="$RUNNER_TEMP/doc-target"
+          rm -rf "$empty_home" "$empty_target"
+          mkdir -p "$empty_home" "$empty_target"
+          export CARGO_HOME="$empty_home" CARGO_TARGET_DIR="$empty_target" CARGO_NET_OFFLINE=true
+          export HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9
           RUSTDOCFLAGS="-D warnings" cargo doc --offline --locked --manifest-path xtask/Cargo.toml --all-features --no-deps
           RUSTDOCFLAGS="-D warnings" cargo doc --offline --locked --workspace --all-features --no-deps
+          test ! -e "$empty_home/registry"
 
   audit:
     name: cargo audit (pinned, advisory fetch)
@@ -233,7 +278,9 @@ jobs:
       # advisory database over the network; it is not an offline step. An offline
       # `cargo audit --no-fetch` against a local cache is a local-only gate.
       - name: install cargo-audit (pinned, --locked)
-        run: cargo install cargo-audit --version 0.21.2 --locked
+        # Run outside the checkout so this explicitly online tool does not inherit the project's
+        # crates.io-to-registry-vendor replacement.
+        run: (cd "$RUNNER_TEMP" && cargo install cargo-audit --version 0.21.2 --locked)
       - name: cargo audit (normal advisory fetch)
         run: |
           cargo audit --color always

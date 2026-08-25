@@ -474,12 +474,35 @@ fn search_result_budget_counts_separator_and_clips_multibyte_safely() {
 }
 
 #[test]
-fn search_render_keeps_metadata_inside_exact_byte_cap() {
+fn search_render_keeps_marker_inside_exact_byte_cap() {
     let results = vec!["aé".to_string()];
     let rendered = render_search_results(&results, " [truncated reasons: result_bytes]", 7);
     assert!(rendered.is_char_boundary(rendered.len()));
     assert!(rendered.len() <= 7);
-    assert_eq!(rendered, "aé [tr");
+    assert_eq!(rendered, "aé...");
+}
+
+#[test]
+fn search_render_reserves_marker_after_multibyte_result_fills_cap() {
+    let mut counters = SearchCounters::new();
+    let mut results = Vec::new();
+    assert!(push_search_result(
+        &mut counters,
+        &mut results,
+        "a".to_string(),
+        4,
+    ));
+    assert!(!push_search_result(
+        &mut counters,
+        &mut results,
+        "éé".to_string(),
+        4,
+    ));
+
+    assert!(counters.reasons.contains(&"result_bytes"));
+    let rendered = render_search_results(&results, " [truncated reasons: result_bytes]", 4);
+    assert_eq!(rendered, "a...");
+    assert_eq!(rendered.len(), 4);
 }
 
 // ---- replace conflict detection (stale-replace data-loss race) ----

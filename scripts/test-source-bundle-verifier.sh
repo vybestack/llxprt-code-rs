@@ -317,23 +317,22 @@ with make("oversize-member.tar.gz") as tf:
     add_file(tf, "bundle/huge.bin", b"\x00" * (20 * 1024 * 1024))
 
 # 11. Aggregate overflow: regular members of 8 MiB each pass the per-member cap
-#     (8 MiB < 16 MiB), but the 16th reaches the excluded 128 MiB aggregate boundary,
+#     (8 MiB < 16 MiB), but the 48th reaches the excluded 384 MiB aggregate boundary,
 #     so the stream must be rejected while the aggregate is still being accumulated,
 #     before extraction.
 with make("aggregate-overflow.tar.gz") as tf:
     add_dir(tf, "bundle/")
-    for i in range(17):
+    for i in range(49):
         add_file(tf, "bundle/blob-%02d.bin" % i, b"\x00" * (8 * 1024 * 1024))
 
-# 12. 16 MiB of incompressible payload plus a few small members keeps the gzip stream
-#     over the 32 MiB compressed-size cap. The private snapshot is bounded while copying,
-#     so this is rejected without staging the full input or decompressing it. The random
-#     bytes also keep their incompressible size through the archive's own gzip stage.
+# 12. Seventeen 8 MiB incompressible members keep the gzip stream over the 128 MiB
+#     compressed-size cap while each member stays under its own cap. The private snapshot
+#     is bounded while copying, so this is rejected without staging the full input or
+#     decompressing it.
 with make("oversize-archive.tar.gz") as tf:
     add_dir(tf, "bundle/")
-    add_file(tf, "bundle/entropy.bin", os.urandom(16 * 1024 * 1024))
-    for i in range(3):
-        add_file(tf, "bundle/entropy-%d.bin" % i, os.urandom(8 * 1024 * 1024))
+    for i in range(17):
+        add_file(tf, "bundle/entropy-%02d.bin" % i, os.urandom(8 * 1024 * 1024))
 
 # 13. A directory header must never carry a payload. Without this check, tar readers can
 #     consume a compressed expansion that is omitted from all regular-member byte caps.
@@ -356,7 +355,7 @@ with tarfile.open(trailing_path, "w:gz") as tf:
 with open(trailing_path, "ab") as stream:
     with gzip.GzipFile(fileobj=stream, mode="wb", mtime=0) as tail:
         chunk = b"\x00" * (1024 * 1024)
-        for _ in range(170):
+        for _ in range(450):
             tail.write(chunk)
 
 # 15. A complete self-consistent manifest must still be rejected when it is not in the
@@ -686,18 +685,18 @@ def await_publication(candidate, output):
 
 exact = root / "await-exact-cap"
 with exact.open("wb") as handle:
-    handle.truncate(32 * 1024 * 1024)
+    handle.truncate(128 * 1024 * 1024)
 exact_output = root / "await-exact-output"
 status, stderr = await_publication(exact, exact_output)
-if status != 0 or exact_output.stat().st_size != 32 * 1024 * 1024:
+if status != 0 or exact_output.stat().st_size != 128 * 1024 * 1024:
     raise SystemExit(f"await-source rejected exact-cap sparse input: {stderr!r}")
 
 over = root / "await-over-cap"
 with over.open("wb") as handle:
-    handle.truncate(32 * 1024 * 1024 + 1)
+    handle.truncate(128 * 1024 * 1024 + 1)
 over_output = root / "await-over-output"
 status, stderr = await_publication(over, over_output)
-if status == 0 or b"32 MiB" not in stderr or over_output.exists():
+if status == 0 or b"128 MiB" not in stderr or over_output.exists():
     raise SystemExit("await-source accepted cap-plus-one sparse input")
 
 await_growth = root / "await-growth"
@@ -741,7 +740,7 @@ if not verifier_started.exists():
     child.kill()
     child.wait()
     raise SystemExit("await-source growth verifier did not start")
-await_growth_writer.truncate(32 * 1024 * 1024 + 1)
+await_growth_writer.truncate(128 * 1024 * 1024 + 1)
 await_growth_writer.flush()
 os.fsync(await_growth_writer.fileno())
 await_growth_writer.close()
@@ -841,13 +840,16 @@ verifier.write_text(
 )
 verifier.chmod(0o700)
 environment = os.environ.copy()
-environment["LLXPRT_SOURCE_VERIFY_TIMEOUT_SECONDS"] = "1"
+# Popen has completed exec before the publisher starts this deadline, but a loaded host may not
+# schedule the verifier shell immediately. Keep the injected deadline bounded while leaving enough
+# startup margin that this regression measures descendant cleanup rather than scheduler latency.
+environment["LLXPRT_SOURCE_VERIFY_TIMEOUT_SECONDS"] = "5"
 process = subprocess.run(
     [sys.executable, publisher, str(source), str(destination), "--", str(verifier)],
     env=environment,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
-    timeout=10,
+    timeout=20,
 )
 if process.returncode == 0 or b"source-bundle verifier timed out" not in process.stderr:
     raise SystemExit(f"hung verifier was not classified as a timeout: {process.stderr!r}")
@@ -931,7 +933,7 @@ module.publish(str(source), str(destination), command)
 if source.exists() or destination.read_bytes() != verified:
     raise SystemExit("atomic publication did not install the exact candidate")
 
-# The public direct publication path accepts the exact 32 MiB limit, including a sparse source,
+# The public direct publication path accepts the exact 128 MiB limit, including a sparse source,
 # and rejects cap-plus-one before invoking the verifier or creating a destination.
 real_run = module.run_verifier
 module.run_verifier = lambda *args, **kwargs: 0
@@ -950,7 +952,7 @@ with over_source.open("wb") as handle:
 try:
     module.publish(str(over_source), str(over_destination), command)
 except RuntimeError as error:
-    if "32 MiB" not in str(error):
+    if "128 MiB" not in str(error):
         raise
 else:
     raise SystemExit("cap-plus-one sparse source was accepted")
@@ -1012,7 +1014,7 @@ module.run_verifier = grow_retained_source
 try:
     module.publish(str(growth_source), str(growth_destination), command)
 except RuntimeError as error:
-    if "32 MiB" not in str(error):
+    if "128 MiB" not in str(error):
         raise
 else:
     raise SystemExit("source growth during verification was accepted")
@@ -1479,17 +1481,23 @@ import sys
 
 source = pathlib.Path(sys.argv[1])
 destination = pathlib.Path(sys.argv[2])
-shutil.copytree(
-    source,
-    destination,
-    symlinks=True,
-    ignore=shutil.ignore_patterns(".git", "target", "dist", "__pycache__", "*.pyc"),
-)
+
+
+def ignore(directory: str, names: list[str]) -> set[str]:
+    relative = pathlib.Path(directory).relative_to(source)
+    ignored = {name for name in names if name == "__pycache__" or name.endswith(".pyc")}
+    if not relative.parts:
+        ignored.update(name for name in names if name in {".git", "target", "dist"})
+    return ignored
+
+
+shutil.copytree(source, destination, symlinks=True, ignore=ignore)
 PY
   git -C "$build_fixture" init -q
   git -C "$build_fixture" config user.name 'Bundle Test'
   git -C "$build_fixture" config user.email 'bundle-test@example.invalid'
   git -C "$build_fixture" add .
+  git -C "$build_fixture" add -f registry-vendor
   git -C "$build_fixture" commit -q -m snapshot
   mkdir "$tmp/clean-output"
   PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \

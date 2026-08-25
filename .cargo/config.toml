@@ -1,2 +1,8 @@
 [alias]
 xtask = "run --offline --locked --manifest-path xtask/Cargo.toml --"
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "registry-vendor"

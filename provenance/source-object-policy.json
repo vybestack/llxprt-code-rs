@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "store": "GitHub Container Registry",
+  "registry": "ghcr.io",
+  "packageSuffix": "-source",
+  "visibility": "public",
+  "automaticExpiration": false,
+  "automatedDeletion": false,
+  "allowDigestOverwrite": false,
+  "releaseReferences": "manifest-and-blob-digests",
+  "tagPurpose": "commit-qualified-discovery-only"
+}

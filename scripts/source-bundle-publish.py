@@ -25,7 +25,7 @@ def close_quietly(fd: int) -> None:
         pass
 
 
-SOURCE_BUNDLE_MAX_BYTES = 32 * 1024 * 1024
+SOURCE_BUNDLE_MAX_BYTES = 128 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
 
@@ -33,7 +33,7 @@ def checked_size(fd: int) -> None:
     """Reject an already-oversized file before reading any of its content."""
     size = os.fstat(fd).st_size
     if size < 0 or size > SOURCE_BUNDLE_MAX_BYTES:
-        raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
+        raise RuntimeError("source bundle exceeds the 128 MiB (134217728-byte) limit")
 
 
 def digest_fd(fd: int) -> str:
@@ -47,7 +47,7 @@ def digest_fd(fd: int) -> str:
         ):
             total += len(chunk)
             if total > SOURCE_BUNDLE_MAX_BYTES:
-                raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
+                raise RuntimeError("source bundle exceeds the 128 MiB (134217728-byte) limit")
             digest.update(chunk)
         return digest.hexdigest()
     finally:
@@ -76,7 +76,7 @@ def copy_anonymous_candidate(source_fd: int, directory_fd: int, expected: str) -
         ):
             total += len(chunk)
             if total > SOURCE_BUNDLE_MAX_BYTES:
-                raise RuntimeError("source bundle exceeds the 32 MiB (33554432-byte) limit")
+                raise RuntimeError("source bundle exceeds the 128 MiB (134217728-byte) limit")
             digest.update(chunk)
             view = memoryview(chunk)
             while view:

@@ -365,9 +365,9 @@ bash scripts/build-source-bundle.sh --list   # print the exact member list, no b
 
 What it contains: the crate files (`Cargo.toml`, `Cargo.lock`,
 `LICENSE`, `README.md`, `PATCHES.md`, `SERDES-AI-0.2.6.patch`, `.gitignore`),
-the whole `src/`, `tests/`, `scripts/`, `.github/`, `THIRD_PARTY_LICENSES/`, and
-`vendor-upstream/`, `.cargo/config.toml`, the xtask manifest, lockfile, and source, and the
-required vendored serdes-ai crates'
+the whole `src/`, `tests/`, `scripts/`, `.github/`, `THIRD_PARTY_LICENSES/`,
+`vendor-upstream/`, and `registry-vendor/`, `.cargo/config.toml`, the xtask manifest, lockfile,
+and source, and the required vendored serdes-ai crates'
 `Cargo.toml`/`Cargo.toml.orig`/`README.md`/`.cargo_vcs_info.json`/`Cargo.lock`/`src`. Retaining
 all vendor lockfiles permits byte-for-byte reconstruction from the upstream archives and patch;
 the models lockfile is also required by its direct locked provider tests. The bundle includes the
@@ -383,8 +383,8 @@ the physical source tree or a proper descendant of its physical `dist/` director
 is not a file destination. Verification snapshots the archive before
 validation, validates all member names and types before extraction, rejects paths outside
 `bundle/`, links, and special files, requires zero-size directory payloads, and enforces limits
-of 32 MiB compressed input, 16 MiB per regular member, less than 128 MiB aggregate
-regular-member bytes, and 160 MiB for the complete expanded tar stream, including concatenated
+of 128 MiB compressed input, 16 MiB per regular member, less than 384 MiB aggregate
+regular-member bytes, and 448 MiB for the complete expanded tar stream, including concatenated
 gzip members, headers, and metadata. It requires the byte-sorted embedded manifest to match the
 trusted verifier tree's allow-list, generated from the same fixed build policy rather than from
 archive-authored data, checks the extraction in both directions, and compares every regular source
@@ -413,12 +413,22 @@ the upstream license Git blob by `provenance/serdes-ai-0.2.6.json`. See
 tag and release requirements, atomic release-record publication, and signed GitHub attestation
 verification.
 
-Limitations: the bundle contains all project source and the patched SerdesAI provenance
-archives, but it does not contain the complete crates.io dependency graph. Building and verifying
-are **offline** and need the other locked dependencies in the local Cargo registry cache
-(`--offline --locked`); the offline gates never touch the network. The manifest is written inside
-the staged bundle and the checked tree is never
-mutated, so repeated builds over the same sources are repeatable. `bash -n` and ShellCheck on
+Before the one-shot zero-asset GitHub Release `POST`, the tagged workflow publishes the archive and
+sidecar as OCI blobs in the public `ghcr.io/<owner>/<repo>-source` package. A deterministic OCI
+manifest binds those digest-addressed files to the tag and commit. Publication refuses a
+same-commit-tag collision, anonymously retrieves every published object by digest, and attests both
+the files and OCI manifest. The release body contains the stable digest URLs. A package's first GHCR
+publication defaults private, so it must fail before release creation until an administrator makes
+the package public; the exact-content rerun is safe. GHCR has no default automatic package expiry and
+this repository has no cleanup automation. Package administrators retain the ability to delete
+objects. See the provenance guide for bootstrap and verification details.
+
+The bundle contains the complete crates.io source closure for all 13 retained lockfiles.
+`scripts/verify-registry-vendor.py` checks the package inventory, package checksums, file inventory,
+and every vendored file digest. Bundle verification runs with an empty temporary `CARGO_HOME`,
+`--offline --locked`, unusable network proxies, and fresh target directories. The manifest is
+written inside the staged bundle and the checked tree is never mutated, so repeated builds over the
+same sources are repeatable. `bash -n` and ShellCheck on
 `scripts/*.sh` are CI gates; on GNU tar the archive is byte-reproducible, on BSD/macOS
 tar (no GNU ordering flags) it is well-formed but not byte-reproducible.
 

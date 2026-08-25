@@ -76,10 +76,14 @@ digest_rel='THIRD_PARTY_LICENSES/source-bundle.sha256'
 stage="$(mktemp -d)"
 snapshot_stage="$(mktemp -d)"
 provider_target=""
+cargo_home=""
 cleanup() {
   rm -rf "$stage" "$snapshot_stage"
   if [[ -n "$provider_target" ]]; then
     rm -rf -- "$provider_target"
+  fi
+  if [[ -n "$cargo_home" ]]; then
+    rm -rf -- "$cargo_home"
   fi
 }
 trap cleanup EXIT
@@ -89,7 +93,7 @@ import os
 import stat
 import sys
 
-limit = 32 * 1024 * 1024
+limit = 128 * 1024 * 1024
 source_path, candidate_path, inherited_fd = sys.argv[1:]
 if inherited_fd:
     source_fd = os.dup(int(inherited_fd))
@@ -133,12 +137,14 @@ if [[ "$(find "$stage" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d ' ')" -ne 
 fi
 cd "$stage/bundle"
 
-# 1. Forbidden paths must be absent: .git at any depth, target/dist at any depth,
-#    logs, temp files, parity output, .DS_Store.
-bad="$( { find . -type d \( -name target -o -name dist -o -name llxprt-parity-out -o -name __pycache__ \) -print
-           find . -name .git -print
-           find . -path '*/target/*' -type f -print
-           find . -type f \( -name '*.log' -o -name '*.tmp' -o -name '*.temp' -o -name '*.pyc' -o -name '.DS_Store' \) -print
+# 1. Forbidden generated paths must be absent from first-party and patched-vendor sources. The
+#    checksum-inventoried registry closure is exempt because legitimate crate source can contain
+#    path-handling fixtures named target, dist, or *.tmp; verify-registry-vendor.py checks every
+#    path and byte there against Cargo's package manifests.
+bad="$( { find . -path './registry-vendor' -prune -o -type d \( -name target -o -name dist -o -name llxprt-parity-out -o -name __pycache__ \) -print
+           find . -path './registry-vendor' -prune -o -name .git -print
+           find . -path './registry-vendor' -prune -o -path '*/target/*' -type f -print
+           find . -path './registry-vendor' -prune -o -type f \( -name '*.log' -o -name '*.tmp' -o -name '*.temp' -o -name '*.pyc' -o -name '.DS_Store' \) -print
          } )"
 if [[ -n "$bad" ]]; then
   echo "forbidden path present in extracted bundle:" >&2
@@ -269,9 +275,17 @@ if [[ "$run_local_source_code" != true ]]; then
   exit 0
 fi
 
-# 4. The offline release gates from the extraction: xtask tests and production quality,
-#    then the full root test run and release build. All Cargo operations are offline and
-#    locked.
+# 4. The offline release gates from the extraction: verify the shipped registry closure,
+#    then run xtask tests and production quality, the full root test run, and the release build.
+#    An empty Cargo home, unusable network proxies, --offline, and --locked prove the bundle
+#    reconstructs without relying on a pre-populated registry cache.
+python3 scripts/verify-registry-vendor.py
+cargo_home="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-cargo-home.XXXXXX")"
+export CARGO_HOME="$cargo_home"
+export CARGO_NET_OFFLINE=true
+export HTTP_PROXY=http://127.0.0.1:9
+export HTTPS_PROXY=http://127.0.0.1:9
+export ALL_PROXY=http://127.0.0.1:9
 root_target="$stage/root-target"
 CARGO_TARGET_DIR="$root_target" cargo +1.88.0 test --offline --locked \
   --manifest-path xtask/Cargo.toml
@@ -281,12 +295,15 @@ CARGO_TARGET_DIR="$root_target" cargo +1.88.0 test --offline --locked \
 CARGO_TARGET_DIR="$root_target" cargo +1.88.0 build --offline --release --locked \
   --workspace --all-features
 
-# 5. The direct vendored provider suite runs from the extraction against
-#    vendor/serdes-ai-models with the Cargo.lock it ships (that lockfile is part of
-#    SERDES-AI-0.2.6.patch and --locked requires it). It builds into an external
-#    temporary CARGO_TARGET_DIR so the clean extraction stays exactly the canonical member
-#    list, and cleanup removes that target dir on every path, failure included.
+# 5. Every directly gated vendored manifest resolves from that same empty Cargo home. The feature
+#    surface gate covers all retained manifests; direct provider/model tests also execute. Builds
+#    use an external target so the extraction remains exactly the canonical member list, and
+#    cleanup removes the target on every path, failure included.
 provider_target="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-provider.XXXXXX")"
+CARGO_TARGET_DIR="$provider_target" bash scripts/test-vendor-feature-surfaces.sh
+CARGO_TARGET_DIR="$provider_target" cargo +1.88.0 test --offline --locked \
+  --manifest-path vendor/serdes-ai-providers/Cargo.toml \
+  --no-default-features --features openai
 CARGO_TARGET_DIR="$provider_target" cargo +1.88.0 test --offline --locked \
   --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai
 rm -rf -- "$provider_target"

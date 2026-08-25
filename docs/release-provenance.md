@@ -34,11 +34,23 @@ source bundle and checksum, and attests both files.
 
 GitHub's REST API has no compare-and-set operation that can publish a draft only if its asset list is
 unchanged. The publisher therefore never creates or resumes a draft and never uploads release
-assets. After checking remote policy, it creates a public release with deterministic metadata and an
-empty asset list in one `POST`. The release body records the source-bundle name, SHA-256, and tagged
-workflow run containing the attested artifact. This removes the unchecked draft-to-public window,
-but it means the custom source bundle is a workflow artifact rather than a GitHub Release asset.
-Workflow-artifact retention is a hosting limitation; the bundle remains reproducible from the tag.
+assets. Before release creation, the workflow publishes the archive, checksum sidecar, and a
+manifest that binds both files to the release tag and commit in `ghcr.io/<owner>/<repo>-source`.
+It refuses to replace a commit-qualified tag that already has different content, then retrieves the
+manifest and both blobs anonymously by digest and verifies their bytes. Only after that succeeds does
+it create a public release with deterministic metadata and an empty asset list in one `POST`. The
+release body records the archive SHA-256 and digest-qualified URLs for the manifest and both files.
+The workflow artifact transfers files between jobs and may expire; it is not the durable release
+location.
+
+A new GHCR package is private by default. On first publication, anonymous verification therefore
+fails before release creation. A package administrator must make `<repo>-source` public in GitHub's
+package settings and rerun the tag workflow. The exact-content retry path accepts the existing
+manifest without rewriting its commit-qualified discovery tag. Public GHCR packages have no default
+automatic expiry, and this repository configures no cleanup workflow. OCI digests cannot be
+reassigned to different bytes. A package administrator can still delete a package or version; GHCR
+offers no repository setting that removes that administrative capability. This residual hosting
+limitation applies to the durable objects even though release metadata references their digests.
 
 The repository must enable immutable releases. It must also have an active, no-bypass ruleset that
 applies to the exact release tag (or all refs) and prohibits tag updates and deletion. The publisher
@@ -59,8 +71,9 @@ asset state.
 
 The tagged publication job requests GitHub OIDC and attestation permissions and invokes the
 commit-pinned `actions/attest-build-provenance` action for the exact archive and checksum sidecar.
-GitHub binds the Sigstore attestation to the repository, workflow, workflow commit, and subject
-hashes. Publication proceeds only if attestation succeeds.
+It separately attests the published OCI manifest digest and pushes that attestation to the registry.
+GitHub binds the Sigstore attestations to the repository, workflow, workflow commit, and subject
+hashes. Release creation proceeds only if both attestation steps succeed.
 
 The archive contains the upstream evidence JSON, all 11 retained archives, the complete patch, the
 vendor verifier, the reviewed workflow, and the pinned action identity. Its generated content
@@ -76,10 +89,12 @@ gh attestation verify dist/llxprt-code-rs-<version>-source.tar.gz --repo <owner>
 gh attestation verify dist/llxprt-code-rs-<version>-source.tar.gz.sha256 --repo <owner>/<repo>
 ```
 
-Also peel the annotated tag through the GitHub API, compare it with the attested workflow commit,
-download both attested workflow artifacts, run `sha256sum --check`, and compare their names with the
-version derived by `scripts/release-version.py`. Confirm that the immutable release has the exact
-recorded title/body/tag/target, is neither draft nor prerelease, has no discussion, and has an empty
-asset list. The action configuration is present, but no attestation or signature exists until a
+Also peel the annotated tag through the GitHub API and compare it with the attested workflow commit.
+Fetch the OCI manifest and both blobs through the digest-qualified URLs in the release body. Check the
+manifest digest, run `sha256sum --check`, and compare the names with the version derived by
+`scripts/release-version.py`. Verify the manifest attestation against
+`ghcr.io/<owner>/<repo>-source@sha256:<manifest-digest>`. Confirm that the immutable release has the
+exact recorded title/body/tag/target, is neither draft nor prerelease, has no discussion, and has an
+empty asset list. The action configuration is present, but no attestation or signature exists until a
 tagged GitHub workflow completes successfully. A local annotated Git tag is not a cryptographic
 signature unless a trusted signing key is separately configured and the signature is verified.
