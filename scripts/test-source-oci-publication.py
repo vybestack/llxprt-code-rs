@@ -157,11 +157,18 @@ def main() -> None:
             if "/manifests/sha256:" not in outputs["manifest-url"]:
                 raise SystemExit("publisher did not emit a digest-qualified manifest URL")
 
-            # Exact retry is idempotent. The commit-qualified discovery tag is never rewritten.
+            # An exact retry observed in a serialized workflow run does not rewrite the
+            # commit-qualified discovery tag.
             before = dict(State.manifests)
             invoke(work, registry, "1" * 40)
             if State.manifests != before:
                 raise SystemExit("exact retry rewrote OCI manifest state")
+
+            # The OCI config is also anonymously retrieved and checked byte-for-byte.
+            first_manifest = json.loads(next(iter(State.manifests.values())))
+            State.corrupt_digest = first_manifest["config"]["digest"]
+            invoke(work, registry, "1" * 40, expect_success=False)
+            State.corrupt_digest = None
 
             # Different content cannot reuse an existing commit-qualified tag.
             write_source(work, b"different source bytes")
@@ -182,7 +189,7 @@ def main() -> None:
         server.shutdown()
         server.server_close()
         thread.join()
-    print("OCI source publication tests passed: retrieval, collision, visibility, and digest failures")
+    print("OCI source publication tests passed: manifest/config/layer retrieval, collision, visibility, and digest failures")
 
 
 if __name__ == "__main__":

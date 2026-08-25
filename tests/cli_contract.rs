@@ -371,6 +371,46 @@ fn profile_precedence_and_missing_named_profile() {
     assert_eq!(stdout_json(&out)["error"]["code"], "profile-missing");
 }
 
+/// Missing or relative configuration roots fail before profile access or network activity.
+#[test]
+fn configuration_root_must_be_available_and_absolute() {
+    let missing = bin()
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .env_remove("AppData")
+        .arg("--profile")
+        .arg("does-not-exist")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(3));
+    let missing_json = stdout_json(&missing);
+    assert_eq!(missing_json["error"]["code"], "profile-load");
+    assert_eq!(
+        missing_json["error"]["message"],
+        "profile resolution failed: absolute configuration directory is unavailable"
+    );
+
+    let absolute_fallback = tempfile::tempdir().unwrap();
+    let relative = bin()
+        .env("LLXPRT_CONFIG_HOME", "relative/config")
+        .env("LLXPRT_CONFIG_DIR", absolute_fallback.path())
+        .arg("--profile")
+        .arg("does-not-exist")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(relative.status.code(), Some(3));
+    let relative_json = stdout_json(&relative);
+    assert_eq!(relative_json["error"]["code"], "profile-load");
+    assert_eq!(
+        relative_json["error"]["message"],
+        "profile resolution failed: LLXPRT_CONFIG_HOME must name a nonempty absolute directory"
+    );
+}
+
 /// The dsflash default resolves against the real config dir when no explicit profile is
 /// given (fast fail on the http gate so no network), while a remote loopback URL in a
 /// file profile is allowed at config time.

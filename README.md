@@ -29,7 +29,7 @@ src/
   adapter.rs     SerdesAI wiring: OpenAI chat-completions request shape, tool schemas
   model.rs       ModelConfig resolution: profile key -> adapter settings (memory only)
   profile.rs     profile parsing + standard config-dir discovery
-  session.rs     disk-backed session/turn store (flock + atomic writes, cwd pinning)
+  session.rs     disk-backed session/turn store (flock + two-slot recovery, cwd pinning)
   tools.rs       tool specs and execution (file ops confined to --cwd), bounded shell
   harness.rs     black-box subprocess scaffolding shared by the parity binary
   grade.rs       structural / protocol / tool-use / build-test scoring
@@ -286,8 +286,9 @@ the same directory inode cannot interleave those operations. `replace` reads the
 replacement bytes, then publishes them atomically with a temporary file and rename. Immediately
 before the rename it re-opens the final name no-follow and verifies identity (`dev`/`ino`), file
 type, size, and a SHA-256 digest against the bytes from which the replacement was derived. A
-change detected by that check returns a conflict. Callers can also pass `expected_sha256` (a
-lowercase hex SHA-256 of content from a recent `read_file`) as an up-front precondition.
+change detected by that check returns a conflict. Callers can also pass `expected_sha256`, an
+independently computed lowercase hex SHA-256 of the complete current content, as an up-front
+precondition.
 
 The advisory lock only coordinates programs that honor it. The verification is not an atomic
 compare-and-swap because the re-open/verify and rename are separate syscalls. An unrelated process
@@ -415,9 +416,12 @@ verification.
 
 Before the one-shot zero-asset GitHub Release `POST`, the tagged workflow publishes the archive and
 sidecar as OCI blobs in the public `ghcr.io/<owner>/<repo>-source` package. A deterministic OCI
-manifest binds those digest-addressed files to the tag and commit. Publication refuses a
-same-commit-tag collision, anonymously retrieves every published object by digest, and attests both
-the files and OCI manifest. The release body contains the stable digest URLs. A package's first GHCR
+manifest binds those digest-addressed files to the tag and commit. A preflight check refuses an
+observed same-commit-tag collision. OCI Distribution has no portable create-only tag update, so the
+commit-qualified tag is mutable discovery metadata; same-ref workflow serialization prevents normal
+publication runs from racing, while digest-qualified references remain authoritative. Publication
+anonymously retrieves the manifest, config, archive, and sidecar by digest and attests the files and
+OCI manifest. The release body contains the stable digest URLs. A package's first GHCR
 publication defaults private, so it must fail before release creation until an administrator makes
 the package public; the exact-content rerun is safe. GHCR has no default automatic package expiry and
 this repository has no cleanup automation. Package administrators retain the ability to delete

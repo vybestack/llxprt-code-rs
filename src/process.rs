@@ -294,16 +294,16 @@ fn supervise(
             }
         }
         let closed = done.load(Ordering::SeqCst) >= pipes;
-        if exited && closed {
-            return (
-                child.wait().ok().and_then(|status| status.code()),
-                passed_deadline,
-            );
-        }
         let now = Instant::now();
         if now >= deadline {
             passed_deadline = true;
         }
+        if exited && closed && !passed_deadline {
+            return (child.wait().ok().and_then(|status| status.code()), false);
+        }
+        // A timed-out direct child may exit and close its pipes while a TERM-ignoring descendant
+        // remains in the same process group with redirected stdio. Always complete the group-wide
+        // escalation before reaping the retained leader and returning from a timeout.
         if now >= escalation_deadline {
             let _ = kill_group(&mut child, libc::SIGKILL);
             return (child.wait().ok().and_then(|status| status.code()), true);
@@ -446,6 +446,45 @@ mod tests {
         assert_eq!(exited.wait().unwrap().code(), Some(0));
         let _ = kill_group(&mut sentinel, libc::SIGKILL);
         let _ = sentinel.wait();
+    }
+
+    #[test]
+    fn timeout_sweeps_descendant_after_direct_child_exits_and_closes_pipes() {
+        let directory = tempfile::tempdir().unwrap();
+        let pidfile = directory.path().join("descendant.pid");
+        let command = format!(
+            "trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) </dev/null >/dev/null 2>&1 & echo $! > '{}'; while :; do :; done",
+            pidfile.display()
+        );
+        let outcome = run_sh(
+            &command,
+            Some(directory.path()),
+            Duration::from_millis(50),
+            1024,
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(outcome.timed_out);
+        assert_eq!(outcome.status, Some(0));
+
+        let descendant: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            // Safety: signal zero only probes whether the recorded process still exists.
+            let probe = unsafe { libc::kill(descendant, 0) };
+            if probe == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "TERM-ignoring same-group descendant survived timeout cleanup"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

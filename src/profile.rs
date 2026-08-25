@@ -17,33 +17,39 @@ use std::path::{Path, PathBuf};
 /// platform default: Windows `%AppData%\llxprt-code`, macOS
 /// `~/Library/Preferences/llxprt-code`, otherwise `$XDG_CONFIG_HOME/llxprt-code`
 /// falling back to `~/.config/llxprt-code`.
-pub fn std_profile_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("LLXPRT_CONFIG_HOME") {
-        if !d.is_empty() {
-            return PathBuf::from(d);
-        }
-    }
-    if let Ok(d) = std::env::var("LLXPRT_CONFIG_DIR") {
-        if !d.is_empty() {
-            return PathBuf::from(d);
+pub fn std_profile_dir() -> Result<PathBuf, String> {
+    for name in ["LLXPRT_CONFIG_HOME", "LLXPRT_CONFIG_DIR"] {
+        if let Some(path) = absolute_env_path(name)? {
+            return Ok(path);
         }
     }
     let designed_dir = if cfg!(target_os = "windows") {
-        std::env::var_os("AppData").map(|w| PathBuf::from(w).join("llxprt-code"))
+        absolute_env_path("AppData")?.map(|path| path.join("llxprt-code"))
     } else if cfg!(target_os = "macos") {
-        home_dir().map(|h| h.join("Library").join("Preferences").join("llxprt-code"))
+        home_dir()?.map(|path| path.join("Library/Preferences/llxprt-code"))
+    } else if let Some(path) = absolute_env_path("XDG_CONFIG_HOME")? {
+        Some(path.join("llxprt-code"))
     } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(|x| PathBuf::from(x).join("llxprt-code"))
-            .or_else(|| home_dir().map(|h| h.join(".config").join("llxprt-code")))
+        home_dir()?.map(|path| path.join(".config/llxprt-code"))
     };
-    designed_dir.unwrap_or_else(|| PathBuf::from("."))
+    designed_dir.ok_or_else(|| "absolute configuration directory is unavailable".to_string())
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+fn absolute_env_path(name: &str) -> Result<Option<PathBuf>, String> {
+    std::env::var_os(name)
+        .map(|value| require_absolute_path(name, PathBuf::from(value)))
+        .transpose()
+}
+
+fn require_absolute_path(name: &str, path: PathBuf) -> Result<PathBuf, String> {
+    (!path.as_os_str().is_empty() && path.is_absolute())
+        .then_some(path)
+        .ok_or_else(|| format!("{name} must name a nonempty absolute directory"))
+}
+
+fn home_dir() -> Result<Option<PathBuf>, String> {
+    absolute_env_path("HOME")?
+        .map_or_else(|| absolute_env_path("USERPROFILE"), |path| Ok(Some(path)))
 }
 
 /// Parsed profile.
@@ -78,9 +84,9 @@ pub struct ToolCallRecord {
 
 /// The endpoint base URL after validation.
 ///
-/// The **full** URL is kept verbatim for the transport (including any path prefix such as
-/// `/inference/v1` so routing reaches the real endpoint) and for strict validation. Every
-/// rendering for `Debug`/`Display`/errors goes through the redacted
+/// The **full** URL is kept verbatim for the transport and strict validation. Its path must be
+/// empty or one of `/v1`, `/chat/completions`, or `/v1/chat/completions`. Every rendering for
+/// `Debug`/`Display`/errors goes through the redacted
 /// `scheme://host:port` form, which never carries userinfo, query, fragment, or the
 /// path.
 #[derive(Clone)]
@@ -629,6 +635,16 @@ pub fn is_dsflash_profile_name(name: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn configuration_selectors_require_nonempty_absolute_paths() {
+        assert!(require_absolute_path("TEST_CONFIG", PathBuf::new()).is_err());
+        assert!(require_absolute_path("TEST_CONFIG", PathBuf::from("relative")).is_err());
+        assert_eq!(
+            require_absolute_path("TEST_CONFIG", PathBuf::from("/absolute/config")).unwrap(),
+            PathBuf::from("/absolute/config")
+        );
+    }
 
     /// A strict profile type table: `ephemeralSettings`/`modelParams` must be JSON
     /// objects when present, and each known scalar field must have the right type. Every

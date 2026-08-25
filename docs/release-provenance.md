@@ -36,18 +36,23 @@ GitHub's REST API has no compare-and-set operation that can publish a draft only
 unchanged. The publisher therefore never creates or resumes a draft and never uploads release
 assets. Before release creation, the workflow publishes the archive, checksum sidecar, and a
 manifest that binds both files to the release tag and commit in `ghcr.io/<owner>/<repo>-source`.
-It refuses to replace a commit-qualified tag that already has different content, then retrieves the
-manifest and both blobs anonymously by digest and verifies their bytes. Only after that succeeds does
-it create a public release with deterministic metadata and an empty asset list in one `POST`. The
-release body records the archive SHA-256 and digest-qualified URLs for the manifest and both files.
+A preflight check refuses to replace a commit-qualified tag observed with different content. OCI
+Distribution has no portable atomic create-only tag operation, so the tag is mutable discovery
+metadata rather than an identity boundary. Same-ref workflow concurrency serializes normal
+publication runs. The publisher retrieves the manifest, config, archive, and sidecar anonymously by
+digest and verifies their bytes; these digest-qualified objects are authoritative. Only after that
+succeeds does it create a public release with deterministic metadata and an empty asset list in one
+`POST`. The release body records the archive SHA-256 and digest-qualified URLs for the manifest and
+both files.
 The workflow artifact transfers files between jobs and may expire; it is not the durable release
 location.
 
 A new GHCR package is private by default. On first publication, anonymous verification therefore
 fails before release creation. A package administrator must make `<repo>-source` public in GitHub's
-package settings and rerun the tag workflow. The exact-content retry path accepts the existing
-manifest without rewriting its commit-qualified discovery tag. Public GHCR packages have no default
-automatic expiry, and this repository configures no cleanup workflow. OCI digests cannot be
+package settings and rerun the tag workflow. In a serialized workflow run, the exact-content retry path
+accepts the existing manifest without issuing another discovery-tag update. The tag remains mutable
+registry metadata and is not used in release identity. Public GHCR packages have no default automatic
+expiry, and this repository configures no cleanup workflow. OCI digests cannot be
 reassigned to different bytes. A package administrator can still delete a package or version; GHCR
 offers no repository setting that removes that administrative capability. This residual hosting
 limitation applies to the durable objects even though release metadata references their digests.

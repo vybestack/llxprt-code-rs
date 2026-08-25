@@ -236,8 +236,8 @@ impl std::fmt::Debug for StoreError {
 
 impl std::error::Error for StoreError {}
 
-fn sessions_root() -> PathBuf {
-    crate::profile::std_profile_dir().join("code-rs-sessions")
+fn sessions_root() -> Result<PathBuf, String> {
+    Ok(crate::profile::std_profile_dir()?.join("code-rs-sessions"))
 }
 
 /// A safe identifier is a bounded single path component of `[A-Za-z0-9_-]`.
@@ -510,14 +510,14 @@ impl SessionId {
     }
 
     /// The on-disk directory for this session.
-    pub fn path(&self) -> PathBuf {
-        sessions_root().join(&self.id)
+    pub fn path(&self) -> Result<PathBuf, String> {
+        Ok(sessions_root()?.join(&self.id))
     }
 }
 
 impl SessionStore {
     fn open(session: &SessionId) -> Result<Self, StoreError> {
-        let config_path = crate::profile::std_profile_dir();
+        let config_path = crate::profile::std_profile_dir().map_err(StoreError::Invalid)?;
         std::fs::create_dir_all(&config_path)
             .map_err(|_| StoreError::Io("create configuration directory failed".into()))?;
         let config = crate::tools::open_root(&config_path)
@@ -529,7 +529,7 @@ impl SessionStore {
         use std::os::fd::AsRawFd as _;
         fchmod(file.as_raw_fd(), 0o600)?;
         Ok(SessionStore {
-            session_dir: session.path(),
+            session_dir: config_path.join("code-rs-sessions").join(&session.id),
             session_id: session.id.clone(),
             dir: dir_cap,
             file,
@@ -540,6 +540,11 @@ impl SessionStore {
     /// Open (or create) the store for a session.
     pub fn load(session: &SessionId) -> Result<SessionStore, StoreError> {
         Self::open(session)
+    }
+
+    /// Return the configuration-root-derived path retained when this store was opened.
+    pub fn session_dir(&self) -> &Path {
+        &self.session_dir
     }
 
     /// Require a retained workspace capability to match the identity pinned by this session.

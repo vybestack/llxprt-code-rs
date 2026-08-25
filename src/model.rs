@@ -64,7 +64,9 @@ impl ProfileResolver {
         {
             return Ok(ResolveOutcome::Missing(name.to_string()));
         }
-        let dir = std_profile_dir().join("profiles");
+        let dir = std_profile_dir()
+            .map_err(ModelError::Resolve)?
+            .join("profiles");
         let path = dir.join(format!("{name}.json"));
         if !path.exists() {
             return Ok(ResolveOutcome::Missing(name.to_string()));
@@ -434,7 +436,7 @@ fn resolve_api_key(profile: &Profile, from_file: bool) -> Result<String, ModelEr
     }
 
     let api_key = if let Some(key) = profile.ephemeral.auth_key.as_deref() {
-        if key.is_empty() {
+        if key.trim().is_empty() {
             return Err(ModelError::NoAuth);
         }
         key.to_string()
@@ -489,7 +491,9 @@ struct SettingsJson {
 }
 
 fn load_settings_json() -> Result<SettingsJson, ModelError> {
-    let path = std_profile_dir().join("settings.json");
+    let path = std_profile_dir()
+        .map_err(ModelError::SettingsRead)?
+        .join("settings.json");
     // settings.json is read bounded (`cap + 1`) **before** any parse; a larger
     // file is a settings error with a fixed message, never an unbounded read nor an
     // unbounded parse. The over-limit content (which is a credential-default
@@ -689,6 +693,22 @@ mod tests {
             true,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn whitespace_only_inline_auth_is_rejected_without_normalizing_other_keys() {
+        let mut profile = base_profile();
+        profile.ephemeral.auth_key = Some(" \t\n ".into());
+        assert!(matches!(
+            super::resolve_api_key(&profile, true),
+            Err(super::ModelError::NoAuth)
+        ));
+
+        profile.ephemeral.auth_key = Some("  key bytes  ".into());
+        assert_eq!(
+            super::resolve_api_key(&profile, true).unwrap(),
+            "  key bytes  "
+        );
     }
 
     #[test]

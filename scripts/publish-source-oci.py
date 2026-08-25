@@ -335,6 +335,7 @@ def main() -> None:
     observed = client.get_manifest(manifest_digest, anonymous=True)
     if observed is None or observed[0] != manifest or observed[1] not in {"", manifest_digest}:
         fail("anonymous digest-qualified manifest retrieval returned different content")
+    client.verify_blob(config_digest, len(config))
     client.verify_blob(archive_digest, archive_size)
     client.verify_blob(sidecar_digest, sidecar_size)
 

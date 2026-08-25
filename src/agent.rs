@@ -504,6 +504,7 @@ impl CodingAgent {
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
         if !attempt.current.text.trim().is_empty() {
+            self.check_round_limit(store, reserved, &attempt.rounds)?;
             return Ok(std::mem::take(&mut attempt.current.text));
         }
         self.forced_summary(store, reserved, tools, attempt)

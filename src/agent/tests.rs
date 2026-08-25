@@ -506,6 +506,39 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
 }
 
 #[test]
+fn normal_summary_after_maximum_tool_round_exceeds_cap() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("normal-round-limit").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "list_directory".into(),
+            args_json: r#"{"path":"."}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let final_round = LlmResult {
+        text: "summary".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![tool_round, final_round])),
+        cwd.path().to_path_buf(),
+        false,
+    )
+    .with_max_rounds(1);
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("normal final response must exceed cap");
+    assert_eq!(error.key, "turn-budget");
+    assert_eq!(agent.model_calls(), 2);
+}
+
+#[test]
 fn forced_summary_counts_already_persisted_rounds() {
     let cwd = tempfile::tempdir().unwrap();
     let _config = shared_config_home();

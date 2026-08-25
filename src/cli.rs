@@ -76,6 +76,7 @@ pub struct Args {
 /// Outcome of a successful invocation.
 pub struct RunOutcome {
     pub session: SessionId,
+    pub session_dir: std::path::PathBuf,
     pub run: crate::agent::CompletedRun,
 }
 
@@ -148,6 +149,7 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
 
     Ok(RunOutcome {
         session: session_id,
+        session_dir: store.session_dir().to_path_buf(),
         run,
     })
 }
@@ -157,7 +159,7 @@ pub fn to_json(outcome: &Result<RunOutcome, AppError>) -> serde_json::Value {
     match outcome {
         Ok(o) => serde_json::json!({
             "session_id": o.session.id,
-            "session_dir": o.session.path().display().to_string(),
+            "session_dir": o.session_dir.display().to_string(),
             "turn": o.run.turn,
             "attempt": o.run.attempt,
             "branch_id": o.run.branch_id,
