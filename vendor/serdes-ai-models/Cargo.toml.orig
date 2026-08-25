@@ -1,0 +1,63 @@
+[package]
+name = "serdes-ai-models"
+description = "Model trait and provider implementations for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "models", "openai", "anthropic"]
+categories = ["api-bindings"]
+readme = "README.md"
+
+[features]
+default = ["openai"]
+full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth", "antigravity"]
+
+# Provider implementations
+openai = []
+anthropic = []
+google = []
+gemini = ["google"]  # Alias
+mistral = []
+groq = ["openai"]
+ollama = []
+azure = ["openai"]
+openrouter = ["openai"]  # OpenRouter uses OpenAI's stream parser
+huggingface = []
+cohere = []
+chatgpt-oauth = []
+claude-code-oauth = ["anthropic"]
+antigravity = ["dep:uuid"]
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-tools = { workspace = true }
+serdes-ai-output = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+derive_builder = { workspace = true }
+chrono = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio-stream = "0.1"
+
+# Optional UUID for Antigravity
+uuid = { version = "1.0", features = ["v4"], optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+wiremock = { workspace = true }
+mockall = { workspace = true }
+rstest = { workspace = true }

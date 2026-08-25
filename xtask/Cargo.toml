@@ -1,0 +1,31 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "llxprt-code-rs quality gates: LOC, cyclomatic/cognitive complexity, and the coordinating lint gate"
+license = "Apache-2.0"
+publish = false
+autotests = false
+
+# The xtask is a separate crate by design (the conventional `cargo xtask` layout): it is
+# never a workspace member of the root crate, so its deps are pinned against the offline
+# registry cache below (all of these exact versions are already in the root Cargo.lock and the
+# local cargo cache: syn 2.0.119 / quote 1.0.47 / proc-macro2 1.0.107). It
+# only parses source, never runs proc macros, so the default syn `proc-macro`/`derive`
+# features stay off.
+
+[lib]
+name = "xtask"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+proc-macro2 = { version = "=1.0.107", default-features = false, features = ["span-locations"] }
+quote = "=1.0.47"
+syn = { version = "=2.0.119", default-features = false, features = ["full", "parsing", "printing", "visit"] }
+
+[dev-dependencies]

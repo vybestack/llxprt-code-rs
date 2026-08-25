@@ -1,0 +1,18 @@
+# Rust build output: the crate's own build dir and any nested `target/` dirs
+# anywhere in the tree, including inside vendor/. There are no vendored `target/`
+# dirs today; the patterns below prove they can never be incorrectly bundled.
+target/
+**/target/
+
+# Local release-distribution artifacts (scripts/build-source-bundle.sh writes here).
+/dist/
+
+# Parity output (reports/captures from the llxprt-parity harness).
+/llxprt-parity-out/
+
+# Other generated state that is never part of a source archive.
+/theirs
+**/*.log
+.DS_Store
+__pycache__/
+*.pyc

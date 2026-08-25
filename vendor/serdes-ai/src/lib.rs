@@ -1,0 +1,449 @@
+//! # SerdesAI - Type-Safe AI Agent Framework for Rust
+//!
+//! SerdesAI is a comprehensive Rust library for building AI agents that interact with
+//! large language models (LLMs). It is a complete port of [pydantic-ai](https://github.com/pydantic/pydantic-ai)
+//! to Rust, providing type-safe, ergonomic APIs for creating intelligent agents.
+//!
+//! ## Quick Start
+//!
+//! ```ignore
+//! use serdes_ai::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let agent = Agent::builder()
+//!         .model("openai:gpt-4o")
+//!         .system_prompt("You are a helpful assistant.")
+//!         .build()?;
+//!
+//!     let result = agent.run("What is the capital of France?", ()).await?;
+//!     println!("{}", result.output());
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Key Features
+//!
+//! - **Type-safe agents** with generic dependencies and output types
+//! - **Multiple LLM providers** (OpenAI, Anthropic, Google, Groq, Mistral, Ollama)
+//! - **Tool/function calling** with automatic JSON schema generation
+//! - **Streaming responses** with real-time text updates
+//! - **Structured outputs** with JSON Schema validation
+//! - **Retry strategies** with exponential backoff
+//!
+//! ## Feature Flags
+//!
+//! | Feature | Description | Default |
+//! |---------|-------------|--------|
+//! | `openai` | OpenAI GPT models | ✅ |
+//! | `anthropic` | Anthropic Claude models | ❌ |
+//! | `gemini` | Google Gemini models | ❌ |
+//! | `groq` | Groq fast inference | ❌ |
+//! | `mistral` | Mistral AI models | ❌ |
+//! | `ollama` | Local Ollama models | ❌ |
+//! | `macros` | Proc macros | ✅ |
+//! | `full` | All features | ❌ |
+//!
+//! ## Architecture
+//!
+//! SerdesAI is organized as a workspace of focused crates:
+//!
+//! - [`serdes_ai_core`] - Core types, messages, and errors
+//! - [`serdes_ai_agent`] - Agent implementation and builder
+//! - [`serdes_ai_models`] - Model trait and implementations
+//! - [`serdes_ai_tools`] - Tool system and schema generation
+//! - [`serdes_ai_toolsets`] - Toolset abstractions
+//! - [`serdes_ai_output`] - Output schema validation
+//! - [`serdes_ai_streaming`] - Streaming support
+//! - [`serdes_ai_retries`] - Retry strategies
+//! - [`serdes_ai_macros`] - Procedural macros
+//!
+//! ## Examples
+//!
+//! ### Simple Chat
+//!
+//! ```ignore
+//! use serdes_ai::prelude::*;
+//!
+//! let agent = Agent::builder()
+//!     .model("openai:gpt-4o")
+//!     .system_prompt("You are helpful.")
+//!     .build()?;
+//!
+//! let result = agent.run("Hello!", ()).await?;
+//! ```
+//!
+//! ### With Tools
+//!
+//! ```ignore
+//! use serdes_ai::prelude::*;
+//!
+//! #[tool(description = "Get weather for a city")]
+//! async fn get_weather(ctx: &RunContext<()>, city: String) -> ToolResult<String> {
+//!     Ok(format!("Weather in {}: 22°C, sunny", city))
+//! }
+//!
+//! let agent = Agent::builder()
+//!     .model("openai:gpt-4o")
+//!     .tool(get_weather)
+//!     .build()?;
+//! ```
+//!
+//! ### Structured Output
+//!
+//! ```ignore
+//! use serdes_ai::prelude::*;
+//! use serde::Deserialize;
+//!
+//! #[derive(Deserialize, OutputSchema)]
+//! struct Person {
+//!     name: String,
+//!     age: u32,
+//! }
+//!
+//! let agent = Agent::builder()
+//!     .model("openai:gpt-4o")
+//!     .output_type::<Person>()
+//!     .build()?;
+//!
+//! let result: Person = agent.run("Extract: John is 30 years old", ()).await?.into_output();
+//! ```
+//!
+//! ### Streaming
+//!
+//! ```ignore
+//! use serdes_ai::prelude::*;
+//! use futures::StreamExt;
+//!
+//! let mut stream = agent.run_stream("Tell me a story", ()).await?;
+//!
+//! while let Some(event) = stream.next().await {
+//!     if let AgentStreamEvent::Text { delta } = event? {
+//!         print!("{}", delta);
+//!     }
+//! }
+//! ```
+
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_crate_level_docs)]
+#![deny(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+// ============================================================================
+// Direct Model Access
+// ============================================================================
+
+/// Direct model request functions for imperative API access.
+///
+/// Use this module when you want to make simple, direct requests to models
+/// without the full agent infrastructure.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use serdes_ai::direct::model_request;
+/// use serdes_ai_core::ModelRequest;
+///
+/// let response = model_request(
+///     "openai:gpt-4o",
+///     &[ModelRequest::user("Hello!")],
+///     None,
+///     None,
+/// ).await?;
+/// ```
+pub mod direct;
+
+// ============================================================================
+// Core Crate Re-exports
+// ============================================================================
+
+/// Core types, messages, and error handling.
+pub use serdes_ai_core as core;
+
+/// Agent implementation and builder.
+pub use serdes_ai_agent as agent;
+
+/// Model traits and implementations.
+pub use serdes_ai_models as models;
+
+/// Provider abstractions.
+pub use serdes_ai_providers as providers;
+
+/// Tool system.
+pub use serdes_ai_tools as tools;
+
+/// Toolset abstractions.
+pub use serdes_ai_toolsets as toolsets;
+
+/// Output schema validation.
+pub use serdes_ai_output as output;
+
+/// Streaming support.
+pub use serdes_ai_streaming as streaming;
+
+/// Retry strategies.
+pub use serdes_ai_retries as retries;
+
+// ============================================================================
+// Macro Re-exports
+// ============================================================================
+
+/// Derive macro for tools.
+#[cfg(feature = "macros")]
+#[cfg_attr(docsrs, doc(cfg(feature = "macros")))]
+pub use serdes_ai_macros::Tool;
+
+/// Derive macro for output schemas.
+#[cfg(feature = "macros")]
+#[cfg_attr(docsrs, doc(cfg(feature = "macros")))]
+pub use serdes_ai_macros::OutputSchema;
+
+/// Attribute macro for tool functions.
+#[cfg(feature = "macros")]
+#[cfg_attr(docsrs, doc(cfg(feature = "macros")))]
+pub use serdes_ai_macros::tool;
+
+/// Attribute macro for agent definitions.
+#[cfg(feature = "macros")]
+#[cfg_attr(docsrs, doc(cfg(feature = "macros")))]
+pub use serdes_ai_macros::agent as agent_macro;
+
+// ============================================================================
+// Core Type Re-exports (Flat)
+// ============================================================================
+
+// Errors
+pub use serdes_ai_core::SerdesAiError;
+
+// Identifiers
+pub use serdes_ai_core::{ConversationId, RunId, ToolCallId};
+
+// Messages
+pub use serdes_ai_core::{
+    BinaryContent,
+    // Builtin tools
+    BuiltinToolCallPart,
+    BuiltinToolReturnContent,
+    BuiltinToolReturnPart,
+    CodeExecutionResult,
+    // File and binary content
+    FilePart,
+    FileSearchResult,
+    FileSearchResults,
+    FinishReason,
+    ModelRequest,
+    ModelRequestPart,
+    ModelResponse,
+    ModelResponsePart,
+    ModelResponsePartDelta,
+    // Streaming events
+    ModelResponseStreamEvent,
+    PartDeltaEvent,
+    PartEndEvent,
+    PartStartEvent,
+    SystemPromptPart,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserContent,
+    WebSearchResult,
+    WebSearchResults,
+};
+
+// Settings
+pub use serdes_ai_core::ModelSettings;
+
+// Usage
+pub use serdes_ai_core::{RequestUsage, RunUsage, UsageLimits};
+
+// Format
+pub use serdes_ai_core::{
+    format_as_xml, format_as_xml_with_options, XmlFormatError, XmlFormatOptions,
+};
+
+// Agent
+pub use serdes_ai_agent::{
+    Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
+    ModelConfig, RunContext, RunOptions, StepResult,
+};
+
+// Models
+pub use serdes_ai_models::Model;
+pub use serdes_ai_models::{build_model_extended, build_model_with_config, ExtendedModelConfig};
+
+#[cfg(feature = "openai")]
+#[cfg_attr(docsrs, doc(cfg(feature = "openai")))]
+pub use serdes_ai_models::openai::OpenAIChatModel;
+
+/// Build the chat-completions URL for an OpenAI-compatible base. The whole
+/// ``scheme://host:port/v1`` prefix is preserved; only the trailing
+/// `chat/completions` is normalized (see the vendored openai chat helper).
+#[cfg(feature = "openai")]
+pub use serdes_ai_models::openai::chat_url;
+
+#[cfg(feature = "anthropic")]
+#[cfg_attr(docsrs, doc(cfg(feature = "anthropic")))]
+pub use serdes_ai_models::anthropic::AnthropicModel;
+
+#[cfg(feature = "gemini")]
+#[cfg_attr(docsrs, doc(cfg(feature = "gemini")))]
+pub use serdes_ai_models::GeminiModel;
+
+#[cfg(feature = "groq")]
+#[cfg_attr(docsrs, doc(cfg(feature = "groq")))]
+pub use serdes_ai_models::groq::GroqModel;
+
+#[cfg(feature = "mistral")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mistral")))]
+pub use serdes_ai_models::mistral::MistralModel;
+
+#[cfg(feature = "ollama")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ollama")))]
+pub use serdes_ai_models::ollama::OllamaModel;
+
+// Tools
+pub use serdes_ai_tools::{
+    ObjectJsonSchema, SchemaBuilder, Tool, ToolDefinition, ToolRegistry, ToolResult,
+};
+
+// Toolsets
+pub use serdes_ai_toolsets::{
+    AbstractToolset, ApprovalRequiredToolset, BoxedToolset, CombinedToolset, DynamicToolset,
+    ExternalToolset, FilteredToolset, FunctionToolset, PrefixedToolset, PreparedToolset,
+    RenamedToolset, ToolsetInfo, ToolsetTool, WrapperToolset,
+};
+
+// Output
+pub use serdes_ai_output::{
+    OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult,
+};
+
+// Streaming
+pub use serdes_ai_streaming::{ResponseDelta, ResponseStream};
+
+// Retries
+pub use serdes_ai_retries::{
+    ExponentialBackoff, FixedDelay, LinearBackoff, RetryConfig, RetryStrategy,
+};
+
+// Direct model access
+pub use direct::{
+    model_request, model_request_stream, model_request_stream_sync, model_request_sync,
+    DirectError, ModelSpec, StreamedResponseSync,
+};
+
+// ============================================================================
+// Prelude Module
+// ============================================================================
+
+/// Convenient prelude for common imports.
+///
+/// Import everything you need with a single use statement:
+///
+/// ```ignore
+/// use serdes_ai::prelude::*;
+/// ```
+pub mod prelude {
+    // Core types
+    pub use crate::core::{ConversationId, Result, RunId, SerdesAiError, ToolCallId};
+
+    // Messages
+    pub use crate::core::{
+        FinishReason, ModelRequest, ModelResponse, ModelSettings, RequestUsage, RunUsage,
+        UsageLimits, UserContent,
+    };
+
+    // Agent
+    pub use crate::agent::{
+        Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
+        ModelConfig, RunContext, RunOptions,
+    };
+
+    // Models
+    pub use crate::models::Model;
+
+    #[cfg(feature = "openai")]
+    pub use crate::models::openai::OpenAIChatModel;
+
+    #[cfg(feature = "anthropic")]
+    pub use crate::models::anthropic::AnthropicModel;
+
+    // Tools
+    pub use crate::tools::{Tool, ToolDefinition, ToolRegistry, ToolResult};
+
+    // Toolsets
+    pub use crate::toolsets::{
+        AbstractToolset, BoxedToolset, CombinedToolset, DynamicToolset, FunctionToolset,
+    };
+
+    // Output
+    pub use crate::output::{
+        OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult,
+    };
+
+    // Streaming
+    pub use crate::streaming::{ResponseDelta, ResponseStream};
+
+    // Retries
+    pub use crate::retries::{ExponentialBackoff, RetryConfig, RetryStrategy};
+
+    // Direct model access
+    pub use crate::direct::{model_request, model_request_stream, DirectError, ModelSpec};
+
+    // Format
+    pub use crate::core::{format_as_xml, XmlFormatOptions};
+
+    // Macros
+    #[cfg(feature = "macros")]
+    pub use crate::{tool, OutputSchema as DeriveOutputSchema, Tool as DeriveTool};
+}
+
+// ============================================================================
+// Version Information
+// ============================================================================
+
+/// Returns the current version of serdes-ai.
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Returns version information as a tuple (major, minor, patch).
+pub fn version_tuple() -> (u32, u32, u32) {
+    let version = version();
+    let parts: Vec<&str> = version.split('.').collect();
+    (
+        parts.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+        parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
+        parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version() {
+        assert_eq!(version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn test_version_tuple() {
+        let (major, minor, patch) = version_tuple();
+        let expected: Vec<u32> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|s| s.parse::<u32>().unwrap_or(0))
+            .collect();
+
+        assert_eq!(major, *expected.first().unwrap_or(&0));
+        assert_eq!(minor, *expected.get(1).unwrap_or(&0));
+        assert_eq!(patch, *expected.get(2).unwrap_or(&0));
+    }
+
+    #[test]
+    fn test_prelude_imports() {
+        // Just verify these types exist and are accessible
+        let _: fn() -> &'static str = crate::version;
+    }
+}

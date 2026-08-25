@@ -1,0 +1,38 @@
+[package]
+name = "serdes-ai-providers"
+description = "Provider abstractions and registry for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "providers", "openai", "anthropic"]
+categories = ["api-bindings"]
+readme = "README.md"
+
+[features]
+default = ["openai"]
+full = ["openai"]
+openai = []
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-models = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+sha2 = "0.10"
+base64 = { workspace = true }
+getrandom = "0.4"
+urlencoding = "2.1"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

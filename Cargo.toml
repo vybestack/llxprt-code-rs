@@ -1,0 +1,74 @@
+[package]
+name = "llxprt-code-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+# publish=false: the serdes-ai path dependency points at a patched local crate (see
+# PATCHES.md) and no publishing registry was provided. `cargo package` normalizes the path
+# dependency back to the unpatched crates.io `=0.2.6`, which would silently drop the
+# transport patches, so the crate is never published; the local vendor tree stays authoritative.
+# `cargo package` is not a release gate for this project; CI builds the source tree in place
+# with the vendor path deps instead.
+publish = false
+description = "Headless, process-per-request coding agent for llxprt profiles via SerdesAI"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["llxprt", "agent", "cli", "serdes-ai", "coding-agent"]
+categories = ["command-line-utilities", "development-tools"]
+# The `exclude` list does not remove vendor from any claimed source bundle: the vendored
+# patched serdes-ai tree is required to build, and `cargo package`/`cargo publish`
+# are never run (publish=false). The exclude patterns only keep stray dirs out of any
+# accidental tarball; the release build builds directly from this source tree.
+exclude = ["theirs/", "llxprt-parity-out/"]
+# Vendored patched serdes-ai 0.2.6 (transport) so the raw finish reason and raw
+# malformed tool-call arguments survive parsing, and provider response bodies are read
+# bounded (see PATCHES.md). The llxprt-code-rs CLI is Unix-only (macOS/Linux): the
+# subprocess runner uses the Unix process-group/deadline machinery, and all workspace file I/O
+# stays under one `openat` cwd capability with O_NOFOLLOW and same-dir atomic temp-file
+# renames.
+
+[[bin]]
+name = "llxprt-code-rs"
+path = "src/main.rs"
+
+[lib]
+name = "llxprt_code_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "llxprt-parity"
+path = "src/bin/llxprt-parity.rs"
+
+[dependencies]
+serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex-lite = "0.1"
+tokio = { version = "1", features = ["rt", "time"] }
+clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
+thiserror = "2"
+url = "2"
+# All descriptor-relative/no-follow workspace file operations (read/write/replace/list/search)
+# go through `openat`; `cap-std` and `rustix` are not direct dependencies.
+openat = "0.1.21"
+toml = "0.8"
+# Direct, exact-compatible dependency: syn 2.0.119 is already in Cargo.lock
+# (locked transitive), pinned exactly so the already-populated offline registry cache is
+# reused (no network). Only the features the grading walk needs are enabled; the heavy
+# default `derive`/`printing`/`proc-macro` features are never turned on.
+syn = { version = "=2.0.119", default-features = false, features = ["parsing", "full", "visit"] }
+
+# `sha2` supplies the strong SHA-256 digest used by `replace`'s fail-fast conflict
+# detection: before publishing derived bytes, the tool re-opens the final name no-follow and
+# compares (dev, ino), size, and this digest against the bytes the replacement was derived
+# from. The crate is already in the locked tree (via serdes-ai-providers), so the
+# direct dependency adds no new package; only the root entry in Cargo.lock changes.
+sha2 = "0.10"
+
+# `tempfile` is used only by the crate's own tests (no runtime code path).
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

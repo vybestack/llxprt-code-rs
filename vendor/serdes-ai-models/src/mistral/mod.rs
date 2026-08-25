@@ -1,0 +1,436 @@
+//! Mistral AI model implementation.
+//!
+//! [Mistral AI](https://mistral.ai) provides powerful open-weight and commercial
+//! language models with excellent instruction-following capabilities.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use serdes_ai_models::mistral::MistralModel;
+//!
+//! let model = MistralModel::from_env("mistral-large-latest")?;
+//! ```
+//!
+//! ## Available Models
+//!
+//! - `mistral-large-latest` - Most capable model, 128K context
+//! - `mistral-medium-latest` - Balanced performance
+//! - `mistral-small-latest` - Fast, efficient model
+//! - `open-mixtral-8x22b` - Open-weight MoE model
+//! - `open-mixtral-8x7b` - Efficient MoE model
+//! - `open-mistral-7b` - Small open-weight model
+//! - `codestral-latest` - Optimized for code
+
+pub mod types;
+
+use async_trait::async_trait;
+use reqwest::Client;
+use std::time::Duration;
+
+use crate::error::ModelError;
+use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
+use crate::profile::ModelProfile;
+use serdes_ai_core::messages::ImageContent;
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
+};
+
+/// Mistral AI model client.
+#[derive(Debug, Clone)]
+pub struct MistralModel {
+    /// Model name.
+    model_name: String,
+    /// HTTP client.
+    client: Client,
+    /// API key.
+    api_key: String,
+    /// Base URL.
+    base_url: String,
+    /// Model profile.
+    profile: ModelProfile,
+    /// Default timeout.
+    default_timeout: Duration,
+}
+
+impl MistralModel {
+    /// Default Mistral API base URL.
+    pub const DEFAULT_BASE_URL: &'static str = "https://api.mistral.ai/v1";
+
+    /// Create a new Mistral model.
+    pub fn new(model_name: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            model_name: model_name.into(),
+            client: crate::no_redirect_client(),
+            api_key: api_key.into(),
+            base_url: Self::DEFAULT_BASE_URL.to_string(),
+            profile: Self::default_profile(),
+            default_timeout: Duration::from_secs(120),
+        }
+    }
+
+    /// Create from environment variable `MISTRAL_API_KEY`.
+    pub fn from_env(model_name: impl Into<String>) -> Result<Self, ModelError> {
+        let api_key = std::env::var("MISTRAL_API_KEY")
+            .map_err(|_| ModelError::configuration("MISTRAL_API_KEY not set"))?;
+        Ok(Self::new(model_name, api_key))
+    }
+
+    /// Set a custom base URL.
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = url.into();
+        self
+    }
+
+    /// Set a custom profile.
+    pub fn with_profile(mut self, profile: ModelProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// Set the default timeout.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.default_timeout = timeout;
+        self
+    }
+
+    /// Default profile for Mistral models.
+    fn default_profile() -> ModelProfile {
+        ModelProfile {
+            supports_tools: true,
+            supports_parallel_tools: true,
+            supports_native_structured_output: true,
+            supports_strict_tools: false,
+            supports_system_messages: true,
+            supports_images: false,
+            supports_streaming: true,
+            ..Default::default()
+        }
+    }
+
+    /// Build the chat request.
+    fn build_request(
+        &self,
+        messages: &[ModelRequest],
+        settings: &ModelSettings,
+        params: &ModelRequestParameters,
+    ) -> Result<types::ChatRequest, ModelError> {
+        let api_messages = self.convert_messages(messages)?;
+        let tools = self.convert_tools(params);
+        let tool_choice = params
+            .tool_choice
+            .as_ref()
+            .map(|choice| self.convert_tool_choice(choice));
+
+        Ok(types::ChatRequest {
+            model: self.model_name.clone(),
+            messages: api_messages,
+            tools: if tools.is_empty() { None } else { Some(tools) },
+            tool_choice,
+            temperature: settings.temperature,
+            max_tokens: settings.max_tokens,
+            top_p: settings.top_p,
+            stream: false,
+            safe_prompt: None,
+            random_seed: settings.seed.map(|s| s as i64),
+        })
+    }
+
+    /// Convert messages to Mistral format.
+    fn convert_messages(
+        &self,
+        messages: &[ModelRequest],
+    ) -> Result<Vec<types::Message>, ModelError> {
+        let mut result = Vec::new();
+
+        for request in messages {
+            for part in &request.parts {
+                match part {
+                    ModelRequestPart::SystemPrompt(sp) => {
+                        result.push(types::Message {
+                            role: types::Role::System,
+                            content: types::Content::Text(sp.content.clone()),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                    ModelRequestPart::UserPrompt(up) => {
+                        let content = self.convert_user_content(&up.content)?;
+                        result.push(types::Message {
+                            role: types::Role::User,
+                            content,
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                    ModelRequestPart::ToolReturn(tr) => {
+                        result.push(types::Message {
+                            role: types::Role::Tool,
+                            content: types::Content::Text(tr.content.to_string_content()),
+                            tool_calls: None,
+                            tool_call_id: tr.tool_call_id.clone(),
+                            name: Some(tr.tool_name.clone()),
+                        });
+                    }
+                    ModelRequestPart::RetryPrompt(rp) => {
+                        result.push(types::Message {
+                            role: types::Role::User,
+                            content: types::Content::Text(rp.content.message().to_string()),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                    ModelRequestPart::BuiltinToolReturn(builtin) => {
+                        let content_str = serde_json::to_string(&builtin.content)
+                            .unwrap_or_else(|_| builtin.content_type().to_string());
+                        result.push(types::Message {
+                            role: types::Role::Tool,
+                            content: types::Content::Text(content_str),
+                            tool_calls: None,
+                            tool_call_id: Some(builtin.tool_call_id.clone()),
+                            name: Some(builtin.tool_name.clone()),
+                        });
+                    }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut tool_calls = Vec::new();
+                        let mut text_content = String::new();
+                        for resp_part in &response.parts {
+                            match resp_part {
+                                serdes_ai_core::ModelResponsePart::Text(t) => {
+                                    text_content.push_str(&t.content);
+                                }
+                                serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                                    tool_calls.push(types::ToolCall {
+                                        id: tc.tool_call_id.clone().unwrap_or_default(),
+                                        r#type: "function".to_string(),
+                                        function: types::FunctionCall {
+                                            name: tc.tool_name.clone(),
+                                            arguments: tc.args.to_json_string().unwrap_or_default(),
+                                        },
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                        result.push(types::Message {
+                            role: types::Role::Assistant,
+                            content: types::Content::Text(text_content),
+                            tool_calls: if tool_calls.is_empty() {
+                                None
+                            } else {
+                                Some(tool_calls)
+                            },
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn convert_user_content(&self, content: &UserContent) -> Result<types::Content, ModelError> {
+        match content {
+            UserContent::Text(text) => Ok(types::Content::Text(text.clone())),
+            UserContent::Parts(parts) => {
+                let mut content_parts = Vec::new();
+
+                for part in parts {
+                    match part {
+                        UserContentPart::Text { text } => {
+                            content_parts.push(types::ContentPart::Text { text: text.clone() });
+                        }
+                        UserContentPart::Image { image } => {
+                            if !self.profile.supports_images {
+                                return Err(ModelError::unsupported_content("images"));
+                            }
+
+                            match image {
+                                ImageContent::Url(url) => {
+                                    content_parts.push(types::ContentPart::ImageUrl {
+                                        image_url: url.url.clone(),
+                                    });
+                                }
+                                ImageContent::Binary(_) => {
+                                    return Err(ModelError::unsupported_content("binary images"));
+                                }
+                            }
+                        }
+                        UserContentPart::Document { .. } => {
+                            return Err(ModelError::unsupported_content("documents"));
+                        }
+                        _ => {
+                            return Err(ModelError::unsupported_content("non-text content"));
+                        }
+                    }
+                }
+
+                Ok(types::Content::Parts(content_parts))
+            }
+        }
+    }
+
+    /// Convert tools to Mistral format.
+    fn convert_tools(&self, params: &ModelRequestParameters) -> Vec<types::Tool> {
+        params
+            .tools
+            .iter()
+            .map(|t| types::Tool {
+                r#type: "function".to_string(),
+                function: types::FunctionDef {
+                    name: t.name.clone(),
+                    description: Some(t.description.clone()),
+                    parameters: serde_json::to_value(&t.parameters_json_schema).unwrap_or_default(),
+                },
+            })
+            .collect()
+    }
+
+    /// Convert tool choice to Mistral format.
+    fn convert_tool_choice(&self, choice: &ToolChoice) -> String {
+        match choice {
+            ToolChoice::Auto => "auto".to_string(),
+            ToolChoice::Required => "any".to_string(),
+            ToolChoice::None => "none".to_string(),
+            ToolChoice::Specific(name) => name.clone(),
+        }
+    }
+
+    /// Parse response from Mistral.
+    fn parse_response(&self, response: types::ChatResponse) -> Result<ModelResponse, ModelError> {
+        let choice = response
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
+
+        let mut parts = Vec::new();
+
+        // Text content
+        if let types::Content::Text(text) = choice.message.content {
+            if !text.is_empty() {
+                parts.push(ModelResponsePart::Text(TextPart::new(text)));
+            }
+        }
+
+        // Tool calls
+        if let Some(tool_calls) = choice.message.tool_calls {
+            for tc in tool_calls {
+                let args: serde_json::Value =
+                    serde_json::from_str(&tc.function.arguments).unwrap_or_default();
+                parts.push(ModelResponsePart::ToolCall(ToolCallPart {
+                    tool_name: tc.function.name,
+                    args: serdes_ai_core::messages::ToolCallArgs::Json(args),
+                    tool_call_id: Some(tc.id),
+                    id: None,
+                    provider_details: None,
+                }));
+            }
+        }
+
+        let finish_reason = match choice.finish_reason.as_deref() {
+            Some("stop") => Some(FinishReason::EndTurn),
+            Some("length") => Some(FinishReason::Length),
+            Some("tool_calls") => Some(FinishReason::ToolCall),
+            _ => None,
+        };
+
+        let usage = response.usage.map(|u| RequestUsage {
+            request_tokens: Some(u.prompt_tokens as u64),
+            response_tokens: Some(u.completion_tokens as u64),
+            total_tokens: Some(u.total_tokens as u64),
+            ..Default::default()
+        });
+
+        Ok(ModelResponse {
+            parts,
+            finish_reason,
+            usage,
+            model_name: Some(response.model),
+            timestamp: serdes_ai_core::identifier::now_utc(),
+            vendor_id: Some(response.id),
+            vendor_details: None,
+            kind: "response".to_string(),
+        })
+    }
+}
+
+#[async_trait]
+impl Model for MistralModel {
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+
+    fn system(&self) -> &str {
+        "mistral"
+    }
+
+    fn profile(&self) -> &ModelProfile {
+        &self.profile
+    }
+
+    async fn request(
+        &self,
+        messages: &[ModelRequest],
+        settings: &ModelSettings,
+        params: &ModelRequestParameters,
+    ) -> Result<ModelResponse, ModelError> {
+        let body = self.build_request(messages, settings, params)?;
+        let timeout = settings.timeout.unwrap_or(self.default_timeout);
+
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .timeout(timeout)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            crate::response::error_text(response).await?;
+            return Err(crate::response::status_error(status, None));
+        }
+
+        let chat_response: types::ChatResponse = crate::response::json(response).await?;
+
+        self.parse_response(chat_response)
+    }
+
+    async fn request_stream(
+        &self,
+        _messages: &[ModelRequest],
+        _settings: &ModelSettings,
+        _params: &ModelRequestParameters,
+    ) -> Result<StreamedResponse, ModelError> {
+        Err(ModelError::not_supported("Streaming for Mistral"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mistral_model_creation() {
+        let model = MistralModel::new("mistral-large-latest", "test-key");
+        assert_eq!(model.name(), "mistral-large-latest");
+        assert_eq!(model.system(), "mistral");
+    }
+
+    #[test]
+    fn test_mistral_with_settings() {
+        let model =
+            MistralModel::new("mistral-small-latest", "key").with_timeout(Duration::from_secs(60));
+
+        assert_eq!(model.default_timeout, Duration::from_secs(60));
+    }
+}
