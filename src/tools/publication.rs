@@ -220,15 +220,12 @@ fn sync_parent(parent: &openat::Dir) -> Result<(), String> {
         return Err("injected retained-parent sync failure".to_string());
     }
 
-    use std::os::fd::AsRawFd as _;
-    if unsafe { libc::fsync(parent.as_raw_fd()) } == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "sync retained parent directory: {}",
-            std::io::Error::last_os_error()
-        ))
-    }
+    let directory = parent
+        .open_file(".")
+        .map_err(|error| format!("open retained parent directory for sync: {error}"))?;
+    directory
+        .sync_all()
+        .map_err(|error| format!("sync retained parent directory: {error}"))
 }
 
 fn installed_unknown(leaf: &str, detail: &str) -> String {
