@@ -453,7 +453,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pidfile = directory.path().join("descendant.pid");
         let script = format!(
-            "trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) </dev/null >/dev/null 2>&1 & echo $! > '{}'; while :; do :; done",
+            "(trap '' TERM; exec sleep 30) </dev/null >/dev/null 2>&1 & echo $! > '{}'; exit 0",
             pidfile.display()
         );
         let mut command = Command::new("/bin/sh");
@@ -466,16 +466,17 @@ mod tests {
             .stderr(Stdio::null());
         cfg_setsid(&mut command);
         let child = command.spawn().unwrap();
+        let child_pid = child.id();
 
         let ready_deadline = Instant::now() + Duration::from_secs(2);
-        while !pidfile.is_file() {
+        while !pidfile.is_file() || !child_exited_unreaped(child_pid).unwrap() {
             assert!(
                 Instant::now() < ready_deadline,
-                "direct child did not report descendant readiness"
+                "direct child did not report readiness and exit"
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        let deadline = Instant::now() + Duration::from_millis(50);
+        let deadline = Instant::now();
         let escalation_deadline = deadline + TERM_GRACE;
         let done = AtomicUsize::new(0);
         let (status, timed_out) = supervise(child, deadline, escalation_deadline, &done, 0);
