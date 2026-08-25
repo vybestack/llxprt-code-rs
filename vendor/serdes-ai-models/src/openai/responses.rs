@@ -1025,10 +1025,8 @@ impl OpenAIResponsesModel {
                     arguments,
                     ..
                 } => {
-                    let args: JsonValue =
-                        serde_json::from_str(&arguments).unwrap_or(serde_json::json!({}));
                     parts.push(ModelResponsePart::ToolCall(
-                        ToolCallPart::new(name, ToolCallArgs::Json(args))
+                        ToolCallPart::new(name, ToolCallArgs::from(arguments))
                             .with_tool_call_id(call_id),
                     ));
                 }
@@ -1047,8 +1045,9 @@ impl OpenAIResponsesModel {
         let finish_reason = match resp.status {
             ResponseStatus::Completed => Some(FinishReason::Stop),
             ResponseStatus::Incomplete => Some(FinishReason::Length),
-            ResponseStatus::Cancelled => Some(FinishReason::Stop),
-            _ => None,
+            ResponseStatus::Cancelled => Some(FinishReason::Other("cancelled".to_string())),
+            ResponseStatus::Failed => Some(FinishReason::Other("failed".to_string())),
+            ResponseStatus::InProgress => Some(FinishReason::Other("in_progress".to_string())),
         };
 
         let usage = resp.usage.map(|u| RequestUsage {
@@ -1261,5 +1260,37 @@ mod tests {
         let json = serde_json::to_string(&input).unwrap();
         assert!(json.contains("\"role\":\"tool\""));
         assert!(json.contains("\"tool_call_id\":\"call_123\""));
+    }
+
+    #[test]
+    fn malformed_function_arguments_remain_raw() {
+        let response: ResponsesApiResponse = serde_json::from_value(serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 1,
+            "model": "o3-mini",
+            "output": [{
+                "type": "function_call",
+                "id": "item_1",
+                "call_id": "call_1",
+                "name": "search",
+                "arguments": "<not-json>",
+                "status": "completed"
+            }],
+            "usage": null,
+            "status": "completed",
+            "error": null,
+            "metadata": null,
+            "service_tier": null
+        }))
+        .unwrap();
+        let result = OpenAIResponsesModel::new("o3-mini", "key")
+            .process_response(response)
+            .unwrap();
+        assert!(matches!(
+            &result.parts[0],
+            ModelResponsePart::ToolCall(call)
+                if call.args == ToolCallArgs::String("<not-json>".to_string())
+        ));
     }
 }

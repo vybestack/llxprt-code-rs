@@ -452,7 +452,7 @@ mod tests {
         let event = parser.next().await.unwrap();
         assert!(event.is_err());
         let diagnostic = event.unwrap_err().to_string();
-        assert_eq!(diagnostic, "API error: provider stream reported an error");
+        assert_eq!(diagnostic, "Model API error");
         assert!(!diagnostic.contains("Rate limited"));
     }
 

@@ -378,11 +378,16 @@ impl ClaudeCodeOAuthModel {
             }
         }
 
-        let finish_reason = response.stop_reason.as_ref().map(|r| match r.as_str() {
-            "end_turn" | "stop" => FinishReason::Stop,
-            "max_tokens" => FinishReason::Length,
-            "tool_use" => FinishReason::ToolCall,
-            _ => FinishReason::Stop,
+        let finish_reason = response.stop_reason.as_ref().map(|r| {
+            crate::map_terminal_reason(
+                r,
+                &[
+                    ("end_turn", FinishReason::Stop),
+                    ("stop", FinishReason::Stop),
+                    ("max_tokens", FinishReason::Length),
+                    ("tool_use", FinishReason::ToolCall),
+                ],
+            )
         });
 
         let usage = response.usage.map(|u| RequestUsage {

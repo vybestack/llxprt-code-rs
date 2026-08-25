@@ -332,11 +332,9 @@ impl MistralModel {
         // Tool calls
         if let Some(tool_calls) = choice.message.tool_calls {
             for tc in tool_calls {
-                let args: serde_json::Value =
-                    serde_json::from_str(&tc.function.arguments).unwrap_or_default();
                 parts.push(ModelResponsePart::ToolCall(ToolCallPart {
                     tool_name: tc.function.name,
-                    args: serdes_ai_core::messages::ToolCallArgs::Json(args),
+                    args: serdes_ai_core::messages::ToolCallArgs::from(tc.function.arguments),
                     tool_call_id: Some(tc.id),
                     id: None,
                     provider_details: None,
@@ -344,12 +342,16 @@ impl MistralModel {
             }
         }
 
-        let finish_reason = match choice.finish_reason.as_deref() {
-            Some("stop") => Some(FinishReason::EndTurn),
-            Some("length") => Some(FinishReason::Length),
-            Some("tool_calls") => Some(FinishReason::ToolCall),
-            _ => None,
-        };
+        let finish_reason = choice.finish_reason.as_deref().map(|raw| {
+            crate::map_terminal_reason(
+                raw,
+                &[
+                    ("stop", FinishReason::EndTurn),
+                    ("length", FinishReason::Length),
+                    ("tool_calls", FinishReason::ToolCall),
+                ],
+            )
+        });
 
         let usage = response.usage.map(|u| RequestUsage {
             request_tokens: Some(u.prompt_tokens as u64),
@@ -442,5 +444,39 @@ mod tests {
             MistralModel::new("mistral-small-latest", "key").with_timeout(Duration::from_secs(60));
 
         assert_eq!(model.default_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn malformed_tool_arguments_remain_raw() {
+        let response: types::ChatResponse = serde_json::from_value(serde_json::json!({
+            "id": "response",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "mistral",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": "<not-json>"}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": null
+        }))
+        .unwrap();
+        let result = MistralModel::new("mistral", "key")
+            .parse_response(response)
+            .unwrap();
+        assert!(result.parts.iter().any(|part| matches!(
+            part,
+            ModelResponsePart::ToolCall(call)
+                if call.args
+                    == serdes_ai_core::messages::ToolCallArgs::String("<not-json>".to_string())
+        )));
     }
 }

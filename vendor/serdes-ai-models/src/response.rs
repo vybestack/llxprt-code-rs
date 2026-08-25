@@ -285,10 +285,7 @@ mod tests {
         {
             let response = fixed_response(vec![0xff, 0xfe]).await;
             let error = text(response).await.unwrap_err();
-            assert_eq!(
-                error.to_string(),
-                "Invalid response: provider response is not UTF-8"
-            );
+            assert_eq!(error.to_string(), "Model returned an invalid response");
         }
     }
 

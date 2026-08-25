@@ -7145,7 +7145,7 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..ff93cf9 100644
+index 0d35170..22d1eb7 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
 @@ -21,7 +21,7 @@ use serdes_ai_tools::ToolDefinition;
@@ -7197,7 +7197,30 @@ index 0d35170..ff93cf9 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -550,36 +553,8 @@ impl AnthropicModel {
+@@ -512,12 +515,16 @@ impl AnthropicModel {
+             }
+         }
+ 
+-        let finish_reason = resp.stop_reason.map(|r| match r.as_str() {
+-            "end_turn" => FinishReason::Stop,
+-            "stop_sequence" => FinishReason::Stop,
+-            "max_tokens" => FinishReason::Length,
+-            "tool_use" => FinishReason::ToolCall,
+-            _ => FinishReason::Stop,
++        let finish_reason = resp.stop_reason.map(|r| {
++            crate::map_terminal_reason(
++                &r,
++                &[
++                    ("end_turn", FinishReason::Stop),
++                    ("stop_sequence", FinishReason::Stop),
++                    ("max_tokens", FinishReason::Length),
++                    ("tool_use", FinishReason::ToolCall),
++                ],
++            )
+         });
+ 
+         let usage = RequestUsage {
+@@ -550,36 +557,8 @@ impl AnthropicModel {
      }
  
      /// Handle API error response.
@@ -7236,7 +7259,7 @@ index 0d35170..ff93cf9 100644
      }
  }
  
-@@ -630,14 +605,11 @@ impl Model for AnthropicModel {
+@@ -630,14 +609,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7253,7 +7276,7 @@ index 0d35170..ff93cf9 100644
  
          self.parse_response(resp)
      }
-@@ -673,11 +645,11 @@ impl Model for AnthropicModel {
+@@ -673,11 +649,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7268,7 +7291,7 @@ index 0d35170..ff93cf9 100644
  
          Ok(Box::pin(parser))
 diff --git a/vendor/serdes-ai-models/src/anthropic/stream.rs b/vendor/serdes-ai-models/src/anthropic/stream.rs
-index 8623d2c..1f392cb 100644
+index 8623d2c..0ced5fe 100644
 --- a/vendor/serdes-ai-models/src/anthropic/stream.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/stream.rs
 @@ -22,6 +22,7 @@ pin_project! {
@@ -7420,7 +7443,7 @@ index 8623d2c..1f392cb 100644
 -        let err = event.unwrap_err();
 -        assert!(err.to_string().contains("Rate limited"));
 +        let diagnostic = event.unwrap_err().to_string();
-+        assert_eq!(diagnostic, "API error: provider stream reported an error");
++        assert_eq!(diagnostic, "Model API error");
 +        assert!(!diagnostic.contains("Rate limited"));
      }
  
@@ -7433,7 +7456,7 @@ index 8623d2c..1f392cb 100644
          let mut parser = AnthropicStreamParser::new(stream);
  
 diff --git a/vendor/serdes-ai-models/src/antigravity/model.rs b/vendor/serdes-ai-models/src/antigravity/model.rs
-index c98b56f..519f219 100644
+index c98b56f..9ef7c6d 100644
 --- a/vendor/serdes-ai-models/src/antigravity/model.rs
 +++ b/vendor/serdes-ai-models/src/antigravity/model.rs
 @@ -31,7 +31,7 @@ You are pair programming with a USER to solve their coding task. The task may re
@@ -7485,7 +7508,37 @@ index c98b56f..519f219 100644
              .timeout(Duration::from_secs(180))
              .build()
              .expect("Failed to build HTTP client")
-@@ -545,7 +550,6 @@ impl Model for AntigravityModel {
+@@ -442,7 +447,7 @@ impl AntigravityModel {
+     /// Convert API response to model response.
+     fn convert_response(&self, response: AntigravityResponse) -> ModelResponse {
+         let mut parts = Vec::new();
+-        let mut finish_reason = FinishReason::EndTurn;
++        let mut finish_reason = FinishReason::Other("missing_finish_reason".to_string());
+ 
+         for candidate in &response.response.candidates {
+             if let Some(content) = &candidate.content {
+@@ -491,12 +496,14 @@ impl AntigravityModel {
+             }
+ 
+             if let Some(reason) = &candidate.finish_reason {
+-                finish_reason = match reason.as_str() {
+-                    "STOP" => FinishReason::EndTurn,
+-                    "MAX_TOKENS" => FinishReason::Length,
+-                    "SAFETY" => FinishReason::ContentFilter,
+-                    _ => FinishReason::EndTurn,
+-                };
++                finish_reason = crate::map_terminal_reason(
++                    reason,
++                    &[
++                        ("STOP", FinishReason::EndTurn),
++                        ("MAX_TOKENS", FinishReason::Length),
++                        ("SAFETY", FinishReason::ContentFilter),
++                    ],
++                );
+             }
+         }
+ 
+@@ -545,7 +552,6 @@ impl Model for AntigravityModel {
          info!(
              model = %self.model_name,
              project = %self.project_id,
@@ -7493,7 +7546,7 @@ index c98b56f..519f219 100644
              message_count = messages.len(),
              "Antigravity: making request"
          );
-@@ -563,21 +567,12 @@ impl Model for AntigravityModel {
+@@ -563,21 +569,12 @@ impl Model for AntigravityModel {
  
          if !status.is_success() {
              let status_code = status.as_u16();
@@ -7519,7 +7572,7 @@ index c98b56f..519f219 100644
          Ok(self.convert_response(api_response))
      }
  
-@@ -601,7 +596,6 @@ impl Model for AntigravityModel {
+@@ -601,7 +598,6 @@ impl Model for AntigravityModel {
          info!(
              model = %self.model_name,
              project = %self.project_id,
@@ -7527,7 +7580,7 @@ index c98b56f..519f219 100644
              message_count = messages.len(),
              "Antigravity: making streaming request"
          );
-@@ -619,21 +613,12 @@ impl Model for AntigravityModel {
+@@ -619,21 +615,12 @@ impl Model for AntigravityModel {
  
          if !status.is_success() {
              let status_code = status.as_u16();
@@ -8593,7 +8646,7 @@ index 0ae6091..0000000
 -    pub latency_ms: Option<u64>,
 -}
 diff --git a/vendor/serdes-ai-models/src/chatgpt_oauth/model.rs b/vendor/serdes-ai-models/src/chatgpt_oauth/model.rs
-index 58d1c11..d4a9457 100644
+index 58d1c11..1806a3a 100644
 --- a/vendor/serdes-ai-models/src/chatgpt_oauth/model.rs
 +++ b/vendor/serdes-ai-models/src/chatgpt_oauth/model.rs
 @@ -25,7 +25,7 @@ const CODEX_SYSTEM_PROMPT: &str = include_str!("codex_system_prompt.md");
@@ -8645,7 +8698,28 @@ index 58d1c11..d4a9457 100644
      /// Set a custom profile.
      #[must_use]
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
-@@ -419,7 +422,7 @@ impl ChatGptOAuthModel {
+@@ -382,11 +385,15 @@ impl ChatGptOAuthModel {
+             .choices
+             .first()
+             .and_then(|c| c.finish_reason.as_ref())
+-            .map(|r| match r.as_str() {
+-                "stop" => FinishReason::Stop,
+-                "length" => FinishReason::Length,
+-                "tool_calls" => FinishReason::ToolCall,
+-                _ => FinishReason::Stop,
++            .map(|r| {
++                crate::map_terminal_reason(
++                    r,
++                    &[
++                        ("stop", FinishReason::Stop),
++                        ("length", FinishReason::Length),
++                        ("tool_calls", FinishReason::ToolCall),
++                    ],
++                )
+             });
+ 
+         let usage = response.usage.map(|u| RequestUsage {
+@@ -419,7 +426,7 @@ impl ChatGptOAuthModel {
          let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (name, arguments, call_id)
          let mut final_response: Option<serde_json::Value> = None;
  
@@ -8654,7 +8728,7 @@ index 58d1c11..d4a9457 100644
  
          // Parse SSE format: lines starting with "data: "
          for line in body.lines() {
-@@ -548,11 +551,11 @@ impl ChatGptOAuthModel {
+@@ -548,11 +555,11 @@ impl ChatGptOAuthModel {
          for (name, arguments, call_id) in tool_calls {
              // Skip tool calls with empty name or call_id
              if name.is_empty() {
@@ -8668,7 +8742,7 @@ index 58d1c11..d4a9457 100644
                  continue;
              }
  
-@@ -637,12 +640,8 @@ impl Model for ChatGptOAuthModel {
+@@ -637,12 +644,8 @@ impl Model for ChatGptOAuthModel {
  
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -8715,7 +8789,7 @@ index 541c112..44eabba 100644
      fn default() -> Self {
          Self {
 diff --git a/vendor/serdes-ai-models/src/claude_code_oauth/model.rs b/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
-index 61e49cb..13a8f17 100644
+index 61e49cb..21c01f1 100644
 --- a/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
 +++ b/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
 @@ -29,7 +29,7 @@ const TOOL_PREFIX: &str = "cp_";
@@ -8767,7 +8841,29 @@ index 61e49cb..13a8f17 100644
              .timeout(Duration::from_secs(180))
              .build()
              .expect("Failed to build HTTP client")
-@@ -481,7 +486,6 @@ impl Model for ClaudeCodeOAuthModel {
+@@ -373,11 +378,16 @@ impl ClaudeCodeOAuthModel {
+             }
+         }
+ 
+-        let finish_reason = response.stop_reason.as_ref().map(|r| match r.as_str() {
+-            "end_turn" | "stop" => FinishReason::Stop,
+-            "max_tokens" => FinishReason::Length,
+-            "tool_use" => FinishReason::ToolCall,
+-            _ => FinishReason::Stop,
++        let finish_reason = response.stop_reason.as_ref().map(|r| {
++            crate::map_terminal_reason(
++                r,
++                &[
++                    ("end_turn", FinishReason::Stop),
++                    ("stop", FinishReason::Stop),
++                    ("max_tokens", FinishReason::Length),
++                    ("tool_use", FinishReason::ToolCall),
++                ],
++            )
+         });
+ 
+         let usage = response.usage.map(|u| RequestUsage {
+@@ -481,7 +491,6 @@ impl Model for ClaudeCodeOAuthModel {
  
          info!(
              model = %self.model_name,
@@ -8775,7 +8871,7 @@ index 61e49cb..13a8f17 100644
              message_count = messages.len(),
              "ClaudeCodeOAuth: making request"
          );
-@@ -528,21 +532,12 @@ impl Model for ClaudeCodeOAuthModel {
+@@ -528,21 +537,12 @@ impl Model for ClaudeCodeOAuthModel {
  
          if !status.is_success() {
              let status_code = status.as_u16();
@@ -8801,7 +8897,7 @@ index 61e49cb..13a8f17 100644
          info!(
              content_parts = claude_response.content.len(),
              "ClaudeCodeOAuth: parsed response successfully"
-@@ -567,7 +562,6 @@ impl Model for ClaudeCodeOAuthModel {
+@@ -567,7 +567,6 @@ impl Model for ClaudeCodeOAuthModel {
  
          info!(
              model = %self.model_name,
@@ -8809,7 +8905,7 @@ index 61e49cb..13a8f17 100644
              message_count = messages.len(),
              "ClaudeCodeOAuth: making streaming request"
          );
-@@ -613,24 +607,15 @@ impl Model for ClaudeCodeOAuthModel {
+@@ -613,24 +612,15 @@ impl Model for ClaudeCodeOAuthModel {
  
          if !status.is_success() {
              let status_code = status.as_u16();
@@ -8901,7 +8997,7 @@ index 3d56979..aaab495 100644
      fn default() -> Self {
          Self {
 diff --git a/vendor/serdes-ai-models/src/cohere/model.rs b/vendor/serdes-ai-models/src/cohere/model.rs
-index ed106b6..4030900 100644
+index ed106b6..9090fbc 100644
 --- a/vendor/serdes-ai-models/src/cohere/model.rs
 +++ b/vendor/serdes-ai-models/src/cohere/model.rs
 @@ -29,7 +29,7 @@ use std::{
@@ -8953,7 +9049,29 @@ index ed106b6..4030900 100644
      /// Determine profile based on model name.
      fn profile_for_model(model: &str) -> ModelProfile {
          let mut profile = ModelProfile::new()
-@@ -278,18 +281,8 @@ impl CohereModel {
+@@ -247,11 +250,16 @@ impl CohereModel {
+             }
+         }
+ 
+-        let finish_reason = resp.finish_reason.map(|r| match r.as_str() {
+-            "COMPLETE" | "END_TURN" => FinishReason::Stop,
+-            "MAX_TOKENS" => FinishReason::Length,
+-            "TOOL_CALL" => FinishReason::ToolCall,
+-            _ => FinishReason::Stop,
++        let finish_reason = resp.finish_reason.map(|r| {
++            crate::map_terminal_reason(
++                &r,
++                &[
++                    ("COMPLETE", FinishReason::Stop),
++                    ("END_TURN", FinishReason::Stop),
++                    ("MAX_TOKENS", FinishReason::Length),
++                    ("TOOL_CALL", FinishReason::ToolCall),
++                ],
++            )
+         });
+ 
+         let usage = resp.meta.and_then(|m| m.tokens).map(|t| RequestUsage {
+@@ -278,18 +286,8 @@ impl CohereModel {
          })
      }
  
@@ -8974,7 +9092,7 @@ index ed106b6..4030900 100644
      }
  
      async fn send_request(
-@@ -309,7 +302,7 @@ impl CohereModel {
+@@ -309,7 +307,7 @@ impl CohereModel {
  
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -8983,7 +9101,7 @@ index ed106b6..4030900 100644
              return Err(self.handle_error(status, &body));
          }
          Ok(response)
-@@ -338,10 +331,7 @@ impl Model for CohereModel {
+@@ -338,10 +336,7 @@ impl Model for CohereModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -8995,7 +9113,7 @@ index ed106b6..4030900 100644
          self.parse_response(resp)
      }
  
-@@ -355,7 +345,9 @@ impl Model for CohereModel {
+@@ -355,7 +350,9 @@ impl Model for CohereModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -9006,7 +9124,7 @@ index ed106b6..4030900 100644
      }
  }
  
-@@ -363,6 +355,7 @@ impl Model for CohereModel {
+@@ -363,6 +360,7 @@ impl Model for CohereModel {
  pub struct CohereStreamParser<S> {
      inner: S,
      buffer: String,
@@ -9014,7 +9132,7 @@ index ed106b6..4030900 100644
      started: bool,
  }
  
-@@ -372,33 +365,50 @@ impl<S> CohereStreamParser<S> {
+@@ -372,33 +370,50 @@ impl<S> CohereStreamParser<S> {
          Self {
              inner: stream,
              buffer: String::new(),
@@ -9073,7 +9191,7 @@ index ed106b6..4030900 100644
                  Poll::Pending => return Poll::Pending,
              }
          }
-@@ -406,39 +416,37 @@ where
+@@ -406,39 +421,37 @@ where
  }
  
  impl<S> CohereStreamParser<S> {
@@ -9406,7 +9524,7 @@ index 3e91b26..4f15953 100644
  
      #[tokio::test]
 diff --git a/vendor/serdes-ai-models/src/google/model.rs b/vendor/serdes-ai-models/src/google/model.rs
-index e93c5c0..21ff6c6 100644
+index e93c5c0..fc05acb 100644
 --- a/vendor/serdes-ai-models/src/google/model.rs
 +++ b/vendor/serdes-ai-models/src/google/model.rs
 @@ -20,7 +20,7 @@ use serdes_ai_tools::ToolDefinition;
@@ -9467,7 +9585,33 @@ index e93c5c0..21ff6c6 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -612,24 +615,8 @@ impl GoogleModel {
+@@ -581,13 +584,18 @@ impl GoogleModel {
+             }
+         }
+ 
+-        let finish_reason = candidate.finish_reason.map(|r| match r.as_str() {
+-            "STOP" => FinishReason::Stop,
+-            "MAX_TOKENS" => FinishReason::Length,
+-            "SAFETY" => FinishReason::ContentFilter,
+-            "RECITATION" => FinishReason::ContentFilter,
+-            "TOOL_CALLS" | "FUNCTION_CALL" => FinishReason::ToolCall,
+-            _ => FinishReason::Stop,
++        let finish_reason = candidate.finish_reason.map(|r| {
++            crate::map_terminal_reason(
++                &r,
++                &[
++                    ("STOP", FinishReason::Stop),
++                    ("MAX_TOKENS", FinishReason::Length),
++                    ("SAFETY", FinishReason::ContentFilter),
++                    ("RECITATION", FinishReason::ContentFilter),
++                    ("TOOL_CALLS", FinishReason::ToolCall),
++                    ("FUNCTION_CALL", FinishReason::ToolCall),
++                ],
++            )
+         });
+ 
+         let usage = resp.usage_metadata.map(|u| RequestUsage {
+@@ -612,24 +620,8 @@ impl GoogleModel {
      }
  
      /// Handle API error response.
@@ -9494,7 +9638,7 @@ index e93c5c0..21ff6c6 100644
      }
  }
  
-@@ -675,14 +662,11 @@ impl Model for GoogleModel {
+@@ -675,14 +667,11 @@ impl Model for GoogleModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -9511,7 +9655,7 @@ index e93c5c0..21ff6c6 100644
  
          self.parse_response(resp)
      }
-@@ -708,11 +692,11 @@ impl Model for GoogleModel {
+@@ -708,11 +697,11 @@ impl Model for GoogleModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -9810,7 +9954,7 @@ index 62774e7..d64c2fe 100644
      pub fn llama_70b(api_key: impl Into<String>) -> Self {
          Self::new("llama-3.1-70b-versatile", api_key)
 diff --git a/vendor/serdes-ai-models/src/huggingface/model.rs b/vendor/serdes-ai-models/src/huggingface/model.rs
-index 2807447..772496a 100644
+index 2807447..e8467f8 100644
 --- a/vendor/serdes-ai-models/src/huggingface/model.rs
 +++ b/vendor/serdes-ai-models/src/huggingface/model.rs
 @@ -20,7 +20,7 @@ pub const HF_INFERENCE_URL: &str = "https://api-inference.huggingface.co/models"
@@ -9861,6 +10005,24 @@ index 2807447..772496a 100644
      /// Set a custom profile.
      #[must_use]
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
+@@ -200,7 +203,7 @@ impl HuggingFaceModel {
+                 d.finish_reason.as_ref().map(|r| match r.as_str() {
+                     "length" => FinishReason::Length,
+                     "eos_token" | "stop" => FinishReason::Stop,
+-                    _ => FinishReason::Stop,
++                    raw => crate::map_terminal_reason(raw, &[]),
+                 })
+             }),
+             GenerateResponse::Batch(results) => results.first().and_then(|r| {
+@@ -208,7 +211,7 @@ impl HuggingFaceModel {
+                     d.finish_reason.as_ref().map(|r| match r.as_str() {
+                         "length" => FinishReason::Length,
+                         "eos_token" | "stop" => FinishReason::Stop,
+-                        _ => FinishReason::Stop,
++                        raw => crate::map_terminal_reason(raw, &[]),
+                     })
+                 })
+             }),
 @@ -227,21 +230,8 @@ impl HuggingFaceModel {
      }
  
@@ -10021,7 +10183,7 @@ index 2807447..772496a 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..55ab61a 100644
+index 8dd0e9e..15c4aba 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -10040,7 +10202,7 @@ index 8dd0e9e..55ab61a 100644
  //! - `azure`: Azure OpenAI support
  //! - `full`: Enable all providers
  //!
-@@ -59,9 +57,41 @@
+@@ -59,11 +57,73 @@
  #![deny(unsafe_code)]
  
  pub mod error;
@@ -10081,8 +10243,40 @@ index 8dd0e9e..55ab61a 100644
 +mod response;
  pub mod schema_transformer;
  
++/// Map a provider terminal reason without treating a new provider value as successful completion.
++fn map_terminal_reason(
++    raw: &str,
++    known: &[(&str, serdes_ai_core::messages::FinishReason)],
++) -> serdes_ai_core::messages::FinishReason {
++    known
++        .iter()
++        .find(|(name, _)| *name == raw)
++        .map(|(_, reason)| reason.clone())
++        .unwrap_or_else(|| serdes_ai_core::messages::FinishReason::Other(raw.to_string()))
++}
++
++#[cfg(test)]
++mod terminal_reason_tests {
++    use super::map_terminal_reason;
++    use serdes_ai_core::messages::FinishReason;
++
++    #[test]
++    fn unknown_terminal_reason_is_never_a_successful_stop() {
++        assert_eq!(
++            map_terminal_reason("provider-added-value", &[("stop", FinishReason::Stop)]),
++            FinishReason::Other("provider-added-value".to_string())
++        );
++        assert_eq!(
++            map_terminal_reason("stop", &[("stop", FinishReason::Stop)]),
++            FinishReason::Stop
++        );
++    }
++}
++
  // Provider modules (feature-gated)
-@@ -96,11 +126,6 @@ pub mod mistral;
+ 
+ /// OpenAI models (GPT-4, GPT-4o, o1, etc.).
+@@ -96,11 +156,6 @@ pub mod mistral;
  #[cfg_attr(docsrs, doc(cfg(feature = "ollama")))]
  pub mod ollama;
  
@@ -10094,7 +10288,7 @@ index 8dd0e9e..55ab61a 100644
  /// Azure OpenAI models.
  #[cfg(feature = "azure")]
  #[cfg_attr(docsrs, doc(cfg(feature = "azure")))]
-@@ -198,9 +223,6 @@ pub use mistral::MistralModel;
+@@ -198,9 +253,6 @@ pub use mistral::MistralModel;
  #[cfg(feature = "ollama")]
  pub use ollama::OllamaModel;
  
@@ -10104,7 +10298,7 @@ index 8dd0e9e..55ab61a 100644
  /// Prelude for common imports.
  pub mod prelude {
      pub use crate::{
-@@ -232,9 +254,6 @@ pub mod prelude {
+@@ -232,9 +284,6 @@ pub mod prelude {
      #[cfg(feature = "ollama")]
      pub use crate::ollama::OllamaModel;
  
@@ -10114,7 +10308,7 @@ index 8dd0e9e..55ab61a 100644
      #[cfg(feature = "openrouter")]
      pub use crate::openrouter::OpenRouterModel;
  
-@@ -271,8 +290,6 @@ pub mod prelude {
+@@ -271,8 +320,6 @@ pub mod prelude {
  /// ```
  #[cfg(feature = "openai")]
  pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -10123,7 +10317,7 @@ index 8dd0e9e..55ab61a 100644
      let (provider, model_name) = if identifier.contains(':') {
          let parts: Vec<&str> = identifier.splitn(2, ':').collect();
          (parts[0], parts[1])
-@@ -285,7 +302,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -285,7 +332,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "openai")]
              {
                  let model = OpenAIChatModel::from_env(model_name)?;
@@ -10132,7 +10326,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -298,7 +315,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -298,7 +345,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "anthropic")]
              {
                  let model = AnthropicModel::from_env(model_name)?;
@@ -10141,7 +10335,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -310,41 +327,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -310,41 +357,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
          #[cfg(feature = "groq")]
          "groq" => {
              let model = GroqModel::from_env(model_name)?;
@@ -10190,7 +10384,7 @@ index 8dd0e9e..55ab61a 100644
          ))),
      }
  }
-@@ -368,8 +379,6 @@ pub fn build_model_with_config(
+@@ -368,8 +409,6 @@ pub fn build_model_with_config(
      base_url: Option<&str>,
      timeout: Option<std::time::Duration>,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -10199,7 +10393,7 @@ index 8dd0e9e..55ab61a 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -392,7 +401,7 @@ pub fn build_model_with_config(
+@@ -392,7 +431,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -10208,7 +10402,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -423,7 +432,7 @@ pub fn build_model_with_config(
+@@ -423,7 +462,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -10217,7 +10411,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -444,7 +453,7 @@ pub fn build_model_with_config(
+@@ -444,7 +483,7 @@ pub fn build_model_with_config(
              // GroqModel doesn't have with_base_url/with_timeout
              let _ = (base_url, timeout);
  
@@ -10226,7 +10420,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -466,7 +475,7 @@ pub fn build_model_with_config(
+@@ -466,7 +505,7 @@ pub fn build_model_with_config(
                  model
              };
  
@@ -10235,7 +10429,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -481,7 +490,7 @@ pub fn build_model_with_config(
+@@ -481,7 +520,7 @@ pub fn build_model_with_config(
              // Ollama doesn't use API keys or timeouts in the same way
              let _ = (api_key, timeout);
  
@@ -10244,7 +10438,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -507,12 +516,11 @@ pub fn build_model_with_config(
+@@ -507,12 +546,11 @@ pub fn build_model_with_config(
  
              let _ = timeout; // Google model doesn't have with_timeout
  
@@ -10260,7 +10454,7 @@ index 8dd0e9e..55ab61a 100644
          ))),
      }
  }
-@@ -533,13 +541,51 @@ mod tests {
+@@ -533,13 +571,51 @@ mod tests {
          let result = build_model_with_config("unknown", "model", None, None, None);
          assert!(result.is_err());
      }
@@ -10313,7 +10507,7 @@ index 8dd0e9e..55ab61a 100644
  pub struct ExtendedModelConfig {
      /// API key (overrides environment variable)
      pub api_key: Option<String>,
-@@ -557,6 +603,21 @@ pub struct ExtendedModelConfig {
+@@ -557,6 +633,21 @@ pub struct ExtendedModelConfig {
      pub reasoning_effort: Option<String>,
  }
  
@@ -10335,7 +10529,7 @@ index 8dd0e9e..55ab61a 100644
  impl ExtendedModelConfig {
      /// Create a new empty config
      pub fn new() -> Self {
-@@ -628,8 +689,11 @@ pub fn build_model_extended(
+@@ -628,8 +719,11 @@ pub fn build_model_extended(
      model_name: &str,
      config: ExtendedModelConfig,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -10349,7 +10543,7 @@ index 8dd0e9e..55ab61a 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -654,13 +718,13 @@ pub fn build_model_extended(
+@@ -654,13 +748,13 @@ pub fn build_model_extended(
  
                  // TODO: Add reasoning_effort support when available in OpenAIChatModel
  
@@ -10369,7 +10563,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -698,13 +762,7 @@ pub fn build_model_extended(
+@@ -698,13 +792,7 @@ pub fn build_model_extended(
                      model
                  };
  
@@ -10384,7 +10578,7 @@ index 8dd0e9e..55ab61a 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -716,19 +774,18 @@ pub fn build_model_extended(
+@@ -716,19 +804,18 @@ pub fn build_model_extended(
          }
          #[cfg(feature = "groq")]
          "groq" => {
@@ -10410,7 +10604,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -750,13 +807,7 @@ pub fn build_model_extended(
+@@ -750,13 +837,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10425,7 +10619,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -768,13 +819,7 @@ pub fn build_model_extended(
+@@ -768,13 +849,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10440,7 +10634,7 @@ index 8dd0e9e..55ab61a 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +841,75 @@ pub fn build_model_extended(
+@@ -796,17 +871,75 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10526,7 +10720,7 @@ index 8dd0e9e..55ab61a 100644
 +    }
 +}
 diff --git a/vendor/serdes-ai-models/src/mistral/mod.rs b/vendor/serdes-ai-models/src/mistral/mod.rs
-index 994069a..a959767 100644
+index 994069a..b9405a8 100644
 --- a/vendor/serdes-ai-models/src/mistral/mod.rs
 +++ b/vendor/serdes-ai-models/src/mistral/mod.rs
 @@ -37,7 +37,7 @@ use serdes_ai_core::{
@@ -10578,7 +10772,43 @@ index 994069a..a959767 100644
      /// Set a custom profile.
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
          self.profile = profile;
-@@ -403,14 +406,11 @@ impl Model for MistralModel {
+@@ -329,11 +332,9 @@ impl MistralModel {
+         // Tool calls
+         if let Some(tool_calls) = choice.message.tool_calls {
+             for tc in tool_calls {
+-                let args: serde_json::Value =
+-                    serde_json::from_str(&tc.function.arguments).unwrap_or_default();
+                 parts.push(ModelResponsePart::ToolCall(ToolCallPart {
+                     tool_name: tc.function.name,
+-                    args: serdes_ai_core::messages::ToolCallArgs::Json(args),
++                    args: serdes_ai_core::messages::ToolCallArgs::from(tc.function.arguments),
+                     tool_call_id: Some(tc.id),
+                     id: None,
+                     provider_details: None,
+@@ -341,12 +342,16 @@ impl MistralModel {
+             }
+         }
+ 
+-        let finish_reason = match choice.finish_reason.as_deref() {
+-            Some("stop") => Some(FinishReason::EndTurn),
+-            Some("length") => Some(FinishReason::Length),
+-            Some("tool_calls") => Some(FinishReason::ToolCall),
+-            _ => None,
+-        };
++        let finish_reason = choice.finish_reason.as_deref().map(|raw| {
++            crate::map_terminal_reason(
++                raw,
++                &[
++                    ("stop", FinishReason::EndTurn),
++                    ("length", FinishReason::Length),
++                    ("tool_calls", FinishReason::ToolCall),
++                ],
++            )
++        });
+ 
+         let usage = response.usage.map(|u| RequestUsage {
+             request_tokens: Some(u.prompt_tokens as u64),
+@@ -403,14 +408,11 @@ impl Model for MistralModel {
  
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -10596,6 +10826,45 @@ index 994069a..a959767 100644
  
          self.parse_response(chat_response)
      }
+@@ -443,4 +445,38 @@ mod tests {
+ 
+         assert_eq!(model.default_timeout, Duration::from_secs(60));
+     }
++
++    #[test]
++    fn malformed_tool_arguments_remain_raw() {
++        let response: types::ChatResponse = serde_json::from_value(serde_json::json!({
++            "id": "response",
++            "object": "chat.completion",
++            "created": 1,
++            "model": "mistral",
++            "choices": [{
++                "index": 0,
++                "message": {
++                    "role": "assistant",
++                    "content": "",
++                    "tool_calls": [{
++                        "id": "call_1",
++                        "type": "function",
++                        "function": {"name": "search", "arguments": "<not-json>"}
++                    }]
++                },
++                "finish_reason": "tool_calls"
++            }],
++            "usage": null
++        }))
++        .unwrap();
++        let result = MistralModel::new("mistral", "key")
++            .parse_response(response)
++            .unwrap();
++        assert!(result.parts.iter().any(|part| matches!(
++            part,
++            ModelResponsePart::ToolCall(call)
++                if call.args
++                    == serdes_ai_core::messages::ToolCallArgs::String("<not-json>".to_string())
++        )));
++    }
+ }
 diff --git a/vendor/serdes-ai-models/src/mock.rs b/vendor/serdes-ai-models/src/mock.rs
 index e7d0aca..6334242 100644
 --- a/vendor/serdes-ai-models/src/mock.rs
@@ -10667,7 +10936,7 @@ index e7d0aca..6334242 100644
          });
  
 diff --git a/vendor/serdes-ai-models/src/ollama/mod.rs b/vendor/serdes-ai-models/src/ollama/mod.rs
-index 97d1a2d..7703c4d 100644
+index 97d1a2d..1e6fe0e 100644
 --- a/vendor/serdes-ai-models/src/ollama/mod.rs
 +++ b/vendor/serdes-ai-models/src/ollama/mod.rs
 @@ -44,7 +44,7 @@ use serdes_ai_core::{
@@ -10723,7 +10992,31 @@ index 97d1a2d..7703c4d 100644
      /// Set a custom profile.
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
          self.profile = profile;
-@@ -411,14 +418,11 @@ impl Model for OllamaModel {
+@@ -344,11 +351,18 @@ impl OllamaModel {
+         }
+ 
+         let finish_reason = if response.done {
+-            match response.done_reason.as_deref() {
+-                Some("stop") => Some(FinishReason::EndTurn),
+-                Some("length") => Some(FinishReason::Length),
+-                _ => Some(FinishReason::EndTurn),
+-            }
++            response.done_reason.as_deref().map_or_else(
++                || Some(FinishReason::Other("missing_done_reason".to_string())),
++                |raw| {
++                    Some(crate::map_terminal_reason(
++                        raw,
++                        &[
++                            ("stop", FinishReason::EndTurn),
++                            ("length", FinishReason::Length),
++                        ],
++                    ))
++                },
++            )
+         } else {
+             None
+         };
+@@ -411,14 +425,11 @@ impl Model for OllamaModel {
  
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -10741,8 +11034,29 @@ index 97d1a2d..7703c4d 100644
  
          self.parse_response(chat_response)
      }
+@@ -457,4 +468,20 @@ mod tests {
+ 
+         assert_eq!(model.keep_alive, Some("10m".to_string()));
+     }
++
++    #[test]
++    fn completed_response_without_reason_fails_closed() {
++        let response: types::ChatResponse = serde_json::from_value(serde_json::json!({
++            "model": "test",
++            "created_at": "now",
++            "message": {"role": "assistant", "content": "done"},
++            "done": true
++        }))
++        .unwrap();
++        let parsed = OllamaModel::new("test").parse_response(response).unwrap();
++        assert!(matches!(
++            parsed.finish_reason,
++            Some(FinishReason::Other(ref raw)) if raw == "missing_done_reason"
++        ));
++    }
+ }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..a3610fd 100644
+index 9471b5b..7d79889 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -20,8 +20,35 @@ use serdes_ai_core::{
@@ -10864,7 +11178,7 @@ index 9471b5b..a3610fd 100644
              "content_filter" => FinishReason::ContentFilter,
              "tool_calls" => FinishReason::ToolCall,
 -            _ => FinishReason::Stop,
-+            raw => FinishReason::Other(raw.to_string()),
++            raw => crate::map_terminal_reason(raw, &[]),
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
@@ -11028,7 +11342,7 @@ index c1e00c9..6dd4dd0 100644
  pub use responses::{
      OpenAIResponsesModel, OpenAIResponsesModelSettings, ReasoningEffort, ReasoningSummary,
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..a4db774 100644
+index 9384750..3e43054 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -647,7 +647,7 @@ pub struct OutputTokensDetails {
@@ -11099,7 +11413,31 @@ index 9384750..a4db774 100644
          }
  
          let mut parts = Vec::new();
-@@ -1078,28 +1079,8 @@ impl OpenAIResponsesModel {
+@@ -1024,10 +1025,8 @@ impl OpenAIResponsesModel {
+                     arguments,
+                     ..
+                 } => {
+-                    let args: JsonValue =
+-                        serde_json::from_str(&arguments).unwrap_or(serde_json::json!({}));
+                     parts.push(ModelResponsePart::ToolCall(
+-                        ToolCallPart::new(name, ToolCallArgs::Json(args))
++                        ToolCallPart::new(name, ToolCallArgs::from(arguments))
+                             .with_tool_call_id(call_id),
+                     ));
+                 }
+@@ -1046,8 +1045,9 @@ impl OpenAIResponsesModel {
+         let finish_reason = match resp.status {
+             ResponseStatus::Completed => Some(FinishReason::Stop),
+             ResponseStatus::Incomplete => Some(FinishReason::Length),
+-            ResponseStatus::Cancelled => Some(FinishReason::Stop),
+-            _ => None,
++            ResponseStatus::Cancelled => Some(FinishReason::Other("cancelled".to_string())),
++            ResponseStatus::Failed => Some(FinishReason::Other("failed".to_string())),
++            ResponseStatus::InProgress => Some(FinishReason::Other("in_progress".to_string())),
+         };
+ 
+         let usage = resp.usage.map(|u| RequestUsage {
+@@ -1078,28 +1078,8 @@ impl OpenAIResponsesModel {
      }
  
      /// Handle API error response.
@@ -11130,7 +11468,7 @@ index 9384750..a4db774 100644
      }
  }
  
-@@ -1145,14 +1126,11 @@ impl Model for OpenAIResponsesModel {
+@@ -1145,14 +1125,11 @@ impl Model for OpenAIResponsesModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -11147,6 +11485,43 @@ index 9384750..a4db774 100644
  
          self.process_response(resp)
      }
+@@ -1284,4 +1261,36 @@ mod tests {
+         assert!(json.contains("\"role\":\"tool\""));
+         assert!(json.contains("\"tool_call_id\":\"call_123\""));
+     }
++
++    #[test]
++    fn malformed_function_arguments_remain_raw() {
++        let response: ResponsesApiResponse = serde_json::from_value(serde_json::json!({
++            "id": "resp_1",
++            "object": "response",
++            "created_at": 1,
++            "model": "o3-mini",
++            "output": [{
++                "type": "function_call",
++                "id": "item_1",
++                "call_id": "call_1",
++                "name": "search",
++                "arguments": "<not-json>",
++                "status": "completed"
++            }],
++            "usage": null,
++            "status": "completed",
++            "error": null,
++            "metadata": null,
++            "service_tier": null
++        }))
++        .unwrap();
++        let result = OpenAIResponsesModel::new("o3-mini", "key")
++            .process_response(response)
++            .unwrap();
++        assert!(matches!(
++            &result.parts[0],
++            ModelResponsePart::ToolCall(call)
++                if call.args == ToolCallArgs::String("<not-json>".to_string())
++        ));
++    }
+ }
 diff --git a/vendor/serdes-ai-models/src/openai/stream.rs b/vendor/serdes-ai-models/src/openai/stream.rs
 index 69518dd..f21e77b 100644
 --- a/vendor/serdes-ai-models/src/openai/stream.rs
@@ -11298,7 +11673,7 @@ index 69518dd..f21e77b 100644
          let stream = stream::iter(bytes);
          let mut parser = OpenAIStreamParser::new(stream);
 diff --git a/vendor/serdes-ai-models/src/openrouter/model.rs b/vendor/serdes-ai-models/src/openrouter/model.rs
-index 5a4761d..2a6be38 100644
+index 5a4761d..e8950e4 100644
 --- a/vendor/serdes-ai-models/src/openrouter/model.rs
 +++ b/vendor/serdes-ai-models/src/openrouter/model.rs
 @@ -18,7 +18,7 @@ use std::time::Duration;
@@ -11350,7 +11725,40 @@ index 5a4761d..2a6be38 100644
      /// Determine profile based on model name.
      fn profile_for_model(model: &str) -> ModelProfile {
          // Check for reasoning models
-@@ -352,18 +355,8 @@ impl OpenRouterModel {
+@@ -315,21 +318,23 @@ impl OpenRouterModel {
+         }
+         if let Some(tcs) = choice.message.tool_calls {
+             for tc in tcs {
+-                let args =
+-                    serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
+                 parts.push(ModelResponsePart::ToolCall(
+-                    ToolCallPart::new(tc.function.name, ToolCallArgs::Json(args))
++                    ToolCallPart::new(tc.function.name, ToolCallArgs::from(tc.function.arguments))
+                         .with_tool_call_id(tc.id),
+                 ));
+             }
+         }
+ 
+-        let finish_reason = choice.finish_reason.map(|r| match r.as_str() {
+-            "stop" => FinishReason::Stop,
+-            "length" => FinishReason::Length,
+-            "content_filter" => FinishReason::ContentFilter,
+-            "tool_calls" => FinishReason::ToolCall,
+-            _ => FinishReason::Stop,
++        let finish_reason = choice.finish_reason.map(|r| {
++            crate::map_terminal_reason(
++                &r,
++                &[
++                    ("stop", FinishReason::Stop),
++                    ("length", FinishReason::Length),
++                    ("content_filter", FinishReason::ContentFilter),
++                    ("tool_calls", FinishReason::ToolCall),
++                ],
++            )
+         });
+         let usage = resp.usage.map(|u| RequestUsage {
+             request_tokens: Some(u.prompt_tokens),
+@@ -352,18 +357,8 @@ impl OpenRouterModel {
          })
      }
  
@@ -11371,7 +11779,7 @@ index 5a4761d..2a6be38 100644
      }
  }
  
-@@ -391,7 +384,7 @@ impl OpenRouterModel {
+@@ -391,7 +386,7 @@ impl OpenRouterModel {
          let response = req.json(body).send().await?;
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -11380,7 +11788,7 @@ index 5a4761d..2a6be38 100644
              return Err(self.handle_error(status, &body));
          }
          Ok(response)
-@@ -420,10 +413,7 @@ impl Model for OpenRouterModel {
+@@ -420,10 +415,7 @@ impl Model for OpenRouterModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -11392,7 +11800,7 @@ index 5a4761d..2a6be38 100644
          self.parse_response(resp)
      }
  
-@@ -437,7 +427,9 @@ impl Model for OpenRouterModel {
+@@ -437,7 +429,9 @@ impl Model for OpenRouterModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -11403,12 +11811,50 @@ index 5a4761d..2a6be38 100644
      }
  }
  
+@@ -466,4 +460,37 @@ mod tests {
+         );
+         assert!(body.get("provider").is_some() && body.get("transforms").is_some());
+     }
++
++    #[test]
++    fn malformed_tool_arguments_remain_raw() {
++        let response: ChatCompletionResponse = serde_json::from_value(serde_json::json!({
++            "id": "response",
++            "object": "chat.completion",
++            "created": 1,
++            "model": "model",
++            "choices": [{
++                "index": 0,
++                "message": {
++                    "role": "assistant",
++                    "content": "",
++                    "tool_calls": [{
++                        "id": "call_1",
++                        "type": "function",
++                        "function": {"name": "search", "arguments": "<not-json>"}
++                    }]
++                },
++                "finish_reason": "tool_calls"
++            }],
++            "usage": null
++        }))
++        .unwrap();
++        let result = OpenRouterModel::new("model", "key")
++            .parse_response(response)
++            .unwrap();
++        assert!(result.parts.iter().any(|part| matches!(
++            part,
++            ModelResponsePart::ToolCall(call)
++                if call.args == ToolCallArgs::String("<not-json>".to_string())
++        )));
++    }
+ }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..343b0fe
+index 0000000..5231a60
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,434 @@
+@@ -0,0 +1,431 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
 +use crate::error::{ModelError, ModelResult};
@@ -11696,10 +12142,7 @@ index 0000000..343b0fe
 +        {
 +            let response = fixed_response(vec![0xff, 0xfe]).await;
 +            let error = text(response).await.unwrap_err();
-+            assert_eq!(
-+                error.to_string(),
-+                "Invalid response: provider response is not UTF-8"
-+            );
++            assert_eq!(error.to_string(), "Model returned an invalid response");
 +        }
 +    }
 +

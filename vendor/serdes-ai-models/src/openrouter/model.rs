@@ -318,21 +318,23 @@ impl OpenRouterModel {
         }
         if let Some(tcs) = choice.message.tool_calls {
             for tc in tcs {
-                let args =
-                    serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
                 parts.push(ModelResponsePart::ToolCall(
-                    ToolCallPart::new(tc.function.name, ToolCallArgs::Json(args))
+                    ToolCallPart::new(tc.function.name, ToolCallArgs::from(tc.function.arguments))
                         .with_tool_call_id(tc.id),
                 ));
             }
         }
 
-        let finish_reason = choice.finish_reason.map(|r| match r.as_str() {
-            "stop" => FinishReason::Stop,
-            "length" => FinishReason::Length,
-            "content_filter" => FinishReason::ContentFilter,
-            "tool_calls" => FinishReason::ToolCall,
-            _ => FinishReason::Stop,
+        let finish_reason = choice.finish_reason.map(|r| {
+            crate::map_terminal_reason(
+                &r,
+                &[
+                    ("stop", FinishReason::Stop),
+                    ("length", FinishReason::Length),
+                    ("content_filter", FinishReason::ContentFilter),
+                    ("tool_calls", FinishReason::ToolCall),
+                ],
+            )
         });
         let usage = resp.usage.map(|u| RequestUsage {
             request_tokens: Some(u.prompt_tokens),
@@ -457,5 +459,38 @@ mod tests {
             false,
         );
         assert!(body.get("provider").is_some() && body.get("transforms").is_some());
+    }
+
+    #[test]
+    fn malformed_tool_arguments_remain_raw() {
+        let response: ChatCompletionResponse = serde_json::from_value(serde_json::json!({
+            "id": "response",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "model",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": "<not-json>"}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": null
+        }))
+        .unwrap();
+        let result = OpenRouterModel::new("model", "key")
+            .parse_response(response)
+            .unwrap();
+        assert!(result.parts.iter().any(|part| matches!(
+            part,
+            ModelResponsePart::ToolCall(call)
+                if call.args == ToolCallArgs::String("<not-json>".to_string())
+        )));
     }
 }

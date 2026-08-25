@@ -55,7 +55,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 `SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives to
 `vendor/`, including path-dependency rewrites and source compatibility changes
 needed by `FinishReason::Other`. Its SHA-256 is
-`81902175510edcfe35fafbe2bbf6208887d518023829583b074861e9cb360a24`.
+`64e6bd09d5f2e5477cf23fbb2d418b2093286582f85b045307f1a082ee47951e`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 archives in a temporary
 Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
@@ -78,11 +78,12 @@ URLs and checksums plus the upstream Git commit, tree, and license blob. Run
 roots, online checking procedure, unsigned upstream-commit status, and release-attestation
 procedure are documented in `docs/release-provenance.md`.
 
-## Patch 1 - raw finish reason (`vendor/serdes-ai-core/src/messages/response.rs`)
+## Patch 1 - fail-closed provider finish reasons
 
-`FinishReason` gained a new variant `Other(String)`. An unrecognized provider
-`finish_reason` string is preserved verbatim instead of being silently coerced to a
-successful `Stop`:
+`FinishReason` gained a new variant `Other(String)`. Every retained provider parser maps only its
+explicitly recognized terminal values to successful reasons. An unrecognized provider
+`finish_reason`, `stop_reason`, or `done_reason` is preserved as `Other` instead of being silently
+coerced to a successful `Stop` or `EndTurn`:
 
 ```rust
 pub enum FinishReason {
@@ -91,14 +92,13 @@ pub enum FinishReason {
 }
 ```
 
-`Display` for `Other(raw)` prints the raw provider string. The llxprt-code-rs host
-(`src/adapter.rs`) surfaces the raw reason and treats unknown reasons as an error rather
-than a clean stop.
+The llxprt-code-rs host (`src/adapter.rs`) treats every `Other` reason as an error rather than a
+clean stop and applies the public diagnostic scrubbing boundary before display.
 
 ## Patch 2 - raw malformed tool-call arguments
-(`vendor/serdes-ai-models/src/openai/chat.rs`, `parse_response`)
 
-Tool-call arguments are kept exactly as the provider emitted them:
+OpenAI Chat, OpenAI Responses, Mistral, and OpenRouter tool-call arguments are kept exactly as the
+provider emitted them:
 
 ```rust
 let args = ToolCallArgs::from(tc.function.arguments.clone());
@@ -156,6 +156,8 @@ OAuth tokens, authorization headers, configured endpoints, or HTTP clients imple
 arbitrary header maps render as `[hidden]`. Wrapper formatters delegate only to these scrubbed
 implementations. `ModelApiError` retains status and retry metadata while hiding provider-controlled
 body, header, message, and error-code text in `Debug`; its `Display` reports only the status.
+Generic `ModelError::Http` formatting is similarly fixed and value-free. Upstream-derived tests that
+previously expected provider response text were corrected to assert these public redaction contracts.
 Retained-feature marker tests require credential and endpoint sentinels to be absent from all of
 these representations.
 
@@ -163,8 +165,9 @@ these representations.
 
 Both the patched behavior and the rest of the transport are exercised by the host tests
 `tests/provider.rs` (raw finish reason, malformed tool-call arguments, strict parity
-envelope, endpoint-route matrix plus loopback request-path coverage), `src/adapter.rs`
-round-replay tests, and `tests/cli_contract.rs` /
-`tests/phase2.rs` (offline, no configured endpoint request). The end-to-end release
+envelope, endpoint-route matrix plus loopback request-path coverage), direct all-feature model tests
+(provider-specific malformed-argument handling, missing and unknown terminal reasons, and public
+redaction), `src/adapter.rs` round-replay tests, and `tests/cli_contract.rs` / `tests/phase2.rs`
+(offline, no configured endpoint request). The end-to-end release
 gate is `scripts/release-gates.sh` (release build of the source tree with the vendor
 path deps plus the vendor/license file checks); `cargo package` is not a release gate.

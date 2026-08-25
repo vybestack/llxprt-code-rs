@@ -203,7 +203,7 @@ impl HuggingFaceModel {
                 d.finish_reason.as_ref().map(|r| match r.as_str() {
                     "length" => FinishReason::Length,
                     "eos_token" | "stop" => FinishReason::Stop,
-                    _ => FinishReason::Stop,
+                    raw => crate::map_terminal_reason(raw, &[]),
                 })
             }),
             GenerateResponse::Batch(results) => results.first().and_then(|r| {
@@ -211,7 +211,7 @@ impl HuggingFaceModel {
                     d.finish_reason.as_ref().map(|r| match r.as_str() {
                         "length" => FinishReason::Length,
                         "eos_token" | "stop" => FinishReason::Stop,
-                        _ => FinishReason::Stop,
+                        raw => crate::map_terminal_reason(raw, &[]),
                     })
                 })
             }),

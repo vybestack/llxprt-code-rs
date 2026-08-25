@@ -176,17 +176,21 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: bash scripts/publish-release.sh --verify-tag-only
-      - name: Attest exact release assets
+      - name: Attest exact source artifacts
         # actions/attest-build-provenance@v4.2.2
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: |
             dist/${{ steps.release.outputs.archive }}
             dist/${{ steps.release.outputs.sidecar }}
-      - name: Stage, verify, and expose release assets
+      - name: Create atomic immutable release record
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Administration-read is required to verify immutable-release policy. This fine-grained
+          # token also needs contents-write to create the release record.
+          GH_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
           RELEASE_TAG: ${{ github.ref_name }}
           EXPECTED_COMMIT: ${{ github.sha }}
           RELEASE_ARCHIVE: ${{ steps.release.outputs.archive }}
@@ -234,4 +238,6 @@ jobs:
         run: |
           cargo audit --color always
           cargo audit --color always --file xtask/Cargo.lock
-          cargo audit --color always --file vendor/serdes-ai-models/Cargo.lock
+          for lockfile in vendor/*/Cargo.lock; do
+            cargo audit --color always --file "$lockfile"
+          done

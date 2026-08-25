@@ -351,11 +351,18 @@ impl OllamaModel {
         }
 
         let finish_reason = if response.done {
-            match response.done_reason.as_deref() {
-                Some("stop") => Some(FinishReason::EndTurn),
-                Some("length") => Some(FinishReason::Length),
-                _ => Some(FinishReason::EndTurn),
-            }
+            response.done_reason.as_deref().map_or_else(
+                || Some(FinishReason::Other("missing_done_reason".to_string())),
+                |raw| {
+                    Some(crate::map_terminal_reason(
+                        raw,
+                        &[
+                            ("stop", FinishReason::EndTurn),
+                            ("length", FinishReason::Length),
+                        ],
+                    ))
+                },
+            )
         } else {
             None
         };
@@ -460,5 +467,21 @@ mod tests {
         let model = OllamaModel::new("phi3").with_keep_alive("10m");
 
         assert_eq!(model.keep_alive, Some("10m".to_string()));
+    }
+
+    #[test]
+    fn completed_response_without_reason_fails_closed() {
+        let response: types::ChatResponse = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "created_at": "now",
+            "message": {"role": "assistant", "content": "done"},
+            "done": true
+        }))
+        .unwrap();
+        let parsed = OllamaModel::new("test").parse_response(response).unwrap();
+        assert!(matches!(
+            parsed.finish_reason,
+            Some(FinishReason::Other(ref raw)) if raw == "missing_done_reason"
+        ));
     }
 }

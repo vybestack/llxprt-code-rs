@@ -43,9 +43,14 @@ do
   check_features "$package"
 done
 
+# Parser regressions must execute with every retained provider module enabled. Compilation alone
+# cannot prove that unknown terminal reasons and malformed tool arguments fail closed.
+cargo +1.88.0 test --offline --locked \
+  --manifest-path vendor/serdes-ai-models/Cargo.toml --all-features --lib
+
 if (( owned_target == 1 )); then
   rm -rf "$CARGO_TARGET_DIR"
   trap - EXIT
 fi
 
-echo "retained vendor feature surfaces compile"
+echo "retained vendor feature surfaces compile and model tests pass"

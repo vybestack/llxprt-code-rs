@@ -453,7 +453,7 @@ impl OpenAIChatModel {
             "length" => FinishReason::Length,
             "content_filter" => FinishReason::ContentFilter,
             "tool_calls" => FinishReason::ToolCall,
-            raw => FinishReason::Other(raw.to_string()),
+            raw => crate::map_terminal_reason(raw, &[]),
         });
 
         let usage = resp.usage.map(|u| RequestUsage {

@@ -28,20 +28,29 @@ claimed.
 ## Tag and publication policy
 
 A release tag must be an annotated `v<package-version>` tag that points directly to the workflow
-commit. The package version and all asset names are derived from locked Cargo metadata. The release
-workflow repeatedly peels the remote tag through GitHub's Git-data API before and after uploads and
-around publication. It stages assets in a same-commit draft, verifies downloaded archive and
-checksum bytes, rejects foreign assets, and exposes the draft only after all checks pass.
+commit. The package version and artifact names are derived from locked Cargo metadata. Before
+publication, the workflow peels the remote tag through GitHub's Git-data API, verifies the local
+source bundle and checksum, and attests both files.
 
-The GitHub repository must have a ruleset for `refs/tags/v*` that permits creation only by release
-maintainers and prohibits updates and deletion. This setting is a prerequisite because a workflow
-cannot make a mutable repository tag immutable. No remote is configured in the current local
-repository, so that setting and remote publication have not been observed here.
+GitHub's REST API has no compare-and-set operation that can publish a draft only if its asset list is
+unchanged. The publisher therefore never creates or resumes a draft and never uploads release
+assets. After checking remote policy, it creates a public release with deterministic metadata and an
+empty asset list in one `POST`. The release body records the source-bundle name, SHA-256, and tagged
+workflow run containing the attested artifact. This removes the unchecked draft-to-public window,
+but it means the custom source bundle is a workflow artifact rather than a GitHub Release asset.
+Workflow-artifact retention is a hosting limitation; the bundle remains reproducible from the tag.
+
+The repository must enable immutable releases. It must also have an active, no-bypass ruleset that
+applies to the exact release tag (or all refs) and prohibits tag updates and deletion. The publisher
+checks both settings before release creation and rechecks the annotated tag afterward. Its token
+therefore needs repository administration-read and contents-write permissions. No remote is
+configured in the current local repository, so those settings and remote publication have not been
+observed here.
 
 Tag workflow runs do not cancel earlier runs. A tag-specific publication concurrency group permits
-one publisher at a time. Interrupted same-commit drafts can resume without replacing existing
-assets. An existing public release, a draft targeting another commit, a changed remote tag, an
-unexpected asset, or mismatched downloaded bytes causes publication to fail.
+one publisher at a time. Any pre-existing release causes GitHub's create operation to fail; the
+publisher never edits attacker-controlled title, body, prerelease, discussion, latest, target, or
+asset state.
 
 ## Signed release attestation
 
@@ -65,8 +74,9 @@ gh attestation verify dist/llxprt-code-rs-<version>-source.tar.gz.sha256 --repo 
 ```
 
 Also peel the annotated tag through the GitHub API, compare it with the attested workflow commit,
-download both release assets, run `sha256sum --check`, and compare their names with the version
-derived by `scripts/release-version.py`. The action configuration is present, but no attestation or
-signature exists until a tagged GitHub workflow completes successfully. A local annotated Git tag
-is not a cryptographic signature unless a trusted signing key is separately configured and the
-signature is verified.
+download both attested workflow artifacts, run `sha256sum --check`, and compare their names with the
+version derived by `scripts/release-version.py`. Confirm that the immutable release has the exact
+recorded title/body/tag/target, is neither draft nor prerelease, has no discussion, and has an empty
+asset list. The action configuration is present, but no attestation or signature exists until a
+tagged GitHub workflow completes successfully. A local annotated Git tag is not a cryptographic
+signature unless a trusted signing key is separately configured and the signature is verified.

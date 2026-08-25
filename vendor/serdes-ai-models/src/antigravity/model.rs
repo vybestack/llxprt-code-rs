@@ -447,7 +447,7 @@ impl AntigravityModel {
     /// Convert API response to model response.
     fn convert_response(&self, response: AntigravityResponse) -> ModelResponse {
         let mut parts = Vec::new();
-        let mut finish_reason = FinishReason::EndTurn;
+        let mut finish_reason = FinishReason::Other("missing_finish_reason".to_string());
 
         for candidate in &response.response.candidates {
             if let Some(content) = &candidate.content {
@@ -496,12 +496,14 @@ impl AntigravityModel {
             }
 
             if let Some(reason) = &candidate.finish_reason {
-                finish_reason = match reason.as_str() {
-                    "STOP" => FinishReason::EndTurn,
-                    "MAX_TOKENS" => FinishReason::Length,
-                    "SAFETY" => FinishReason::ContentFilter,
-                    _ => FinishReason::EndTurn,
-                };
+                finish_reason = crate::map_terminal_reason(
+                    reason,
+                    &[
+                        ("STOP", FinishReason::EndTurn),
+                        ("MAX_TOKENS", FinishReason::Length),
+                        ("SAFETY", FinishReason::ContentFilter),
+                    ],
+                );
             }
         }
 

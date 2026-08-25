@@ -385,11 +385,15 @@ impl ChatGptOAuthModel {
             .choices
             .first()
             .and_then(|c| c.finish_reason.as_ref())
-            .map(|r| match r.as_str() {
-                "stop" => FinishReason::Stop,
-                "length" => FinishReason::Length,
-                "tool_calls" => FinishReason::ToolCall,
-                _ => FinishReason::Stop,
+            .map(|r| {
+                crate::map_terminal_reason(
+                    r,
+                    &[
+                        ("stop", FinishReason::Stop),
+                        ("length", FinishReason::Length),
+                        ("tool_calls", FinishReason::ToolCall),
+                    ],
+                )
             });
 
         let usage = response.usage.map(|u| RequestUsage {

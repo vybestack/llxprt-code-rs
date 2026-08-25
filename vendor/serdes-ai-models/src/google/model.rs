@@ -584,13 +584,18 @@ impl GoogleModel {
             }
         }
 
-        let finish_reason = candidate.finish_reason.map(|r| match r.as_str() {
-            "STOP" => FinishReason::Stop,
-            "MAX_TOKENS" => FinishReason::Length,
-            "SAFETY" => FinishReason::ContentFilter,
-            "RECITATION" => FinishReason::ContentFilter,
-            "TOOL_CALLS" | "FUNCTION_CALL" => FinishReason::ToolCall,
-            _ => FinishReason::Stop,
+        let finish_reason = candidate.finish_reason.map(|r| {
+            crate::map_terminal_reason(
+                &r,
+                &[
+                    ("STOP", FinishReason::Stop),
+                    ("MAX_TOKENS", FinishReason::Length),
+                    ("SAFETY", FinishReason::ContentFilter),
+                    ("RECITATION", FinishReason::ContentFilter),
+                    ("TOOL_CALLS", FinishReason::ToolCall),
+                    ("FUNCTION_CALL", FinishReason::ToolCall),
+                ],
+            )
         });
 
         let usage = resp.usage_metadata.map(|u| RequestUsage {

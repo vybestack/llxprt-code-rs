@@ -126,7 +126,7 @@ impl RetainedStage {
         use std::io::Write as _;
         use std::os::unix::fs::MetadataExt as _;
 
-        let name = random_temp_name(leaf)?;
+        let name = random_temp_name()?;
         let mut file = parent
             .new_file(&name, 0o600)
             .map_err(|error| format!("create temp in {leaf}: {error}"))?;
@@ -235,11 +235,11 @@ fn installed_unknown(leaf: &str, detail: &str) -> String {
     format!("installed {leaf}, but durability or integrity is unknown: {detail}")
 }
 
-fn random_temp_name(leaf: &str) -> Result<String, String> {
+fn random_temp_name() -> Result<String, String> {
     let mut random = [0u8; 16];
     fill_random(&mut random)?;
     let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok(format!(".llxprt-tmp-{leaf}-{suffix}"))
+    Ok(format!(".llxprt-tmp-{suffix}"))
 }
 
 #[cfg(target_os = "macos")]

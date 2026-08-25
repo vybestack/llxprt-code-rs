@@ -94,6 +94,36 @@ pub mod profile;
 mod response;
 pub mod schema_transformer;
 
+/// Map a provider terminal reason without treating a new provider value as successful completion.
+fn map_terminal_reason(
+    raw: &str,
+    known: &[(&str, serdes_ai_core::messages::FinishReason)],
+) -> serdes_ai_core::messages::FinishReason {
+    known
+        .iter()
+        .find(|(name, _)| *name == raw)
+        .map(|(_, reason)| reason.clone())
+        .unwrap_or_else(|| serdes_ai_core::messages::FinishReason::Other(raw.to_string()))
+}
+
+#[cfg(test)]
+mod terminal_reason_tests {
+    use super::map_terminal_reason;
+    use serdes_ai_core::messages::FinishReason;
+
+    #[test]
+    fn unknown_terminal_reason_is_never_a_successful_stop() {
+        assert_eq!(
+            map_terminal_reason("provider-added-value", &[("stop", FinishReason::Stop)]),
+            FinishReason::Other("provider-added-value".to_string())
+        );
+        assert_eq!(
+            map_terminal_reason("stop", &[("stop", FinishReason::Stop)]),
+            FinishReason::Stop
+        );
+    }
+}
+
 // Provider modules (feature-gated)
 
 /// OpenAI models (GPT-4, GPT-4o, o1, etc.).

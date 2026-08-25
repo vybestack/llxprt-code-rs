@@ -250,11 +250,16 @@ impl CohereModel {
             }
         }
 
-        let finish_reason = resp.finish_reason.map(|r| match r.as_str() {
-            "COMPLETE" | "END_TURN" => FinishReason::Stop,
-            "MAX_TOKENS" => FinishReason::Length,
-            "TOOL_CALL" => FinishReason::ToolCall,
-            _ => FinishReason::Stop,
+        let finish_reason = resp.finish_reason.map(|r| {
+            crate::map_terminal_reason(
+                &r,
+                &[
+                    ("COMPLETE", FinishReason::Stop),
+                    ("END_TURN", FinishReason::Stop),
+                    ("MAX_TOKENS", FinishReason::Length),
+                    ("TOOL_CALL", FinishReason::ToolCall),
+                ],
+            )
         });
 
         let usage = resp.meta.and_then(|m| m.tokens).map(|t| RequestUsage {

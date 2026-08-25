@@ -782,6 +782,37 @@ fn search_path_given_intermediate_symlink_root_is_rejected() {
 }
 
 #[test]
+fn write_and_replace_support_filesystem_name_max() {
+    use std::os::fd::AsRawFd as _;
+
+    let d = tempfile::tempdir().unwrap();
+    let directory = std::fs::File::open(d.path()).unwrap();
+    let name_max = unsafe { libc::fpathconf(directory.as_raw_fd(), libc::_PC_NAME_MAX) };
+    assert!(name_max > 1, "filesystem did not report a usable NAME_MAX");
+
+    for length in [name_max as usize - 1, name_max as usize] {
+        let name = "n".repeat(length);
+        let (ok, message) = run(
+            d.path(),
+            "write_file",
+            json!({"path": name, "content": "old"}),
+        );
+        assert!(
+            ok,
+            "write_file rejected a valid {length}-byte leaf: {message}"
+        );
+
+        let (ok, message) = run(
+            d.path(),
+            "replace",
+            json!({"path": name, "old_string": "old", "new_string": "new"}),
+        );
+        assert!(ok, "replace rejected a valid {length}-byte leaf: {message}");
+        assert_eq!(std::fs::read_to_string(d.path().join(name)).unwrap(), "new");
+    }
+}
+
+#[test]
 fn deterministic_swap_write_then_read_is_consistent() {
     let d = tempfile::tempdir().unwrap();
     // write_file is atomic (temp + renameat over the target), so an immediate read sees a

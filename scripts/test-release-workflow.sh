@@ -28,6 +28,18 @@ for production_path in \
     exit 1
   fi
 done
+for audit_gate in scripts/release-gates.sh .github/workflows/ci.yml; do
+  grep -Fq 'for lockfile in vendor/*/Cargo.lock; do' "$root/$audit_gate"
+  [[ $(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.lock -type f | wc -l | tr -d ' ') == 11 ]]
+done
+grep -Fq "GH_TOKEN: \${{ secrets.RELEASE_ADMIN_TOKEN }}" "$root/.github/workflows/ci.yml"
+grep -Fq 'Create atomic immutable release record' "$root/.github/workflows/ci.yml"
+grep -Fq "repos/\$GITHUB_REPOSITORY/immutable-releases" "$root/scripts/publish-release.sh"
+if grep -Eq 'gh release (create|upload|download)|--method PATCH|draft=true' "$root/scripts/publish-release.sh"; then
+  echo "production publisher contains a draft, upload, download, or PATCH path" >&2
+  exit 1
+fi
+
 
 mkdir "$tmp/bin" "$tmp/state" "$tmp/dist"
 cat >"$tmp/bin/gh" <<'PY'
@@ -35,91 +47,77 @@ cat >"$tmp/bin/gh" <<'PY'
 import json
 import os
 import pathlib
-import shutil
 import sys
 
 state = pathlib.Path(os.environ["MOCK_RELEASE_STATE"])
 args = sys.argv[1:]
 commit_file = state / "tag-commit"
 release_file = state / "release.json"
-assets = state / "assets"
-assets.mkdir(exist_ok=True)
+log_file = state / "calls"
+with log_file.open("a") as log:
+    log.write(json.dumps(args) + "\n")
 
-def release():
-    return json.loads(release_file.read_text())
-
-def save(value):
-    release_file.write_text(json.dumps(value))
 
 def option(name):
-    index = args.index(name)
-    return args[index + 1]
+    return args[args.index(name) + 1]
 
-if args[0] == "api":
-    method = "GET"
-    if "--method" in args:
-        method = option("--method")
-    endpoint = next(item for item in args[1:] if not item.startswith("-") and item not in {method})
-    if "/git/ref/tags/" in endpoint:
-        value = {"object": {"type": "tag", "sha": "annotated-object"}}
-    elif endpoint.endswith("/git/tags/annotated-object"):
-        value = {"object": {"type": "commit", "sha": commit_file.read_text().strip()}}
-    elif endpoint.endswith("/releases") and method == "POST":
-        fields = {}
-        for index, item in enumerate(args):
-            if item in {"-f", "-F"}:
-                key, field_value = args[index + 1].split("=", 1)
-                fields[key] = field_value
-        value = {
-            "id": 17,
-            "tag_name": fields["tag_name"],
-            "target_commitish": fields["target_commitish"],
-            "draft": True,
-            "assets": [],
-        }
-        save(value)
-    elif "/releases/tags/" in endpoint:
-        if not release_file.exists():
-            print("HTTP 404", file=sys.stderr)
-            raise SystemExit(1)
-        value = release()
-    elif "/releases/17" in endpoint and method == "PATCH":
-        value = release()
-        value["draft"] = False
-        save(value)
-    else:
-        raise SystemExit(f"unsupported mock gh api: {args!r}")
-    if "--jq" in args:
-        query = option("--jq")
-        if query == ".object.type":
-            print(value["object"]["type"])
-        elif query == ".object.sha":
-            print(value["object"]["sha"])
-        else:
-            raise SystemExit(f"unsupported jq query: {query}")
-    else:
+
+def emit(value):
+    if "--jq" not in args:
         print(json.dumps(value))
-elif args[:2] == ["release", "upload"]:
-    path = pathlib.Path(args[3])
-    value = release()
-    if any(item["name"] == path.name for item in value["assets"]):
+        return
+    query = option("--jq")
+    if query == ".object.type":
+        print(value["object"]["type"])
+    elif query == ".object.sha":
+        print(value["object"]["sha"])
+    else:
+        raise SystemExit(f"unsupported jq query: {query}")
+
+
+if args[0] != "api":
+    raise SystemExit(f"publisher used a non-API release command: {args!r}")
+method = option("--method") if "--method" in args else "GET"
+endpoint = next(item for item in args[1:] if not item.startswith("-") and item != method)
+if "/git/ref/tags/" in endpoint:
+    emit({"object": {"type": "tag", "sha": "annotated-object"}})
+elif endpoint.endswith("/git/tags/annotated-object"):
+    emit({"object": {"type": "commit", "sha": commit_file.read_text().strip()}})
+elif endpoint.endswith("/immutable-releases"):
+    emit({"enabled": os.environ.get("MOCK_IMMUTABLE_DISABLED") != "1", "enforced_by_owner": True})
+elif "/rulesets?" in endpoint:
+    enforcement = "evaluate" if os.environ.get("MOCK_RULESET_INACTIVE") == "1" else "active"
+    emit([[{"id": 7, "target": "tag", "enforcement": enforcement}]])
+elif endpoint.endswith("/rulesets/7"):
+    bypass = [{"actor_type": "User"}] if os.environ.get("MOCK_RULESET_BYPASS") == "1" else []
+    exclusions = ["refs/tags/v0.1.0"] if os.environ.get("MOCK_RULESET_EXCLUDES_TAG") == "1" else []
+    rules = [{"type": "update"}]
+    if os.environ.get("MOCK_RULESET_WEAK") != "1":
+        rules.append({"type": "deletion"})
+    emit({
+        "id": 7,
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": bypass,
+        "conditions": {"ref_name": {"include": ["refs/tags/v0.1.0"], "exclude": exclusions}},
+        "rules": rules,
+    })
+elif "/releases?per_page=" in endpoint:
+    emit([[json.loads(release_file.read_text())] if release_file.exists() else []])
+elif endpoint.endswith("/releases") and method == "POST":
+    # GitHub rejects a competing release create. The publisher never edits or resumes the
+    # attacker's object.
+    if release_file.exists():
         raise SystemExit(1)
-    shutil.copyfile(path, assets / path.name)
-    value["assets"].append({"name": path.name})
-    save(value)
-    if os.environ.get("MOCK_RECREATE_AFTER_UPLOAD") == "1" and not (state / "recreated").exists():
-        (state / "recreated").write_text("yes")
-        commit_file.write_text("changed-commit")
-    if os.environ.get("MOCK_UPLOAD_RACE") == "1" and not (state / "raced").exists():
-        (state / "raced").write_text("yes")
-        raise SystemExit(1)
-elif args[:2] == ["release", "download"]:
-    destination = pathlib.Path(option("--dir"))
-    patterns = [args[index + 1] for index, item in enumerate(args) if item == "--pattern"]
-    for pattern in patterns:
-        shutil.copyfile(assets / pattern, destination / pattern)
+    payload = json.loads(pathlib.Path(option("--input")).read_text())
+    value = dict(payload)
+    value.update({"id": 17, "immutable": True, "assets": []})
+    if os.environ.get("MOCK_BAD_POST_METADATA") == "1":
+        value["name"] = "attacker title"
+    release_file.write_text(json.dumps(value))
+    emit(value)
 else:
-    raise SystemExit(f"unsupported mock gh command: {args!r}")
+    raise SystemExit(f"unsupported mock gh api: {args!r}")
 PY
 chmod +x "$tmp/bin/gh"
 
@@ -130,7 +128,7 @@ printf 'verified archive bytes' >"$tmp/dist/$archive"
 
 reset_state() {
   rm -rf "$tmp/state"
-  mkdir -p "$tmp/state/assets"
+  mkdir -p "$tmp/state"
   printf 'expected-commit' >"$tmp/state/tag-commit"
 }
 
@@ -139,8 +137,9 @@ publish() {
     cd "$tmp"
     PATH="$tmp/bin:$PATH" \
       MOCK_RELEASE_STATE="$tmp/state" \
-      GH_TOKEN=test GITHUB_REPOSITORY=owner/repo RELEASE_TAG=v0.1.0 \
-      EXPECTED_COMMIT=expected-commit RELEASE_ARCHIVE="$archive" RELEASE_SIDECAR="$sidecar" \
+      GH_TOKEN=test GITHUB_REPOSITORY=owner/repo GITHUB_SERVER_URL=https://example.invalid \
+      GITHUB_RUN_ID=123 RELEASE_TAG=v0.1.0 EXPECTED_COMMIT=expected-commit \
+      RELEASE_ARCHIVE="$archive" RELEASE_SIDECAR="$sidecar" \
       bash "$root/scripts/publish-release.sh"
   )
 }
@@ -161,51 +160,60 @@ if verify_tag_only >/dev/null 2>&1; then
   exit 1
 fi
 
+# Publication is one create operation with deterministic metadata and no release assets. There is
+# no draft-to-public transition or upload window in which a foreign asset can be exposed.
 reset_state
 publish
-[[ $(jq -r .draft "$tmp/state/release.json") == false ]]
-
-# A failed upload that actually won a concurrent create is safely resumed from API state.
-reset_state
-MOCK_UPLOAD_RACE=1 publish
-[[ $(jq -r .draft "$tmp/state/release.json") == false ]]
-
-# A same-commit partial draft is resumed, verified, and published.
-reset_state
-cp "$tmp/dist/$archive" "$tmp/state/assets/$archive"
-cat >"$tmp/state/release.json" <<JSON
-{"id":17,"tag_name":"v0.1.0","target_commitish":"expected-commit","draft":true,"assets":[{"name":"$archive"}]}
-JSON
-publish
-[[ $(jq -r .draft "$tmp/state/release.json") == false ]]
-
-# Tag recreation during upload is detected before another asset or publication.
-reset_state
-if MOCK_RECREATE_AFTER_UPLOAD=1 publish >/dev/null 2>&1; then
-  echo "publisher accepted a recreated tag" >&2
+jq -e --arg archive "$archive" '
+  .tag_name == "v0.1.0" and
+  .target_commitish == "expected-commit" and
+  .name == "v0.1.0" and
+  .draft == false and
+  .prerelease == false and
+  .generate_release_notes == false and
+  .make_latest == "true" and
+  .immutable == true and
+  (.assets | length == 0) and
+  (.body | contains($archive)) and
+  (.body | contains("https://example.invalid/owner/repo/actions/runs/123"))
+' "$tmp/state/release.json" >/dev/null
+grep -q '"--method", "POST"' "$tmp/state/calls"
+if grep -Eq 'PATCH|"release", "upload"|"release", "download"' "$tmp/state/calls"; then
+  echo "publisher used a non-atomic draft or release-asset operation" >&2
   exit 1
 fi
-[[ $(jq -r .draft "$tmp/state/release.json") == true ]]
 
-# Existing public releases, foreign-commit drafts, foreign assets, and mismatched bytes fail.
-for mode in public foreign-commit foreign-asset bad-bytes; do
+# Existing attacker-controlled drafts or public releases are never resumed or edited.
+for draft in true false; do
   reset_state
-  cp "$tmp/dist/$archive" "$tmp/state/assets/$archive"
-  cp "$tmp/dist/$sidecar" "$tmp/state/assets/$sidecar"
-  draft=true
-  target=expected-commit
-  extra=''
-  [[ $mode == public ]] && draft=false
-  [[ $mode == foreign-commit ]] && target=other-commit
-  [[ $mode == foreign-asset ]] && extra=',{"name":"foreign"}'
-  [[ $mode == bad-bytes ]] && printf 'attacker bytes' >"$tmp/state/assets/$archive"
   cat >"$tmp/state/release.json" <<JSON
-{"id":17,"tag_name":"v0.1.0","target_commitish":"$target","draft":$draft,"assets":[{"name":"$archive"},{"name":"$sidecar"}$extra]}
+{"id":99,"tag_name":"v0.1.0","target_commitish":"other","name":"attacker title","body":"attacker body","draft":$draft,"prerelease":true,"discussion_url":"https://attacker.invalid","assets":[{"name":"foreign"}]}
 JSON
+  before=$(sha256sum "$tmp/state/release.json")
   if publish >/dev/null 2>&1; then
-    echo "publisher accepted invalid state: $mode" >&2
+    echo "publisher resumed an existing attacker-controlled release" >&2
     exit 1
   fi
+  [[ $(sha256sum "$tmp/state/release.json") == "$before" ]]
 done
+
+# Policy failures stop before the release-create operation.
+for mode in MOCK_IMMUTABLE_DISABLED MOCK_RULESET_BYPASS MOCK_RULESET_INACTIVE MOCK_RULESET_WEAK MOCK_RULESET_EXCLUDES_TAG; do
+  reset_state
+  export "$mode=1"
+  if publish >/dev/null 2>&1; then
+    echo "publisher ignored failed remote policy: $mode" >&2
+    exit 1
+  fi
+  unset "$mode"
+  [[ ! -e "$tmp/state/release.json" ]]
+done
+
+# A server response with metadata outside the submitted deterministic payload fails verification.
+reset_state
+if MOCK_BAD_POST_METADATA=1 publish >/dev/null 2>&1; then
+  echo "publisher accepted mismatched created-release metadata" >&2
+  exit 1
+fi
 
 echo "release workflow semantics tests passed"

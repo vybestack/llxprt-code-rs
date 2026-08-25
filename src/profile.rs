@@ -465,6 +465,9 @@ fn parse_ephemeral_flags(
         }
         "reasoning.effort" => {
             let effort = required_string(value, name, key)?;
+            if effort.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
+                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
+            }
             settings.flags.insert(key.to_string(), true);
             if !effort.is_empty() {
                 settings
@@ -827,6 +830,36 @@ mod tests {
         }
         let valid = RedactedUrl::parse("https://api.example.com/v1").unwrap();
         assert_eq!(valid.as_display(), "https://api.example.com");
+    }
+
+    #[test]
+    fn reasoning_effort_enforces_prompt_note_cap() {
+        let exact = "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES);
+        let profile = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"reasoning.effort": exact}
+            }),
+            "bounded",
+        )
+        .unwrap();
+        assert_eq!(
+            profile.ephemeral.prompt_notes["reasoning:reasoning.effort"].len(),
+            crate::redact::MAX_PROMPT_NOTE_BYTES
+        );
+
+        let over = "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES + 1);
+        let error = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"reasoning.effort": over}
+            }),
+            "bounded",
+        )
+        .unwrap_err();
+        assert_eq!(error, crate::redact::PROMPT_NOTE_CAP_MESSAGE);
     }
 
     #[test]

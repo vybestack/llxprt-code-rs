@@ -26,7 +26,6 @@ verify_remote_identity() {
   [[ $(tag_commit) == "$EXPECTED_COMMIT" ]] || die "remote release tag does not match the workflow commit"
 }
 
-
 if [[ ${1:-} == --verify-tag-only ]]; then
   [[ $# == 1 ]] || die "--verify-tag-only accepts no additional arguments"
   verify_remote_identity
@@ -35,68 +34,95 @@ fi
 [[ $# == 0 ]] || die "unexpected publisher argument"
 : "${RELEASE_ARCHIVE:?RELEASE_ARCHIVE is required}"
 : "${RELEASE_SIDECAR:?RELEASE_SIDECAR is required}"
+: "${GITHUB_SERVER_URL:?GITHUB_SERVER_URL is required}"
+: "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+
 release_json=$(mktemp)
-asset_dir=$(mktemp -d)
-trap 'rm -f "$release_json" "$release_json.error"; rm -rf "$asset_dir"' EXIT
+immutable_json=$(mktemp)
+rules_json=$(mktemp)
+existing_json=$(mktemp)
+payload_json=$(mktemp)
+trap 'rm -f "$release_json" "$immutable_json" "$rules_json" "$existing_json" "$payload_json"' EXIT
 
-verify_remote_identity
-if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json" 2>"$release_json.error"; then
-  [[ $(jq -r .draft "$release_json") == true ]] || die "an already-published release exists"
-  [[ $(jq -r .target_commitish "$release_json") == "$EXPECTED_COMMIT" ]] || die "existing draft targets another commit"
-else
-  grep -q 'HTTP 404' "$release_json.error" || die "could not inspect an existing release"
-  gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
-    -f "tag_name=$RELEASE_TAG" -f "target_commitish=$EXPECTED_COMMIT" \
-    -f "name=$RELEASE_TAG" -F draft=true -F generate_release_notes=true >"$release_json"
+# This endpoint requires administration-read permission. Publication fails closed unless the server
+# confirms that newly published releases are immutable.
+gh api "repos/$GITHUB_REPOSITORY/immutable-releases" >"$immutable_json"
+[[ $(jq -r .enabled "$immutable_json") == true ]] || die "immutable releases are not enabled"
+
+# The release POST uses an existing annotated tag. Require an active, no-bypass ruleset that names
+# this exact ref (or all refs) and rejects both updates and deletion. This closes the tag-move window
+# before GitHub makes the new immutable release lock authoritative.
+gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&per_page=100" >"$rules_json"
+ruleset_ok=0
+while IFS= read -r ruleset_id; do
+  [[ $ruleset_id =~ ^[0-9]+$ ]] || die "GitHub returned an invalid tag ruleset id"
+  ruleset=$(gh api "repos/$GITHUB_REPOSITORY/rulesets/$ruleset_id")
+  if jq -e --arg ref "refs/tags/$RELEASE_TAG" '
+    .target == "tag" and
+    .enforcement == "active" and
+    ((.bypass_actors // []) | length == 0) and
+    ((.conditions.ref_name.exclude // []) | length == 0) and
+    ((.conditions.ref_name.include // []) | any(. == $ref or . == "~ALL")) and
+    (([.rules[]?.type] | index("update")) != null) and
+    (([.rules[]?.type] | index("deletion")) != null)
+  ' <<<"$ruleset" >/dev/null; then
+    ruleset_ok=1
+    break
+  fi
+done < <(jq -r 'flatten[]? | select(.target == "tag" and .enforcement == "active") | .id' "$rules_json")
+((ruleset_ok == 1)) || die "the release tag lacks an active no-bypass update/deletion ruleset"
+
+# Refuse rather than resume or edit every visible same-tag draft or public release. Pagination keeps
+# the decision independent of release-list ordering. A concurrent creator can only make our atomic
+# create fail or create a separate draft; it cannot add state to the release created below.
+gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" >"$existing_json"
+if jq -e --arg tag "$RELEASE_TAG" 'flatten | any(.tag_name == $tag)' "$existing_json" >/dev/null; then
+  die "a release or draft already exists for the release tag"
 fi
-rm -f "$release_json.error"
-release_id=$(jq -r .id "$release_json")
-[[ $release_id =~ ^[0-9]+$ ]] || die "release API returned an invalid draft id"
-
-upload_if_absent() {
-  local path=$1 name=$2
-  if jq -e --arg name "$name" '.assets[]? | select(.name == $name)' "$release_json" >/dev/null; then
-    return
-  fi
-  verify_remote_identity
-  if ! gh release upload "$RELEASE_TAG" "$path"; then
-    gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json"
-    jq -e --arg name "$name" '.assets[]? | select(.name == $name)' "$release_json" >/dev/null \
-      || die "release asset upload failed"
-  fi
-  verify_remote_identity
-  gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json"
-}
-
-upload_if_absent "dist/$RELEASE_ARCHIVE" "$RELEASE_ARCHIVE"
-upload_if_absent "dist/$RELEASE_SIDECAR" "$RELEASE_SIDECAR"
-
-verify_remote_assets() {
-  rm -rf "$asset_dir"
-  mkdir "$asset_dir"
-  gh release download "$RELEASE_TAG" --dir "$asset_dir" \
-    --pattern "$RELEASE_ARCHIVE" --pattern "$RELEASE_SIDECAR"
-  cmp "dist/$RELEASE_ARCHIVE" "$asset_dir/$RELEASE_ARCHIVE"
-  cmp "dist/$RELEASE_SIDECAR" "$asset_dir/$RELEASE_SIDECAR"
-  (cd "$asset_dir" && sha256sum --check "$RELEASE_SIDECAR")
-}
-
-verify_remote_assets
-verify_remote_identity
-gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json"
-[[ $(jq -r .draft "$release_json") == true ]] || die "release stopped being a draft before publication"
-[[ $(jq -r .target_commitish "$release_json") == "$EXPECTED_COMMIT" ]] \
-  || die "release target changed before publication"
-[[ $(jq -r '[.assets[].name] | sort | join("\n")' "$release_json") == "$RELEASE_ARCHIVE"$'\n'"$RELEASE_SIDECAR" ]] \
-  || die "draft contains missing or foreign assets"
 
 verify_remote_identity
-gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
+(cd dist && sha256sum --check "$RELEASE_SIDECAR")
+digest=$(awk 'NR == 1 { print $1 } NR > 1 { exit 2 }' "dist/$RELEASE_SIDECAR") \
+  || die "release checksum sidecar must contain exactly one entry"
+[[ $digest =~ ^[0-9a-f]{64}$ ]] || die "release checksum sidecar has an invalid digest"
+[[ $(awk 'NR == 1 { sub(/^[0-9a-f]+[[:space:]]+[*]?/, ""); print }' "dist/$RELEASE_SIDECAR") == "$RELEASE_ARCHIVE" ]] \
+  || die "release checksum sidecar names another archive"
+
+artifact_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+release_body=$(printf '%s\n\n%s\n\n%s\n%s\n' \
+  "The source bundle and checksum sidecar were generated and signed with GitHub build provenance." \
+  "Attested workflow artifact: $artifact_url" \
+  "Archive: \`$RELEASE_ARCHIVE\`" \
+  "SHA-256: \`$digest\`")
+
+# GitHub has no compare-and-set operation for publishing a draft with an asset allowlist. Therefore
+# this publisher does not create or resume drafts and does not attach release assets. It creates the
+# immutable public release, deterministic metadata, and empty asset list in one server operation.
+# The exact source bundle remains the separately attested workflow artifact identified above.
+jq -n \
+  --arg tag "$RELEASE_TAG" \
+  --arg commit "$EXPECTED_COMMIT" \
+  --arg name "$RELEASE_TAG" \
+  --arg body "$release_body" \
+  '{tag_name:$tag, target_commitish:$commit, name:$name, body:$body,
+    draft:false, prerelease:false, generate_release_notes:false, make_latest:"true"}' \
+  >"$payload_json"
+
+gh api --method POST "repos/$GITHUB_REPOSITORY/releases" --input "$payload_json" >"$release_json"
+
+jq -e \
+  --arg tag "$RELEASE_TAG" \
+  --arg commit "$EXPECTED_COMMIT" \
+  --arg name "$RELEASE_TAG" \
+  --arg body "$release_body" '
+    .tag_name == $tag and
+    .target_commitish == $commit and
+    .name == $name and
+    .body == $body and
+    .draft == false and
+    .prerelease == false and
+    .immutable == true and
+    ((.discussion_url? // "") == "") and
+    (.assets | length == 0)
+  ' "$release_json" >/dev/null || die "created release does not match the immutable publication contract"
 verify_remote_identity
-gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >"$release_json"
-[[ $(jq -r .draft "$release_json") == false ]] || die "release remained a draft"
-[[ $(jq -r .target_commitish "$release_json") == "$EXPECTED_COMMIT" ]] \
-  || die "published release target does not match the workflow commit"
-[[ $(jq -r '[.assets[].name] | sort | join("\n")' "$release_json") == "$RELEASE_ARCHIVE"$'\n'"$RELEASE_SIDECAR" ]] \
-  || die "published release contains missing or foreign assets"
-verify_remote_assets

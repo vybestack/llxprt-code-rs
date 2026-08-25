@@ -515,12 +515,16 @@ impl AnthropicModel {
             }
         }
 
-        let finish_reason = resp.stop_reason.map(|r| match r.as_str() {
-            "end_turn" => FinishReason::Stop,
-            "stop_sequence" => FinishReason::Stop,
-            "max_tokens" => FinishReason::Length,
-            "tool_use" => FinishReason::ToolCall,
-            _ => FinishReason::Stop,
+        let finish_reason = resp.stop_reason.map(|r| {
+            crate::map_terminal_reason(
+                &r,
+                &[
+                    ("end_turn", FinishReason::Stop),
+                    ("stop_sequence", FinishReason::Stop),
+                    ("max_tokens", FinishReason::Length),
+                    ("tool_use", FinishReason::ToolCall),
+                ],
+            )
         });
 
         let usage = RequestUsage {

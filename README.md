@@ -410,7 +410,8 @@ original writable pathname is never published.
 The retained archives are also bound to crates.io checksums, upstream Git commit/tree identity, and
 the upstream license Git blob by `provenance/serdes-ai-0.2.6.json`. See
 [`docs/release-provenance.md`](docs/release-provenance.md) for independent verification, immutable
-tag requirements, draft publication behavior, and signed GitHub attestation verification.
+tag and release requirements, atomic release-record publication, and signed GitHub attestation
+verification.
 
 Limitations: the bundle contains all project source and the patched SerdesAI provenance
 archives, but it does not contain the complete crates.io dependency graph. Building and verifying

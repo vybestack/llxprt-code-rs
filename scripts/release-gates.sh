@@ -102,8 +102,9 @@ elif cargo audit --version >/dev/null 2>&1; then
   echo "== cargo audit against the local advisory cache (no fetch) =="
   cargo audit --no-fetch
   cargo audit --no-fetch --file xtask/Cargo.lock
-  cargo audit --no-fetch --file vendor/serdes-ai-models/Cargo.lock
-  cargo audit --no-fetch --file vendor/serdes-ai-providers/Cargo.lock
+  for lockfile in vendor/*/Cargo.lock; do
+    cargo audit --no-fetch --file "$lockfile"
+  done
 else
   echo "!! cargo-audit not installed; local offline audit was not run"
 fi
