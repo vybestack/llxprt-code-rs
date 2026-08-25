@@ -62,10 +62,38 @@ def destination_exists(directory_fd: int, name: str) -> bool:
     return True
 
 
+def open_anonymous_candidate(directory_fd: int) -> int:
+    """Create an unlinked writable candidate on the destination filesystem."""
+    if sys.platform.startswith("linux"):
+        flags = os.O_RDWR | os.O_TMPFILE | os.O_CLOEXEC
+        return os.open(".", flags, 0o600, dir_fd=directory_fd)
+    if sys.platform == "darwin":
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | os.O_NOFOLLOW
+            | os.O_CLOEXEC
+        )
+        for _ in range(128):
+            name = f".llxprt-source-candidate.{os.urandom(16).hex()}"
+            try:
+                target_fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+            except FileExistsError:
+                continue
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except BaseException:
+                close_quietly(target_fd)
+                raise
+            return target_fd
+        raise RuntimeError("could not allocate a source-bundle publication candidate")
+    raise RuntimeError("descriptor-bound source publication is unsupported")
+
+
 def copy_anonymous_candidate(source_fd: int, directory_fd: int, expected: str) -> int:
-    """Copy into a Linux unnamed inode, so no cleanup pathname ever exists."""
-    flags = os.O_RDWR | os.O_TMPFILE | os.O_CLOEXEC
-    target_fd = os.open(".", flags, 0o600, dir_fd=directory_fd)
+    """Copy into an unlinked inode on the destination filesystem."""
+    target_fd = open_anonymous_candidate(directory_fd)
     digest = hashlib.sha256()
     total = 0
     try:
@@ -295,17 +323,10 @@ def publish(
 
         if digest_fd(source_fd) != expected:
             raise RuntimeError("verified source bundle changed before publication")
-        if sys.platform.startswith("linux"):
-            candidate_fd = copy_anonymous_candidate(
-                source_fd, destination_directory_fd, expected
-            )
-            stack.callback(close_quietly, candidate_fd)
-        elif sys.platform == "darwin":
-            candidate_fd = source_fd
-            os.fchmod(candidate_fd, 0o644)
-            os.fsync(candidate_fd)
-        else:
-            raise RuntimeError("descriptor-bound source publication is unsupported")
+        candidate_fd = copy_anonymous_candidate(
+            source_fd, destination_directory_fd, expected
+        )
+        stack.callback(close_quietly, candidate_fd)
         install_fd(candidate_fd, destination_directory_fd, destination_name)
         try:
             installed_fd = open_installed(destination_directory_fd, destination_name)

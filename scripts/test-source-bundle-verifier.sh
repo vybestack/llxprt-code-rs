@@ -26,6 +26,7 @@ source_scratch_dir="$root/tests/.bundle-verifier-scratch-$$"
 source_scratch="$source_scratch_dir/.cargo-ok"
 source_output_dir="$root/scripts/.bundle-verifier-output-dir-$$"
 source_tree_output="$root/scripts/.bundle-verifier-output-$$.tar.gz"
+cross_filesystem_output="$root/dist/.bundle-verifier-cross-filesystem-$$"
 source_alias="$tmp/source-alias"
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -35,7 +36,8 @@ fi
 
 cleanup() {
   rm -rf "$tmp" "$marker" "$source_link" "$source_fifo" "$source_newline" \
-    "$source_scratch_dir" "$source_output_dir" "$source_tree_output"
+    "$source_scratch_dir" "$source_output_dir" "$source_tree_output" \
+    "$cross_filesystem_output"
 }
 trap cleanup EXIT
 
@@ -562,6 +564,49 @@ elif ! git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1; then
 else
   echo "skipping successful builder publication checks for a dirty worktree" >&2
 fi
+
+# Publication must copy the verified descriptor onto the destination filesystem before installation.
+# This is required when TMPDIR and dist/ are on different macOS filesystems.
+python3 - "$root/scripts/source-bundle-publish.py" "$tmp" "$cross_filesystem_output" <<'PY'
+import importlib.util
+import os
+import pathlib
+import sys
+
+publisher, temporary, output = sys.argv[1:]
+source = pathlib.Path(temporary) / "cross-filesystem-candidate"
+source.write_bytes(b"cross-filesystem verified candidate")
+destination = pathlib.Path(output) / "release.tar.gz"
+destination.parent.mkdir(parents=True)
+source_identity = os.stat(source)
+
+spec = importlib.util.spec_from_file_location("source_bundle_publish", publisher)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+original_install = module.install_fd
+
+
+def checked_install(candidate_fd, directory_fd, destination_name):
+    candidate_identity = os.fstat(candidate_fd)
+    destination_identity = os.fstat(directory_fd)
+    if candidate_identity.st_dev != destination_identity.st_dev:
+        raise SystemExit("publication candidate was not copied onto the destination filesystem")
+    if (candidate_identity.st_dev, candidate_identity.st_ino) == (
+        source_identity.st_dev,
+        source_identity.st_ino,
+    ):
+        raise SystemExit("publication tried to install the original source descriptor")
+    original_install(candidate_fd, directory_fd, destination_name)
+
+
+module.install_fd = checked_install
+module.publish(str(source), str(destination), ["/usr/bin/true"])
+if destination.read_bytes() != b"cross-filesystem verified candidate":
+    raise SystemExit("cross-filesystem publication changed the verified content")
+if list(destination.parent.glob(".llxprt-source-candidate.*")):
+    raise SystemExit("cross-filesystem publication left a named candidate")
+PY
 
 # The builder starts the publisher before archive construction and waits until the publisher has
 # retained the original output parent. Replacing that pathname afterward cannot redirect output.
