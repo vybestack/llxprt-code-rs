@@ -308,10 +308,7 @@ mod tests {
             ModelError::RateLimited { retry_after: Some(delay) } if delay == Duration::from_secs(3)
         ));
         let diagnostic = status_error(500, None).to_string();
-        assert_eq!(
-            diagnostic,
-            "HTTP error: 500 - provider returned an error response"
-        );
+        assert_eq!(diagnostic, "Model HTTP error (status 500)");
     }
 
     #[tokio::test]

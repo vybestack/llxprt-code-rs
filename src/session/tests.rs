@@ -36,6 +36,54 @@ fn session_entries_reject_symlinks_and_special_files_without_blocking() {
 }
 
 #[test]
+fn session_lock_timeout_does_not_execute_or_mutate_and_later_recovers() {
+    let root = tempfile::tempdir().unwrap();
+    let lock_path = root.path().join(".lock");
+    let holder = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    let contender = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    FileExt::lock_exclusive(&holder).unwrap();
+    let store = SessionStore {
+        session_dir: root.path().to_path_buf(),
+        session_id: "lock-test".to_string(),
+        dir: openat::Dir::open(root.path()).unwrap(),
+        file: contender,
+        lock: Mutex::new(()),
+    };
+    let executed = std::cell::Cell::new(false);
+    let started = std::time::Instant::now();
+    let error = store
+        .locked_with_timeout(std::time::Duration::from_millis(30), || {
+            executed.set(true);
+            std::fs::write(root.path().join("mutated"), b"bad").unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(matches!(error, StoreError::LockTimeout));
+    assert!(!executed.get());
+    assert!(!root.path().join("mutated").exists());
+    assert!(started.elapsed() >= std::time::Duration::from_millis(30));
+
+    FileExt::unlock(&holder).unwrap();
+    store
+        .locked_with_timeout(std::time::Duration::from_secs(1), || {
+            executed.set(true);
+            Ok(())
+        })
+        .unwrap();
+    assert!(executed.get());
+}
+
+#[test]
 fn dual_slots_recover_from_an_interrupted_newer_write() {
     let root = tempfile::tempdir().unwrap();
     let dir = openat::Dir::open(root.path()).unwrap();

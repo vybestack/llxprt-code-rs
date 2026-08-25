@@ -20,8 +20,8 @@
 # BSD/macOS tar it is well-formed.
 #
 # Allows: crate files (Cargo.toml/Cargo.lock/LICENSE/README.md/PATCHES.md/.gitignore),
-# the whole src/, tests/, scripts/, .github/, THIRD_PARTY_LICENSES/, the checksum-pinned
-# vendor-upstream/ crate archives, .cargo/config.toml, the xtask manifest/lock/source,
+# the whole src/, tests/, scripts/, docs/, provenance/, .github/, THIRD_PARTY_LICENSES/,
+# the checksum-pinned vendor-upstream/ crate archives, .cargo/config.toml, and xtask sources,
 # and the required vendored serdes-ai crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock.
 # All retained vendor lockfiles are source-provenance inputs. The models lockfile is also required
 # for the --locked direct provider test (CARGO_TARGET_DIR=... cargo test --offline --locked
@@ -49,7 +49,7 @@ cd "$root"
 
 
 top_files=(Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch .gitignore)
-source_dirs=(src tests scripts .github THIRD_PARTY_LICENSES vendor-upstream)
+source_dirs=(src tests scripts docs provenance .github THIRD_PARTY_LICENSES vendor-upstream)
 config_files=(.cargo/config.toml)
 xtask_files=(xtask/Cargo.toml xtask/Cargo.lock)
 vendor_crates=(
@@ -119,7 +119,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-out="${1:-dist/llxprt-code-rs-0.1.0-source.tar.gz}"
+if [[ "$#" -gt 1 ]]; then
+  echo "usage: $0 [OUT.tar.gz]" >&2
+  exit 2
+fi
+if [[ "$#" -eq 1 ]]; then
+  out="$1"
+else
+  archive_name=$(python3 "$root/scripts/release-version.py" --value archive)
+  out="dist/$archive_name"
+fi
 out="$(python3 "$root/scripts/source-bundle-output.py" "$root" "$out")" || exit 1
 
 stage=""

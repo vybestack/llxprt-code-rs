@@ -301,6 +301,14 @@ mod tests {
     }
 
     #[test]
+    fn model_wrapper_formatting_does_not_restore_hidden_details() {
+        let marker = "provider-secret-marker";
+        let error = AgentRunError::from(ModelError::http(500, marker));
+        assert!(!error.to_string().contains(marker));
+        assert!(!format!("{error:?}").contains(marker));
+    }
+
+    #[test]
     fn test_output_validation_error() {
         let err = OutputValidationError::failed("invalid value");
         assert!(err.retry_message().contains("invalid value"));

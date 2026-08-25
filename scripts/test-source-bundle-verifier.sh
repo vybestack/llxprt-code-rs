@@ -813,6 +813,62 @@ else:
     raise SystemExit("cancelled publisher left a blocking verifier descendant")
 PY
 
+# A publisher-owned deadline terminates a silent verifier and its TERM-ignoring descendant,
+# classifies the failure before publication, and leaves neither destination nor named candidate.
+python3 - "$root/scripts/source-bundle-publish.py" "$tmp" <<'PY'
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+publisher, temporary = sys.argv[1:]
+root = pathlib.Path(temporary) / "publisher-deadline"
+root.mkdir()
+source = root / "source"
+source.write_bytes(b"private verified candidate")
+destination = root / "destination"
+pid_file = root / "descendant.pid"
+verifier = root / "hung-verifier.sh"
+verifier.write_text(
+    "#!/usr/bin/env bash\n"
+    "set -euo pipefail\n"
+    "trap '' TERM\n"
+    "(trap '' TERM; while :; do sleep 300; done) &\n"
+    f"echo $! > {str(pid_file)!r}\n"
+    "while :; do sleep 300; done\n",
+    encoding="utf-8",
+)
+verifier.chmod(0o700)
+environment = os.environ.copy()
+environment["LLXPRT_SOURCE_VERIFY_TIMEOUT_SECONDS"] = "1"
+process = subprocess.run(
+    [sys.executable, publisher, str(source), str(destination), "--", str(verifier)],
+    env=environment,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    timeout=10,
+)
+if process.returncode == 0 or b"source-bundle verifier timed out" not in process.stderr:
+    raise SystemExit(f"hung verifier was not classified as a timeout: {process.stderr!r}")
+if destination.exists() or source.exists():
+    raise SystemExit("verifier timeout left a source pathname or installed destination")
+if list(root.glob(".llxprt-publish.*")):
+    raise SystemExit("verifier timeout left named publication residue")
+if not pid_file.exists():
+    raise SystemExit("timeout verifier descendant did not start")
+descendant = int(pid_file.read_text(encoding="utf-8"))
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    try:
+        os.kill(descendant, 0)
+    except ProcessLookupError:
+        break
+    time.sleep(0.01)
+else:
+    raise SystemExit("verifier timeout left a TERM-ignoring descendant")
+PY
+
 # Publication retains the source file and destination directory descriptors across verification.
 # Existing objects are rejected; source-name and output-parent substitution cannot redirect the
 # final bytes; and a late destination directory is never used as a container.

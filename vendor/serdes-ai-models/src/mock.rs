@@ -670,7 +670,13 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("no request function defined"));
+        match &err {
+            ModelError::Other(detail) => {
+                assert!(detail.to_string().contains("no request function defined"));
+            }
+            _ => panic!("expected Other error"),
+        }
+        assert_eq!(err.to_string(), "Model operation failed");
     }
 
     #[tokio::test]
@@ -684,7 +690,13 @@ mod tests {
         let result = model.request_stream(&messages, &settings, &params).await;
         match result {
             Err(err) => {
-                assert!(err.to_string().contains("no stream function defined"));
+                match &err {
+                    ModelError::Other(detail) => {
+                        assert!(detail.to_string().contains("no stream function defined"));
+                    }
+                    _ => panic!("expected Other error"),
+                }
+                assert_eq!(err.to_string(), "Model operation failed");
             }
             Ok(_) => panic!("Expected error for missing stream function"),
         }

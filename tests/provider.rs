@@ -60,7 +60,8 @@ fn serve(body: String) -> std::net::SocketAddr {
 fn config(addr: std::net::SocketAddr) -> ModelConfig {
     ModelConfig {
         model: "loopback".into(),
-        base_url: llxprt_code_rs::profile::RedactedUrl::parse(&format!("http://{addr}/v1")),
+        base_url: llxprt_code_rs::profile::RedactedUrl::parse(&format!("http://{addr}/v1"))
+            .unwrap(),
         api_key: "loopback-key".into(),
         keyfile_path: None,
         max_output_tokens: None,
@@ -238,7 +239,7 @@ fn endpoint_route_matrix_and_loopback_requests() {
             model: "m".into(),
             model_params: Default::default(),
             ephemeral: EphemeralSettings {
-                base_url: Some(RedactedUrl::parse(&base)),
+                base_url: Some(RedactedUrl::parse(&base).unwrap()),
                 auth_key: Some("k".into()),
                 ..Default::default()
             },
@@ -261,7 +262,7 @@ fn endpoint_route_matrix_and_loopback_requests() {
         model: "m".into(),
         model_params: Default::default(),
         ephemeral: EphemeralSettings {
-            base_url: Some(RedactedUrl::parse("http://127.0.0.1:8080/inference/v1")),
+            base_url: Some(RedactedUrl::parse("http://127.0.0.1:8080/inference/v1").unwrap()),
             auth_key: Some("k".into()),
             ..Default::default()
         },

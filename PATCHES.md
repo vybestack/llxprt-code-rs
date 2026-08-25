@@ -55,7 +55,10 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 `SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives to
 `vendor/`, including path-dependency rewrites and source compatibility changes
 needed by `FinishReason::Other`. Its SHA-256 is
-`451a7e9771a59162da018873dc20325dba6f4fe457acd1136337d4bffb3bc350`.
+`81902175510edcfe35fafbe2bbf6208887d518023829583b074861e9cb360a24`.
+`bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 archives in a temporary
+Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
+new files, modifications, and deletions are all represented.
 The 11 exact archives are retained under `vendor-upstream/`. To reproduce the vendored tree:
 
 1. Verify the retained archives against the checksums above.
@@ -69,7 +72,11 @@ The 11 exact archives are retained under `vendor-upstream/`. To reproduce the ve
 
 `bash scripts/verify-vendor-provenance.sh` performs those steps offline and fails unless the
 reproduced tree exactly matches `vendor/`. Its regression suite also rejects a modified archive
-or vendored file.
+or vendored file. `provenance/serdes-ai-0.2.6.json` records independently checkable crates.io
+URLs and checksums plus the upstream Git commit, tree, and license blob. Run
+`python3 scripts/verify-upstream-evidence.py` to bind the retained inputs to that record. The trust
+roots, online checking procedure, unsigned upstream-commit status, and release-attestation
+procedure are documented in `docs/release-provenance.md`.
 
 ## Patch 1 - raw finish reason (`vendor/serdes-ai-core/src/messages/response.rs`)
 

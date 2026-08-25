@@ -24,6 +24,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 (for scripts/source-bundle-validate.py) is required for release gates" >&2
   exit 1
 fi
+release_archive=$(python3 scripts/release-version.py --value archive)
 
 echo "== fmt =="
 cargo +1.88.0 fmt --all -- --check
@@ -38,13 +39,15 @@ echo "== production Rust LOC and complexity =="
 # Fixed limits: file 800, function 80, cyclomatic 25, cognitive 30.
 cargo +1.88.0 xtask quality
 
-echo "== source-bundle verifier adversarial cases =="
+echo "== source and release publication adversarial cases =="
 bash scripts/test-source-bundle-verifier.sh
+bash scripts/test-release-workflow.sh
 
 echo "== vendor provenance regression cases =="
 bash scripts/test-vendor-provenance.sh
 bash scripts/test-dependency-inventory.sh
 bash scripts/test-vendor-license.sh
+bash scripts/test-upstream-evidence.sh
 
 echo "== resolved provider feature graph =="
 bash scripts/test-provider-features.sh
@@ -109,15 +112,15 @@ echo "== release build (source tree, vendor path deps) =="
 cargo +1.88.0 build --offline --release --locked --workspace --all-features
 
 echo "== source bundle build + verify (extract -> test --offline -> build --release --offline) =="
-(umask 022; bash scripts/build-source-bundle.sh)
+(umask 022; bash scripts/build-source-bundle.sh "dist/$release_archive")
 
 if tar --version 2>/dev/null | grep -q GNU; then
   echo "== GNU tar source-bundle byte reproducibility =="
   comparison_dir="$(mktemp -d)"
-  comparison_bundle="$comparison_dir/llxprt-code-rs-0.1.0-source.tar.gz"
+  comparison_bundle="$comparison_dir/$release_archive"
   trap 'rm -rf "$comparison_dir"' EXIT
   (umask 077; bash scripts/build-source-bundle.sh "$comparison_bundle")
-  cmp dist/llxprt-code-rs-0.1.0-source.tar.gz "$comparison_bundle"
+  cmp "dist/$release_archive" "$comparison_bundle"
   rm -rf "$comparison_dir"
   trap - EXIT
 fi

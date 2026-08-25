@@ -2,13 +2,10 @@
 
 use std::collections::HashMap;
 use std::time::Duration;
-use thiserror::Error;
-
-/// Model-related errors.
-#[derive(Debug, Error)]
+/// Model-related errors. External text remains available in typed fields but is never rendered
+/// by the standard public formatting contracts.
 pub enum ModelError {
     /// HTTP error from the API.
-    #[error("HTTP error: {status} - {body}")]
     Http {
         /// HTTP status code.
         status: u16,
@@ -19,7 +16,6 @@ pub enum ModelError {
     },
 
     /// API-level error.
-    #[error("API error: {message}")]
     Api {
         /// Error message.
         message: String,
@@ -28,75 +24,102 @@ pub enum ModelError {
     },
 
     /// Request timeout.
-    #[error("Request timeout after {0:?}")]
     Timeout(Duration),
 
     /// Rate limited by the API.
-    #[error("Rate limited, retry after {retry_after:?}")]
     RateLimited {
         /// Suggested retry delay.
         retry_after: Option<Duration>,
     },
 
     /// Authentication failed.
-    #[error("Authentication failed: {0}")]
     Authentication(String),
-
     /// Invalid response from the API.
-    #[error("Invalid response: {0}")]
     InvalidResponse(String),
-
     /// Provider response exceeded the configured byte limit.
-    #[error("Provider response exceeded the {limit}-byte limit")]
     ResponseTooLarge {
         /// Maximum accepted response bytes.
         limit: usize,
     },
-
     /// Model not found.
-    #[error("Model not found: {0}")]
     NotFound(String),
-
     /// Feature not supported by the model.
-    #[error("Feature not supported: {0}")]
     NotSupported(String),
-
     /// JSON serialization/deserialization error.
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
-
+    Serialization(serde_json::Error),
     /// Request cancelled.
-    #[error("Request cancelled")]
     Cancelled,
-
     /// Connection error.
-    #[error("Connection error: {0}")]
     Connection(String),
-
     /// Content filter triggered.
-    #[error("Content filtered: {0}")]
     ContentFiltered(String),
-
     /// Context length exceeded.
-    #[error("Context length exceeded: {max_tokens} tokens max, got {requested_tokens}")]
     ContextLengthExceeded {
         /// Maximum allowed tokens.
         max_tokens: u64,
         /// Requested tokens.
         requested_tokens: u64,
     },
-
     /// Configuration error.
-    #[error("Configuration error: {0}")]
     Configuration(String),
-
     /// Network error.
-    #[error("Network error: {0}")]
     Network(String),
-
     /// Other error.
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for ModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
+            Self::Api { .. } => f.write_str("Model API error"),
+            Self::Timeout(duration) => write!(f, "Model request timed out after {duration:?}"),
+            Self::RateLimited { retry_after } => {
+                write!(f, "Model request rate limited (retry after {retry_after:?})")
+            }
+            Self::Authentication(_) => f.write_str("Model authentication failed"),
+            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
+            Self::ResponseTooLarge { limit } => {
+                write!(f, "Provider response exceeded the {limit}-byte limit")
+            }
+            Self::NotFound(_) => f.write_str("Model was not found"),
+            Self::NotSupported(_) => f.write_str("Model feature is not supported"),
+            Self::Serialization(_) => f.write_str("Model serialization failed"),
+            Self::Cancelled => f.write_str("Model request was cancelled"),
+            Self::Connection(_) => f.write_str("Model connection failed"),
+            Self::ContentFiltered(_) => f.write_str("Model content was filtered"),
+            Self::ContextLengthExceeded {
+                max_tokens,
+                requested_tokens,
+            } => write!(
+                f,
+                "Model context length exceeded ({max_tokens} tokens maximum, {requested_tokens} requested)"
+            ),
+            Self::Configuration(_) => f.write_str("Model configuration is invalid"),
+            Self::Network(_) => f.write_str("Model network request failed"),
+            Self::Other(_) => f.write_str("Model operation failed"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ModelError({self})")
+    }
+}
+
+impl std::error::Error for ModelError {}
+
+impl From<serde_json::Error> for ModelError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Serialization(error)
+    }
+}
+
+impl From<anyhow::Error> for ModelError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Other(error)
+    }
 }
 
 impl ModelError {
@@ -256,12 +279,50 @@ mod tests {
     }
 
     #[test]
-    fn test_error_display() {
-        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
-        assert!(err.to_string().contains("Something went wrong"));
+    fn public_formatting_hides_external_text_for_every_variant() {
+        let marker = "provider-secret-marker";
+        let mut headers = HashMap::new();
+        headers.insert(marker.to_string(), marker.to_string());
+        let errors = vec![
+            ModelError::Http {
+                status: 503,
+                body: marker.to_string(),
+                headers,
+            },
+            ModelError::Api {
+                message: marker.to_string(),
+                code: Some(marker.to_string()),
+            },
+            ModelError::Timeout(Duration::from_secs(7)),
+            ModelError::RateLimited {
+                retry_after: Some(Duration::from_secs(9)),
+            },
+            ModelError::Authentication(marker.to_string()),
+            ModelError::InvalidResponse(marker.to_string()),
+            ModelError::ResponseTooLarge { limit: 123 },
+            ModelError::NotFound(marker.to_string()),
+            ModelError::NotSupported(marker.to_string()),
+            ModelError::Serialization(serde_json::from_str::<serde_json::Value>("{").unwrap_err()),
+            ModelError::Cancelled,
+            ModelError::Connection(marker.to_string()),
+            ModelError::ContentFiltered(marker.to_string()),
+            ModelError::ContextLengthExceeded {
+                max_tokens: 10,
+                requested_tokens: 11,
+            },
+            ModelError::Configuration(marker.to_string()),
+            ModelError::Network(marker.to_string()),
+            ModelError::Other(anyhow::anyhow!(marker)),
+        ];
+        for error in errors {
+            let display = error.to_string();
+            let debug = format!("{error:?}");
+            assert!(!display.contains(marker), "display leaked: {display}");
+            assert!(!debug.contains(marker), "debug leaked: {debug}");
+            assert!(std::error::Error::source(&error).is_none());
+        }
 
-        let err = ModelError::http(404, "Not found");
-        assert!(err.to_string().contains("404"));
+        assert!(ModelError::http(404, marker).to_string().contains("404"));
     }
 
     #[tokio::test]

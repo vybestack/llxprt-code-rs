@@ -134,6 +134,23 @@ def open_installed(directory_fd: int, name: str) -> int:
 ACTIVE_VERIFIER: subprocess.Popen[bytes] | None = None
 ACTIVE_VERIFIER_CANCELLED = False
 VERIFIER_TERMINATE_SECONDS = 1.0
+VERIFIER_POLL_SECONDS = 0.01
+DEFAULT_VERIFIER_TIMEOUT_SECONDS = 30 * 60
+MAX_VERIFIER_TIMEOUT_SECONDS = 24 * 60 * 60
+
+
+def verifier_timeout_seconds() -> float:
+    """Read a finite verifier deadline without carrying an invalid value into process startup."""
+    raw = os.environ.get(
+        "LLXPRT_SOURCE_VERIFY_TIMEOUT_SECONDS", str(DEFAULT_VERIFIER_TIMEOUT_SECONDS)
+    )
+    try:
+        timeout = float(raw)
+    except ValueError as error:
+        raise RuntimeError("source-bundle verifier timeout is invalid") from error
+    if not 0.1 <= timeout <= MAX_VERIFIER_TIMEOUT_SECONDS:
+        raise RuntimeError("source-bundle verifier timeout is outside its allowed range")
+    return timeout
 
 
 def terminate_verifier_group(
@@ -174,19 +191,38 @@ def verifier_signal(signum: int, _frame: object) -> None:
 def run_verifier(command: list[str], environment: dict[str, str], source_fd: int) -> int:
     """Run verification in an owned process group and remove every surviving descendant."""
     global ACTIVE_VERIFIER, ACTIVE_VERIFIER_CANCELLED
-    process = subprocess.Popen(
-        command,
-        env=environment,
-        pass_fds=(source_fd,),
-        start_new_session=True,
-    )
+    timeout = verifier_timeout_seconds()
+    handled_signals = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    try:
+        process = subprocess.Popen(
+            command,
+            env=environment,
+            pass_fds=(source_fd,),
+            start_new_session=True,
+        )
+    except BaseException:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        raise
     ACTIVE_VERIFIER = process
     ACTIVE_VERIFIER_CANCELLED = False
     reaped = False
     try:
+        # A pending cancellation is delivered only after ownership is recorded and this cleanup
+        # region is active, closing the spawn-to-registration leak window.
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         # Observe completion without reaping the group leader. Keeping its PID reserved prevents
         # process-group reuse until every descendant has been terminated.
-        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+        deadline = time.monotonic() + timeout
+        while True:
+            info = os.waitid(
+                os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG
+            )
+            if info is not None:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("source-bundle verifier timed out")
+            time.sleep(VERIFIER_POLL_SECONDS)
         result = terminate_verifier_group(process, ACTIVE_VERIFIER_CANCELLED)
         reaped = True
         return result

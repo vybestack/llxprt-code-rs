@@ -83,7 +83,7 @@ pub struct ToolCallRecord {
 /// rendering for `Debug`/`Display`/errors goes through the redacted
 /// `scheme://host:port` form, which never carries userinfo, query, fragment, or the
 /// path.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RedactedUrl {
     /// Full normalized URL, used only for transport and validation, never rendered.
     full: String,
@@ -98,9 +98,16 @@ impl std::fmt::Debug for RedactedUrl {
 }
 
 impl RedactedUrl {
-    /// Parse the raw value (accepting any syntactically valid absolute URL). The full value
-    /// is preserved for the transport; only the redacted form is ever rendered.
-    pub fn parse(raw: &str) -> RedactedUrl {
+    /// Parse and validate an endpoint URL. It must be absolute HTTP(S), have a host, and carry
+    /// no userinfo, query, or fragment. Errors never include the supplied value.
+    pub fn parse(raw: &str) -> Result<RedactedUrl, String> {
+        parse_url(raw)
+    }
+
+    /// Construct the redacted transport value before validation. This remains crate-private so
+    /// public callers cannot create an invalid endpoint value; model construction still validates
+    /// it again at the transport boundary.
+    pub(crate) fn from_unvalidated(raw: &str) -> RedactedUrl {
         let trimmed = raw.trim();
         RedactedUrl {
             display: crate::redact::redact_url(trimmed),
@@ -115,7 +122,7 @@ impl RedactedUrl {
     }
 
     /// The full URL (with its path prefix) for the transport only. Never render this.
-    pub fn full(&self) -> &str {
+    pub(crate) fn full(&self) -> &str {
         &self.full
     }
 }
@@ -123,18 +130,6 @@ impl RedactedUrl {
 impl std::fmt::Display for RedactedUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display)
-    }
-}
-
-/// A safely-rendered URL (or an unclassified value) for errors and `Debug`. Only a
-/// `https://` absolute URL with a host and no userinfo/query/fragment is ever shown
-/// verbatim; everything else collapses to a scheme/host/port form.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SafeUrl(pub String);
-
-impl std::fmt::Display for SafeUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 
@@ -165,7 +160,7 @@ pub(crate) fn parse_url(raw: &str) -> Result<RedactedUrl, String> {
     if u.host_str().is_none() || u.host_str().unwrap_or("").is_empty() {
         return Err("URL must have a host".to_string());
     }
-    Ok(RedactedUrl::parse(trimmed))
+    Ok(RedactedUrl::from_unvalidated(trimmed))
 }
 
 /// Transport + request settings from a profile's `ephemeralSettings`.
@@ -815,6 +810,23 @@ mod tests {
                 .as_deref(),
             Some("https://api.example.com/v1")
         );
+    }
+
+    #[test]
+    fn public_redacted_url_constructor_enforces_endpoint_policy() {
+        let secret = "constructor-secret-marker";
+        for raw in [
+            "ftp://127.0.0.1/x".to_string(),
+            format!("https://alice:{secret}@api.example.com/v1"),
+            format!("https://api.example.com/v1?token={secret}"),
+            format!("https://api.example.com/v1#{secret}"),
+        ] {
+            let err = RedactedUrl::parse(&raw).expect_err("unsafe public URL must reject");
+            assert!(!err.contains(secret));
+            assert!(!format!("{err:?}").contains(secret));
+        }
+        let valid = RedactedUrl::parse("https://api.example.com/v1").unwrap();
+        assert_eq!(valid.as_display(), "https://api.example.com");
     }
 
     #[test]

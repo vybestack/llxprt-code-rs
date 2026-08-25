@@ -2038,6 +2038,25 @@ index 5f443ec..7556957 100644
      fn create_mock_model() -> MockModel {
          MockModel::new("test-model")
      }
+diff --git a/vendor/serdes-ai-agent/src/errors.rs b/vendor/serdes-ai-agent/src/errors.rs
+index 5d20bf9..a504fde 100644
+--- a/vendor/serdes-ai-agent/src/errors.rs
++++ b/vendor/serdes-ai-agent/src/errors.rs
+@@ -300,6 +300,14 @@ mod tests {
+         assert!(err.to_string().contains("tool call"));
+     }
+ 
++    #[test]
++    fn model_wrapper_formatting_does_not_restore_hidden_details() {
++        let marker = "provider-secret-marker";
++        let error = AgentRunError::from(ModelError::http(500, marker));
++        assert!(!error.to_string().contains(marker));
++        assert!(!format!("{error:?}").contains(marker));
++    }
++
+     #[test]
+     fn test_output_validation_error() {
+         let err = OutputValidationError::failed("invalid value");
 diff --git a/vendor/serdes-ai-agent/src/run.rs b/vendor/serdes-ai-agent/src/run.rs
 index e07f96d..f69f02d 100644
 --- a/vendor/serdes-ai-agent/src/run.rs
@@ -9114,24 +9133,164 @@ index ed106b6..4030900 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..7730dfb 100644
+index 58b6fc1..ed83d1c 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
-@@ -46,6 +46,13 @@ pub enum ModelError {
-     #[error("Invalid response: {0}")]
-     InvalidResponse(String),
+@@ -2,13 +2,10 @@
  
+ use std::collections::HashMap;
+ use std::time::Duration;
+-use thiserror::Error;
+-
+-/// Model-related errors.
+-#[derive(Debug, Error)]
++/// Model-related errors. External text remains available in typed fields but is never rendered
++/// by the standard public formatting contracts.
+ pub enum ModelError {
+     /// HTTP error from the API.
+-    #[error("HTTP error: {status} - {body}")]
+     Http {
+         /// HTTP status code.
+         status: u16,
+@@ -19,7 +16,6 @@ pub enum ModelError {
+     },
+ 
+     /// API-level error.
+-    #[error("API error: {message}")]
+     Api {
+         /// Error message.
+         message: String,
+@@ -28,68 +24,102 @@ pub enum ModelError {
+     },
+ 
+     /// Request timeout.
+-    #[error("Request timeout after {0:?}")]
+     Timeout(Duration),
+ 
+     /// Rate limited by the API.
+-    #[error("Rate limited, retry after {retry_after:?}")]
+     RateLimited {
+         /// Suggested retry delay.
+         retry_after: Option<Duration>,
+     },
+ 
+     /// Authentication failed.
+-    #[error("Authentication failed: {0}")]
+     Authentication(String),
+-
+     /// Invalid response from the API.
+-    #[error("Invalid response: {0}")]
+     InvalidResponse(String),
+-
 +    /// Provider response exceeded the configured byte limit.
-+    #[error("Provider response exceeded the {limit}-byte limit")]
 +    ResponseTooLarge {
 +        /// Maximum accepted response bytes.
 +        limit: usize,
 +    },
-+
      /// Model not found.
-     #[error("Model not found: {0}")]
+-    #[error("Model not found: {0}")]
      NotFound(String),
-@@ -202,15 +209,15 @@ impl From<reqwest::Error> for ModelError {
+-
+     /// Feature not supported by the model.
+-    #[error("Feature not supported: {0}")]
+     NotSupported(String),
+-
+     /// JSON serialization/deserialization error.
+-    #[error("Serialization error: {0}")]
+-    Serialization(#[from] serde_json::Error),
+-
++    Serialization(serde_json::Error),
+     /// Request cancelled.
+-    #[error("Request cancelled")]
+     Cancelled,
+-
+     /// Connection error.
+-    #[error("Connection error: {0}")]
+     Connection(String),
+-
+     /// Content filter triggered.
+-    #[error("Content filtered: {0}")]
+     ContentFiltered(String),
+-
+     /// Context length exceeded.
+-    #[error("Context length exceeded: {max_tokens} tokens max, got {requested_tokens}")]
+     ContextLengthExceeded {
+         /// Maximum allowed tokens.
+         max_tokens: u64,
+         /// Requested tokens.
+         requested_tokens: u64,
+     },
+-
+     /// Configuration error.
+-    #[error("Configuration error: {0}")]
+     Configuration(String),
+-
+     /// Network error.
+-    #[error("Network error: {0}")]
+     Network(String),
+-
+     /// Other error.
+-    #[error(transparent)]
+-    Other(#[from] anyhow::Error),
++    Other(anyhow::Error),
++}
++
++impl std::fmt::Display for ModelError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
++            Self::Api { .. } => f.write_str("Model API error"),
++            Self::Timeout(duration) => write!(f, "Model request timed out after {duration:?}"),
++            Self::RateLimited { retry_after } => {
++                write!(f, "Model request rate limited (retry after {retry_after:?})")
++            }
++            Self::Authentication(_) => f.write_str("Model authentication failed"),
++            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
++            Self::ResponseTooLarge { limit } => {
++                write!(f, "Provider response exceeded the {limit}-byte limit")
++            }
++            Self::NotFound(_) => f.write_str("Model was not found"),
++            Self::NotSupported(_) => f.write_str("Model feature is not supported"),
++            Self::Serialization(_) => f.write_str("Model serialization failed"),
++            Self::Cancelled => f.write_str("Model request was cancelled"),
++            Self::Connection(_) => f.write_str("Model connection failed"),
++            Self::ContentFiltered(_) => f.write_str("Model content was filtered"),
++            Self::ContextLengthExceeded {
++                max_tokens,
++                requested_tokens,
++            } => write!(
++                f,
++                "Model context length exceeded ({max_tokens} tokens maximum, {requested_tokens} requested)"
++            ),
++            Self::Configuration(_) => f.write_str("Model configuration is invalid"),
++            Self::Network(_) => f.write_str("Model network request failed"),
++            Self::Other(_) => f.write_str("Model operation failed"),
++        }
++    }
++}
++
++impl std::fmt::Debug for ModelError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "ModelError({self})")
++    }
++}
++
++impl std::error::Error for ModelError {}
++
++impl From<serde_json::Error> for ModelError {
++    fn from(error: serde_json::Error) -> Self {
++        Self::Serialization(error)
++    }
++}
++
++impl From<anyhow::Error> for ModelError {
++    fn from(error: anyhow::Error) -> Self {
++        Self::Other(error)
++    }
+ }
+ 
+ impl ModelError {
+@@ -202,15 +232,15 @@ impl From<reqwest::Error> for ModelError {
          if err.is_timeout() {
              ModelError::Timeout(Duration::from_secs(30)) // Default timeout
          } else if err.is_connect() {
@@ -9150,11 +9309,61 @@ index 58b6fc1..7730dfb 100644
          }
      }
  }
-@@ -256,4 +263,25 @@ mod tests {
-         let err = ModelError::http(404, "Not found");
-         assert!(err.to_string().contains("404"));
+@@ -249,11 +279,70 @@ mod tests {
      }
+ 
+     #[test]
+-    fn test_error_display() {
+-        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
+-        assert!(err.to_string().contains("Something went wrong"));
++    fn public_formatting_hides_external_text_for_every_variant() {
++        let marker = "provider-secret-marker";
++        let mut headers = HashMap::new();
++        headers.insert(marker.to_string(), marker.to_string());
++        let errors = vec![
++            ModelError::Http {
++                status: 503,
++                body: marker.to_string(),
++                headers,
++            },
++            ModelError::Api {
++                message: marker.to_string(),
++                code: Some(marker.to_string()),
++            },
++            ModelError::Timeout(Duration::from_secs(7)),
++            ModelError::RateLimited {
++                retry_after: Some(Duration::from_secs(9)),
++            },
++            ModelError::Authentication(marker.to_string()),
++            ModelError::InvalidResponse(marker.to_string()),
++            ModelError::ResponseTooLarge { limit: 123 },
++            ModelError::NotFound(marker.to_string()),
++            ModelError::NotSupported(marker.to_string()),
++            ModelError::Serialization(serde_json::from_str::<serde_json::Value>("{").unwrap_err()),
++            ModelError::Cancelled,
++            ModelError::Connection(marker.to_string()),
++            ModelError::ContentFiltered(marker.to_string()),
++            ModelError::ContextLengthExceeded {
++                max_tokens: 10,
++                requested_tokens: 11,
++            },
++            ModelError::Configuration(marker.to_string()),
++            ModelError::Network(marker.to_string()),
++            ModelError::Other(anyhow::anyhow!(marker)),
++        ];
++        for error in errors {
++            let display = error.to_string();
++            let debug = format!("{error:?}");
++            assert!(!display.contains(marker), "display leaked: {display}");
++            assert!(!debug.contains(marker), "debug leaked: {debug}");
++            assert!(std::error::Error::source(&error).is_none());
++        }
 +
++        assert!(ModelError::http(404, marker).to_string().contains("404"));
++    }
+ 
+-        let err = ModelError::http(404, "Not found");
+-        assert!(err.to_string().contains("404"));
 +    #[tokio::test]
 +    async fn reqwest_errors_do_not_disclose_url_or_query_secrets() {
 +        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -9174,8 +9383,28 @@ index 58b6fc1..7730dfb 100644
 +        assert!(!diagnostic.contains(marker));
 +        assert!(!diagnostic.contains("/private"));
 +        assert!(!diagnostic.contains(&address.to_string()));
-+    }
+     }
  }
+diff --git a/vendor/serdes-ai-models/src/fallback.rs b/vendor/serdes-ai-models/src/fallback.rs
+index 3e91b26..4f15953 100644
+--- a/vendor/serdes-ai-models/src/fallback.rs
++++ b/vendor/serdes-ai-models/src/fallback.rs
+@@ -616,8 +616,13 @@ mod tests {
+ 
+         assert!(result.is_err());
+         let err = result.unwrap_err();
+-        assert!(matches!(err, ModelError::Configuration(_)));
+-        assert!(err.to_string().contains("No models in fallback chain"));
++        match &err {
++            ModelError::Configuration(detail) => {
++                assert!(detail.contains("No models in fallback chain"));
++            }
++            _ => panic!("expected Configuration error"),
++        }
++        assert_eq!(err.to_string(), "Model configuration is invalid");
+     }
+ 
+     #[tokio::test]
 diff --git a/vendor/serdes-ai-models/src/google/model.rs b/vendor/serdes-ai-models/src/google/model.rs
 index e93c5c0..21ff6c6 100644
 --- a/vendor/serdes-ai-models/src/google/model.rs
@@ -9792,7 +10021,7 @@ index 2807447..772496a 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..02e5d02 100644
+index 8dd0e9e..55ab61a 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -10031,7 +10260,7 @@ index 8dd0e9e..02e5d02 100644
          ))),
      }
  }
-@@ -533,13 +541,43 @@ mod tests {
+@@ -533,13 +541,51 @@ mod tests {
          let result = build_model_with_config("unknown", "model", None, None, None);
          assert!(result.is_err());
      }
@@ -10046,9 +10275,13 @@ index 8dd0e9e..02e5d02 100644
 +            Ok(_) => panic!("OpenAI custom clients must be rejected"),
 +            Err(error) => error,
 +        };
-+        assert!(error
-+            .to_string()
-+            .contains("custom HTTP clients are unsupported for provider models"));
++        match &error {
++            ModelError::Configuration(detail) => {
++                assert!(detail.contains("custom HTTP clients are unsupported for provider models"))
++            }
++            _ => panic!("expected Configuration error"),
++        }
++        assert_eq!(error.to_string(), "Model configuration is invalid");
 +    }
 +
 +    #[cfg(feature = "groq")]
@@ -10061,9 +10294,13 @@ index 8dd0e9e..02e5d02 100644
 +            Ok(_) => panic!("Groq custom clients must be rejected"),
 +            Err(error) => error,
 +        };
-+        assert!(error
-+            .to_string()
-+            .contains("custom HTTP clients are unsupported for provider models"));
++        match &error {
++            ModelError::Configuration(detail) => {
++                assert!(detail.contains("custom HTTP clients are unsupported for provider models"))
++            }
++            _ => panic!("expected Configuration error"),
++        }
++        assert_eq!(error.to_string(), "Model configuration is invalid");
 +    }
  }
  
@@ -10076,7 +10313,7 @@ index 8dd0e9e..02e5d02 100644
  pub struct ExtendedModelConfig {
      /// API key (overrides environment variable)
      pub api_key: Option<String>,
-@@ -557,6 +595,21 @@ pub struct ExtendedModelConfig {
+@@ -557,6 +603,21 @@ pub struct ExtendedModelConfig {
      pub reasoning_effort: Option<String>,
  }
  
@@ -10098,7 +10335,7 @@ index 8dd0e9e..02e5d02 100644
  impl ExtendedModelConfig {
      /// Create a new empty config
      pub fn new() -> Self {
-@@ -628,8 +681,11 @@ pub fn build_model_extended(
+@@ -628,8 +689,11 @@ pub fn build_model_extended(
      model_name: &str,
      config: ExtendedModelConfig,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -10112,7 +10349,7 @@ index 8dd0e9e..02e5d02 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -654,13 +710,13 @@ pub fn build_model_extended(
+@@ -654,13 +718,13 @@ pub fn build_model_extended(
  
                  // TODO: Add reasoning_effort support when available in OpenAIChatModel
  
@@ -10132,7 +10369,7 @@ index 8dd0e9e..02e5d02 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -698,13 +754,7 @@ pub fn build_model_extended(
+@@ -698,13 +762,7 @@ pub fn build_model_extended(
                      model
                  };
  
@@ -10147,7 +10384,7 @@ index 8dd0e9e..02e5d02 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -716,19 +766,18 @@ pub fn build_model_extended(
+@@ -716,19 +774,18 @@ pub fn build_model_extended(
          }
          #[cfg(feature = "groq")]
          "groq" => {
@@ -10173,7 +10410,7 @@ index 8dd0e9e..02e5d02 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -750,13 +799,7 @@ pub fn build_model_extended(
+@@ -750,13 +807,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10188,7 +10425,7 @@ index 8dd0e9e..02e5d02 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -768,13 +811,7 @@ pub fn build_model_extended(
+@@ -768,13 +819,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10203,7 +10440,7 @@ index 8dd0e9e..02e5d02 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +833,75 @@ pub fn build_model_extended(
+@@ -796,17 +841,75 @@ pub fn build_model_extended(
                  model
              };
  
@@ -10360,7 +10597,7 @@ index 994069a..a959767 100644
          self.parse_response(chat_response)
      }
 diff --git a/vendor/serdes-ai-models/src/mock.rs b/vendor/serdes-ai-models/src/mock.rs
-index e7d0aca..d04167e 100644
+index e7d0aca..6334242 100644
 --- a/vendor/serdes-ai-models/src/mock.rs
 +++ b/vendor/serdes-ai-models/src/mock.rs
 @@ -369,7 +369,7 @@ impl FunctionModel {
@@ -10390,7 +10627,37 @@ index e7d0aca..d04167e 100644
          assert!(debug_str.contains("FunctionModel"));
          assert!(debug_str.contains("has_function: true"));
      }
-@@ -699,7 +699,7 @@ mod tests {
+@@ -670,7 +670,13 @@ mod tests {
+         assert!(result.is_err());
+ 
+         let err = result.unwrap_err();
+-        assert!(err.to_string().contains("no request function defined"));
++        match &err {
++            ModelError::Other(detail) => {
++                assert!(detail.to_string().contains("no request function defined"));
++            }
++            _ => panic!("expected Other error"),
++        }
++        assert_eq!(err.to_string(), "Model operation failed");
+     }
+ 
+     #[tokio::test]
+@@ -684,7 +690,13 @@ mod tests {
+         let result = model.request_stream(&messages, &settings, &params).await;
+         match result {
+             Err(err) => {
+-                assert!(err.to_string().contains("no stream function defined"));
++                match &err {
++                    ModelError::Other(detail) => {
++                        assert!(detail.to_string().contains("no stream function defined"));
++                    }
++                    _ => panic!("expected Other error"),
++                }
++                assert_eq!(err.to_string(), "Model operation failed");
+             }
+             Ok(_) => panic!("Expected error for missing stream function"),
+         }
+@@ -699,7 +711,7 @@ mod tests {
              if total_user_prompts > 2 {
                  ModelResponse::text("That's a lot of messages!")
              } else {
@@ -11138,10 +11405,10 @@ index 5a4761d..2a6be38 100644
  
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..0608dd7
+index 0000000..343b0fe
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,437 @@
+@@ -0,0 +1,434 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
 +use crate::error::{ModelError, ModelResult};
@@ -11452,10 +11719,7 @@ index 0000000..0608dd7
 +            ModelError::RateLimited { retry_after: Some(delay) } if delay == Duration::from_secs(3)
 +        ));
 +        let diagnostic = status_error(500, None).to_string();
-+        assert_eq!(
-+            diagnostic,
-+            "HTTP error: 500 - provider returned an error response"
-+        );
++        assert_eq!(diagnostic, "Model HTTP error (status 500)");
 +    }
 +
 +    #[tokio::test]
@@ -30391,7 +30655,7 @@ index 16cd238..28d8921 100644
  ## Part of SerdesAI
  
 diff --git a/vendor/serdes-ai/src/direct.rs b/vendor/serdes-ai/src/direct.rs
-index 12ab579..e41eec1 100644
+index 12ab579..1515e0d 100644
 --- a/vendor/serdes-ai/src/direct.rs
 +++ b/vendor/serdes-ai/src/direct.rs
 @@ -437,7 +437,6 @@ pub fn model_request_stream_sync(
@@ -30447,6 +30711,20 @@ index 12ab579..e41eec1 100644
                      .map_err(DirectError::ModelError)?;
                  Ok(Arc::new(model))
              }
+@@ -505,6 +498,13 @@ fn parse_model_name(name: &str) -> Result<BoxedModel, DirectError> {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    #[test]
++    fn model_wrapper_formatting_does_not_restore_hidden_details() {
++        let marker = "provider-secret-marker";
++        let error = DirectError::from(ModelError::http(500, marker));
++        assert!(!error.to_string().contains(marker));
++        assert!(!format!("{error:?}").contains(marker));
++    }
+ 
+     #[test]
+     fn test_model_spec_from_str() {
 diff --git a/vendor/serdes-ai/src/lib.rs b/vendor/serdes-ai/src/lib.rs
 index 8c9cc3e..ee4f929 100644
 --- a/vendor/serdes-ai/src/lib.rs

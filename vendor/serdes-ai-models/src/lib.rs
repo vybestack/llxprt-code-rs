@@ -552,9 +552,13 @@ mod tests {
             Ok(_) => panic!("OpenAI custom clients must be rejected"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("custom HTTP clients are unsupported for provider models"));
+        match &error {
+            ModelError::Configuration(detail) => {
+                assert!(detail.contains("custom HTTP clients are unsupported for provider models"))
+            }
+            _ => panic!("expected Configuration error"),
+        }
+        assert_eq!(error.to_string(), "Model configuration is invalid");
     }
 
     #[cfg(feature = "groq")]
@@ -567,9 +571,13 @@ mod tests {
             Ok(_) => panic!("Groq custom clients must be rejected"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("custom HTTP clients are unsupported for provider models"));
+        match &error {
+            ModelError::Configuration(detail) => {
+                assert!(detail.contains("custom HTTP clients are unsupported for provider models"))
+            }
+            _ => panic!("expected Configuration error"),
+        }
+        assert_eq!(error.to_string(), "Model configuration is invalid");
     }
 }
 

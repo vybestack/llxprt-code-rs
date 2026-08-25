@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "0.2.6",
+  "crates_io_index": "https://github.com/rust-lang/crates.io-index",
+  "crates": {
+    "serdes-ai": "62dcf7d035a43aab94b8fed2925faa6f845d49de27066b2c9b07e339b3048a85",
+    "serdes-ai-agent": "95fd65311bcd469934e9cf5b4d10b6296fd9bde944aa2e232b0fedd37cca4aee",
+    "serdes-ai-core": "8c75900724c512454172492ffdd9ae24f8ccc5569e812c258a79d4151cd8934c",
+    "serdes-ai-macros": "8bd2f1e7f4f1f9a0a9f8b31ea0bb24b13271dd46817c8b656821701d1e1d4a40",
+    "serdes-ai-models": "cbca6da3265b8d1fce6255c4aee81b02ac9d2dba6e93829e09eaf1bc29d2886e",
+    "serdes-ai-output": "7c73a180c99d702c59282057d6f993332c8150834017110051f56e272133c54f",
+    "serdes-ai-providers": "8d857c9fc39b9c370eb7321fecb253c07a7892a3646c7455968a123da6df5a1d",
+    "serdes-ai-retries": "ebf2449d534d7ce2df7d743e61de516df945384aa50024965246ef5dfc638b93",
+    "serdes-ai-streaming": "159b5dfda85e1a886793e0962c6d40581044bb3ca008665b53f75ecb62eb3f74",
+    "serdes-ai-tools": "ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777",
+    "serdes-ai-toolsets": "85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588"
+  },
+  "download_url_template": "https://crates.io/api/v1/crates/{crate}/0.2.6/download",
+  "upstream": {
+    "repository": "https://github.com/janfeddersen-wq/serdesAI",
+    "commit": "20fc3077e77a38ccc6d0ab5763098e44138630b5",
+    "tree": "b03d19344e22181b6fc4bafe22c6cae344994519",
+    "commit_api": "https://api.github.com/repos/janfeddersen-wq/serdesAI/git/commits/20fc3077e77a38ccc6d0ab5763098e44138630b5",
+    "commit_signature_verified": false,
+    "license_blob": "fe61a2b80c84e4ff08965e9e952b02ee2be6a1f5",
+    "license_sha256": "6854fea6c63a116a0cb7754cd9a6fea9c0578a64c50e850d87bef14579c6abf6",
+    "license_url": "https://raw.githubusercontent.com/janfeddersen-wq/serdesAI/20fc3077e77a38ccc6d0ab5763098e44138630b5/LICENSE"
+  }
+}

@@ -58,7 +58,12 @@ if [[ "$#" -gt 1 ]]; then
   echo "usage: $0 [BUNDLE.tar.gz]" >&2
   exit 2
 fi
-bundle="${1:-dist/llxprt-code-rs-0.1.0-source.tar.gz}"
+if [[ "$#" -eq 1 ]]; then
+  bundle="$1"
+else
+  archive_name=$(python3 "$root/scripts/release-version.py" --value archive)
+  bundle="dist/$archive_name"
+fi
 case "$bundle" in /*) ;; *) bundle="$root/$bundle" ;; esac
 if [[ -z "${LLXPRT_BUNDLE_SOURCE_FD:-}" ]]; then
   [[ -f "$bundle" ]] || { echo "bundle not found: $bundle" >&2; exit 1; }

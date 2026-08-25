@@ -498,6 +498,13 @@ fn parse_model_name(name: &str) -> Result<BoxedModel, DirectError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn model_wrapper_formatting_does_not_restore_hidden_details() {
+        let marker = "provider-secret-marker";
+        let error = DirectError::from(ModelError::http(500, marker));
+        assert!(!error.to_string().contains(marker));
+        assert!(!format!("{error:?}").contains(marker));
+    }
 
     #[test]
     fn test_model_spec_from_str() {

@@ -447,13 +447,13 @@ mod tests {
     fn plaintext_endpoint_is_collapsed() {
         // The dsflash base URL is a remote plaintext HTTP address; only the
         // scheme/host/port survive.
-        let u = crate::profile::RedactedUrl::parse("http://23.183.40.76:8080/v1");
+        let u = crate::profile::RedactedUrl::from_unvalidated("http://23.183.40.76:8080/v1");
         assert_eq!(u.as_display(), "http://23.183.40.76:8080");
     }
 
     #[test]
     fn query_and_fragment_never_survive() {
-        let s = crate::profile::RedactedUrl::parse(
+        let s = crate::profile::RedactedUrl::from_unvalidated(
             "https://api.example.com/v1?api-key=ghp_secret#frag",
         );
         assert_eq!(s.as_display(), "https://api.example.com");
@@ -473,7 +473,7 @@ mod tests {
         ] {
             let rendered = redact_url(raw);
             assert!(!rendered.contains("secret"), "{rendered}");
-            let disp = crate::profile::RedactedUrl::parse(raw)
+            let disp = crate::profile::RedactedUrl::from_unvalidated(raw)
                 .as_display()
                 .to_string();
             assert!(!disp.contains("secret"), "{disp}");
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn endpoint_userinfo_path_query_fragment_all_redacted() {
         let raw = "https://bob:hunter2@api.example.com:8443/v1/chat?hint=1&token=abc#tail";
-        let r = crate::profile::RedactedUrl::parse(raw);
+        let r = crate::profile::RedactedUrl::from_unvalidated(raw);
         assert_eq!(r.as_display(), "https://api.example.com:8443");
         let s = redact_url(raw);
         assert_eq!(s, "https://api.example.com:8443");
@@ -637,7 +637,7 @@ name = "x"
 
     #[test]
     fn redacted_url_preserves_path_prefix_for_transport_but_not_display() {
-        let u = crate::profile::RedactedUrl::parse("http://127.0.0.1:8000/inference/v1");
+        let u = crate::profile::RedactedUrl::from_unvalidated("http://127.0.0.1:8000/inference/v1");
         assert_eq!(u.full(), "http://127.0.0.1:8000/inference/v1");
         assert!(!u.as_display().contains("inference"), "{}", u.as_display());
         assert_eq!(u.as_display(), "http://127.0.0.1:8000");

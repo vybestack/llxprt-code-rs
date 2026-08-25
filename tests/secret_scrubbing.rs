@@ -199,8 +199,11 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
     assert_marker_absent_bytes(&out.stdout, marker_b.as_bytes(), "raw stdout");
     assert_marker_absent_bytes(&out.stderr, marker_a.as_bytes(), "raw stderr");
     assert_marker_absent_bytes(&out.stderr, marker_b.as_bytes(), "raw stderr");
-    for field in ["error.message", "error.code"] {
-        if let Some(s) = parsed[field].as_str() {
+    for (field, value) in [
+        ("error.message", &parsed["error"]["message"]),
+        ("error.code", &parsed["error"]["code"]),
+    ] {
+        if let Some(s) = value.as_str() {
             assert_marker_absent_str(s, marker_a.as_bytes(), field);
             assert_marker_absent_str(s, marker_b.as_bytes(), field);
         }
@@ -231,5 +234,6 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
     let persisted = &slots.last().expect("a persisted session slot").1;
     assert!(!contains_bytes(persisted, b"provider-reflected-secret"));
     let stdout_str = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout_str.contains("provider returned an error response"));
+    assert!(stdout_str.contains("Model HTTP error (status 400)"));
+    assert!(!stdout_str.contains("provider returned an error response"));
 }

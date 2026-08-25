@@ -616,8 +616,13 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, ModelError::Configuration(_)));
-        assert!(err.to_string().contains("No models in fallback chain"));
+        match &err {
+            ModelError::Configuration(detail) => {
+                assert!(detail.contains("No models in fallback chain"));
+            }
+            _ => panic!("expected Configuration error"),
+        }
+        assert_eq!(err.to_string(), "Model configuration is invalid");
     }
 
     #[tokio::test]

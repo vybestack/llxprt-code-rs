@@ -375,7 +375,11 @@ impl ModelConfig {
 
         let api_key = resolve_api_key(profile, from_file)?;
 
-        let base_url = profile.ephemeral.base_url.clone().unwrap_or_default();
+        let base_url = profile
+            .ephemeral
+            .base_url
+            .clone()
+            .ok_or(ModelError::NoBaseUrl)?;
         if crate::redact::url_has_rejected_parts(base_url.full()) {
             return Err(ModelError::NoBaseUrl);
         }
@@ -407,7 +411,7 @@ impl ModelConfig {
         Ok(ModelConfig {
             timeout,
             model: profile.model.clone(),
-            base_url: profile.ephemeral.base_url.clone().unwrap_or_default(),
+            base_url,
             api_key,
             keyfile_path,
             max_output_tokens: profile.ephemeral.max_output_tokens,
@@ -556,7 +560,7 @@ mod tests {
             "https://api.example.com/chat/completions",
             "https://api.example.com/v1/chat/completions",
         ] {
-            let url = crate::profile::RedactedUrl::parse(raw);
+            let url = crate::profile::RedactedUrl::from_unvalidated(raw);
             let cfg = crate::model::ModelConfig {
                 model: "m".into(),
                 base_url: url.clone(),
@@ -581,7 +585,7 @@ mod tests {
             "https://api.example.com/v1#frag",
             "https://api.example.com/inference/v1/chat/completions",
         ] {
-            let url = crate::profile::RedactedUrl::parse(raw);
+            let url = crate::profile::RedactedUrl::from_unvalidated(raw);
             let cfg = crate::model::ModelConfig {
                 model: "m".into(),
                 base_url: url.clone(),
@@ -647,7 +651,7 @@ mod tests {
             let bp = base_profile();
             let p = crate::profile::Profile {
                 ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::parse(p)),
+                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(p)),
                     auth_key: Some("k".into()),
                     ..Default::default()
                 },
@@ -658,7 +662,7 @@ mod tests {
         assert!(ModelConfig::from_profile(
             &crate::profile::Profile {
                 ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::parse(
+                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
                         "http://23.183.40.76:8080/v1"
                     )),
                     auth_key: Some("k".into()),
@@ -673,7 +677,7 @@ mod tests {
         assert!(ModelConfig::from_profile(
             &crate::profile::Profile {
                 ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::parse(
+                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
                         "http://23.183.40.76:8080/v1"
                     )),
                     auth_key: Some("k".into()),
@@ -743,7 +747,9 @@ mod tests {
         use crate::profile::ModelParams;
         let inner = crate::profile::Profile {
             ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::parse("http://127.0.0.1:1/v1")),
+                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
+                    "http://127.0.0.1:1/v1",
+                )),
                 auth_key: Some("k".into()),
                 ..Default::default()
             },
@@ -764,7 +770,7 @@ mod tests {
     fn debug_never_reveals_api_key() {
         let cfg = crate::model::ModelConfig {
             model: "m".into(),
-            base_url: crate::profile::RedactedUrl::parse("http://127.0.0.1:1/v1"),
+            base_url: crate::profile::RedactedUrl::from_unvalidated("http://127.0.0.1:1/v1"),
             api_key: "sk-super-secret".into(),
             keyfile_path: None,
             max_output_tokens: Some(16384),
@@ -786,7 +792,9 @@ mod tests {
         std::fs::write(&local, "sk-local\n").unwrap();
         let inner = crate::profile::Profile {
             ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::parse("http://127.0.0.1:1/v1")),
+                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
+                    "http://127.0.0.1:1/v1",
+                )),
                 auth_keyfile_orig: Some(local.display().to_string()),
                 ..Default::default()
             },
@@ -797,7 +805,9 @@ mod tests {
 
         let inner = crate::profile::Profile {
             ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::parse("http://127.0.0.1:1/v1")),
+                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
+                    "http://127.0.0.1:1/v1",
+                )),
                 auth_keyfile_orig: None,
                 ..Default::default()
             },
@@ -812,7 +822,9 @@ mod tests {
         let p = base_profile();
         let inner = crate::profile::Profile {
             ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::parse("http://127.0.0.1:1/v1")),
+                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
+                    "http://127.0.0.1:1/v1",
+                )),
                 auth_key: Some("k".into()),
                 timeout_ms: Some(900000),
                 max_output_tokens: Some(16384),

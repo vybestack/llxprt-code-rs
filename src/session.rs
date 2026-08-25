@@ -31,6 +31,10 @@ pub const MAX_SESSION_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_BRANCHES: usize = 4096;
 /// Hard cap on the number of tool entries persisted for one branch.
 pub const MAX_TOOL_ENTRIES: usize = 20_000;
+/// Maximum time spent waiting for another process or thread to release a session lock.
+const SESSION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Poll interval while waiting for a contended session lock.
+const SESSION_LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -200,6 +204,7 @@ pub enum StoreError {
     Stale,
     Busy(String),
     Lock(String),
+    LockTimeout,
     /// A state-slot update completed, but retained-directory durability was not confirmed.
     InstalledDurabilityUnknown,
 }
@@ -213,6 +218,7 @@ impl std::fmt::Display for StoreError {
             StoreError::Stale => "session state changed since reservation; retry".to_string(),
             StoreError::Busy(m) => format!("session reservation active: {m}"),
             StoreError::Lock(m) => format!("session lock: {m}"),
+            StoreError::LockTimeout => "session lock timed out; retry".to_string(),
             StoreError::InstalledDurabilityUnknown => {
                 "session state was installed but directory durability is unconfirmed".to_string()
             }
@@ -548,18 +554,41 @@ impl SessionStore {
         })
     }
 
-    /// Hold the exclusive lock (intra-process mutex + OS flock) for a critical
-    /// section. `f` must not call another locked method (no nesting, no
-    /// self-deadlock).
+    /// Hold the exclusive lock for a bounded critical section. `f` must not call another locked
+    /// method.
     fn locked<T>(&self, f: impl FnOnce() -> Result<T, StoreError>) -> Result<T, StoreError> {
-        let _g = self
-            .lock
-            .lock()
-            .map_err(|_| StoreError::Lock("lock poisoned".into()))?;
-        FileExt::lock_exclusive(&self.file).map_err(|e| StoreError::Lock(e.to_string()))?;
-        let r = f();
-        let _ = FileExt::unlock(&self.file);
-        r
+        self.locked_with_timeout(SESSION_LOCK_TIMEOUT, f)
+    }
+
+    fn locked_with_timeout<T>(
+        &self,
+        timeout: std::time::Duration,
+        f: impl FnOnce() -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let deadline = std::time::Instant::now()
+            .checked_add(timeout)
+            .ok_or(StoreError::LockTimeout)?;
+        let _thread_guard = loop {
+            match self.lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err(StoreError::Lock("lock poisoned".into()));
+                }
+                Err(std::sync::TryLockError::WouldBlock) => wait_for_session_lock(deadline)?,
+            }
+        };
+        loop {
+            match FileExt::try_lock_exclusive(&self.file) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    wait_for_session_lock(deadline)?;
+                }
+                Err(_) => return Err(StoreError::Lock("lock operation failed".into())),
+            }
+        }
+        let _file_guard = SessionFileLock(&self.file);
+        f()
     }
 
     /// Read and validate the current state under the exclusive lock. A missing state
@@ -887,6 +916,23 @@ impl SessionStore {
     /// Snapshot the current validated state (used by the CLI for cwd checks).
     pub fn snapshot(&self) -> Result<SessionState, StoreError> {
         self.locked(|| self.read())
+    }
+}
+
+fn wait_for_session_lock(deadline: std::time::Instant) -> Result<(), StoreError> {
+    let now = std::time::Instant::now();
+    if now >= deadline {
+        return Err(StoreError::LockTimeout);
+    }
+    std::thread::sleep(SESSION_LOCK_RETRY.min(deadline.duration_since(now)));
+    Ok(())
+}
+
+struct SessionFileLock<'a>(&'a std::fs::File);
+
+impl Drop for SessionFileLock<'_> {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(self.0);
     }
 }
 
