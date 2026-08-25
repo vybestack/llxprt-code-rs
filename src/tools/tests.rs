@@ -536,42 +536,57 @@ fn search_honors_configured_output_limit_at_exact_and_plus_one() {
     assert!(over_limit.len() < exact_len, "{}", over_limit.len());
 }
 
+const WORKSPACE_LOCK_CHILD_ROOT: &str = "LLXPRT_TEST_WORKSPACE_LOCK_CHILD_ROOT";
+
 #[test]
-fn cooperating_writes_wait_for_the_workspace_lock() {
+fn workspace_lock_subprocess_helper() {
+    let Some(root) = std::env::var_os(WORKSPACE_LOCK_CHILD_ROOT) else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    std::fs::write(root.join("child-ready"), b"ready").unwrap();
+    let config = cfg(&root);
+    let (ok, body) = execute_tool(
+        &root,
+        "write_file",
+        json!({"path": "locked.txt", "content": "writer"}),
+        &config,
+    );
+    assert!(ok, "{body}");
+}
+
+#[test]
+fn cooperating_processes_wait_for_the_workspace_lock() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().to_path_buf();
     let config = cfg(&root);
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    let writer_root = root.clone();
-    let writer = std::thread::spawn(move || {
-        let writer_config = cfg(&writer_root);
-        started_tx.send(()).unwrap();
-        let result = execute_tool(
-            &writer_root,
-            "write_file",
-            json!({"path": "locked.txt", "content": "writer"}),
-            &writer_config,
-        );
-        done_tx.send(result).unwrap();
-    });
-
-    with_workspace_write_lock(&config.ws, || {
-        started_rx.recv().unwrap();
+    let mut child = with_workspace_write_lock(&config.ws, || {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::tests::workspace_lock_subprocess_helper",
+                "--nocapture",
+            ])
+            .env(WORKSPACE_LOCK_CHILD_ROOT, &root)
+            .spawn()
+            .map_err(|error| format!("spawn cooperating writer: {error}"))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !root.join("child-ready").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "cooperating writer did not reach the lock"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         std::thread::sleep(Duration::from_millis(50));
         assert!(
-            matches!(
-                done_rx.try_recv(),
-                Err(std::sync::mpsc::TryRecvError::Empty)
-            ),
+            child.try_wait().unwrap().is_none(),
             "a cooperating writer completed while another workspace write lock was held"
         );
-        Ok(())
+        Ok(child)
     })
     .unwrap();
-    let (ok, body) = done_rx.recv().unwrap();
-    assert!(ok, "{body}");
-    writer.join().unwrap();
+    assert!(child.wait().unwrap().success());
     assert_eq!(
         std::fs::read_to_string(root.join("locked.txt")).unwrap(),
         "writer"
