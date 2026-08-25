@@ -36,22 +36,43 @@ fn session_entries_reject_symlinks_and_special_files_without_blocking() {
 }
 
 #[test]
+fn session_lock_helper_process() {
+    let Some(lock_path) = std::env::var_os("LLXPRT_TEST_SESSION_LOCK_PATH") else {
+        return;
+    };
+    let ready_path = std::env::var_os("LLXPRT_TEST_SESSION_LOCK_READY").unwrap();
+    let release_path = std::env::var_os("LLXPRT_TEST_SESSION_LOCK_RELEASE").unwrap();
+    let holder = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .unwrap();
+    FileExt::lock_exclusive(&holder).unwrap();
+    std::fs::write(ready_path, b"ready").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !std::path::Path::new(&release_path).exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "parent did not release the session-lock helper"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    FileExt::unlock(&holder).unwrap();
+}
+
+#[test]
 fn session_lock_timeout_does_not_execute_or_mutate_and_later_recovers() {
     let root = tempfile::tempdir().unwrap();
     let lock_path = root.path().join(".lock");
-    let holder = std::fs::OpenOptions::new()
+    let ready_path = root.path().join("lock-ready");
+    let release_path = root.path().join("lock-release");
+    let contender = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(&lock_path)
         .unwrap();
-    let contender = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .unwrap();
-    FileExt::lock_exclusive(&holder).unwrap();
     let store = SessionStore {
         session_dir: root.path().to_path_buf(),
         session_id: "lock-test".to_string(),
@@ -59,21 +80,45 @@ fn session_lock_timeout_does_not_execute_or_mutate_and_later_recovers() {
         file: contender,
         lock: Mutex::new(()),
     };
+    let mut holder = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "session::tests::session_lock_helper_process",
+            "--nocapture",
+        ])
+        .env("LLXPRT_TEST_SESSION_LOCK_PATH", &lock_path)
+        .env("LLXPRT_TEST_SESSION_LOCK_READY", &ready_path)
+        .env("LLXPRT_TEST_SESSION_LOCK_RELEASE", &release_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready_path.exists() {
+        if holder.try_wait().unwrap().is_some() || std::time::Instant::now() >= ready_deadline {
+            let _ = holder.kill();
+            let _ = holder.wait();
+            panic!("session-lock helper did not acquire the lock");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
     let executed = std::cell::Cell::new(false);
     let started = std::time::Instant::now();
-    let error = store
-        .locked_with_timeout(std::time::Duration::from_millis(30), || {
-            executed.set(true);
-            std::fs::write(root.path().join("mutated"), b"bad").unwrap();
-            Ok(())
-        })
-        .unwrap_err();
-    assert!(matches!(error, StoreError::LockTimeout));
+    let result = store.locked_with_timeout(std::time::Duration::from_millis(30), || {
+        executed.set(true);
+        std::fs::write(root.path().join("mutated"), b"bad").unwrap();
+        Ok(())
+    });
+    let elapsed = started.elapsed();
+    std::fs::write(&release_path, b"release").unwrap();
+    assert!(holder.wait().unwrap().success());
+
+    assert!(matches!(result, Err(StoreError::LockTimeout)));
     assert!(!executed.get());
     assert!(!root.path().join("mutated").exists());
-    assert!(started.elapsed() >= std::time::Duration::from_millis(30));
+    assert!(elapsed >= std::time::Duration::from_millis(30));
 
-    FileExt::unlock(&holder).unwrap();
     store
         .locked_with_timeout(std::time::Duration::from_secs(1), || {
             executed.set(true);

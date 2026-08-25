@@ -2,9 +2,9 @@
 # Black-box adversarial checks for pre-extraction source-bundle validation.
 #
 # Every crafted archive below must be REJECTED by scripts/verify-source-bundle.sh
-# before extraction and must have no outside side effect (the marker path in /tmp is
-# only written by a broken verifier that extracted a hostile member; its absence proves
-# nothing was written). The source-bundle builder must likewise refuse symlink, newline,
+# before extraction and must have no outside side effect (the marker path in the configured
+# temporary root is only written by a broken verifier that extracted a hostile member; its absence
+# proves nothing was written). The source-bundle builder must likewise refuse symlink, newline,
 # and special-file inputs.
 #
 # The malicious archives are crafted with Python 3 heredocs (tarfile is accepted as
@@ -17,8 +17,8 @@ export PYTHONDONTWRITEBYTECODE=1
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verify="$root/scripts/verify-source-bundle.sh"
 build="$root/scripts/build-source-bundle.sh"
-tmp="$(mktemp -d)"
-marker="/tmp/llxprt-bundle-verifier-outside-$$"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-verifier.XXXXXX")"
+marker="${TMPDIR:-/tmp}/llxprt-bundle-verifier-outside-$$"
 source_link="$root/tests/.bundle-verifier-link-$$"
 source_newline="$root/tests/"$'.bundle-verifier-newline\n'"$$"
 source_fifo="$root/tests/.bundle-verifier-fifo-$$"

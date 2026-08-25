@@ -73,8 +73,8 @@ fi
 manifest_rel='THIRD_PARTY_LICENSES/source-bundle.txt'
 digest_rel='THIRD_PARTY_LICENSES/source-bundle.sha256'
 
-stage="$(mktemp -d)"
-snapshot_stage="$(mktemp -d)"
+stage="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-verify.XXXXXX")"
+snapshot_stage="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-snapshot.XXXXXX")"
 provider_target=""
 cargo_home=""
 cleanup() {
@@ -282,6 +282,19 @@ fi
 python3 scripts/verify-registry-vendor.py
 cargo_home="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-cargo-home.XXXXXX")"
 export CARGO_HOME="$cargo_home"
+# The home is cache-empty, but nested grader Cargo commands run outside the extraction's
+# `.cargo/` ancestry. Give every bounded child the same absolute shipped directory source.
+python3 - "$PWD/registry-vendor" "$CARGO_HOME/config.toml" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+Path(sys.argv[2]).write_text(
+    '[source.crates-io]\nreplace-with = "vendored-sources"\n\n'
+    '[source.vendored-sources]\ndirectory = ' + json.dumps(sys.argv[1]) + '\n',
+    encoding='utf-8',
+)
+PY
 export CARGO_NET_OFFLINE=true
 export HTTP_PROXY=http://127.0.0.1:9
 export HTTPS_PROXY=http://127.0.0.1:9

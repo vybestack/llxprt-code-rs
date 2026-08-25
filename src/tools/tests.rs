@@ -610,9 +610,10 @@ fn workspace_lock_subprocess_helper() {
         return;
     }
     let config = cfg(&root);
-    let fd = config.ws.root_dir().as_raw_fd();
+    let directory = config.ws.root_dir().open_file(".").unwrap();
+    let fd = directory.as_raw_fd();
     loop {
-        // SAFETY: `fd` is the child's valid retained workspace directory descriptor.
+        // SAFETY: `fd` is the child's valid, normally opened workspace directory descriptor.
         if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             panic!("child acquired a workspace lock that the parent claims to hold");
         }
@@ -705,14 +706,17 @@ fn workspace_lock_timeout_is_typed_and_does_not_run_the_operation() {
     let d = tempfile::tempdir().unwrap();
     let first = cfg(d.path());
     let second = cfg(d.path());
-    use std::os::unix::io::AsRawFd;
-    let _held =
-        acquire_workspace_write_lock(first.ws.root_dir().as_raw_fd(), Duration::from_secs(1))
-            .unwrap();
+    let _held = acquire_workspace_write_lock(
+        first.ws.root_dir().open_file(".").unwrap(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
     let start = std::time::Instant::now();
-    let error =
-        acquire_workspace_write_lock(second.ws.root_dir().as_raw_fd(), Duration::from_millis(50))
-            .unwrap_err();
+    let error = acquire_workspace_write_lock(
+        second.ws.root_dir().open_file(".").unwrap(),
+        Duration::from_millis(50),
+    )
+    .unwrap_err();
     assert_eq!(error, WorkspaceLockError::Timeout);
     assert!(start.elapsed() < Duration::from_secs(1));
 }

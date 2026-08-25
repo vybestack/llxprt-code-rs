@@ -16,8 +16,8 @@
 //! and returns `timed_out`; joining the reader threads never blocks past a poll tick.
 //!
 //! The runner is Unix-only (macOS/Linux supported). Inherited environment is scrubbed: only
-//! `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*` and the caller's explicit additions are
-//! passed through.
+//! `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, the non-secret `CARGO_HOME`/`RUSTUP_HOME` paths,
+//! `RUSTUP_TOOLCHAIN`, and the caller's explicit additions are passed through.
 
 #[cfg(not(unix))]
 compile_error!("llxprt-code-rs is Unix-only (macOS/Linux); the process runner relies on Unix setsid/poll/process-group machinery");
@@ -334,7 +334,10 @@ fn child_exited_unreaped(pid: u32) -> std::io::Result<bool> {
     Ok(unsafe { info.si_pid() } == pid as libc::pid_t)
 }
 
-/// Scrub inherited env, allowing only PATH/HOME/TMPDIR/LANG/LC_* plus explicit entries.
+/// Scrub inherited env, allowing only PATH/HOME/TMPDIR/LANG/LC_*, the non-secret Cargo home,
+/// Rustup home, selected toolchain, and explicit entries. Preserving these values keeps nested
+/// offline Cargo commands on the caller's source configuration and installed toolchain without
+/// exposing registry credentials.
 fn scrub_env(cmd: &mut Command, add: &[(String, String)]) {
     cmd.env_clear();
     for (k, v) in std::env::vars() {
@@ -348,7 +351,10 @@ fn scrub_env(cmd: &mut Command, add: &[(String, String)]) {
 }
 
 fn allow_key(k: &str) -> bool {
-    matches!(k, "PATH" | "HOME" | "TMPDIR" | "LANG") || k.starts_with("LC_")
+    matches!(
+        k,
+        "PATH" | "HOME" | "TMPDIR" | "LANG" | "CARGO_HOME" | "RUSTUP_HOME" | "RUSTUP_TOOLCHAIN"
+    ) || k.starts_with("LC_")
 }
 
 /// Put the child in its own session/process group so its pid is the group id and a
@@ -406,6 +412,14 @@ mod tests {
             (nanos / 1_000_000_000) as u64,
             (nanos % 1_000_000_000) as u32,
         )
+    }
+
+    #[test]
+    fn environment_allowlist_keeps_toolchain_paths_but_not_registry_credentials() {
+        assert!(allow_key("CARGO_HOME"));
+        assert!(allow_key("RUSTUP_HOME"));
+        assert!(allow_key("RUSTUP_TOOLCHAIN"));
+        assert!(!allow_key("CARGO_REGISTRIES_CRATES_IO_TOKEN"));
     }
 
     #[test]

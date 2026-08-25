@@ -269,12 +269,18 @@ aes-gcm = \"0.10\"
 ",
     )
     .unwrap();
-    // Route cargo artifacts to a shared offline cache so the graded `cargo test
-    // --offline` reuses already compiled deps instead of recompiling per test.
+    // Route artifacts to a shared cache and dependencies to the shipped source closure so
+    // the graded `cargo test --offline` remains independent of the user's Cargo cache.
     std::fs::create_dir_all(ws.join(".cargo")).unwrap();
+    let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("registry-vendor");
+    let target = std::env::temp_dir().join("llxprt-rs-grader-enc-target");
     std::fs::write(
         ws.join(".cargo/config.toml"),
-        "[build]\ntarget-dir = \"/tmp/llxprt-rs-grader-enc-target\"\n",
+        format!(
+            "[build]\ntarget-dir = {target:?}\n\
+             [source.crates-io]\nreplace-with = \"vendored-sources\"\n\
+             [source.vendored-sources]\ndirectory = {registry:?}\n"
+        ),
     )
     .unwrap();
     std::fs::create_dir_all(ws.join("src")).unwrap();

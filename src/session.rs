@@ -469,7 +469,10 @@ fn write_state_slot_inner(
             "session state slot name was replaced".into(),
         ));
     }
-    sync_directory(dir.as_raw_fd()).map_err(|_| StoreError::InstalledDurabilityUnknown)?;
+    let syncable_dir = dir
+        .open_file(".")
+        .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
+    sync_directory(syncable_dir.as_raw_fd()).map_err(|_| StoreError::InstalledDurabilityUnknown)?;
     let installed = open_regular_at(dir, name, libc::O_RDONLY, 0)
         .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
     if !same_file_identity(&f, &installed)? {
@@ -494,7 +497,10 @@ fn ensure_private_subdir(parent: &openat::Dir, name: &str) -> Result<openat::Dir
         .sub_dir(name)
         .map_err(|_| StoreError::Io("open session directory safely failed".into()))?;
     use std::os::fd::AsRawFd as _;
-    fchmod(dir.as_raw_fd(), 0o700)?;
+    let permission_handle = dir
+        .open_file(".")
+        .map_err(|_| StoreError::Io("open retained session descriptor failed".into()))?;
+    fchmod(permission_handle.as_raw_fd(), 0o700)?;
     Ok(dir)
 }
 

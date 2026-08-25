@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/llxprt-upstream-evidence.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 python3 "$root/scripts/verify-upstream-evidence.py"

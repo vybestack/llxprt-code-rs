@@ -122,7 +122,7 @@ echo "== source bundle build + verify (extract -> test --offline -> build --rele
 
 if tar --version 2>/dev/null | grep -q GNU; then
   echo "== GNU tar source-bundle byte reproducibility =="
-  comparison_dir="$(mktemp -d)"
+  comparison_dir="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-comparison.XXXXXX")"
   comparison_bundle="$comparison_dir/$release_archive"
   trap 'rm -rf "$comparison_dir"' EXIT
   (umask 077; bash scripts/build-source-bundle.sh "$comparison_bundle")

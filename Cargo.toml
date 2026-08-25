@@ -66,8 +66,10 @@ syn = { version = "=2.0.119", default-features = false, features = ["parsing", "
 # direct dependency adds no new package; only the root entry in Cargo.lock changes.
 sha2 = "0.10"
 
-# `tempfile` is used only by the crate's own tests (no runtime code path).
+# These crates are used only by the crate's own tests (no runtime code path). `aes-gcm`
+# supplies the dependency closure for the dynamically constructed offline encryption fixture.
 [dev-dependencies]
+aes-gcm = "0.10"
 tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]

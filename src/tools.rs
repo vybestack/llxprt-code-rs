@@ -382,29 +382,33 @@ impl std::fmt::Display for WorkspaceLockError {
 }
 
 #[derive(Debug)]
-struct WorkspaceLockGuard(std::os::unix::io::RawFd);
+struct WorkspaceLockGuard(std::fs::File);
 
 impl Drop for WorkspaceLockGuard {
     fn drop(&mut self) {
-        // SAFETY: the retained workspace descriptor outlives this guard. Unlocking cannot
-        // violate memory safety, and an unlock failure cannot be recovered during Drop.
+        use std::os::unix::io::AsRawFd;
+
+        // SAFETY: this guard owns the open directory descriptor. Unlocking cannot violate
+        // memory safety, and an unlock failure cannot be recovered during Drop.
         unsafe {
-            libc::flock(self.0, libc::LOCK_UN);
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
         }
     }
 }
 
 fn acquire_workspace_write_lock(
-    fd: std::os::unix::io::RawFd,
+    directory: std::fs::File,
     timeout: std::time::Duration,
 ) -> Result<WorkspaceLockGuard, WorkspaceLockError> {
+    use std::os::unix::io::AsRawFd;
+
     let deadline = std::time::Instant::now()
         .checked_add(timeout)
         .ok_or(WorkspaceLockError::Timeout)?;
     loop {
-        // SAFETY: the caller passes the valid retained workspace directory descriptor.
-        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(WorkspaceLockGuard(fd));
+        // SAFETY: the guard owns this valid, normally opened directory descriptor.
+        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(WorkspaceLockGuard(directory));
         }
         let error = std::io::Error::last_os_error();
         if error.kind() != std::io::ErrorKind::Interrupted
@@ -429,11 +433,12 @@ fn with_workspace_write_lock<T>(
     cap: &WorkspaceCap,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    use std::os::unix::io::AsRawFd;
-
-    let _guard =
-        acquire_workspace_write_lock(cap.root_dir().as_raw_fd(), WORKSPACE_WRITE_LOCK_TIMEOUT)
-            .map_err(|error| error.to_string())?;
+    let directory = cap
+        .root_dir()
+        .open_file(".")
+        .map_err(|error| format!("open workspace for write lock: {error}"))?;
+    let _guard = acquire_workspace_write_lock(directory, WORKSPACE_WRITE_LOCK_TIMEOUT)
+        .map_err(|error| error.to_string())?;
     operation()
 }
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 python3 "$root/scripts/verify-upstream-evidence.py"
-stage=$(mktemp -d)
+stage=$(mktemp -d "${TMPDIR:-/tmp}/llxprt-serdes-patch.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/tree/vendor" "$stage/extract"
 

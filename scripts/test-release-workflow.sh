@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/llxprt-release-workflow.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 version_json=$(cd "$root" && python3 scripts/release-version.py --tag v0.1.0)

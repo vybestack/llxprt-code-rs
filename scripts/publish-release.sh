@@ -41,11 +41,11 @@ fi
 : "${SOURCE_OCI_ARCHIVE_URL:?SOURCE_OCI_ARCHIVE_URL is required}"
 : "${SOURCE_OCI_SIDECAR_URL:?SOURCE_OCI_SIDECAR_URL is required}"
 
-release_json=$(mktemp)
-immutable_json=$(mktemp)
-rules_json=$(mktemp)
-existing_json=$(mktemp)
-payload_json=$(mktemp)
+release_json=$(mktemp "${TMPDIR:-/tmp}/llxprt-release.XXXXXX")
+immutable_json=$(mktemp "${TMPDIR:-/tmp}/llxprt-immutable-release.XXXXXX")
+rules_json=$(mktemp "${TMPDIR:-/tmp}/llxprt-release-rules.XXXXXX")
+existing_json=$(mktemp "${TMPDIR:-/tmp}/llxprt-existing-release.XXXXXX")
+payload_json=$(mktemp "${TMPDIR:-/tmp}/llxprt-release-payload.XXXXXX")
 trap 'rm -f "$release_json" "$immutable_json" "$rules_json" "$existing_json" "$payload_json"' EXIT
 
 # This endpoint requires administration-read permission. Publication fails closed unless the server

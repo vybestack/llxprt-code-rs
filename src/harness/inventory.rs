@@ -42,7 +42,9 @@ where
     let mut state = InventoryState::default();
     let mut stack = vec![(PathBuf::new(), root_dir, 0)];
     while let Some((prefix, dir, depth)) = stack.pop() {
-        let entries = match dir.list_self() {
+        // Linux retains `openat::Dir` as `O_PATH`; opening `.` creates a readable
+        // directory stream instead of passing an `O_PATH` duplicate to `fdopendir`.
+        let entries = match dir.list_dir(".") {
             Ok(entries) => entries,
             Err(_) => continue,
         };

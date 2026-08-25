@@ -203,7 +203,7 @@ if ! IFS= read -r -t 10 publisher_ready <&8 || [[ "$publisher_ready" != "PARENT_
 fi
 exec 8>&-
 
-stage="$(mktemp -d)"
+stage="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-build.XXXXXX")"
 archive_tmp="$(mktemp "${TMPDIR:-/tmp}/.llxprt-source.XXXXXX")"
 
 # Presence guards: every allow-listed root must exist; if a forbidden path appears

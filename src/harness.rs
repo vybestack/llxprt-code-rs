@@ -274,8 +274,8 @@ pub fn fresh_workspace(root: &Path) -> PathBuf {
 
 /// Spawn the real CLI and parse its stdout. The `LLXPRT_CODE_RS_BIN` env var is
 /// honoured first so the parity binary can be driven from the shell; as a fallback the
-/// `cargo test`-baked path is used. The runner passes through only
-/// PATH/HOME/TMPDIR/LANG/LC_* env.
+/// `cargo test`-baked path is used. The runner passes through only PATH, HOME, TMPDIR,
+/// LANG, LC_*, CARGO_HOME, RUSTUP_HOME, and RUSTUP_TOOLCHAIN.
 pub fn cli_binary() -> String {
     if let Ok(p) = std::env::var("LLXPRT_CODE_RS_BIN") {
         return p;
@@ -844,13 +844,7 @@ fn open_artifact_at(dir: &openat::Dir, name: &str) -> std::io::Result<std::fs::F
 }
 
 fn sync_artifact_dir(dir: &openat::Dir) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd as _;
-
-    if unsafe { libc::fsync(dir.as_raw_fd()) } == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
+    dir.open_file(".")?.sync_all()
 }
 
 /// Cap on how many directory entries one inventory descent visits before stopping (the
