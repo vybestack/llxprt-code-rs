@@ -368,10 +368,7 @@ impl ModelConfig {
         from_file: bool,
         allow_insecure_http: bool,
     ) -> Result<ModelConfig, ModelError> {
-        if !matches!(
-            profile.provider.as_str(),
-            "openai" | "openaivercel" | "openai-compatible"
-        ) {
+        if profile.target.api != crate::model_api::target::ModelApi::ChatCompletions {
             return Err(ModelError::UnsupportedProvider(profile.provider.clone()));
         }
 

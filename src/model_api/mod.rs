@@ -6,6 +6,10 @@ pub(crate) mod macos_keychain;
 #[cfg(all(test, target_os = "macos"))]
 mod operator_protocol;
 pub(crate) mod settings;
+pub(crate) mod target;
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(target_os = "macos")]
 pub(crate) type PlatformCredentialSource = macos_keychain::MacOsCredentialSource;
