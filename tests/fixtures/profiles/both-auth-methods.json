@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "gpt-4",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-key": "<redacted-credential>",
+    "auth-keyfile": "<redacted-keyfile-path>"
+  }
+}

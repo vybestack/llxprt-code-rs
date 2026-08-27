@@ -1,7 +1,7 @@
 # Vendored local patches on serdes-ai 0.2.6
 
-`llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path
-dependency `vendor/serdes-ai` (`default-features = false, features = ["openai"]`).
+`llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path dependency
+`vendor/serdes-ai` (`default-features = false, features = ["openai", "chatgpt-oauth"]`).
 The vendored tree is the 0.2.6 release with the local transport patches below.
 `publish = false` in `Cargo.toml`: `cargo package` would normalize the path
 dependency back to the unpatched crates.io `=0.2.6`, silently dropping these
@@ -21,11 +21,12 @@ required by the path dependency's normal (non-optional) `serdes-ai` dependencies
 No other serdes-ai workspace crates (embeddings/evals/graph/mcp) are vendored. Features and
 dependencies for those absent crates are removed from the retained manifests.
 
-The retained feature surface is limited to combinations that compile from the shipped offline
-inputs. Unavailable Bedrock, OpenTelemetry, JSON-schema validation, WebSocket, and third-party
-common-tool dependencies are removed rather than advertised as non-building options. The release
-gate discovers every feature in each retained manifest, checks each one independently, and checks
-each crate with all of its retained features enabled.
+The root path dependency enables the retained `openai` and `chatgpt-oauth` model features. Every
+retained feature combination must compile from the shipped offline inputs. Unavailable Bedrock,
+OpenTelemetry, JSON-schema validation, WebSocket, and third-party common-tool dependencies are
+removed rather than advertised as non-building options. The release gate discovers every feature
+in each retained manifest, checks each one independently, and checks each crate with all of its
+retained features enabled.
 
 The vendored crate archives shipped by the 0.2.6 source distribution carry no
 `LICENSE` file; the exact MIT notice from the upstream repository is reproduced in

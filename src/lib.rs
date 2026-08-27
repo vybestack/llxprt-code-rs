@@ -8,6 +8,7 @@ pub mod cli;
 pub mod grade;
 pub mod harness;
 pub mod model;
+mod model_api;
 pub mod process;
 pub mod profile;
 pub mod redact;

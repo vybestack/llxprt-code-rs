@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "deepseek-reasoner",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://api.deepseek.com",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none"
+  }
+}

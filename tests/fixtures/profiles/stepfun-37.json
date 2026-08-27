@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "step-3.7-flash",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://api.stepfun.ai/step_plan/v1",
+    "context-limit": 250000,
+    "maxOutputTokens": 40000
+  }
+}

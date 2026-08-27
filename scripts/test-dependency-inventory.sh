@@ -35,5 +35,41 @@ reject_mutation version "| sha2                          | 0.10.8      | runtime
 reject_mutation kind "| sha2                          | 0.10.9      | dev-only      | MIT OR Apache-2.0 | registry (locked in ${tick}Cargo.lock${tick}) |"
 reject_mutation license "| sha2                          | 0.10.9      | runtime       | MIT                | registry (locked in ${tick}Cargo.lock${tick}) |"
 reject_mutation source "| sha2                          | 0.10.9      | runtime       | MIT OR Apache-2.0 | vendored ${tick}vendor/sha2${tick} |"
+mac_base="| security-framework (macOS)    | 3.7.0      | runtime (macos-tgt) | MIT OR Apache-2.0 | registry (locked in ${tick}Cargo.lock${tick}) |"
+base="$mac_base"
+reject_mutation macos-kind-label "| security-framework (macOS)    | 3.7.0      | runtime (macos) | MIT OR Apache-2.0 | registry (locked in ${tick}Cargo.lock${tick}) |"
+reject_mutation macos-wrong-kind "| security-framework (macOS)    | 3.7.0      | runtime (unix-tgt) | MIT OR Apache-2.0 | registry (locked in ${tick}Cargo.lock${tick}) |"
+
+
+python3 - <<'PY'
+import importlib.util
+import pathlib
+
+path = pathlib.Path("scripts/verify-dependency-inventory.py")
+spec = importlib.util.spec_from_file_location("inventory", path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+macos = {"kind": None, "target": 'cfg(target_os = "macos")'}
+if module.dependency_kind("root", macos) != "runtime (macos-tgt)":
+    raise SystemExit("macOS target kind was not recognized")
+wrong_target = {"kind": None, "target": 'cfg(target_os = "ios")'}
+try:
+    module.dependency_kind("root", wrong_target)
+except RuntimeError:
+    pass
+else:
+    raise SystemExit("an undocumented target kind was accepted")
+kinds = {
+    "xtask runtime",
+    "runtime (macos-tgt)",
+    "dev-only",
+    "runtime",
+    "runtime (unix-tgt)",
+}
+joined = " + ".join(sorted(kinds, key=module.KIND_ORDER.__getitem__))
+expected = "runtime + runtime (unix-tgt) + runtime (macos-tgt) + dev-only + xtask runtime"
+if joined != expected:
+    raise SystemExit(f"dependency kind ordering changed: {joined}")
+PY
 
 echo "dependency inventory regression tests passed"

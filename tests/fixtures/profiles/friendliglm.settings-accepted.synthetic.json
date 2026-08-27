@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "zai-org/GLM-5.2",
+  "modelParams": {
+    "temperature": 0.6,
+    "max_tokens": 4096,
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "ephemeralSettings": {
+    "base-url": "https://api.friendli.ai/serverless/v1",
+    "context-limit": 262000
+  }
+}

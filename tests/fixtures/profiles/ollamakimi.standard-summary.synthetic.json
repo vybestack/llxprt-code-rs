@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "kimi-k2.7",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "https://ollama.com/v1/",
+    "reasoning.effort": "high",
+    "reasoning.summary": "auto",
+    "context-limit": 225000,
+    "maxOutputTokens": 40000
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "deepseek-chat",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://api.deepseek.com"
+  }
+}

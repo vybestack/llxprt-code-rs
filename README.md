@@ -163,7 +163,9 @@ Example success object:
 ## `--session` and `--turn` semantics (documented current behavior)
 
 - `--session ID` is a directory name under `<config>/code-rs-sessions/`. Turn numbers
-  restart per session and are 1-based.
+  restart per session and are 1-based. Codex Responses sends this label to the provider as
+  the `session_id` header and, unless prompt caching is `off`, as `prompt_cache_key`. Omitting
+  `--session` sends the literal label `default`. Do not use a sensitive value as a session ID.
 - No `--turn` runs the **next** turn: the first invocation of a session runs turn 1,
   the second runs turn 2, and each new turn materializes all prior turn history as context
   and **continues in the same workspace**.

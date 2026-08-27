@@ -40,7 +40,7 @@ name = "llxprt-parity"
 path = "src/bin/llxprt-parity.rs"
 
 [dependencies]
-serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai"] }
+serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai", "chatgpt-oauth"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex-lite = "0.1"
@@ -74,3 +74,6 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "=3.7.0", default-features = false }

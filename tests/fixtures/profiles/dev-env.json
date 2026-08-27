@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "test-model",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "<redacted-keyfile-path>"
+  }
+}

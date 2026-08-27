@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "moonshotai/Kimi-K2-Thinking",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "<redacted-keyfile-path>",
+    "context-limit": 200000,
+    "base-url": "https://llm.chutes.ai/v1",
+    "shell-replacement": true,
+    "streaming": "enabled",
+    "reasoning.enabled": true,
+    "reasoning.includeInContext": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.stripFromContext": "all"
+  }
+}

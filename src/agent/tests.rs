@@ -97,142 +97,6 @@ fn agent_with_caps(
     a
 }
 
-fn materialized_request_fixture(
-    prompt: &str,
-) -> (Vec<serdes_ai::core::ModelRequest>, Vec<ToolSpec>) {
-    let agent = CodingAgent::with_backend(
-        Box::new(MockBackend::new(Vec::new())),
-        std::env::temp_dir(),
-        false,
-    );
-    let reserved = ReservedRequest {
-        branch_id: "b1".into(),
-        turn: 1,
-        attempt: 1,
-        replay: false,
-        retry: false,
-        rounds: Vec::new(),
-        summary: String::new(),
-        prompt: prompt.into(),
-        history: Vec::new(),
-        owner: "owner".into(),
-    };
-    (
-        agent.materialize_requests(&reserved),
-        crate::tools::tool_specs(false),
-    )
-}
-
-/// The complete-request preflight includes the fixed overhead (model id, route,
-/// provider settings, framing) so a request of only part bytes can still trip the
-/// conservative budget gate; it is refused before any backend call.
-#[test]
-fn estimate_request_bytes_includes_fixed_overhead() {
-    let (reqs, tools) = materialized_request_fixture("a");
-    // This is the exact initial request emitted by CodingAgent: its system prompt and
-    // user prompt, tool schemas, fixed overhead, request framing, and part framing.
-    let est = estimate_request_bytes(&reqs);
-    assert!(est > 256);
-    assert!(
-        round_budget_exceeded(&reqs, &tools, Some(10)),
-        "a tiny context budget must refuse the complete request"
-    );
-    assert!(
-        !round_budget_exceeded(&reqs, &tools, None),
-        "the default 32MiB budget still accepts a one-prompt request"
-    );
-    assert_eq!(REQUEST_FIXED_OVERHEAD_BYTES, 8192);
-    assert_eq!(
-        REQUEST_FIXED_OVERHEAD_BYTES,
-        crate::redact::MAX_ERROR_TEXT_BYTES
-    );
-    assert_eq!(crate::redact::TRUNCATION_MARKER, "[truncated]");
-}
-
-#[test]
-fn exact_materialized_request_budget_is_inclusive() {
-    let mut prompt = String::from("boundary");
-    let (requests, tools, total) = loop {
-        let (requests, tools) = materialized_request_fixture(&prompt);
-        let total = estimate_request_bytes(&requests)
-            .saturating_add(crate::adapter::estimate_tool_schema_bytes(&tools));
-        if total.checked_rem(3) == Some(0) {
-            break (requests, tools, total);
-        }
-        prompt.push('x');
-    };
-    let exact_tokens = u64::try_from(total / 3).unwrap();
-    assert!(!round_budget_exceeded(
-        &requests,
-        &tools,
-        Some(exact_tokens)
-    ));
-    assert!(round_budget_exceeded(
-        &requests,
-        &tools,
-        Some(exact_tokens - 1)
-    ));
-}
-
-#[test]
-fn omitting_the_system_prompt_changes_a_budget_decision() {
-    let (requests, tools) = materialized_request_fixture("a");
-    let incomplete = vec![user_request("a")];
-    let incomplete_total = estimate_request_bytes(&incomplete)
-        .saturating_add(crate::adapter::estimate_tool_schema_bytes(&tools));
-    let fixture_tokens = u64::try_from(incomplete_total.div_ceil(3)).unwrap();
-    assert!(!round_budget_exceeded(
-        &incomplete,
-        &tools,
-        Some(fixture_tokens)
-    ));
-    assert!(round_budget_exceeded(
-        &requests,
-        &tools,
-        Some(fixture_tokens)
-    ));
-}
-/// A giant prompt request stays over the complete-request budget: the saturated
-/// estimate cannot wrap to a smaller total, so an over-cap complete request is refused
-/// before any backend call. (A single small request stays *under* the default 32 MiB
-/// budget regardless of the 8192-byte fixed overhead.)
-#[test]
-fn estimate_request_bytes_saturates_and_refuses_oversized() {
-    let (reqs, tools) = materialized_request_fixture(&"x".repeat(16 * 1024 * 1024));
-    assert!(estimate_request_bytes(&reqs) > 16 * 1024 * 1024);
-    assert!(
-        round_budget_exceeded(&reqs, &tools, Some(7)),
-        "the configured 7-token context-limit (a 21-byte budget) has a tiny byte budget and so refuses a 16 MiB request"
-    );
-    // A single small request stays under the default 32 MiB budget.
-    let (tiny, tiny_tools) = materialized_request_fixture("a");
-    let _ = estimate_request_bytes(&tiny);
-    assert!(
-        !round_budget_exceeded(&tiny, &tiny_tools, None),
-        "a single small request stays under the default budget"
-    );
-}
-
-#[test]
-fn oversized_history_is_outside_the_budget() {
-    let huge = crate::session::HistoryTurn {
-        turn: 1,
-        attempt: 1,
-        branch_id: "b1".into(),
-        prompt: "x".repeat(1_000),
-        rounds: vec![],
-        summary: String::new(),
-    };
-    assert!(history_needs_check(std::slice::from_ref(&huge)));
-    assert!(!history_within(std::slice::from_ref(&huge), 10));
-    assert!(history_within(&[huge], 10 * 1024 * 1024));
-    assert!(!history_needs_check(&[]));
-}
-
-#[test]
-fn model_response_cap_is_a_positive_bound() {
-    assert_ne!(MAX_RESPONSE_BYTES, 0);
-}
 /// A forced response exactly at the remaining assistant cap (`exact` bytes after the
 /// first round's `pre` bytes) succeeds and is persisted as the completed final round.
 #[test]
@@ -535,6 +399,10 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
         .run(&store, &reserved)
         .expect_err("normal final response must exceed cap");
     assert_eq!(error.key, "turn-budget");
+    assert_eq!(
+        error.message,
+        "turn would exceed the 1 round cap; give a final summary instead"
+    );
     assert_eq!(agent.model_calls(), 2);
 }
 

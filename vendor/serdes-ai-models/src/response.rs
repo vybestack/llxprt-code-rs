@@ -21,6 +21,7 @@ pub(crate) const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
+    feature = "chatgpt-oauth",
     feature = "cohere",
     feature = "google",
     feature = "huggingface",
@@ -48,6 +49,7 @@ async fn read_bounded(mut response: reqwest::Response, limit: usize) -> ModelRes
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
+    feature = "chatgpt-oauth",
     feature = "cohere",
     feature = "google",
     feature = "huggingface",
@@ -62,6 +64,7 @@ pub(crate) fn stream(
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
+    feature = "chatgpt-oauth",
     feature = "cohere",
     feature = "google",
     feature = "huggingface",
@@ -102,6 +105,7 @@ fn stream_bounded(
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
+    feature = "chatgpt-oauth",
     feature = "cohere",
     feature = "google",
     feature = "huggingface",
@@ -115,6 +119,7 @@ pub(crate) struct Utf8StreamDecoder {
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
+    feature = "chatgpt-oauth",
     feature = "cohere",
     feature = "google",
     feature = "huggingface",
@@ -180,14 +185,6 @@ impl Utf8StreamDecoder {
 pub(crate) async fn json<T: DeserializeOwned>(response: reqwest::Response) -> ModelResult<T> {
     let bytes = read_bounded(response, MAX_SUCCESS_BODY_BYTES).await?;
     serde_json::from_slice(&bytes).map_err(ModelError::from)
-}
-
-/// Read one successful text response without materializing more than the response cap.
-#[cfg(feature = "chatgpt-oauth")]
-pub(crate) async fn text(response: reqwest::Response) -> ModelResult<String> {
-    let bytes = read_bounded(response, MAX_SUCCESS_BODY_BYTES).await?;
-    String::from_utf8(bytes)
-        .map_err(|_| ModelError::InvalidResponse("provider response is not UTF-8".to_string()))
 }
 
 /// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
@@ -274,19 +271,22 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(any(
+        feature = "antigravity",
+        feature = "anthropic",
+        feature = "cohere",
+        feature = "google",
+        feature = "huggingface",
+        feature = "mistral",
+        feature = "ollama",
+        feature = "openai"
+    ))]
     #[tokio::test]
     async fn malformed_success_bodies_do_not_disclose_payload_bytes() {
         let marker = "private-malformed-json-marker";
         let response = fixed_response(format!("{{invalid:{marker}}}").into_bytes()).await;
         let error = json::<serde_json::Value>(response).await.unwrap_err();
         assert!(!error.to_string().contains(marker));
-
-        #[cfg(feature = "chatgpt-oauth")]
-        {
-            let response = fixed_response(vec![0xff, 0xfe]).await;
-            let error = text(response).await.unwrap_err();
-            assert_eq!(error.to_string(), "Model returned an invalid response");
-        }
     }
 
     #[test]
@@ -427,5 +427,28 @@ mod tests {
                 limit: MAX_STREAM_BUFFER_BYTES
             }
         ));
+
+        for (pending, completion) in [
+            (vec![0xc2], 0xa2),
+            (vec![0xe2, 0x82], 0xac),
+            (vec![0xf0, 0x9f, 0x92], 0xa9),
+        ] {
+            let remaining = MAX_STREAM_BUFFER_BYTES - pending.len();
+            let mut exact = vec![b'a'; remaining];
+            exact[0] = completion;
+            let mut decoder = Utf8StreamDecoder::default();
+            decoder.push(&pending, &mut String::new()).unwrap();
+            decoder.push(&exact, &mut String::new()).unwrap();
+
+            exact.push(b'a');
+            let mut decoder = Utf8StreamDecoder::default();
+            decoder.push(&pending, &mut String::new()).unwrap();
+            assert!(matches!(
+                decoder.push(&exact, &mut String::new()),
+                Err(ModelError::ResponseTooLarge {
+                    limit: MAX_STREAM_BUFFER_BYTES
+                })
+            ));
+        }
     }
 }

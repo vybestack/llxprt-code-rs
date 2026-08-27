@@ -4,16 +4,100 @@
 
 #![allow(missing_docs)] // DTO fields are self-documenting
 
+use crate::error::ModelError;
 use serde::{Deserialize, Serialize};
+
+const CODEX_LABEL_MAX_BYTES: usize = 64;
+
+fn validate_codex_label(value: String, kind: &str) -> Result<String, ModelError> {
+    if value.is_empty()
+        || value.len() > CODEX_LABEL_MAX_BYTES
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(ModelError::Configuration(format!(
+            "{kind} must be 1-64 ASCII characters from [A-Za-z0-9_-]"
+        )));
+    }
+    Ok(value)
+}
+
+/// Validated Codex session identity sent in the `session_id` header.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ChatGptSessionId(String);
+
+impl ChatGptSessionId {
+    pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
+        validate_codex_label(value.into(), "ChatGPT session id").map(Self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Validated Codex prompt-cache identity sent in the request body.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ChatGptPromptCacheKey(String);
+
+impl ChatGptPromptCacheKey {
+    pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
+        validate_codex_label(value.into(), "ChatGPT prompt cache key").map(Self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Codex reasoning effort supported by the Phase 0.5 request contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodexReasoningEffort {
+    High,
+}
+
+/// Codex reasoning summary mode supported by the Phase 0.5 request contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodexReasoningSummary {
+    Auto,
+}
+
+/// Codex text verbosity supported by the Phase 0.5 request contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodexTextVerbosity {
+    Medium,
+}
+
+/// Native Codex reasoning request settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CodexReasoning {
+    pub effort: CodexReasoningEffort,
+    pub summary: CodexReasoningSummary,
+}
+
+/// Typed settings consumed only by the ChatGPT OAuth request builder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatGptOAuthRequestSettings {
+    pub reasoning: Option<CodexReasoning>,
+    pub text_verbosity: CodexTextVerbosity,
+    pub session_id: ChatGptSessionId,
+    pub prompt_cache_key: Option<ChatGptPromptCacheKey>,
+}
 
 /// ChatGPT Codex API configuration.
 #[derive(Clone)]
 pub struct ChatGptConfig {
-    /// Base URL for the Codex API
+    /// Base URL for the Codex API.
     pub api_base_url: String,
-    /// Model prefix for display
+    /// Model prefix for display.
     pub prefix: String,
-    /// Default context length
+    /// Default context length.
     pub context_length: usize,
 }
 
@@ -42,52 +126,46 @@ impl Default for ChatGptConfig {
 #[derive(Debug, Serialize)]
 pub struct CodexRequest {
     pub model: String,
-    /// System instructions (REQUIRED by Responses API)
     pub instructions: String,
-    /// User input - list of messages and function outputs
     pub input: Vec<InputItem>,
-    /// Required by ChatGPT Codex API - must be false
-    #[serde(default)]
     pub store: bool,
-    /// Required by ChatGPT Codex API - must be true
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
+    pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
-    /// Reasoning settings for GPT-5 and o-series models
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ReasoningConfig>,
+    pub reasoning: Option<CodexReasoning>,
+    pub text: CodexTextConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<ChatGptPromptCacheKey>,
 }
 
-/// Reasoning configuration for GPT-5 and o-series models
-#[derive(Debug, Serialize, Clone)]
-pub struct ReasoningConfig {
-    pub effort: String,
-    pub summary: String,
+#[derive(Debug, Serialize)]
+pub struct CodexTextConfig {
+    pub verbosity: CodexTextVerbosity,
 }
 
-/// Function call from assistant for Responses API
+/// Function call from assistant for Responses API.
 #[derive(Debug, Serialize, Clone)]
 pub struct FunctionCallItem {
     #[serde(rename = "type")]
-    pub call_type: String, // Always "function_call"
+    pub call_type: String,
     pub name: String,
     pub arguments: String,
     pub call_id: String,
 }
 
-/// Function call output for Responses API (tool return)
+/// Function call output for Responses API.
 #[derive(Debug, Serialize, Clone)]
 pub struct FunctionCallOutput {
     #[serde(rename = "type")]
-    pub output_type: String, // Always "function_call_output"
+    pub output_type: String,
     pub call_id: String,
     pub output: String,
 }
 
-/// Input item for Responses API - can be a message, function call, or function output
+/// Input item for Responses API.
 #[derive(Debug, Serialize, Clone)]
 #[serde(untagged)]
 pub enum InputItem {
@@ -101,12 +179,6 @@ pub enum InputItem {
 pub struct CodexMessage {
     pub role: String,
     pub content: MessageContent,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
 }
 
 /// Message content (string or parts array).
@@ -134,7 +206,7 @@ pub struct ImageUrl {
     pub detail: Option<String>,
 }
 
-/// Tool call in assistant message.
+/// Tool call in a legacy Chat Completions response.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolCall {
     pub id: String,
@@ -149,7 +221,7 @@ pub struct FunctionCall {
     pub arguments: String,
 }
 
-/// Response from Codex API.
+/// Legacy Chat Completions response retained by the existing response parser.
 #[derive(Debug, Deserialize)]
 pub struct CodexResponse {
     pub id: String,
@@ -185,4 +257,55 @@ pub struct Usage {
     pub completion_tokens: u32,
     #[serde(default)]
     pub total_tokens: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_labels_accept_exact_bounds_and_allowed_ascii() {
+        for value in ["a".to_string(), "A0_-".to_string(), "z".repeat(64)] {
+            assert_eq!(ChatGptSessionId::new(&value).unwrap().as_str(), value);
+            assert_eq!(ChatGptPromptCacheKey::new(&value).unwrap().as_str(), value);
+        }
+    }
+
+    #[test]
+    fn codex_labels_reject_invalid_values() {
+        for value in ["", "a b", "é", "a/b", &"z".repeat(65)] {
+            assert!(ChatGptSessionId::new(value).is_err(), "accepted {value:?}");
+            assert!(
+                ChatGptPromptCacheKey::new(value).is_err(),
+                "accepted {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_codex_settings_serialize_to_native_values() {
+        let reasoning = CodexReasoning {
+            effort: CodexReasoningEffort::High,
+            summary: CodexReasoningSummary::Auto,
+        };
+        assert_eq!(
+            serde_json::to_value(reasoning).unwrap(),
+            serde_json::json!({"effort": "high", "summary": "auto"})
+        );
+        assert_eq!(
+            serde_json::to_value(CodexTextConfig {
+                verbosity: CodexTextVerbosity::Medium
+            })
+            .unwrap(),
+            serde_json::json!({"verbosity": "medium"})
+        );
+    }
+
+    #[test]
+    fn default_endpoint_is_fixed_production_endpoint() {
+        assert_eq!(
+            ChatGptConfig::default().api_base_url,
+            "https://chatgpt.com/backend-api/codex"
+        );
+    }
 }

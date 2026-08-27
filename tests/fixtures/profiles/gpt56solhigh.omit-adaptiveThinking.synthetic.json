@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "provider": "codex",
+  "model": "gpt-5.6-sol",
+  "modelParams": {
+    "maxOutputTokens": 40000
+  },
+  "ephemeralSettings": {
+    "base-url": "https://chatgpt.com/backend-api/codex",
+    "reasoning.enabled": true,
+    "reasoning.effort": "high",
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "reasoning.summary": "auto",
+    "text.verbosity": "medium",
+    "prompt-caching": "24h",
+    "context-limit": 262144,
+    "maxTurnsPerPrompt": -1,
+    "loopDetectionEnabled": false,
+    "emojifilter": "auto",
+    "tools.disabled": [
+      "google_web_fetch",
+      "google_web_search"
+    ],
+    "stream-idle-timeout-ms": 0,
+    "task-default-timeout-seconds": 3600,
+    "task-max-timeout-seconds": 7200
+  }
+}

@@ -236,17 +236,8 @@ impl std::fmt::Debug for StoreError {
 
 impl std::error::Error for StoreError {}
 
-fn sessions_root() -> Result<PathBuf, String> {
-    Ok(crate::profile::std_profile_dir()?.join("code-rs-sessions"))
-}
-
-/// A safe identifier is a bounded single path component of `[A-Za-z0-9_-]`.
-pub fn is_safe_component(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
+mod paths;
+pub use paths::is_safe_component;
 
 /// The on-disk session store. All state reads and writes happen under one exclusive lock
 /// and validate invariants every time.
@@ -517,13 +508,14 @@ impl SessionId {
 
     /// The on-disk directory for this session.
     pub fn path(&self) -> Result<PathBuf, String> {
-        Ok(sessions_root()?.join(&self.id))
+        let sessions_dir = paths::sessions_root()?;
+        Ok(sessions_dir.join(&self.id))
     }
 }
 
 impl SessionStore {
     fn open(session: &SessionId) -> Result<Self, StoreError> {
-        let config_path = crate::profile::std_profile_dir().map_err(StoreError::Invalid)?;
+        let config_path = paths::config_root().map_err(StoreError::Invalid)?;
         std::fs::create_dir_all(&config_path)
             .map_err(|_| StoreError::Io("create configuration directory failed".into()))?;
         let config = crate::tools::open_root(&config_path)
@@ -548,7 +540,7 @@ impl SessionStore {
         Self::open(session)
     }
 
-    /// Return the configuration-root-derived path retained when this store was opened.
+    /// The configuration-root-derived path retained when this store was opened.
     pub fn session_dir(&self) -> &Path {
         &self.session_dir
     }

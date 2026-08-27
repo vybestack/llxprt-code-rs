@@ -8,26 +8,36 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 INVENTORY = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "THIRD_PARTY_LICENSES/DEPENDENCIES.md"
 MANIFESTS = [(ROOT / "Cargo.toml", "root"), (ROOT / "xtask/Cargo.toml", "xtask")]
 HEADING = "## Direct dependencies (from both first-party manifests, locked in their lockfiles)"
-KIND_ORDER = {"runtime": 0, "runtime (unix-tgt)": 1, "dev-only": 2, "xtask runtime": 3}
+KIND_ORDER = {
+    "runtime": 0,
+    "runtime (unix-tgt)": 1,
+    "runtime (macos-tgt)": 2,
+    "dev-only": 3,
+    "xtask runtime": 4,
+}
 
 
 def metadata(manifest: pathlib.Path) -> dict:
-    result = subprocess.run(
-        [
-            "cargo",
-            "metadata",
-            "--offline",
-            "--locked",
-            "--format-version",
-            "1",
-            "--manifest-path",
-            str(manifest),
-        ],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--offline",
+                "--locked",
+                "--format-version",
+                "1",
+                "--manifest-path",
+                str(manifest),
+            ],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        raise SystemExit("offline locked Cargo metadata failed") from None
     return json.loads(result.stdout)
 
 
@@ -36,6 +46,8 @@ def dependency_kind(scope: str, dependency: dict) -> str:
         return "xtask runtime"
     if dependency["kind"] == "dev":
         return "dev-only"
+    if dependency["target"] == 'cfg(target_os = "macos")':
+        return "runtime (macos-tgt)"
     if dependency["target"] == "cfg(unix)":
         return "runtime (unix-tgt)"
     if dependency["kind"] is None and dependency["target"] is None:

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "zai/GLM-5.2",
+  "modelParams": {
+    "temperature": 0.3,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    },
+    "top_p": "0.8"
+  },
+  "ephemeralSettings": {
+    "base-url": "https://api.inference.crusoecloud.com/v1/",
+    "reasoning.enabled": true,
+    "reasoning.effort": "high",
+    "context-limit": 262000
+  }
+}

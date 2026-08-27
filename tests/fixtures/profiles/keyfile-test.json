@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "gpt-4",
+  "modelParams": {
+    "temperature": 0.7
+  },
+  "ephemeralSettings": {
+    "auth-keyfile": "<redacted-keyfile-path>"
+  }
+}

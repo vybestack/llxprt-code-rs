@@ -468,8 +468,8 @@ const MAX_SEARCH_RESULT_BYTES: usize = MAX_SEARCH_RESULTS * MAX_LINE_BYTES;
 /// Space reserved inside the result cap for all truncation-reason metadata.
 const MAX_SEARCH_NOTE_BYTES: usize = 128;
 const MAX_SEARCH_DATA_BYTES: usize = MAX_SEARCH_RESULT_BYTES - MAX_SEARCH_NOTE_BYTES;
+pub(crate) mod output_limits;
 
-/// The tool schemas sent with every model request.
 /// Whether a name belongs to a tool that this agent can persist in a transcript.
 pub(crate) fn is_known_tool_name(name: &str) -> bool {
     matches!(

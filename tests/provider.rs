@@ -303,3 +303,9 @@ fn endpoint_route_matrix_and_loopback_requests() {
         "no unsanitized path echoed"
     );
 }
+
+#[test]
+fn request_budget_constants_keep_their_public_agent_paths() {
+    assert_eq!(llxprt_code_rs::agent::PER_REQUEST_OVERHEAD_BYTES, 512);
+    assert_eq!(llxprt_code_rs::agent::PER_PART_OVERHEAD_BYTES, 128);
+}

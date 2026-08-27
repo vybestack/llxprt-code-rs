@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "kimika-4.0",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://ai.blink.ms/v1",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "context-limit": 250000,
+    "emojifilter": "auto",
+    "dumpcontext": "on",
+    "tools.disabled": [
+      "google_web_fetch"
+    ]
+  }
+}
