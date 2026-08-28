@@ -21,9 +21,27 @@ for archive in "$root"/vendor-upstream/*.crate; do
   mv "${entries[0]}" "$stage/tree/vendor/$crate"
 done
 
-tar -xzf \
-  "$root/vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz" \
-  -C "$stage/tree/vendor"
+responses_archive="$root/vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz"
+python3 - "$responses_archive" <<'PY'
+import pathlib
+import sys
+import tarfile
+
+archive = pathlib.Path(sys.argv[1])
+with tarfile.open(archive, "r:gz") as source:
+    members = source.getmembers()
+    if not members:
+        raise SystemExit("Responses archive is empty")
+    for member in members:
+        path = pathlib.PurePosixPath(member.name)
+        if path.is_absolute() or ".." in path.parts:
+            raise SystemExit("Responses archive contains an unsafe path")
+        if not path.parts or path.parts[0] != "serdes-ai-responses":
+            raise SystemExit("Responses archive has an unexpected root")
+        if not (member.isfile() or member.isdir()):
+            raise SystemExit("Responses archive contains a non-regular member")
+PY
+tar -xzf "$responses_archive" -C "$stage/tree/vendor"
 
 (
   cd "$stage/tree"

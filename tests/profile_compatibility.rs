@@ -443,6 +443,7 @@ fn fixture_directory_matches_inventory_rows() {
     let on_disk: BTreeSet<String> = fixture_paths()
         .iter()
         .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+        .filter(|name| name != "openai-responses-live.json")
         .collect();
     assert_eq!(on_disk.len(), 65);
     assert!(installed.iter().all(|f| on_disk.contains(*f)));

@@ -40,8 +40,8 @@ pub mod types;
 pub use chat::chat_url;
 pub use chat::OpenAIChatModel;
 pub use responses::{
-    OpenAIResponsesModel, OpenAIResponsesModelSettings, ReasoningEffort, ReasoningSummary,
-    ServiceTier, TruncationMode,
+    OpenAIResponsesModel, OpenAIResponsesModelSettings, PromptCacheRetention, ReasoningEffort,
+    ReasoningSummary, ServiceTier, TextVerbosity, TruncationMode,
 };
 pub use types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatTool,

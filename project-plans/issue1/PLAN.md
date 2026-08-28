@@ -873,3 +873,24 @@ For Phases 9 and 10, set `candidate_evidence_root="$LLXPRT_EVIDENCE_ROOT/<full-c
 After evidence generation, make the evidence directory read-only. Publish its digest and location in the final release report. The reviewed and accepted source commit must not change after Phase 9 begins. If source changes, discard the evidence, create a new candidate commit, and rerun Phases 9 and 10.
 
 Do not mark a phase complete while any requirement assigned to it is deferred or untested.
+
+## Provider-evidence and acceptance amendment
+
+The provider probe established that the available Codex endpoint is the authenticated Responses
+WebSocket route at `wss://chatgpt.com/backend-api/codex/responses`, not the planned custom HTTP
+shape. The retained implementation therefore registers Codex as Responses/WebSocket with native
+macOS Keychain credentials and the tested beta, originator, account, authorization, and user-agent
+headers. It does not send the caller session label or a prompt-cache key. Public OpenAI Responses
+remains a separate stateless HTTP/API-key registration. Its request sends the complete transcript,
+forces `store: false`, and omits `previous_response_id` and encrypted reasoning continuation state.
+
+No additional external provider credential or public API call is authorized for acceptance. The
+Phase 10 procedure is amended to use the committed public OpenAI Responses profile fixture against
+a fresh local loopback endpoint. The immutable candidate binary must complete two HTTP rounds: the
+first response requests an allowed read-only tool, and the second request must preserve the prior
+function call and matching `function_call_output` before the final completion. The fixture must
+also prove endpoint normalization, `store: false`, session-derived cache fields, typed reasoning,
+text verbosity, bounded outputs, clean session lifecycle, and no external network destination.
+All other Phase 10 immutability, evidence-root, watchdog, transcript, replay, cleanliness, and
+independent-adjudication requirements remain in force. The acceptance prompt above is retained
+verbatim as historical procedure text and is not edited by this amendment.

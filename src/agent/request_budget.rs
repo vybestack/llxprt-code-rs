@@ -136,10 +136,10 @@ pub fn context_exceeded_message(
         .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools));
     match context_limit {
         Some(n) => format!(
-            "the complete outgoing request would be {total} bytes, over the configured context-limit of {n} tokens ({budget}-byte heuristic guard); no request is sent"
+            "the estimated complete outgoing request would be {total} bytes, over the configured context-limit of {n} tokens ({budget}-byte heuristic guard); no request is sent"
         ),
         None => format!(
-            "the complete outgoing request would be {total} bytes, over the {budget} byte context budget; no request is sent"
+            "the estimated complete outgoing request would be {total} bytes, over the {budget} byte context budget; no request is sent"
         ),
     }
 }

@@ -23,3 +23,32 @@ fn disabled_reasoning_omits_responses_reasoning() {
     let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), false);
     assert!(draft.responses_reasoning().is_none());
 }
+
+#[test]
+fn openai_responses_cache_settings_are_session_bound_and_stateless() {
+    let session = crate::session::SessionId::parse("session_123").unwrap();
+    let cached = OpenAiResponsesSettingsDraft {
+        reasoning_effort: None,
+        reasoning_summary: None,
+        text_verbosity: None,
+        prompt_caching: PromptCaching::Cached,
+    }
+    .finalize(&session);
+    assert_eq!(cached.prompt_cache_key.as_deref(), Some("session_123"));
+    assert_eq!(
+        cached.prompt_cache_retention,
+        Some(serdes_ai::models::openai::PromptCacheRetention::Hours24)
+    );
+    assert!(cached.previous_response_id.is_none());
+    assert!(!cached.send_reasoning_ids);
+
+    let off = OpenAiResponsesSettingsDraft {
+        reasoning_effort: None,
+        reasoning_summary: None,
+        text_verbosity: None,
+        prompt_caching: PromptCaching::Off,
+    }
+    .finalize(&session);
+    assert!(off.prompt_cache_key.is_none());
+    assert!(off.prompt_cache_retention.is_none());
+}

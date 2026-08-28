@@ -749,6 +749,171 @@ fn invalid_model_identifier_fails_before_provider_connection() {
     }
 }
 
+fn spawn_responses_tool_server() -> (
+    std::net::SocketAddr,
+    std::sync::mpsc::Receiver<Vec<Value>>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind Responses server");
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let mut bodies = Vec::new();
+        for round in 0..2 {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "missing Responses request"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept Responses request: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+                .unwrap();
+            let request = read_http_request(&mut stream).unwrap();
+            let separator = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|offset| offset + 4)
+                .unwrap();
+            bodies.push(serde_json::from_slice(&request[separator..]).unwrap());
+            let response = if round == 0 {
+                serde_json::json!({
+                    "id": "response-1",
+                    "object": "response",
+                    "created_at": 1,
+                    "model": "loopback-responses",
+                    "status": "completed",
+                    "output": [{
+                        "id": "item-1",
+                        "type": "function_call",
+                        "status": "completed",
+                        "call_id": "call-1",
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"evidence.txt\"}"
+                    }],
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                })
+            } else {
+                serde_json::json!({
+                    "id": "response-2",
+                    "object": "response",
+                    "created_at": 1,
+                    "model": "loopback-responses",
+                    "status": "completed",
+                    "output": [{
+                        "id": "item-2",
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "loopback complete"}]
+                    }],
+                    "usage": {"input_tokens": 20, "output_tokens": 5, "total_tokens": 25}
+                })
+            };
+            let encoded = serde_json::to_vec(&response).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                encoded.len()
+            )
+            .unwrap();
+            stream.write_all(&encoded).unwrap();
+        }
+        sender.send(bodies).unwrap();
+    });
+    (address, receiver, thread)
+}
+
+#[test]
+#[cfg(unix)]
+fn openai_responses_replays_function_history_to_final_completion() {
+    let (address, requests, server) = spawn_responses_tool_server();
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("evidence.txt"), "loopback evidence\n").unwrap();
+    let profiles = workspace.path().join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    let session = format!("responses_{}", uniq());
+    std::fs::write(
+        profiles.join("responses.json"),
+        serde_json::json!({
+            "provider": "openai-responses",
+            "model": "loopback-responses",
+            "ephemeralSettings": {
+                "base-url": format!("http://{address}/v1/responses"),
+                "api-key": "loopback-responses-key",
+                "reasoning.enabled": true,
+                "reasoning.effort": "high",
+                "reasoning.summary": "auto",
+                "text.verbosity": "medium",
+                "prompt-caching": "1h"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = bin()
+        .env("LLXPRT_CONFIG_HOME", workspace.path())
+        .arg("--profile")
+        .arg("responses")
+        .arg("--session")
+        .arg(&session)
+        .arg("--cwd")
+        .arg(workspace.path())
+        .arg("-p")
+        .arg("read evidence.txt and report completion")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().unwrap();
+    let bodies = requests.recv().unwrap();
+    assert_eq!(bodies.len(), 2);
+    for body in &bodies {
+        assert_eq!(body["store"], false);
+        assert_eq!(body["prompt_cache_key"], session);
+        assert_eq!(body["prompt_cache_retention"], "24h");
+        assert!(body.get("previous_response_id").is_none());
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["reasoning"]["summary"], "auto");
+        assert_eq!(body["text"]["verbosity"], "medium");
+    }
+    assert_eq!(bodies[0]["input"][0]["role"], "user");
+    let second_input = bodies[1]["input"].as_array().unwrap();
+    assert!(second_input.iter().any(|item| {
+        item["type"] == "function_call"
+            && item["call_id"] == "call-1"
+            && item["arguments"] == "{\"path\":\"evidence.txt\"}"
+    }));
+    assert!(second_input.iter().any(|item| {
+        item["type"] == "function_call_output"
+            && item["call_id"] == "call-1"
+            && item["output"]
+                .as_str()
+                .is_some_and(|value| value.contains("loopback evidence"))
+    }));
+    let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "ok");
+    assert!(
+        read_current_session(&workspace.path().join("code-rs-sessions").join(session))
+            .to_string()
+            .contains("loopback complete")
+    );
+}
 /// Whether `needle` appears anywhere inside `haystack`.
 fn contains(h: &[u8], needle: &[u8]) -> bool {
     h.windows(needle.len()).any(|w| w == needle)

@@ -32,6 +32,7 @@ impl ConfigHomeRoot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConstructorKind {
     OpenAiChat,
+    OpenAiResponses,
     CodexResponses,
 }
 
@@ -63,6 +64,18 @@ static PRODUCTION_REGISTRATIONS: &[ModelRegistration] = &[
         ModelApi::ChatCompletions,
         TransportKind::Http,
         ConstructorKind::OpenAiChat,
+    ),
+    registration(
+        ProviderId::OpenAi,
+        ModelApi::Responses,
+        TransportKind::Http,
+        ConstructorKind::OpenAiResponses,
+    ),
+    registration(
+        ProviderId::OpenAiResponses,
+        ModelApi::Responses,
+        TransportKind::Http,
+        ConstructorKind::OpenAiResponses,
     ),
     registration(
         ProviderId::OpenAiVercel,

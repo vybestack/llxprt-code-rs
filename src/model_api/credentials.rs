@@ -223,7 +223,7 @@ fn apply_field(fields: &mut CredentialFields, key: &str, value: Value) -> Result
         "expiry" => fields.expiry = Some(require_integral_i64(value)?),
         "token_type" => {
             let value = require_string(value)?;
-            fields.token_type_valid = Some(matches!(value.as_str(), "Bearer" | "bearer"));
+            fields.token_type_valid = Some(value.eq_ignore_ascii_case("bearer"));
         }
         "refresh_token" | "id_token" => {
             validate_optional_string(value, MAX_OPTIONAL_TOKEN_BYTES)?;
@@ -315,7 +315,7 @@ fn validate_header_value(bytes: &[u8]) -> Result<(), CredentialError> {
 }
 
 fn is_header_value_byte(byte: u8) -> bool {
-    byte >= 32 && byte != 127
+    (32..=126).contains(&byte)
 }
 
 #[cfg(test)]

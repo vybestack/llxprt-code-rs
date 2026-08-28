@@ -8,20 +8,38 @@ use serdes_ai_responses::client::OpenResponsesModel;
 use crate::adapter::{schema_for, ChatBackend, LlmResult};
 use crate::model::SerdeAiParams;
 
+enum ResponsesModel {
+    Codex(OpenResponsesModel),
+    OpenAi(Box<serdes_ai::models::openai::OpenAIResponsesModel>),
+}
+
 pub(crate) struct ResponsesBackend {
-    model: OpenResponsesModel,
+    model: ResponsesModel,
+    model_settings: ModelSettings,
     runtime: tokio::runtime::Runtime,
     calls: AtomicUsize,
 }
 
 impl ResponsesBackend {
     pub(crate) fn new(model: OpenResponsesModel) -> Result<Self, String> {
+        Self::with_model(ResponsesModel::Codex(model), ModelSettings::default())
+    }
+
+    pub(crate) fn new_openai(
+        model: serdes_ai::models::openai::OpenAIResponsesModel,
+        model_settings: ModelSettings,
+    ) -> Result<Self, String> {
+        Self::with_model(ResponsesModel::OpenAi(Box::new(model)), model_settings)
+    }
+
+    fn with_model(model: ResponsesModel, model_settings: ModelSettings) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|error| format!("runtime: {error}"))?;
         Ok(Self {
             model,
+            model_settings,
             runtime,
             calls: AtomicUsize::new(0),
         })
@@ -35,15 +53,20 @@ impl ResponsesBackend {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
-        let response = self
-            .model
-            .request(
-                requests,
-                &ModelSettings::default(),
-                &params.to_model_request_parameters(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
+        let request_parameters = params.to_model_request_parameters();
+        let response = match &self.model {
+            ResponsesModel::Codex(model) => {
+                model
+                    .request(requests, &self.model_settings, &request_parameters)
+                    .await
+            }
+            ResponsesModel::OpenAi(model) => {
+                model
+                    .request(requests, &self.model_settings, &request_parameters)
+                    .await
+            }
+        }
+        .map_err(|error| error.to_string())?;
         Ok(LlmResult::from(&response))
     }
 }

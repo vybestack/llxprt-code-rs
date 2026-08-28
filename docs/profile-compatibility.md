@@ -26,6 +26,22 @@ exactly one classification and one owner. The repository self-tests in
 `tests/profile_compatibility.rs` fail if the inventory is internally inconsistent or if
 any fixture field is unclassified or multiply owned.
 
+## Issue 1 OpenAI Responses extension
+
+Public OpenAI Responses profiles select HTTP Responses with either provider `openai-responses`
+or provider `openai` plus a Responses selector. They use API-key credentials, send a complete
+transcript on every round, force `store: false`, and never send `previous_response_id`. Endpoint
+paths are limited to an origin, `/v1`, `/responses`, or `/v1/responses`, with one optional trailing
+slash.
+
+Responses reasoning requires `reasoning.enabled: true`, effort `low`, `medium`, or `high`, and
+summary `concise`, `detailed`, or `auto`. Optional `text.verbosity` uses the same three levels.
+Omitted `prompt-caching`, `1h`, and `24h` send the validated session label as
+`prompt_cache_key` with retention `24h`; `off` omits both fields. Session labels therefore leave
+the process in cached mode and must not contain project or secret information. The literal
+`default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends
+neither that key nor a session header.
+
 ## Persistable-key inventory
 
 - Total persistable entries: 124

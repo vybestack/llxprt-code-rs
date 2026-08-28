@@ -54,14 +54,19 @@ fn production_registration_slice_is_exact_and_typed() {
         .iter()
         .map(|registration| registration.target)
         .collect::<Vec<_>>();
-    assert_eq!(targets.len(), 4);
+    assert_eq!(targets.len(), 6);
     assert!(targets.contains(&ModelTarget {
         provider: ProviderId::Codex,
         api: ModelApi::Responses,
         transport: TransportKind::WebSocket,
     }));
-    assert!(!targets.contains(&ModelTarget {
+    assert!(targets.contains(&ModelTarget {
         provider: ProviderId::OpenAiResponses,
+        api: ModelApi::Responses,
+        transport: TransportKind::Http,
+    }));
+    assert!(targets.contains(&ModelTarget {
+        provider: ProviderId::OpenAi,
         api: ModelApi::Responses,
         transport: TransportKind::Http,
     }));

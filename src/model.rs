@@ -436,7 +436,7 @@ impl ModelConfig {
     }
 }
 
-fn resolve_api_key(
+pub(crate) fn resolve_api_key(
     profile: &Profile,
     from_file: bool,
     config_root: &std::path::Path,
@@ -481,7 +481,7 @@ fn resolve_settings_api_key(
         .provider_keyfiles
         .get(provider)
         .or_else(|| {
-            (provider == "openaivercel")
+            matches!(provider, "openaivercel" | "openai-responses")
                 .then(|| settings.provider_keyfiles.get("openai"))
                 .flatten()
         })
@@ -853,6 +853,30 @@ mod tests {
         };
         let err = crate::model::ModelConfig::from_profile(&inner, true, true).unwrap_err();
         assert!(matches!(err, crate::model::ModelError::NoProfileAuth));
+    }
+
+    #[test]
+    fn openai_responses_uses_the_openai_settings_keyfile_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let keyfile = dir.path().join("openai.key");
+        std::fs::write(&keyfile, "sk-responses\n").unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "providerKeyfiles": { "openai": keyfile }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut profile = base_profile();
+        profile.provider = "openai-responses".to_string();
+        profile.ephemeral.auth_key = None;
+        profile.ephemeral.auth_keyfile_orig = None;
+
+        assert_eq!(
+            super::resolve_api_key(&profile, false, dir.path()).unwrap(),
+            "sk-responses"
+        );
     }
 
     #[test]

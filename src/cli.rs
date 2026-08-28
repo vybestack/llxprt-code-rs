@@ -113,6 +113,7 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
 
     let constructed = construct_backend(
         &profile,
+        &session_id,
         &dependencies,
         args.profile_load.is_some(),
         args.allow_insecure_http,

@@ -1,0 +1,14 @@
+{
+  "provider": "openai-responses",
+  "model": "issue1-loopback-responses",
+  "ephemeralSettings": {
+    "base-url": "http://127.0.0.1:42817/v1/responses",
+    "api-key": "issue1-loopback-only",
+    "maxOutputTokens": 4096,
+    "reasoning.enabled": true,
+    "reasoning.effort": "high",
+    "reasoning.summary": "auto",
+    "text.verbosity": "medium",
+    "prompt-caching": "1h"
+  }
+}

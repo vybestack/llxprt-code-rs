@@ -131,7 +131,7 @@ fn header_validation_rejects_controls_and_del() {
     let mut unicode = valid_value();
     unicode["access_token"] = Value::String("tökén".to_string());
     unicode["account_id"] = Value::String("账户".to_string());
-    assert!(parse_value(&unicode).is_ok());
+    assert_fixed_error(parse_value(&unicode));
 }
 
 #[test]
@@ -164,8 +164,13 @@ fn expiry_number_must_be_finite_integral_and_in_range() {
 }
 
 #[test]
-fn token_type_is_exact() {
-    for invalid in ["BEARER", "bEaReR", " Bearer", "Bearer ", ""] {
+fn token_type_is_ascii_case_insensitive_without_trimming() {
+    for valid in ["Bearer", "bearer", "BEARER", "bEaReR"] {
+        let mut value = valid_value();
+        value["token_type"] = Value::String(valid.to_string());
+        assert!(parse_value(&value).is_ok());
+    }
+    for invalid in [" Bearer", "Bearer ", ""] {
         let mut value = valid_value();
         value["token_type"] = Value::String(invalid.to_string());
         assert_fixed_error(parse_value(&value));

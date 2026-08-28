@@ -47,5 +47,39 @@ impl CodexResponsesSettingsDraft {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromptCaching {
+    Off,
+    Cached,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OpenAiResponsesSettingsDraft {
+    pub(crate) reasoning_effort: Option<serdes_ai::models::openai::ReasoningEffort>,
+    pub(crate) reasoning_summary: Option<serdes_ai::models::openai::ReasoningSummary>,
+    pub(crate) text_verbosity: Option<serdes_ai::models::openai::TextVerbosity>,
+    pub(crate) prompt_caching: PromptCaching,
+}
+
+impl OpenAiResponsesSettingsDraft {
+    pub(crate) fn finalize(
+        &self,
+        session_id: &crate::session::SessionId,
+    ) -> serdes_ai::models::openai::OpenAIResponsesModelSettings {
+        let cached = self.prompt_caching == PromptCaching::Cached;
+        serdes_ai::models::openai::OpenAIResponsesModelSettings {
+            reasoning_effort: self.reasoning_effort,
+            reasoning_summary: self.reasoning_summary,
+            send_reasoning_ids: false,
+            previous_response_id: None,
+            text_verbosity: self.text_verbosity,
+            prompt_cache_key: cached.then(|| session_id.id.clone()),
+            prompt_cache_retention: cached
+                .then_some(serdes_ai::models::openai::PromptCacheRetention::Hours24),
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

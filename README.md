@@ -47,9 +47,9 @@ tests/
   ┌─────────────────────────────────────────────────────────────┐
   │ llxprt-code-rs --session S --cwd W -p "prompt"  │
   │   cli::run                                          │
-  │     profile  → model.rs → SerdesAI OpenAIChatModel    │
-  │       base-url, model, {maxOutputTokens, sampling},  │
-  │       auth-key (keyfile/settings.json; memory only)   │
+  │     profile → typed model API registry               │
+  │       OpenAI Chat/Responses HTTP or Codex WebSocket  │
+  │       route, model, typed settings, credentials      │
   │     session store → resolve_turn, pin/verify --cwd   │
   │     agent.run(turn)                                 │
   │       ┌────────── tool loop (bounded) ──────────┐ │
@@ -108,9 +108,9 @@ Key precedence (matches llxprt-code):
    also falls back to `openai`).
 
 `ephemeralSettings.auth-key-name` is a named **secure-store** reference, never a keyfile
-path. This standalone binary has no compatible secure-store client, so a profile that
-sets it fails fast during parsing with a fixed value-free refusal: the name is never
-treated as a path and no filesystem access is ever attempted for it.
+path. Public OpenAI HTTP profiles reject it with a fixed value-free refusal: the name is never
+treated as a path and no filesystem access is attempted for it. Codex is separate. On macOS it
+loads the native Codex OAuth credential from Keychain and does not use API-key profile fields.
 
 A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile`; it
 never falls back to ambient `settings.json` credentials. The resolved key lives only in
@@ -163,9 +163,11 @@ Example success object:
 ## `--session` and `--turn` semantics (documented current behavior)
 
 - `--session ID` is a directory name under `<config>/code-rs-sessions/`. Turn numbers
-  restart per session and are 1-based. Codex Responses sends this label to the provider as
-  the `session_id` header and, unless prompt caching is `off`, as `prompt_cache_key`. Omitting
-  `--session` sends the literal label `default`. Do not use a sensitive value as a session ID.
+  restart per session and are 1-based. Public OpenAI Responses uses this validated label as
+  `prompt_cache_key` unless prompt caching is `off`; it never uses it as response-continuation
+  state. The Codex WebSocket transport sends neither a session header nor a prompt-cache key.
+  Omitting `--session` uses the literal label `default`. Do not use a sensitive value as a
+  session ID.
 - No `--turn` runs the **next** turn: the first invocation of a session runs turn 1,
   the second runs turn 2, and each new turn materializes all prior turn history as context
   and **continues in the same workspace**.
@@ -209,15 +211,13 @@ tool layer. Nonzero exits are reported to the model so it can repair the code.
 
 ## Base URL, endpoint routes, and `top_k`
 
-A profile base URL is accepted only when its path is empty, `/`, `/v1`, `/v1/`,
-`/chat/completions`, or `/v1/chat/completions`. Any arbitrary path prefix is rejected
-with an unsupported/invalid-endpoint `model-config` error before a request is made. A bare origin, `/v1`, and the already-full route map to
-`/v1/chat/completions` (the origin keeps that route: `http://host:8080` →
-`http://host:8080/v1/chat/completions`), and the redacted
-`scheme://host:port` rendering is never sent as the request URL. Userinfo, query,
-and fragment are rejected. The OpenAI chat-completions request has no `top_k` field, so
-a profile that sets `top_k` is rejected up front as an unsupported setting rather
-than silently dropped or forwarded.
+Endpoint routes are target-qualified. Chat Completions accepts an origin, `/v1`,
+`/chat/completions`, or `/v1/chat/completions`; public Responses accepts an origin, `/v1`,
+`/responses`, or `/v1/responses`. One trailing slash is allowed. Each form normalizes to
+exactly one API suffix. Arbitrary path prefixes fail with a fixed `model-config` error before
+credential lookup or a request. Userinfo, query, and fragment are rejected. The redacted
+`scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
+`top_k` field, so a profile that sets it is rejected instead of being silently dropped.
 
 ## JSON output contract
 
@@ -248,14 +248,12 @@ distributions is recorded in `THIRD_PARTY_LICENSES/SERDES-AI-MIT.txt`.
 
 ## Reasoning (actual behavior)
 
-The `reasoning.*` settings in the installed `dsflash*` profiles influence the *author's*
-streaming renderer. This headless CLI sends non-streaming chat completions and does not set a
-reasoning field; `reasoning.effort` is surfaced as a text note in the system prompt
-when the profile uses it, and the reasoning note is added locally to the prompt text, never
-forwarded as a transport setting. Request-side keys the openai path cannot apply are
-rejected (`model-config unsupported profile behavior`) unless ignoring them would make the
-`dsflash` family unusable, in which case they are accepted only for that family, retained as
-local compatibility flags, and never forwarded: `shell-replacement`, `emojifilter`,
+Reasoning behavior depends on the selected API. Public OpenAI Responses and Codex Responses
+forward their validated reasoning effort and summary settings. Public Responses also supports
+validated text verbosity. OpenAI Chat sends non-streaming Chat Completions and does not set a
+reasoning field; compatible `dsflash*` reasoning effort is represented by a local prompt note.
+Request-side keys the Chat path cannot apply are rejected unless existing `dsflash` compatibility
+requires retaining them as local flags. Those compatibility-only fields are not forwarded: `shell-replacement`, `emojifilter`,
 `stream-idle-timeout-ms`, `requires-auth`, `streamIdleTimeoutMs`, `maxRetrywait`,
 `reasoning.maxTokens`, `reasoning.budgetTokens`, `autokimi-style`, `sandbox-base-url`,
 `default-tools`, `tool-format`, `reasoning.enabled`, `reasoning.includeInResponse`,
@@ -504,17 +502,18 @@ all pass.
 
 - **Interactive mode**, emoji filters, hooks/permissions system, `--param`, and the full
   llxprt-code tool catalog are not ported.
-- **Streaming, telemetry, and token-usage logging** are absent; requests are
-  non-streaming chat completions.
+- **User-facing streaming, telemetry, and token-usage logging** are absent. OpenAI Chat and
+  public Responses use non-streaming HTTP requests. Codex consumes provider WebSocket stream
+  events internally and returns one completed model response to the tool loop.
 - The `context-limit` preflight uses a 3-bytes-per-token request-size heuristic. It is not the
   provider's tokenizer and cannot guarantee acceptance at the model's exact token boundary. The
   separate hard byte caps still bound request construction and transport.
 - The parity harness preserves the CLI's raw stdout/stderr bytes on disk with an explicit
   truncation flag from the bounded runner; a captured stream larger than the cap is
   truncated, never spliced.
-- `reasoning`, `top_k`, and the dsflash request-side profile flags are never forwarded
-  over the wire (`top_k` is rejected as unsupported; the rest are prompt notes or
-  documented-and-ignored).
+- OpenAI Chat does not forward Responses reasoning or `top_k`. Responses targets forward only
+  their validated reasoning fields. Chat-compatible `dsflash` flags remain prompt notes or
+  documented local compatibility fields.
 
 ## Sessions
 

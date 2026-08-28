@@ -9,6 +9,7 @@
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
 mod codex;
+mod openai_responses;
 mod parsing;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -64,6 +65,8 @@ pub struct Profile {
     pub ephemeral: EphemeralSettings,
     pub(crate) target: crate::model_api::target::ModelTarget,
     pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
+    pub(crate) openai_responses_settings:
+        Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
 }
 
 /// Model sampling parameters (the fields the transport can honor) plus keys we know we
@@ -309,14 +312,28 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let (ephemeral, model_params, codex_settings) =
+    let (ephemeral, model_params, codex_settings, openai_responses_settings) =
         if provider_id == crate::model_api::target::ProviderId::Codex {
             let parsed = codex::parse(obj, name, model.clone())?;
-            (parsed.ephemeral, parsed.model_params, Some(parsed.draft))
+            (
+                parsed.ephemeral,
+                parsed.model_params,
+                Some(parsed.draft),
+                None,
+            )
+        } else if target.api == crate::model_api::target::ModelApi::Responses {
+            let parsed = openai_responses::parse(obj, name)?;
+            (
+                parsed.ephemeral,
+                parsed.model_params,
+                None,
+                Some(parsed.draft),
+            )
         } else {
             (
                 parse_ephemeral(obj, name)?,
                 parse_model_params(obj, name)?,
+                None,
                 None,
             )
         };
@@ -329,6 +346,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         ephemeral,
         target,
         codex_settings,
+        openai_responses_settings,
     })
 }
 
@@ -399,12 +417,19 @@ fn parse_ephemeral_primary(
             }
             settings.base_url = Some(url);
         }
-        "auth-key" | "authKey" | "apiKey" => {
+        "auth-key" | "authKey" | "apiKey" | "api-key" => {
             let key_value = required_string(value, name, key)?;
             let over_limit =
                 !key_value.is_empty() && key_value.len() > crate::redact::MAX_KEY_BYTES;
             if key_value.as_bytes().contains(&0) || over_limit {
                 return Err(crate::redact::KEY_CAP_MESSAGE.to_string());
+            }
+            if settings
+                .auth_key
+                .as_deref()
+                .is_some_and(|existing| existing != key_value)
+            {
+                return Err(format!("profile {name:?}: conflicting API-key aliases"));
             }
             settings.auth_key = Some(key_value.to_string());
         }
@@ -424,11 +449,20 @@ fn parse_ephemeral_credentials(
             required_string(value, name, key)?;
             return Err(AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
         }
-        "auth-keyfile" | "authKeyfile" | "apiKeyfile" => {
+        "auth-keyfile" | "authKeyfile" | "apiKeyfile" | "api-keyfile" => {
             let path = required_string(value, name, key)?;
             let over_limit = !path.is_empty() && path.len() > crate::redact::MAX_KEYFILE_PATH_BYTES;
             if path.as_bytes().contains(&0) || over_limit {
                 return Err(crate::redact::KEY_PATH_CAP_MESSAGE.to_string());
+            }
+            if settings
+                .auth_keyfile_orig
+                .as_deref()
+                .is_some_and(|existing| existing != path)
+            {
+                return Err(format!(
+                    "profile {name:?}: conflicting API-key-file aliases"
+                ));
             }
             settings.auth_keyfile_orig = Some(path.to_string());
             settings.auth_keyfile = Some(redact_keyfile(path));
