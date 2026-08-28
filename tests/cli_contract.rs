@@ -386,10 +386,10 @@ fn configuration_root_must_be_available_and_absolute() {
         .unwrap();
     assert_eq!(missing.status.code(), Some(3));
     let missing_json = stdout_json(&missing);
-    assert_eq!(missing_json["error"]["code"], "profile-load");
+    assert_eq!(missing_json["error"]["code"], "config-home");
     assert_eq!(
         missing_json["error"]["message"],
-        "profile resolution failed: absolute configuration directory is unavailable"
+        "absolute configuration directory is unavailable"
     );
 
     let absolute_fallback = tempfile::tempdir().unwrap();
@@ -404,10 +404,10 @@ fn configuration_root_must_be_available_and_absolute() {
         .unwrap();
     assert_eq!(relative.status.code(), Some(3));
     let relative_json = stdout_json(&relative);
-    assert_eq!(relative_json["error"]["code"], "profile-load");
+    assert_eq!(relative_json["error"]["code"], "config-home");
     assert_eq!(
         relative_json["error"]["message"],
-        "profile resolution failed: LLXPRT_CONFIG_HOME must name a nonempty absolute directory"
+        "LLXPRT_CONFIG_HOME must name a nonempty absolute directory"
     );
 }
 

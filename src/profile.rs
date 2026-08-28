@@ -8,6 +8,7 @@
 //! must be JSON objects when present, and every known field must have the right scalar
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
+mod codex;
 mod parsing;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -62,6 +63,7 @@ pub struct Profile {
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
     pub(crate) target: crate::model_api::target::ModelTarget,
+    pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
 }
 
 /// Model sampling parameters (the fields the transport can honor) plus keys we know we
@@ -181,6 +183,8 @@ pub struct EphemeralSettings {
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    pub max_turns_per_prompt: Option<i64>,
+    pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
     /// final component are never both shown if one of them looks like a key name).
@@ -207,6 +211,8 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("auth_keyfile_orig", &"[redacted keyfile]")
             .field("context_limit", &self.context_limit)
             .field("max_output_tokens", &self.max_output_tokens)
+            .field("max_turns_per_prompt", &self.max_turns_per_prompt)
+            .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
@@ -303,8 +309,17 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let ephemeral = parse_ephemeral(obj, name)?;
-    let model_params = parse_model_params(obj, name)?;
+    let (ephemeral, model_params, codex_settings) =
+        if provider_id == crate::model_api::target::ProviderId::Codex {
+            let parsed = codex::parse(obj, name, model.clone())?;
+            (parsed.ephemeral, parsed.model_params, Some(parsed.draft))
+        } else {
+            (
+                parse_ephemeral(obj, name)?,
+                parse_model_params(obj, name)?,
+                None,
+            )
+        };
 
     Ok(Profile {
         name: name.to_string(),
@@ -313,6 +328,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model_params,
         ephemeral,
         target,
+        codex_settings,
     })
 }
 

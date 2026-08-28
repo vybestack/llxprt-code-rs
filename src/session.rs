@@ -516,9 +516,13 @@ impl SessionId {
 impl SessionStore {
     fn open(session: &SessionId) -> Result<Self, StoreError> {
         let config_path = paths::config_root().map_err(StoreError::Invalid)?;
-        std::fs::create_dir_all(&config_path)
+        Self::open_in(session, &config_path)
+    }
+
+    fn open_in(session: &SessionId, config_path: &Path) -> Result<Self, StoreError> {
+        std::fs::create_dir_all(config_path)
             .map_err(|_| StoreError::Io("create configuration directory failed".into()))?;
-        let config = crate::tools::open_root(&config_path)
+        let config = crate::tools::open_root(config_path)
             .map_err(|_| StoreError::Io("open configuration directory safely failed".into()))?;
         let sessions = ensure_private_subdir(&config, "code-rs-sessions")?;
         let dir_cap = ensure_private_subdir(&sessions, &session.id)?;
@@ -538,6 +542,13 @@ impl SessionStore {
     /// Open (or create) the store for a session.
     pub fn load(session: &SessionId) -> Result<SessionStore, StoreError> {
         Self::open(session)
+    }
+
+    pub(crate) fn load_in(
+        session: &SessionId,
+        config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+    ) -> Result<SessionStore, StoreError> {
+        Self::open_in(session, config_root.as_path())
     }
 
     /// The configuration-root-derived path retained when this store was opened.
@@ -943,6 +954,13 @@ impl Drop for SessionFileLock<'_> {
 /// Convenience: open a store for a session (used by the CLI).
 pub fn load_session_store(session: &SessionId) -> Result<SessionStore, String> {
     SessionStore::load(session).map_err(|e| e.to_string())
+}
+
+pub(crate) fn load_session_store_in(
+    session: &SessionId,
+    config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+) -> Result<SessionStore, String> {
+    SessionStore::load_in(session, config_root).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

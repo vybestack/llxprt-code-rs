@@ -57,6 +57,15 @@ pub struct ProfileResolver;
 impl ProfileResolver {
     /// Load a named profile from `<config>/profiles/<name>.json`.
     pub fn load(&self, name: &str) -> Result<ResolveOutcome, ModelError> {
+        let config_root = std_profile_dir().map_err(ModelError::Resolve)?;
+        self.load_in(name, &config_root)
+    }
+
+    pub(crate) fn load_in(
+        &self,
+        name: &str,
+        config_root: &std::path::Path,
+    ) -> Result<ResolveOutcome, ModelError> {
         if name.is_empty()
             || !name
                 .chars()
@@ -64,10 +73,7 @@ impl ProfileResolver {
         {
             return Ok(ResolveOutcome::Missing(name.to_string()));
         }
-        let dir = std_profile_dir()
-            .map_err(ModelError::Resolve)?
-            .join("profiles");
-        let path = dir.join(format!("{name}.json"));
+        let path = config_root.join("profiles").join(format!("{name}.json"));
         if !path.exists() {
             return Ok(ResolveOutcome::Missing(name.to_string()));
         }
@@ -368,11 +374,21 @@ impl ModelConfig {
         from_file: bool,
         allow_insecure_http: bool,
     ) -> Result<ModelConfig, ModelError> {
+        let config_root = std_profile_dir().map_err(ModelError::SettingsRead)?;
+        Self::from_profile_in(profile, from_file, allow_insecure_http, &config_root)
+    }
+
+    pub(crate) fn from_profile_in(
+        profile: &Profile,
+        from_file: bool,
+        allow_insecure_http: bool,
+        config_root: &std::path::Path,
+    ) -> Result<ModelConfig, ModelError> {
         if profile.target.api != crate::model_api::target::ModelApi::ChatCompletions {
             return Err(ModelError::UnsupportedProvider(profile.provider.clone()));
         }
 
-        let api_key = resolve_api_key(profile, from_file)?;
+        let api_key = resolve_api_key(profile, from_file, config_root)?;
 
         let base_url = profile
             .ephemeral
@@ -420,7 +436,11 @@ impl ModelConfig {
     }
 }
 
-fn resolve_api_key(profile: &Profile, from_file: bool) -> Result<String, ModelError> {
+fn resolve_api_key(
+    profile: &Profile,
+    from_file: bool,
+    config_root: &std::path::Path,
+) -> Result<String, ModelError> {
     let keyfile = profile
         .ephemeral
         .auth_keyfile_orig
@@ -442,7 +462,7 @@ fn resolve_api_key(profile: &Profile, from_file: bool) -> Result<String, ModelEr
     } else if from_file {
         return Err(ModelError::NoProfileAuth);
     } else {
-        resolve_settings_api_key(&profile.provider)?
+        resolve_settings_api_key(&profile.provider, config_root)?
     };
     if api_key.len() > crate::redact::MAX_KEY_BYTES {
         return Err(ModelError::CredentialRejected(
@@ -452,8 +472,11 @@ fn resolve_api_key(profile: &Profile, from_file: bool) -> Result<String, ModelEr
     Ok(api_key)
 }
 
-fn resolve_settings_api_key(provider: &str) -> Result<String, ModelError> {
-    let settings = load_settings_json()?;
+fn resolve_settings_api_key(
+    provider: &str,
+    config_root: &std::path::Path,
+) -> Result<String, ModelError> {
+    let settings = load_settings_json(config_root)?;
     let path = settings
         .provider_keyfiles
         .get(provider)
@@ -487,10 +510,8 @@ struct SettingsJson {
     provider_keyfiles: std::collections::BTreeMap<String, String>,
 }
 
-fn load_settings_json() -> Result<SettingsJson, ModelError> {
-    let path = std_profile_dir()
-        .map_err(ModelError::SettingsRead)?
-        .join("settings.json");
+fn load_settings_json(config_root: &std::path::Path) -> Result<SettingsJson, ModelError> {
+    let path = config_root.join("settings.json");
     // settings.json is read bounded (`cap + 1`) **before** any parse; a larger
     // file is a settings error with a fixed message, never an unbounded read nor an
     // unbounded parse. The over-limit content (which is a credential-default
@@ -697,13 +718,13 @@ mod tests {
         let mut profile = base_profile();
         profile.ephemeral.auth_key = Some(" \t\n ".into());
         assert!(matches!(
-            super::resolve_api_key(&profile, true),
+            super::resolve_api_key(&profile, true, std::path::Path::new("/unused")),
             Err(super::ModelError::NoAuth)
         ));
 
         profile.ephemeral.auth_key = Some("  key bytes  ".into());
         assert_eq!(
-            super::resolve_api_key(&profile, true).unwrap(),
+            super::resolve_api_key(&profile, true, std::path::Path::new("/unused")).unwrap(),
             "  key bytes  "
         );
     }

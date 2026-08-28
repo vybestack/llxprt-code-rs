@@ -62,11 +62,11 @@ fn parsed_profile_stores_the_resolved_target() {
         crate::model_api::target::TransportKind::Http
     );
 
-    let codex = parse_profile_value(
-        &json!({"provider": "codex", "model": "gpt-5.6-luna"}),
-        "codex",
-    )
+    let codex_value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
     .unwrap();
+    let codex = parse_profile_value(&codex_value, "gpt56solhigh").unwrap();
     assert_eq!(
         codex.target.api,
         crate::model_api::target::ModelApi::Responses
@@ -75,7 +75,29 @@ fn parsed_profile_stores_the_resolved_target() {
         codex.target.transport,
         crate::model_api::target::TransportKind::WebSocket
     );
+    assert_eq!(codex.ephemeral.context_limit, Some(262_144));
+    assert_eq!(codex.ephemeral.max_output_tokens, Some(40_000));
+    assert_eq!(codex.ephemeral.max_turns_per_prompt, Some(-1));
+    assert_eq!(codex.ephemeral.loop_detection_enabled, Some(false));
+    assert!(codex.codex_settings.is_some());
 }
+
+#[test]
+fn codex_loop_detection_cannot_be_silently_ignored() {
+    let mut value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    value["ephemeralSettings"]["loopDetectionEnabled"] = json!(true);
+
+    let error = parse_profile_value(&value, "gpt56solhigh").unwrap_err();
+
+    assert_eq!(
+        error,
+        "profile \"gpt56solhigh\": Codex loop detection is not supported by this runtime"
+    );
+}
+
 /// objects when present, and each known scalar field must have the right type. Every
 /// bound field stays error-on-wrong-type, never a silent ignore.
 #[test]

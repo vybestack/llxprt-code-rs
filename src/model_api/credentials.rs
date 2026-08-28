@@ -100,7 +100,6 @@ impl fmt::Debug for AccountId {
 pub(crate) struct CodexCredential {
     access_token: AccessToken,
     account_id: AccountId,
-    expiry: i64,
 }
 
 impl CodexCredential {
@@ -110,10 +109,6 @@ impl CodexCredential {
 
     pub(crate) fn account_id(&self) -> &str {
         &self.account_id.0
-    }
-
-    pub(crate) fn expiry(&self) -> i64 {
-        self.expiry
     }
 
     pub(crate) fn secret_values(&self) -> [&str; 2] {
@@ -127,7 +122,6 @@ impl fmt::Debug for CodexCredential {
             .debug_struct("CodexCredential")
             .field("access_token", &"[REDACTED]")
             .field("account_id", &"[REDACTED]")
-            .field("expiry", &self.expiry)
             .finish()
     }
 }
@@ -179,7 +173,6 @@ impl CredentialFields {
         Ok(CodexCredential {
             access_token: AccessToken(access_token),
             account_id: AccountId(account_id),
-            expiry,
         })
     }
 }

@@ -44,7 +44,6 @@ fn parses_exact_required_shape_and_redacts_debug() {
         let credential = parse_value(&value).unwrap();
         assert_eq!(credential.access_token(), "token-value");
         assert_eq!(credential.account_id(), "account-value");
-        assert_eq!(credential.expiry(), 1_031);
         assert_eq!(credential.secret_values(), ["token-value", "account-value"]);
         let debug = format!("{credential:?}");
         assert!(!debug.contains("token-value"));

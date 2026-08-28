@@ -133,6 +133,31 @@ impl CodingAgent {
         })
     }
 
+    pub(crate) fn new_with_backend(
+        backend: Box<dyn ChatBackend>,
+        cwd: &std::path::Path,
+        allow_shell: bool,
+    ) -> Result<CodingAgent, crate::adapter::ModelErrorAdapter> {
+        let workspace = crate::tools::WorkspaceCap::open(cwd).map_err(|message| {
+            crate::adapter::ModelErrorAdapter {
+                key: "workspace",
+                message,
+                code: crate::cli::Code::Config,
+            }
+        })?;
+        Ok(CodingAgent {
+            backend: std::sync::Arc::from(backend),
+            cwd: cwd.to_path_buf(),
+            workspace,
+            max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_rounds: MAX_TURN_ROUNDS,
+            allow_shell,
+            secrets: Vec::new(),
+            prompt_notes: None,
+            context_limit: None,
+        })
+    }
+
     /// Build an agent over an arbitrary backend (used by tests with a mock).
     pub fn with_backend(
         backend: Box<dyn ChatBackend>,

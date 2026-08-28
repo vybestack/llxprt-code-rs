@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::credentials::{Clock, CredentialSource};
+use super::target::{ModelApi, ModelTarget, ProviderId, TransportKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConfigHomeRoot(PathBuf);
@@ -29,11 +30,59 @@ impl ConfigHomeRoot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ModelRegistration {
-    _private: (),
+pub(crate) enum ConstructorKind {
+    OpenAiChat,
+    CodexResponses,
 }
 
-static PRODUCTION_REGISTRATIONS: &[ModelRegistration] = &[];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModelRegistration {
+    pub(crate) target: ModelTarget,
+    pub(crate) constructor: ConstructorKind,
+}
+
+const fn registration(
+    provider: ProviderId,
+    api: ModelApi,
+    transport: TransportKind,
+    constructor: ConstructorKind,
+) -> ModelRegistration {
+    ModelRegistration {
+        target: ModelTarget {
+            provider,
+            api,
+            transport,
+        },
+        constructor,
+    }
+}
+
+static PRODUCTION_REGISTRATIONS: &[ModelRegistration] = &[
+    registration(
+        ProviderId::OpenAi,
+        ModelApi::ChatCompletions,
+        TransportKind::Http,
+        ConstructorKind::OpenAiChat,
+    ),
+    registration(
+        ProviderId::OpenAiVercel,
+        ModelApi::ChatCompletions,
+        TransportKind::Http,
+        ConstructorKind::OpenAiChat,
+    ),
+    registration(
+        ProviderId::OpenAiCompatible,
+        ModelApi::ChatCompletions,
+        TransportKind::Http,
+        ConstructorKind::OpenAiChat,
+    ),
+    registration(
+        ProviderId::Codex,
+        ModelApi::Responses,
+        TransportKind::WebSocket,
+        ConstructorKind::CodexResponses,
+    ),
+];
 
 pub(crate) struct RuntimeDependencies {
     credential_source: Arc<dyn CredentialSource>,
@@ -42,7 +91,27 @@ pub(crate) struct RuntimeDependencies {
     registrations: &'static [ModelRegistration],
 }
 
+#[cfg(target_os = "macos")]
+fn production_credential_source() -> Arc<dyn CredentialSource> {
+    Arc::new(super::macos_keychain::MacOsCredentialSource)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn production_credential_source() -> Arc<dyn CredentialSource> {
+    Arc::new(super::credentials::UnsupportedCredentialSource)
+}
+
 impl RuntimeDependencies {
+    pub(crate) fn production() -> Result<Self, String> {
+        Ok(Self {
+            credential_source: production_credential_source(),
+            clock: Arc::new(super::credentials::SystemClock),
+            config_home: ConfigHomeRoot::discover()?,
+            registrations: PRODUCTION_REGISTRATIONS,
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn new(
         credential_source: Arc<dyn CredentialSource>,
         clock: Arc<dyn Clock>,

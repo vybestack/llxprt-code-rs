@@ -1,3 +1,4 @@
+#[cfg(test)]
 use security_framework::item::{ItemClass, ItemSearchOptions};
 use security_framework::passwords::{generic_password, PasswordOptions};
 
@@ -22,10 +23,12 @@ fn read_generic_password(service: &str, account: &str) -> Result<Vec<u8>, Creden
         .map_err(|_| CredentialError::remediation())
 }
 
+#[cfg(test)]
 pub(crate) fn fixed_item_attributes() -> Result<(), CredentialError> {
     item_attributes(CODEX_SERVICE, CODEX_ACCOUNT)
 }
 
+#[cfg(test)]
 fn item_attributes(service: &str, account: &str) -> Result<(), CredentialError> {
     let results = ItemSearchOptions::new()
         .class(ItemClass::generic_password())

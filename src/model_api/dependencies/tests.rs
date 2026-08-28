@@ -40,7 +40,7 @@ fn dependencies(
 }
 
 #[test]
-fn production_registration_slice_is_typed_and_empty() {
+fn production_registration_slice_is_exact_and_typed() {
     let root = tempfile::tempdir().unwrap();
     let dependencies = RuntimeDependencies::new(
         Arc::new(InMemorySource {
@@ -49,12 +49,34 @@ fn production_registration_slice_is_typed_and_empty() {
         Arc::new(FixedClock(1_000)),
         ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
     );
-    assert!(dependencies.registrations().is_empty());
+    let targets = dependencies
+        .registrations()
+        .iter()
+        .map(|registration| registration.target)
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 4);
+    assert!(targets.contains(&ModelTarget {
+        provider: ProviderId::Codex,
+        api: ModelApi::Responses,
+        transport: TransportKind::WebSocket,
+    }));
+    assert!(!targets.contains(&ModelTarget {
+        provider: ProviderId::OpenAiResponses,
+        api: ModelApi::Responses,
+        transport: TransportKind::Http,
+    }));
 }
 
 #[test]
 fn test_constructor_injects_all_dependencies_and_one_root() {
-    static TEST_REGISTRATIONS: &[ModelRegistration] = &[ModelRegistration { _private: () }];
+    static TEST_REGISTRATIONS: &[ModelRegistration] = &[ModelRegistration {
+        target: ModelTarget {
+            provider: ProviderId::OpenAi,
+            api: ModelApi::ChatCompletions,
+            transport: TransportKind::Http,
+        },
+        constructor: ConstructorKind::OpenAiChat,
+    }];
     let (dependencies, root) = dependencies(TEST_REGISTRATIONS);
 
     assert_eq!(dependencies.clock().unix_seconds().unwrap(), 1_000);
