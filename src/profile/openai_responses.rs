@@ -58,6 +58,23 @@ pub(super) fn parse(
     }
     ephemeral.max_output_tokens = max_output_tokens.or(ephemeral.max_output_tokens);
 
+    let draft = parse_draft(enabled, effort, summary, verbosity, prompt_caching, name)?;
+
+    Ok(Parsed {
+        ephemeral,
+        model_params,
+        draft,
+    })
+}
+
+fn parse_draft(
+    enabled: bool,
+    effort: Option<String>,
+    summary: Option<String>,
+    verbosity: Option<String>,
+    prompt_caching: Option<String>,
+    name: &str,
+) -> Result<OpenAiResponsesSettingsDraft, String> {
     let (reasoning_effort, reasoning_summary) = if enabled {
         let effort = effort.ok_or_else(|| {
             format!("profile {name:?}: enabled reasoning requires 'reasoning.effort'")
@@ -77,7 +94,6 @@ pub(super) fn parse(
         }
         (None, None)
     };
-
     let text_verbosity = verbosity
         .as_deref()
         .map(|value| parse_verbosity(value, name))
@@ -91,16 +107,11 @@ pub(super) fn parse(
             ));
         }
     };
-
-    Ok(Parsed {
-        ephemeral,
-        model_params,
-        draft: OpenAiResponsesSettingsDraft {
-            reasoning_effort,
-            reasoning_summary,
-            text_verbosity,
-            prompt_caching,
-        },
+    Ok(OpenAiResponsesSettingsDraft {
+        reasoning_effort,
+        reasoning_summary,
+        text_verbosity,
+        prompt_caching,
     })
 }
 
