@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::FinishReason;
+
 use super::parts::{
     BuiltinToolCallPart, FilePart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
 };
@@ -21,6 +23,8 @@ pub enum ModelResponseStreamEvent {
     PartDelta(PartDeltaEvent),
     /// A part has ended.
     PartEnd(PartEndEvent),
+    /// Provider-confirmed stream completion and terminal metadata.
+    StreamComplete(StreamCompleteEvent),
 }
 
 impl ModelResponseStreamEvent {
@@ -102,6 +106,7 @@ impl ModelResponseStreamEvent {
             Self::PartStart(e) => e.index,
             Self::PartDelta(e) => e.index,
             Self::PartEnd(e) => e.index,
+            Self::StreamComplete(_) => 0,
         }
     }
 
@@ -121,6 +126,12 @@ impl ModelResponseStreamEvent {
     #[must_use]
     pub fn is_end(&self) -> bool {
         matches!(self, Self::PartEnd(_))
+    }
+
+    /// Check if the provider confirmed stream completion.
+    #[must_use]
+    pub fn is_stream_complete(&self) -> bool {
+        matches!(self, Self::StreamComplete(_))
     }
 }
 
@@ -650,6 +661,37 @@ impl PartEndEvent {
     #[must_use]
     pub fn new(index: usize) -> Self {
         Self { index }
+    }
+}
+
+/// Provider-confirmed stream completion and terminal metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamCompleteEvent {
+    /// Provider-reported finish reason.
+    pub finish_reason: FinishReason,
+    /// Input tokens reported by the provider.
+    pub input_tokens: Option<u64>,
+    /// Output tokens reported by the provider.
+    pub output_tokens: Option<u64>,
+    /// Tokens used to create cache entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_tokens: Option<u64>,
+    /// Tokens read from cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+}
+
+impl StreamCompleteEvent {
+    /// Create a terminal event with no usage metadata.
+    #[must_use]
+    pub fn new(finish_reason: FinishReason) -> Self {
+        Self {
+            finish_reason,
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_tokens: None,
+            cache_read_tokens: None,
+        }
     }
 }
 

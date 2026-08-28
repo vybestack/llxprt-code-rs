@@ -36,6 +36,12 @@ repository = "https://github.com/janfeddersen-wq/serdesAI"
 
 [features]
 default = []
+websocket = [
+    "dep:rustls",
+    "dep:tokio-tungstenite",
+    "dep:webpki-roots",
+    "tokio-tungstenite/__rustls-tls",
+]
 
 [lib]
 name = "serdes_ai_streaming"
@@ -60,6 +66,10 @@ version = "0.12"
 [dependencies.pin-project-lite]
 version = "0.2"
 
+[dependencies.rustls]
+version = "0.22"
+optional = true
+
 [dependencies.serde]
 version = "1.0"
 features = ["derive"]
@@ -78,8 +88,16 @@ version = "1.0"
 version = "1.49"
 features = ["full"]
 
+[dependencies.tokio-tungstenite]
+version = "0.21"
+optional = true
+
 [dependencies.tracing]
 version = "0.1"
+
+[dependencies.webpki-roots]
+version = "1"
+optional = true
 
 [dev-dependencies.rstest]
 version = "0.26"

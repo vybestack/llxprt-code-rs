@@ -5,6 +5,9 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+python3 scripts/verify-upstream-evidence.py
+python3 scripts/verify-serdes-responses-evidence.py
+
 command -v patch >/dev/null 2>&1 || {
   echo "patch is required for vendor provenance verification" >&2
   exit 1
@@ -25,7 +28,7 @@ archives=(
 )
 
 patch_digest="$(shasum -a 256 SERDES-AI-0.2.6.patch | awk '{print $1}')"
-if [[ "$patch_digest" != "08cf84799c600850a1d3b90ff5321ad75edfd6eaba0c9491435a10de220daac7" ]]; then
+if [[ "$patch_digest" != "9f135fc4915012935046179e46d1536ae074e99ff52c4d1a8816a39c98d770df" ]]; then
   echo "retained SerdesAI patch digest mismatch" >&2
   exit 1
 fi
@@ -78,6 +81,10 @@ for entry in "${archives[@]}"; do
   fi
   mv -- "$extracted" "$stage/vendor/$name"
 done
+
+tar -xzf \
+  vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz \
+  -C "$stage/vendor"
 
 if find "$stage" -mindepth 1 -maxdepth 1 ! -name vendor -print | grep -q .; then
   echo "upstream archive produced an unexpected top-level path" >&2

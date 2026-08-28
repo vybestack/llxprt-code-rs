@@ -162,6 +162,9 @@ required=(
   vendor/serdes-ai-core/Cargo.toml vendor/serdes-ai-core/src/lib.rs
   vendor/serdes-ai-models/Cargo.toml vendor/serdes-ai-models/src/openai/chat.rs
   vendor/serdes-ai-models/Cargo.lock
+  vendor/serdes-ai-responses/Cargo.toml vendor/serdes-ai-responses/src/client/mod.rs
+  provenance/serdes-ai-responses-git.json scripts/verify-serdes-responses-evidence.py
+  vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz
   THIRD_PARTY_LICENSES/README.md THIRD_PARTY_LICENSES/SERDES-AI-MIT.txt
   THIRD_PARTY_LICENSES/source-bundle.txt THIRD_PARTY_LICENSES/source-bundle.sha256
   .github/workflows/ci.yml
@@ -280,6 +283,7 @@ fi
 #    An empty Cargo home, unusable network proxies, --offline, and --locked prove the bundle
 #    reconstructs without relying on a pre-populated registry cache.
 python3 scripts/verify-registry-vendor.py
+python3 scripts/verify-serdes-responses-evidence.py
 cargo_home="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-cargo-home.XXXXXX")"
 export CARGO_HOME="$cargo_home"
 # The home is cache-empty, but nested grader Cargo commands run outside the extraction's
@@ -314,6 +318,8 @@ CARGO_TARGET_DIR="$root_target" cargo +1.88.0 build --offline --release --locked
 #    cleanup removes the target on every path, failure included.
 provider_target="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-provider.XXXXXX")"
 CARGO_TARGET_DIR="$provider_target" bash scripts/test-vendor-feature-surfaces.sh
+CARGO_TARGET_DIR="$provider_target" cargo +1.88.0 test --offline --locked \
+  --manifest-path vendor/serdes-ai-responses/Cargo.toml
 CARGO_TARGET_DIR="$provider_target" cargo +1.88.0 test --offline --locked \
   --manifest-path vendor/serdes-ai-providers/Cargo.toml \
   --no-default-features --features openai

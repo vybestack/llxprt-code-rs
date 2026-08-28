@@ -621,6 +621,7 @@ impl AgentStream {
                                 ModelResponseStreamEvent::PartEnd(_) => {
                                     // Part finished
                                 }
+                                ModelResponseStreamEvent::StreamComplete(_) => {}
                             }
                         }
                         Err(e) => {
@@ -1149,6 +1150,7 @@ impl AgentStream {
                                             }
                                         }
                                         ModelResponseStreamEvent::PartEnd(_) => {}
+                                        ModelResponseStreamEvent::StreamComplete(_) => {}
                                     }
                                 }
                                 Some(Err(e)) => {

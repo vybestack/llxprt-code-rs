@@ -61,12 +61,14 @@ jobs:
         run: cargo clippy --offline --locked --workspace --all-targets --all-features -- -D warnings
       - name: Cargo test (offline locked workspace/all targets/features)
         run: cargo test --offline --locked --workspace --all-targets --all-features
-      - name: Direct offline vendored SerdesAI OpenAI provider clippy and tests
+      - name: Direct offline vendored SerdesAI model and Responses clippy and tests
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/serdes-ai-models-target
         run: |
           cargo clippy --offline --locked --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai --all-targets -- -D warnings
           cargo test --offline --locked --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai
+          cargo clippy --offline --locked --manifest-path vendor/serdes-ai-responses/Cargo.toml --all-targets -- -D warnings
+          cargo test --offline --locked --manifest-path vendor/serdes-ai-responses/Cargo.toml
 
   shellcheck:
     name: shellcheck

@@ -9,8 +9,7 @@ locked versions) and points at the license texts this repository ships. Reviewer
 legal-grade attribution list must do their own review; these values are the machine-facing
 SPDX identifiers Cargo metadata provides, reproduced as indexed, not vetted advice.
 
-All direct dependencies resolve through the vendored serdes-ai 0.2.6 workspace (`path`
-dependencies) plus the registry crates listed below. `Cargo.lock` **does** contain a
+All direct dependencies resolve through the vendored serdes-ai 0.2.6 crates, the pinned client-only serdes-ai-responses 0.3.0 snapshot (`path` dependencies), plus the registry crates listed below. `Cargo.lock` **does** contain a
 full registry transitive dependency graph (serde, serde_json, tokio, clap, reqwest,
 and their transitive crates are locked crates.io packages), and `--locked` builds rely on
 it; `publish = false` only means this crate itself is never uploaded, it does not remove
@@ -23,6 +22,7 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 | Crate                          | Version  | Kind          | License   | Source                              |
 | ------------------------------ | -------- | ------------- | --------- | ----------------------------------- |
 | serdes-ai                      | 0.2.6    | runtime       | MIT       | vendored `vendor/serdes-ai`         |
+| serdes-ai-responses            | 0.3.0    | runtime       | MIT       | vendored `vendor/serdes-ai-responses` |
 | serde                          | 1.0.229  | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | serde_json                     | 1.0.151  | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | regex-lite                     | 0.1.9     | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
@@ -44,9 +44,9 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 
 `vendor/serdes-ai*` (runtime, `path`): serdes-ai-core, serdes-ai-models,
 serdes-ai-agent, serdes-ai-output, serdes-ai-providers, serdes-ai-retries,
-serdes-ai-streaming, serdes-ai-tools, serdes-ai-toolsets, serdes-ai-macros —
-all `0.2.6`, `license = "MIT"` as declared in their vendored `Cargo.toml`
-(see `THIRD_PARTY_LICENSES/README.md`).
+serdes-ai-streaming, serdes-ai-tools, serdes-ai-toolsets, serdes-ai-macros at
+`0.2.6`, plus the client-only serdes-ai-responses snapshot at `0.3.0`. Each declares
+`license = "MIT"` in its vendored `Cargo.toml` (see `THIRD_PARTY_LICENSES/README.md`).
 
 ## Scope of this inventory
 

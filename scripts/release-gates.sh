@@ -74,6 +74,10 @@ vendor_target="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-vendor-target.XXXXXX")"
 trap 'rm -rf "$vendor_target"' EXIT
 CARGO_TARGET_DIR="$vendor_target" bash scripts/test-vendor-feature-surfaces.sh
 CARGO_TARGET_DIR="$vendor_target" cargo +1.88.0 clippy --offline --locked \
+  --manifest-path vendor/serdes-ai-responses/Cargo.toml --all-targets -- -D warnings
+CARGO_TARGET_DIR="$vendor_target" cargo +1.88.0 test --offline --locked \
+  --manifest-path vendor/serdes-ai-responses/Cargo.toml
+CARGO_TARGET_DIR="$vendor_target" cargo +1.88.0 clippy --offline --locked \
   --manifest-path vendor/serdes-ai-providers/Cargo.toml \
   --no-default-features --features openai --all-targets -- -D warnings
 CARGO_TARGET_DIR="$vendor_target" cargo +1.88.0 test --offline --locked \

@@ -29,9 +29,12 @@ for production_path in \
     exit 1
   fi
 done
+vendor_manifest_count=$(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.toml -type f | wc -l | tr -d ' ')
+vendor_lock_count=$(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.lock -type f | wc -l | tr -d ' ')
+[[ "$vendor_manifest_count" -gt 0 ]]
+[[ "$vendor_lock_count" == "$vendor_manifest_count" ]]
 for audit_gate in scripts/release-gates.sh .github/workflows/ci.yml; do
   grep -Fq 'for lockfile in vendor/*/Cargo.lock; do' "$root/$audit_gate"
-  [[ $(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.lock -type f | wc -l | tr -d ' ') == 11 ]]
 done
 grep -Fq "GH_TOKEN: \${{ secrets.RELEASE_ADMIN_TOKEN }}" "$root/.github/workflows/ci.yml"
 grep -Fq 'Create atomic immutable release record' "$root/.github/workflows/ci.yml"

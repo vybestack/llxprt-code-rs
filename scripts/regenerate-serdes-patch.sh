@@ -3,6 +3,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 python3 "$root/scripts/verify-upstream-evidence.py"
+python3 "$root/scripts/verify-serdes-responses-evidence.py"
 stage=$(mktemp -d "${TMPDIR:-/tmp}/llxprt-serdes-patch.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/tree/vendor" "$stage/extract"
@@ -19,6 +20,10 @@ for archive in "$root"/vendor-upstream/*.crate; do
   crate=${crate%-0.2.6}
   mv "${entries[0]}" "$stage/tree/vendor/$crate"
 done
+
+tar -xzf \
+  "$root/vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz" \
+  -C "$stage/tree/vendor"
 
 (
   cd "$stage/tree"
