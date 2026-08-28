@@ -193,8 +193,10 @@ Example success object:
 `--cwd`; writes create parents inside the root and paths (including symlinks) that escape
 are rejected. Tool arguments are strictly typed (missing required, wrong type, unknown extra
 fields all fail). `read_file` honors an exact bounded `limit` (at most the requested
-bytes, with an explicit truncation marker) and an exact `offset`; `replace`
-requires `old_string` to match exactly once (or an `expected` count that matches exactly)
+bytes, with an explicit truncation marker) and an exact `offset`. `read_file` and
+`search_file_content` accept `max_output_bytes` to clamp both successful and error results
+below the session's remaining output budget. `replace` requires `old_string` to match exactly
+once (or an `expected` count that matches exactly)
 and a replace on a file above the supported size cap is rejected **without any
 mutation**. `search_file_content` walks descriptor-relative (no symlink follow) and is
 **hard-capped**: recursion depth, entries visited, aggregate source bytes read, aggregate

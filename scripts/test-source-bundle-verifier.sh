@@ -1544,6 +1544,12 @@ PY
   git -C "$build_fixture" add .
   git -C "$build_fixture" add -f registry-vendor
   git -C "$build_fixture" commit -q -m snapshot
+  vendor_attribute="$(git -C "$build_fixture" check-attr text -- \
+    registry-vendor/core-foundation-0.10.1/Cargo.toml)"
+  if [[ "$vendor_attribute" != *': text: unset' ]]; then
+    echo "registry-vendor files are not protected from line-ending conversion" >&2
+    exit 1
+  fi
   mkdir "$tmp/clean-output"
   PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
     "$tmp/clean-output/source.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"
