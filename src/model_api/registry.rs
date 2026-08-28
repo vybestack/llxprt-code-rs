@@ -123,7 +123,7 @@ fn construct_openai_responses(
     };
     let secret_values = secret_config.secret_values();
     let model = serdes_ai::models::openai::OpenAIResponsesModel::new(&profile.model, api_key)
-        .with_base_url(endpoint.full())
+        .with_base_url(responses_transport_base(&endpoint))
         .with_settings(draft.finalize(session_id))
         .with_timeout(std::time::Duration::from_secs(900));
     let model_settings = serdes_ai::ModelSettings {
@@ -160,6 +160,10 @@ fn normalize_responses_endpoint(raw: &str) -> Result<crate::profile::RedactedUrl
     url.set_path(normalized_base);
     crate::profile::RedactedUrl::parse(url.as_str())
         .map_err(|_| "OpenAI Responses endpoint is invalid".to_string())
+}
+
+fn responses_transport_base(endpoint: &crate::profile::RedactedUrl) -> &str {
+    endpoint.full().trim_end_matches('/')
 }
 
 fn construct_codex(
@@ -411,23 +415,36 @@ mod tests {
 
     #[test]
     fn responses_endpoint_routes_normalize_to_one_suffix() {
-        for (raw, expected_base) in [
-            ("https://api.example.com", "https://api.example.com/"),
-            ("https://api.example.com/", "https://api.example.com/"),
-            ("https://api.example.com/v1", "https://api.example.com/v1"),
-            ("https://api.example.com/v1/", "https://api.example.com/v1"),
+        for (raw, expected_url) in [
+            (
+                "https://api.example.com",
+                "https://api.example.com/responses",
+            ),
+            (
+                "https://api.example.com/",
+                "https://api.example.com/responses",
+            ),
+            (
+                "https://api.example.com/v1",
+                "https://api.example.com/v1/responses",
+            ),
+            (
+                "https://api.example.com/v1/",
+                "https://api.example.com/v1/responses",
+            ),
             (
                 "https://api.example.com/responses",
-                "https://api.example.com/",
+                "https://api.example.com/responses",
             ),
             (
                 "https://api.example.com/v1/responses/",
-                "https://api.example.com/v1",
+                "https://api.example.com/v1/responses",
             ),
         ] {
+            let endpoint = normalize_responses_endpoint(raw).unwrap();
             assert_eq!(
-                normalize_responses_endpoint(raw).unwrap().full(),
-                expected_base
+                format!("{}/responses", responses_transport_base(&endpoint)),
+                expected_url
             );
         }
         for raw in [
