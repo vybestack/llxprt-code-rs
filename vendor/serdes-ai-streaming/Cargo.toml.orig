@@ -34,8 +34,8 @@ bytes = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
-rustls = { version = "0.22", optional = true }
-tokio-tungstenite = { version = "0.21", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
+tokio-tungstenite = { version = "0.28", optional = true }
 webpki-roots = { version = "1", optional = true }
 
 [dev-dependencies]

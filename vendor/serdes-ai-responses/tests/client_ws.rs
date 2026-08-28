@@ -123,7 +123,7 @@ async fn send_completed_turn(ws: &mut FakeWs, id: &str, request: &CreateResponse
 }
 
 async fn send_event(ws: &mut FakeWs, event: &StreamEvent) {
-    ws.send(Message::Text(serde_json::to_string(event).unwrap()))
+    ws.send(Message::Text(serde_json::to_string(event).unwrap().into()))
         .await
         .unwrap();
 }
@@ -158,7 +158,9 @@ async fn stale_continuation_clears_chain_and_replays_full_input() {
                 "message": "previous response not found: resp_1",
             }
         });
-        ws.send(Message::Text(envelope.to_string())).await.unwrap();
+        ws.send(Message::Text(envelope.to_string().into()))
+            .await
+            .unwrap();
 
         // Retry: no continuation id, full input replayed.
         let replay = read_turn(&mut ws).await;
@@ -210,7 +212,9 @@ async fn connection_limit_error_reconnects_on_a_fresh_socket() {
                 "message": "websocket connection lifetime limit reached",
             }
         });
-        ws.send(Message::Text(envelope.to_string())).await.unwrap();
+        ws.send(Message::Text(envelope.to_string().into()))
+            .await
+            .unwrap();
         ws.send(Message::Close(None)).await.unwrap();
         drop(ws);
 
