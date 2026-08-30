@@ -775,6 +775,10 @@ fn spawn_responses_tool_server() -> (
                     Err(error) => panic!("accept Responses request: {error}"),
                 }
             };
+            // Accepted sockets inherit the listener's nonblocking flag on darwin,
+            // so reads race EAGAIN; the read timeout only means anything on a
+            // blocking socket.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(20)))
                 .unwrap();
