@@ -55,6 +55,10 @@ impl ModelApi {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TransportKind {
     Http,
+    /// Reserved for the deferred WebSocket transport; re-adding the codex
+    /// registration row constructs it once the vendored client ships that
+    /// support.
+    #[allow(dead_code)]
     WebSocket,
 }
 
@@ -112,10 +116,7 @@ pub(crate) fn resolve_model_target(
             ));
         }
     };
-    let transport = match provider {
-        ProviderId::Codex => TransportKind::WebSocket,
-        _ => TransportKind::Http,
-    };
+    let transport = TransportKind::Http;
 
     Ok(ModelTarget {
         provider,

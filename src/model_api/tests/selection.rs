@@ -95,7 +95,7 @@ fn provider_defaults_and_api_compatibility_are_typed() {
 
     let codex = resolve("codex", json!({})).unwrap();
     assert_eq!(codex.api, ModelApi::Responses);
-    assert_eq!(codex.transport, TransportKind::WebSocket);
+    assert_eq!(codex.transport, TransportKind::Http);
 
     assert!(resolve("openai-responses", json!({"apiMode": "chat"})).is_err());
     assert!(resolve("openaivercel", json!({"apiMode": "responses"})).is_err());

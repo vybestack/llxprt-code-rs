@@ -4,8 +4,8 @@ use super::*;
 fn production_endpoint_identity_is_exact() {
     let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), true);
     assert_eq!(
-        draft.endpoint().websocket_url(),
-        "wss://chatgpt.com/backend-api/codex/responses"
+        draft.endpoint().responses_url(),
+        "https://chatgpt.com/backend-api/codex/responses"
     );
     assert_eq!(draft.model(), "gpt-5.6-sol");
 }

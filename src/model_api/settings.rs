@@ -1,6 +1,6 @@
 use serdes_ai_responses::types::ReasoningSettings;
 
-const CODEX_RESPONSES_ENDPOINT: &str = "wss://chatgpt.com/backend-api/codex/responses";
+const CODEX_RESPONSES_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/responses";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CodexEndpointIdentity {
@@ -8,7 +8,10 @@ pub(crate) enum CodexEndpointIdentity {
 }
 
 impl CodexEndpointIdentity {
-    pub(crate) fn websocket_url(self) -> &'static str {
+    /// The scheme of this URL selects the vendored client's transport; the
+    /// WebSocket transport stays available by switching the registration row
+    /// and this constant back to `wss://`.
+    pub(crate) fn responses_url(self) -> &'static str {
         match self {
             Self::Production => CODEX_RESPONSES_ENDPOINT,
         }

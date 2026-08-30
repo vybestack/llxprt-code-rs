@@ -92,7 +92,7 @@ static PRODUCTION_REGISTRATIONS: &[ModelRegistration] = &[
     registration(
         ProviderId::Codex,
         ModelApi::Responses,
-        TransportKind::WebSocket,
+        TransportKind::Http,
         ConstructorKind::CodexResponses,
     ),
 ];

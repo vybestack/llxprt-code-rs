@@ -58,7 +58,7 @@ fn production_registration_slice_is_exact_and_typed() {
     assert!(targets.contains(&ModelTarget {
         provider: ProviderId::Codex,
         api: ModelApi::Responses,
-        transport: TransportKind::WebSocket,
+        transport: TransportKind::Http,
     }));
     assert!(targets.contains(&ModelTarget {
         provider: ProviderId::OpenAiResponses,

@@ -75,7 +75,7 @@ fn parsed_profile_stores_the_resolved_target() {
     );
     assert_eq!(
         codex.target.transport,
-        crate::model_api::target::TransportKind::WebSocket
+        crate::model_api::target::TransportKind::Http
     );
     assert_eq!(codex.ephemeral.context_limit, Some(262_144));
     assert_eq!(codex.ephemeral.max_output_tokens, Some(40_000));

@@ -6,7 +6,7 @@ use serdes_ai_responses::client::OpenResponsesModel;
 use super::dependencies::{ConstructorKind, RuntimeDependencies};
 use super::responses_backend::ResponsesBackend;
 
-const CODEX_RESPONSES_BETA: &str = "responses_websockets=2026-02-06";
+const CODEX_RESPONSES_BETA: &str = "responses=experimental";
 const ORIGINATOR: &str = "llxprt-code";
 
 pub(crate) struct ConstructedBackend {
@@ -191,7 +191,7 @@ fn construct_codex(
         .collect();
 
     let user_agent = format!("llxprt-code-rs/{}", env!("CARGO_PKG_VERSION"));
-    let mut model = OpenResponsesModel::new(draft.model(), draft.endpoint().websocket_url())
+    let mut model = OpenResponsesModel::new(draft.model(), draft.endpoint().responses_url())
         .bearer(credential.access_token())
         .header("chatgpt-account-id", credential.account_id())
         .header("OpenAI-Beta", CODEX_RESPONSES_BETA)
@@ -269,10 +269,10 @@ mod tests {
             true,
         );
         assert_eq!(
-            draft.endpoint().websocket_url(),
-            "wss://chatgpt.com/backend-api/codex/responses"
+            draft.endpoint().responses_url(),
+            "https://chatgpt.com/backend-api/codex/responses"
         );
-        assert_eq!(CODEX_RESPONSES_BETA, "responses_websockets=2026-02-06");
+        assert_eq!(CODEX_RESPONSES_BETA, "responses=experimental");
         assert_eq!(ORIGINATOR, "llxprt-code");
     }
 
