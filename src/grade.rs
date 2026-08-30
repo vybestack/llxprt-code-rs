@@ -713,6 +713,19 @@ fn build_and_test_consumer(base: &std::path::Path, ws: &std::path::Path, name: &
     if std::fs::write(base.join("tests/contract.rs"), tests).is_err() {
         return false;
     }
+    // Resolve aes-gcm and friends from the shipped source closure: the graded
+    // build must not depend on whatever happens to sit in the ambient Cargo
+    // cache (which is empty and isolated under CI).
+    let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("registry-vendor");
+    let config = format!(
+        "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\
+         [source.vendored-sources]\ndirectory = {registry:?}\n"
+    );
+    if std::fs::create_dir_all(base.join(".cargo")).is_err()
+        || std::fs::write(base.join(".cargo/config.toml"), config).is_err()
+    {
+        return false;
+    }
     let o = match process::run_cmd(CmdSpec {
         program: "cargo".to_string(),
         args: vec!["test".to_string(), "--offline".to_string()],

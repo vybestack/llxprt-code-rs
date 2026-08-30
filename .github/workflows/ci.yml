@@ -85,6 +85,10 @@ jobs:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
           ALL_PROXY: http://127.0.0.1:9
+          # The blackhole stays for off-box hosts, but loopback servers the
+          # tests talk to must be exempt or every HTTP client proxies itself
+          # into the dead port.
+          NO_PROXY: 127.0.0.1,localhost
         run: cargo test --offline --locked --workspace --all-targets --all-features
       - name: Direct offline vendored SerdesAI model and Responses clippy and tests
         env:

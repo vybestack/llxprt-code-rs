@@ -1,19 +1,32 @@
+#[cfg(any(test, target_os = "macos"))]
 use std::collections::BTreeSet;
 use std::fmt;
+#[cfg(any(test, target_os = "macos"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(any(test, target_os = "macos"))]
 use serde::de::{self, Deserialize, Deserializer, MapAccess, Visitor};
+#[cfg(any(test, target_os = "macos"))]
 use serde_json::Value;
 
+#[cfg(any(test, target_os = "macos"))]
 const MAX_CREDENTIAL_BYTES: usize = 65_536;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_CREDENTIAL_FIELDS: usize = 32;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_ACCESS_TOKEN_BYTES: usize = 4_096;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_ACCOUNT_ID_BYTES: usize = 256;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_OPTIONAL_TOKEN_BYTES: usize = 16_384;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_SCOPE_OR_RESOURCE_BYTES: usize = 2_048;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_UNKNOWN_STRING_BYTES: usize = 16_384;
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) const CREDENTIAL_EXPIRY_SKEW_SECONDS: i64 = 30;
 
+#[cfg(any(test, target_os = "macos"))]
 const CREDENTIAL_REMEDIATION: &str =
     "Codex OAuth credential is unavailable or invalid; sign in again with LLxprt Code using the native macOS keychain";
 #[cfg(not(target_os = "macos"))]
@@ -26,6 +39,7 @@ pub(crate) struct CredentialError {
 }
 
 impl CredentialError {
+    #[cfg(any(test, target_os = "macos"))]
     pub(crate) const fn remediation() -> Self {
         Self {
             diagnostic: CREDENTIAL_REMEDIATION,
@@ -49,12 +63,14 @@ impl fmt::Display for CredentialError {
 impl std::error::Error for CredentialError {}
 
 pub(crate) trait Clock: Send + Sync {
+    #[cfg(any(test, target_os = "macos"))]
     fn unix_seconds(&self) -> Result<i64, CredentialError>;
 }
 
 pub(crate) struct SystemClock;
 
 impl Clock for SystemClock {
+    #[cfg(any(test, target_os = "macos"))]
     fn unix_seconds(&self) -> Result<i64, CredentialError> {
         let seconds = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -126,6 +142,7 @@ impl fmt::Debug for CodexCredential {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 pub(super) fn parse_credential(
     bytes: &[u8],
     clock: &dyn Clock,
@@ -143,6 +160,7 @@ pub(super) fn parse_credential(
     fields.into_credential(clock)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Default)]
 struct CredentialFields {
     access_token: Option<String>,
@@ -152,6 +170,7 @@ struct CredentialFields {
 }
 
 impl CredentialFields {
+    #[cfg(any(test, target_os = "macos"))]
     fn into_credential(self, clock: &dyn Clock) -> Result<CodexCredential, CredentialError> {
         let access_token = self.access_token.ok_or_else(CredentialError::remediation)?;
         let account_id = self.account_id.ok_or_else(CredentialError::remediation)?;
@@ -177,6 +196,7 @@ impl CredentialFields {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl<'de> Deserialize<'de> for CredentialFields {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -186,8 +206,10 @@ impl<'de> Deserialize<'de> for CredentialFields {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 struct CredentialVisitor;
 
+#[cfg(any(test, target_os = "macos"))]
 impl<'de> Visitor<'de> for CredentialVisitor {
     type Value = CredentialFields;
 
@@ -216,6 +238,7 @@ impl<'de> Visitor<'de> for CredentialVisitor {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn apply_field(fields: &mut CredentialFields, key: &str, value: Value) -> Result<(), &'static str> {
     match key {
         "access_token" => fields.access_token = Some(require_string(value)?),
@@ -235,10 +258,12 @@ fn apply_field(fields: &mut CredentialFields, key: &str, value: Value) -> Result
     Ok(())
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn require_string(value: Value) -> Result<String, &'static str> {
     value.as_str().map(str::to_owned).ok_or("expected string")
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_optional_string(value: Value, max_bytes: usize) -> Result<(), &'static str> {
     let value = value.as_str().ok_or("expected optional string")?;
     if value.len() > max_bytes {
@@ -247,6 +272,7 @@ fn validate_optional_string(value: Value, max_bytes: usize) -> Result<(), &'stat
     Ok(())
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_optional_scope(value: Value) -> Result<(), &'static str> {
     if value.is_null() {
         return Ok(());
@@ -254,6 +280,7 @@ fn validate_optional_scope(value: Value) -> Result<(), &'static str> {
     validate_optional_string(value, MAX_SCOPE_OR_RESOURCE_BYTES)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_unknown_scalar(value: Value) -> Result<(), &'static str> {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => Ok(()),
@@ -263,6 +290,7 @@ fn validate_unknown_scalar(value: Value) -> Result<(), &'static str> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn require_integral_i64(value: Value) -> Result<i64, &'static str> {
     let number = value.as_number().ok_or("expected number")?;
     if let Some(value) = number.as_i64() {
@@ -282,6 +310,7 @@ fn require_integral_i64(value: Value) -> Result<i64, &'static str> {
     Ok(value as i64)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_required_string(value: &str, max_bytes: usize) -> Result<(), CredentialError> {
     if value.is_empty() || value.len() > max_bytes {
         return Err(CredentialError::remediation());
@@ -289,6 +318,7 @@ fn validate_required_string(value: &str, max_bytes: usize) -> Result<(), Credent
     Ok(())
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_authorization_header(access_token: &str) -> Result<(), CredentialError> {
     let length = b"Bearer "
         .len()
@@ -306,6 +336,7 @@ fn validate_authorization_header(access_token: &str) -> Result<(), CredentialErr
     Ok(())
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn validate_header_value(bytes: &[u8]) -> Result<(), CredentialError> {
     if bytes.iter().copied().all(is_header_value_byte) {
         Ok(())
@@ -314,6 +345,7 @@ fn validate_header_value(bytes: &[u8]) -> Result<(), CredentialError> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn is_header_value_byte(byte: u8) -> bool {
     (32..=126).contains(&byte)
 }
