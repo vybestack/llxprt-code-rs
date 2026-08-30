@@ -719,10 +719,9 @@ impl OpenResponsesModel {
         let messages: Vec<ModelRequest> = messages.to_vec();
         let settings = settings.clone();
         let params = params.clone();
-        let task =
-            tokio::spawn(
-                async move { run_http_stream(&inner, &messages, &settings, &params, &tx).await },
-            );
+        let task = tokio::spawn(async move {
+            run_http_stream(&inner, &messages, &settings, &params, &tx).await
+        });
         let mut events = Vec::new();
         while let Some(item) = rx.recv().await {
             events.push(item?);
@@ -735,7 +734,7 @@ impl OpenResponsesModel {
         Ok(response_from_events(
             events,
             &self.inner.model_name,
-            &terminal_id.as_deref().unwrap_or(""),
+            terminal_id.as_deref().unwrap_or(""),
         ))
     }
 

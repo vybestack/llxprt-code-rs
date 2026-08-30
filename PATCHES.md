@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `640f41fa9212328d947b4314c9f0eba2115e967ca1aa3f1c3b9dde24be4b17a1`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `4ac2d91d0320f0ed3ceeee7766a0e0bc27bc2ff72026cbd2404704ce0af74de6`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -186,8 +186,7 @@ shape, and the key's absence for a default-constructed model.
 
 ## Patch 10 - codex HTTP streaming wire mode
 (`vendor/serdes-ai-responses/src/client/mod.rs`, `Inner.codex_http` + `codex_http()` builder +
-`build_request` store/cap/chaining override + `run_codex_http_turn`; `vendor/serdes-ai-models/src/error.rs`,
-`InvalidResponse` display)
+`build_request` store/cap/chaining override + `run_codex_http_turn`)
 
 The ChatGPT codex responses backend accepts neither `store: true` nor a non-streaming request and
 rejects `max_output_tokens` outright, so the default HTTP turn shape cannot reach it. `codex_http()`
@@ -199,10 +198,11 @@ existing assembler, propagating stream errors instead of folding them into an em
 a stream that closes cleanly after the terminal response event terminates normally because the
 codex backend sends no `[DONE]` marker. A completed response whose folded output contains tool
 calls reports `ToolCall` as the finish reason because the responses wire has no tool-call finish
-reason of its own (mirroring the sibling openai client). `InvalidResponse` and `Network` now
-display their detail so wire failures name the actual cause. The host
-(`src/model_api/registry.rs`) enables the mode for the codex provider and stops forwarding
-`max_tokens` for it. The wire contract is pinned offline by
+reason of its own (mirroring the sibling openai client). The vendored `ModelError` keeps external
+text out of its public formatting; the host (`src/model_api/responses_backend.rs`) renders the
+`InvalidResponse` and `Network` details on its own trusted diagnostic path so wire failures still
+name the actual cause. The host (`src/model_api/registry.rs`) enables the mode for the codex
+provider and stops forwarding `max_tokens` for it. The wire contract is pinned offline by
 `codex_http_wire_contract_streams_without_store_or_cap_and_replays_input` (asserting per-turn body
 shape and full replay) and `codex_http_rejects_non_sse_success_body` (a JSON 200 without SSE is an
 error, not an empty turn).

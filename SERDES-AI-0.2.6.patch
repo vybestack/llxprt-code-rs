@@ -12291,7 +12291,7 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..6567a5c 100644
+index 58b6fc1..ed83d1c 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
 @@ -2,13 +2,10 @@
@@ -12318,7 +12318,7 @@ index 58b6fc1..6567a5c 100644
      Api {
          /// Error message.
          message: String,
-@@ -28,68 +24,104 @@ pub enum ModelError {
+@@ -28,68 +24,102 @@ pub enum ModelError {
      },
  
      /// Request timeout.
@@ -12403,9 +12403,7 @@ index 58b6fc1..6567a5c 100644
 +                write!(f, "Model request rate limited (retry after {retry_after:?})")
 +            }
 +            Self::Authentication(_) => f.write_str("Model authentication failed"),
-+            Self::InvalidResponse(detail) => {
-+                write!(f, "Model returned an invalid response: {detail}")
-+            }
++            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
 +            Self::ResponseTooLarge { limit } => {
 +                write!(f, "Provider response exceeded the {limit}-byte limit")
 +            }
@@ -12423,7 +12421,7 @@ index 58b6fc1..6567a5c 100644
 +                "Model context length exceeded ({max_tokens} tokens maximum, {requested_tokens} requested)"
 +            ),
 +            Self::Configuration(_) => f.write_str("Model configuration is invalid"),
-+            Self::Network(detail) => write!(f, "Model network request failed: {detail}"),
++            Self::Network(_) => f.write_str("Model network request failed"),
 +            Self::Other(_) => f.write_str("Model operation failed"),
 +        }
 +    }
@@ -12450,7 +12448,7 @@ index 58b6fc1..6567a5c 100644
  }
  
  impl ModelError {
-@@ -202,15 +234,15 @@ impl From<reqwest::Error> for ModelError {
+@@ -202,15 +232,15 @@ impl From<reqwest::Error> for ModelError {
          if err.is_timeout() {
              ModelError::Timeout(Duration::from_secs(30)) // Default timeout
          } else if err.is_connect() {
@@ -12469,7 +12467,7 @@ index 58b6fc1..6567a5c 100644
          }
      }
  }
-@@ -249,11 +281,70 @@ mod tests {
+@@ -249,11 +279,70 @@ mod tests {
      }
  
      #[test]
@@ -24922,7 +24920,7 @@ index 9993fc0..78de8d4 100644
  }
  
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..a80e564 100644
+index f90cc22..1fb8ccc 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -16,7 +16,6 @@ use async_trait::async_trait;
@@ -25093,7 +25091,7 @@ index f90cc22..a80e564 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +706,41 @@ fn response_from_events(
+@@ -678,7 +706,40 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -25111,10 +25109,9 @@ index f90cc22..a80e564 100644
 +        let messages: Vec<ModelRequest> = messages.to_vec();
 +        let settings = settings.clone();
 +        let params = params.clone();
-+        let task =
-+            tokio::spawn(
-+                async move { run_http_stream(&inner, &messages, &settings, &params, &tx).await },
-+            );
++        let task = tokio::spawn(async move {
++            run_http_stream(&inner, &messages, &settings, &params, &tx).await
++        });
 +        let mut events = Vec::new();
 +        while let Some(item) = rx.recv().await {
 +            events.push(item?);
@@ -25127,7 +25124,7 @@ index f90cc22..a80e564 100644
 +        Ok(response_from_events(
 +            events,
 +            &self.inner.model_name,
-+            &terminal_id.as_deref().unwrap_or(""),
++            terminal_id.as_deref().unwrap_or(""),
 +        ))
 +    }
 +
@@ -25136,7 +25133,7 @@ index f90cc22..a80e564 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -759,7 +821,8 @@ impl OpenResponsesModel {
+@@ -759,7 +820,8 @@ impl OpenResponsesModel {
      }
  }
  
@@ -25146,7 +25143,7 @@ index f90cc22..a80e564 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,7 +835,7 @@ async fn run_http_stream(
+@@ -772,7 +834,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -25155,7 +25152,7 @@ index f90cc22..a80e564 100644
      use futures::StreamExt;
  
      let mut session = inner.session.lock().await;
-@@ -815,6 +878,7 @@ async fn run_http_stream(
+@@ -815,6 +877,7 @@ async fn run_http_stream(
  
      let mut byte_stream = response.bytes_stream();
      let mut buffer = String::new();
@@ -25163,7 +25160,7 @@ index f90cc22..a80e564 100644
      while let Some(chunk) = byte_stream.next().await {
          let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
          buffer.push_str(&String::from_utf8_lossy(&chunk));
-@@ -825,15 +889,18 @@ async fn run_http_stream(
+@@ -825,15 +888,18 @@ async fn run_http_stream(
                  continue;
              };
              if payload == "[DONE]" {
@@ -25185,7 +25182,7 @@ index f90cc22..a80e564 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,14 +913,20 @@ async fn run_http_stream(
+@@ -846,14 +912,20 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
