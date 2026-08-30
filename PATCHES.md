@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `a56cdcfa8087bdb6c4b60e4425ef25267b336ae75162b4bde175afbd0a422014`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `5526d384486ffc3ae68337cf9896277fafb674cf33374f23060bc6b864eb0478`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -196,7 +196,9 @@ the model settings carry one (the output bound stays host-side), and never uses 
 string-input shorthand or `previous_response_id` chaining; because nothing is stored, every turn
 replays the full input list. The turn drains the SSE event stream and folds it through the
 existing assembler, propagating stream errors instead of folding them into an empty response, and
-`InvalidResponse` now displays its detail so wire failures name the actual cause. The host
+a stream that closes cleanly after the terminal response event terminates normally because the
+codex backend sends no `[DONE]` marker. `InvalidResponse` and `Network` now display their detail so
+wire failures name the actual cause. The host
 (`src/model_api/registry.rs`) enables the mode for the codex provider and stops forwarding
 `max_tokens` for it. The wire contract is pinned offline by
 `codex_http_wire_contract_streams_without_store_or_cap_and_replays_input` (asserting per-turn body

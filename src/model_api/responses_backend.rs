@@ -264,13 +264,22 @@ mod tests {
                 let sse = |event: &serdes_ai_responses::types::StreamEvent| {
                     format!("data: {}\n\n", serde_json::to_string(event).unwrap())
                 };
+                // Round 0 ends like the real codex backend: the terminal
+                // response event, then EOF, no `[DONE]` marker. Round 1
+                // keeps the marker so both terminations stay covered.
+                let done = if round == 0 {
+                    String::new()
+                } else {
+                    "data: [DONE]\n\n".to_string()
+                };
                 let payload = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}data: [DONE]\n\n",
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}{}",
                     sse(&created),
                     sse(&item_added),
                     sse(&text_delta),
                     sse(&item_done),
                     sse(&completed),
+                    done,
                 );
                 stream
                     .write_all(payload.as_bytes())

@@ -908,7 +908,13 @@ async fn run_http_stream(
         }
     }
 
-    Err(ModelError::InvalidResponse(
-        "sse stream ended without a terminal event".to_string(),
-    ))
+    // The codex backend closes the stream after the terminal response
+    // event without a `[DONE]` marker, so a clean EOF after one counts.
+    if terminal_id.is_some() {
+        Ok(terminal_id)
+    } else {
+        Err(ModelError::InvalidResponse(
+            "sse stream ended without a terminal event".to_string(),
+        ))
+    }
 }

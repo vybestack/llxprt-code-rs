@@ -12291,7 +12291,7 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..2605817 100644
+index 58b6fc1..6567a5c 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
 @@ -2,13 +2,10 @@
@@ -12423,7 +12423,7 @@ index 58b6fc1..2605817 100644
 +                "Model context length exceeded ({max_tokens} tokens maximum, {requested_tokens} requested)"
 +            ),
 +            Self::Configuration(_) => f.write_str("Model configuration is invalid"),
-+            Self::Network(_) => f.write_str("Model network request failed"),
++            Self::Network(detail) => write!(f, "Model network request failed: {detail}"),
 +            Self::Other(_) => f.write_str("Model operation failed"),
 +        }
 +    }
@@ -24922,7 +24922,7 @@ index 9993fc0..78de8d4 100644
  }
  
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..2afa144 100644
+index f90cc22..82467ba 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -16,7 +16,6 @@ use async_trait::async_trait;
@@ -25157,7 +25157,7 @@ index f90cc22..2afa144 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,7 +901,7 @@ async fn run_http_stream(
+@@ -846,14 +901,20 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -25166,6 +25166,22 @@ index f90cc22..2afa144 100644
                      }
                  }
              }
+         }
+     }
+ 
+-    Err(ModelError::InvalidResponse(
+-        "sse stream ended without a terminal event".to_string(),
+-    ))
++    // The codex backend closes the stream after the terminal response
++    // event without a `[DONE]` marker, so a clean EOF after one counts.
++    if terminal_id.is_some() {
++        Ok(terminal_id)
++    } else {
++        Err(ModelError::InvalidResponse(
++            "sse stream ended without a terminal event".to_string(),
++        ))
++    }
+ }
 diff --git a/vendor/serdes-ai-responses/src/engine.rs b/vendor/serdes-ai-responses/src/engine.rs
 deleted file mode 100644
 index ffd0e92..0000000
