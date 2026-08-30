@@ -636,7 +636,7 @@ fn response_from_events(
     model_name: &str,
     response_id: &str,
 ) -> ModelResponse {
-    use serdes_ai_core::messages::ModelResponsePartDelta;
+    use serdes_ai_core::messages::{ModelResponsePart, ModelResponsePartDelta};
 
     let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
     let mut finish_reason = None;
@@ -680,6 +680,18 @@ fn response_from_events(
             }
         }
     }
+
+    // The responses wire has no tool-call finish reason: a completed
+    // response whose output contains calls is a tool-call turn, so the
+    // folded parts decide (mirrors the sibling openai client).
+    let finish_reason = if parts
+        .iter()
+        .any(|part| matches!(part, ModelResponsePart::ToolCall(_)))
+    {
+        Some(FinishReason::ToolCall)
+    } else {
+        finish_reason
+    };
 
     ModelResponse {
         parts,

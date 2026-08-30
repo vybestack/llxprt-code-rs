@@ -24922,7 +24922,7 @@ index 9993fc0..78de8d4 100644
  }
  
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..82467ba 100644
+index f90cc22..a80e564 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -16,7 +16,6 @@ use async_trait::async_trait;
@@ -25065,7 +25065,35 @@ index f90cc22..82467ba 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -678,7 +694,41 @@ fn response_from_events(
+@@ -620,7 +636,7 @@ fn response_from_events(
+     model_name: &str,
+     response_id: &str,
+ ) -> ModelResponse {
+-    use serdes_ai_core::messages::ModelResponsePartDelta;
++    use serdes_ai_core::messages::{ModelResponsePart, ModelResponsePartDelta};
+ 
+     let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
+     let mut finish_reason = None;
+@@ -665,6 +681,18 @@ fn response_from_events(
+         }
+     }
+ 
++    // The responses wire has no tool-call finish reason: a completed
++    // response whose output contains calls is a tool-call turn, so the
++    // folded parts decide (mirrors the sibling openai client).
++    let finish_reason = if parts
++        .iter()
++        .any(|part| matches!(part, ModelResponsePart::ToolCall(_)))
++    {
++        Some(FinishReason::ToolCall)
++    } else {
++        finish_reason
++    };
++
+     ModelResponse {
+         parts,
+         model_name: Some(model_name.to_string()),
+@@ -678,7 +706,41 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -25108,7 +25136,7 @@ index f90cc22..82467ba 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -759,7 +809,8 @@ impl OpenResponsesModel {
+@@ -759,7 +821,8 @@ impl OpenResponsesModel {
      }
  }
  
@@ -25118,7 +25146,7 @@ index f90cc22..82467ba 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,7 +823,7 @@ async fn run_http_stream(
+@@ -772,7 +835,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -25127,7 +25155,7 @@ index f90cc22..82467ba 100644
      use futures::StreamExt;
  
      let mut session = inner.session.lock().await;
-@@ -815,6 +866,7 @@ async fn run_http_stream(
+@@ -815,6 +878,7 @@ async fn run_http_stream(
  
      let mut byte_stream = response.bytes_stream();
      let mut buffer = String::new();
@@ -25135,7 +25163,7 @@ index f90cc22..82467ba 100644
      while let Some(chunk) = byte_stream.next().await {
          let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
          buffer.push_str(&String::from_utf8_lossy(&chunk));
-@@ -825,15 +877,18 @@ async fn run_http_stream(
+@@ -825,15 +889,18 @@ async fn run_http_stream(
                  continue;
              };
              if payload == "[DONE]" {
@@ -25157,7 +25185,7 @@ index f90cc22..82467ba 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,14 +901,20 @@ async fn run_http_stream(
+@@ -846,14 +913,20 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
