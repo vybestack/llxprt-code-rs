@@ -169,6 +169,7 @@ struct CredentialFields {
     token_type_valid: Option<bool>,
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl CredentialFields {
     #[cfg(any(test, target_os = "macos"))]
     fn into_credential(self, clock: &dyn Clock) -> Result<CodexCredential, CredentialError> {
