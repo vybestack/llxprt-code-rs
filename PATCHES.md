@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `bae81a058b41adcdd138aa3c20106fe87b00ca043980ff6df684a527daa7a5b3`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `b1b1c11f331cb484dee95adb75161859d09ffc3e7a16b1c93a689e7748782eca`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -167,6 +167,22 @@ deterministic zero delay rather than reaching panicking `Duration` conversion AP
 ## Patch 8 - Open Responses WebSocket client
 
 The client-side `serdes-ai-responses` source is retained from the live-tested Git snapshot. Server, engine, store, and standalone serving surfaces are removed. The client sends flat `response.create` WebSocket frames, maintains socket-local `previous_response_id`, retries stale continuations with full input, and reconnects only before a partial response can be exposed. Codex WSS uses a Rustls connector with the shipped WebPKI roots. Compatibility changes add an explicit terminal stream event to Serdes 0.2.6 and map provider failures into its existing redacted error types. Scripted local WebSocket tests cover flat frames, continuation recovery, and reconnect behavior without credentials or provider access.
+
+## Patch 9 - dsflash chat-template wire channel
+(`vendor/serdes-ai-models/src/openai/types.rs`, `chat_template_kwargs` + `ChatTemplateKwargs`;
+`vendor/serdes-ai-models/src/openai/chat.rs`, `OpenAIChatModelRequestSettings`)
+
+`ChatCompletionRequest` gains an optional `chat_template_kwargs` object. It serializes only when
+construction supplied it, so every non-dsflash Chat target omits the key entirely. The object is the
+bounded pair `enable_thinking: bool` and `reasoning_effort` restricted to
+`minimal | low | medium | high | xhigh | max`; an omitted effort omits the wire key. The model
+carries the pair through a separate `OpenAIChatModelRequestSettings` value set with
+`with_request_settings`, so ambient `ModelSettings` are never reinterpreted and no other request
+field changes. The host constructs the value only for structurally detected dsflash profiles
+(`modelParams.chat_template_kwargs` present), applies it after endpoint, credential-policy, and
+class-4 ordering checks, and rejects the dsflash variant for Vercel Chat targets before
+credential resolution. Direct model tests pin the exact serialized shape, the omitted-effort
+shape, and the key's absence for a default-constructed model.
 
 ## Tests
 

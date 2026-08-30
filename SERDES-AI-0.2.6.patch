@@ -14096,7 +14096,7 @@ index 97d1a2d..1e6fe0e 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..f81912c 100644
+index 9471b5b..cad0b96 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -20,8 +20,35 @@ use serdes_ai_core::{
@@ -14136,10 +14136,22 @@ index 9471b5b..f81912c 100644
  pub struct OpenAIChatModel {
      model_name: String,
      client: Client,
-@@ -33,6 +60,16 @@ pub struct OpenAIChatModel {
+@@ -31,6 +58,26 @@ pub struct OpenAIChatModel {
+     project: Option<String>,
+     profile: ModelProfile,
      default_timeout: Duration,
- }
- 
++    request_settings: OpenAIChatModelRequestSettings,
++}
++
++/// Per-model typed request-extension settings. Only construction decides whether
++/// the dsflash `chat_template_kwargs` object reaches requests; the per-request
++/// `ModelSettings` carries no extension.
++#[derive(Debug, Clone, Default)]
++pub struct OpenAIChatModelRequestSettings {
++    /// The dsflash request extension; `None` keeps the wire key absent.
++    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
++}
++
 +impl std::fmt::Debug for OpenAIChatModel {
 +    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 +        formatter
@@ -14148,12 +14160,10 @@ index 9471b5b..f81912c 100644
 +            .field("api_key", &"[redacted]")
 +            .finish_non_exhaustive()
 +    }
-+}
-+
+ }
+ 
  impl OpenAIChatModel {
-     /// Create a new OpenAI chat model.
-     pub fn new(model_name: impl Into<String>, api_key: impl Into<String>) -> Self {
-@@ -41,7 +78,11 @@ impl OpenAIChatModel {
+@@ -41,13 +88,18 @@ impl OpenAIChatModel {
  
          Self {
              model_name,
@@ -14166,21 +14176,43 @@ index 9471b5b..f81912c 100644
              api_key: api_key.into(),
              base_url: "https://api.openai.com/v1".to_string(),
              organization: None,
-@@ -80,13 +121,6 @@ impl OpenAIChatModel {
+             project: None,
+             profile,
+             default_timeout: Duration::from_secs(120),
++            request_settings: OpenAIChatModelRequestSettings::default(),
+         }
+     }
+ 
+@@ -80,17 +132,17 @@ impl OpenAIChatModel {
          self
      }
  
 -    /// Set a custom HTTP client.
--    #[must_use]
++    /// Set the default timeout.
+     #[must_use]
 -    pub fn with_client(mut self, client: Client) -> Self {
 -        self.client = client;
--        self
--    }
--
-     /// Set the default timeout.
++    pub fn with_timeout(mut self, timeout: Duration) -> Self {
++        self.default_timeout = timeout;
+         self
+     }
+ 
+-    /// Set the default timeout.
++    /// Set the typed per-model request-extension settings.
      #[must_use]
-     pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -368,6 +402,11 @@ impl OpenAIChatModel {
+-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+-        self.default_timeout = timeout;
++    pub fn with_request_settings(mut self, settings: OpenAIChatModelRequestSettings) -> Self {
++        self.request_settings = settings;
+         self
+     }
+ 
+@@ -364,10 +416,16 @@ impl OpenAIChatModel {
+             },
+             logprobs: None,
+             top_logprobs: None,
++            chat_template_kwargs: self.request_settings.chat_template_kwargs.clone(),
+         }
      }
  
      /// Parse OpenAI response to our format.
@@ -14192,7 +14224,7 @@ index 9471b5b..f81912c 100644
      fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
          let choice = resp
              .choices
-@@ -375,6 +414,12 @@ impl OpenAIChatModel {
+@@ -375,6 +433,12 @@ impl OpenAIChatModel {
              .next()
              .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
  
@@ -14205,7 +14237,7 @@ index 9471b5b..f81912c 100644
          let mut parts = Vec::new();
  
          // Check for refusal
-@@ -397,22 +442,29 @@ impl OpenAIChatModel {
+@@ -397,22 +461,29 @@ impl OpenAIChatModel {
  
          if let Some(tool_calls) = choice.message.tool_calls {
              for tc in tool_calls {
@@ -14240,7 +14272,7 @@ index 9471b5b..f81912c 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -445,33 +497,15 @@ impl OpenAIChatModel {
+@@ -445,33 +516,15 @@ impl OpenAIChatModel {
      }
  
      /// Handle API error response.
@@ -14282,7 +14314,7 @@ index 9471b5b..f81912c 100644
      }
  }
  
-@@ -501,7 +535,7 @@ impl Model for OpenAIChatModel {
+@@ -501,7 +554,7 @@ impl Model for OpenAIChatModel {
  
          let mut request = self
              .client
@@ -14291,7 +14323,7 @@ index 9471b5b..f81912c 100644
              .header("Authorization", format!("Bearer {}", self.api_key))
              .header("Content-Type", "application/json")
              .timeout(timeout);
-@@ -518,16 +552,11 @@ impl Model for OpenAIChatModel {
+@@ -518,16 +571,11 @@ impl Model for OpenAIChatModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -14310,7 +14342,7 @@ index 9471b5b..f81912c 100644
      }
  
      async fn request_stream(
-@@ -542,7 +571,7 @@ impl Model for OpenAIChatModel {
+@@ -542,7 +590,7 @@ impl Model for OpenAIChatModel {
  
          let mut request = self
              .client
@@ -14319,7 +14351,7 @@ index 9471b5b..f81912c 100644
              .header("Authorization", format!("Bearer {}", self.api_key))
              .header("Content-Type", "application/json")
              .timeout(timeout);
-@@ -559,13 +588,11 @@ impl Model for OpenAIChatModel {
+@@ -559,13 +607,11 @@ impl Model for OpenAIChatModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -14335,7 +14367,67 @@ index 9471b5b..f81912c 100644
  
          Ok(Box::pin(parser))
      }
-@@ -661,4 +688,50 @@ mod tests {
+@@ -582,6 +628,59 @@ mod tests {
+         assert_eq!(model.system(), "openai");
+     }
+ 
++    #[test]
++    fn test_chat_template_kwargs_wire_shape() {
++        // A dsflash-constructed model serializes exactly the bounded object.
++        let model = OpenAIChatModel::new("deepseek", "key").with_request_settings(
++            OpenAIChatModelRequestSettings {
++                chat_template_kwargs: Some(ChatTemplateKwargs {
++                    enable_thinking: true,
++                    reasoning_effort: Some(ChatTemplateReasoningEffort::High),
++                }),
++            },
++        );
++        let request =
++            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
++        let wire = serde_json::to_value(&request).unwrap();
++        assert_eq!(
++            wire["chat_template_kwargs"],
++            serde_json::json!({"enable_thinking": true, "reasoning_effort": "high"})
++        );
++
++        // An omitted effort omits the key entirely.
++        let without_effort = OpenAIChatModel::new("deepseek", "key").with_request_settings(
++            OpenAIChatModelRequestSettings {
++                chat_template_kwargs: Some(ChatTemplateKwargs {
++                    enable_thinking: false,
++                    reasoning_effort: None,
++                }),
++            },
++        );
++        let request = without_effort.build_request(
++            &[],
++            &ModelSettings::default(),
++            &Default::default(),
++            false,
++        );
++        let wire = serde_json::to_value(&request).unwrap();
++        assert_eq!(
++            wire["chat_template_kwargs"],
++            serde_json::json!({"enable_thinking": false})
++        );
++    }
++
++    #[test]
++    fn test_chat_template_kwargs_absent_without_request_settings() {
++        // Every non-dsflash Chat target constructs without request settings; the
++        // key must be absent from the wire body, not null.
++        let model = OpenAIChatModel::new("gpt-4o", "key");
++        assert!(model.request_settings.chat_template_kwargs.is_none());
++        let request =
++            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
++        let wire = serde_json::to_value(&request).unwrap();
++        assert!(wire.get("chat_template_kwargs").is_none());
++    }
++
+     #[test]
+     fn test_openai_model_builder() {
+         let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
+@@ -661,4 +760,50 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -14387,16 +14479,17 @@ index 9471b5b..f81912c 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/mod.rs b/vendor/serdes-ai-models/src/openai/mod.rs
-index c1e00c9..9e24e12 100644
+index c1e00c9..34b9981 100644
 --- a/vendor/serdes-ai-models/src/openai/mod.rs
 +++ b/vendor/serdes-ai-models/src/openai/mod.rs
-@@ -36,10 +36,12 @@ pub mod stream;
+@@ -36,14 +36,17 @@ pub mod stream;
  pub mod types;
  
  // Re-exports
+-pub use chat::OpenAIChatModel;
 +#[doc(hidden)]
 +pub use chat::chat_url;
- pub use chat::OpenAIChatModel;
++pub use chat::{OpenAIChatModel, OpenAIChatModelRequestSettings};
  pub use responses::{
 -    OpenAIResponsesModel, OpenAIResponsesModelSettings, ReasoningEffort, ReasoningSummary,
 -    ServiceTier, TruncationMode,
@@ -14404,7 +14497,14 @@ index c1e00c9..9e24e12 100644
 +    ReasoningSummary, ServiceTier, TextVerbosity, TruncationMode,
  };
  pub use types::{
-     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatTool,
+-    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatTool,
+-    ContentPart, FunctionDefinition, MessageContent, ResponseFormat, ToolChoiceValue, Usage,
++    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
++    ChatTemplateKwargs, ChatTemplateReasoningEffort, ChatTool, ContentPart, FunctionDefinition,
++    MessageContent, ResponseFormat, ToolChoiceValue, Usage,
+ };
+ 
+ /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
 index 9384750..4d41228 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
@@ -15400,6 +15500,58 @@ index 69518dd..f21e77b 100644
          ];
          let stream = stream::iter(bytes);
          let mut parser = OpenAIStreamParser::new(stream);
+diff --git a/vendor/serdes-ai-models/src/openai/types.rs b/vendor/serdes-ai-models/src/openai/types.rs
+index 51c81fd..f2d729c 100644
+--- a/vendor/serdes-ai-models/src/openai/types.rs
++++ b/vendor/serdes-ai-models/src/openai/types.rs
+@@ -67,6 +67,39 @@ pub struct ChatCompletionRequest {
+     /// Top log probabilities.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub top_logprobs: Option<u32>,
++    /// Typed dsflash-only request extension; serialized only when construction
++    /// supplied it. Every non-dsflash Chat target constructs `None`.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
++}
++
++/// Bounded reasoning effort accepted inside `chat_template_kwargs`.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "lowercase")]
++pub enum ChatTemplateReasoningEffort {
++    /// Minimal effort.
++    Minimal,
++    /// Low effort.
++    Low,
++    /// Medium effort.
++    Medium,
++    /// High effort.
++    High,
++    /// Extra-high effort.
++    Xhigh,
++    /// Maximum effort.
++    Max,
++}
++
++/// Bounded dsflash-only request extension: `enable_thinking` is required, the
++/// effort is optional and omitted entirely when `None`.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct ChatTemplateKwargs {
++    /// Whether template thinking mode is enabled.
++    pub enable_thinking: bool,
++    /// Optional bounded reasoning effort; omitted from the wire when `None`.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub reasoning_effort: Option<ChatTemplateReasoningEffort>,
+ }
+ 
+ impl ChatCompletionRequest {
+@@ -92,6 +125,7 @@ impl ChatCompletionRequest {
+             stream_options: None,
+             logprobs: None,
+             top_logprobs: None,
++            chat_template_kwargs: None,
+         }
+     }
+ }
 diff --git a/vendor/serdes-ai-models/src/openrouter/model.rs b/vendor/serdes-ai-models/src/openrouter/model.rs
 index 5a4761d..e8950e4 100644
 --- a/vendor/serdes-ai-models/src/openrouter/model.rs

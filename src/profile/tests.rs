@@ -238,7 +238,7 @@ fn auth_key_name_is_an_unsupported_secure_store_reference() {
     )
     .expect("parse records the deferred refusal");
     assert!(p.ephemeral.auth_key_name);
-    let rendered = format!("{:?}", p);
+    let rendered = format!("{p:?}");
     assert!(!rendered.contains(marker), "the value must never travel");
 
     let err =
