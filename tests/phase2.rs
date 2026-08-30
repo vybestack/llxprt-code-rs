@@ -1115,6 +1115,11 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle)
             String::new(),
         ),
     };
+    // A pending branch carries its lease; a terminal branch releases it.
+    let (reserved_at, lease_expiry) = match lifecycle {
+        Lifecycle::Pending => (1, 2),
+        Lifecycle::Completed | Lifecycle::Failed => (0, 0),
+    };
     BranchRecord {
         branch_id: id.to_string(),
         turn,
@@ -1129,8 +1134,8 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle)
         summary,
         error,
         owner,
-        reserved_at: 1,
-        lease_expiry: 2,
+        reserved_at,
+        lease_expiry,
     }
 }
 

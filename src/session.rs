@@ -105,10 +105,13 @@ pub struct BranchRecord {
     /// Unique owner token of the process holding the reservation.
     #[serde(default)]
     pub owner: String,
-    /// Wall-clock unix seconds when the reservation was made.
+    /// Wall-clock unix seconds when the reservation was made; zero once the
+    /// branch reaches a terminal lifecycle.
     #[serde(default)]
     pub reserved_at: u64,
-    /// Wall-clock unix seconds when the lease expires; past means stale.
+    /// Wall-clock unix seconds when the lease expires; past means stale. Zero
+    /// once the branch reaches a terminal lifecycle: a completed or failed
+    /// branch is no longer leased and cannot be reclaimed.
     #[serde(default)]
     pub lease_expiry: u64,
 }
@@ -886,6 +889,8 @@ impl SessionStore {
             t.summary = summary.to_string();
             t.lifecycle = Lifecycle::Completed;
             t.owner.clear();
+            t.reserved_at = 0;
+            t.lease_expiry = 0;
             self.write(&state)
         })
     }
@@ -924,6 +929,8 @@ impl SessionStore {
             t.error = error.to_string();
             t.lifecycle = Lifecycle::Failed;
             t.owner.clear();
+            t.reserved_at = 0;
+            t.lease_expiry = 0;
             self.write(&state)
         })
     }

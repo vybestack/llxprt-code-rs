@@ -36,8 +36,8 @@ fn valid_state() -> SessionState {
             summary: "done".to_string(),
             error: String::new(),
             owner: String::new(),
-            reserved_at: 1,
-            lease_expiry: 2,
+            reserved_at: 0,
+            lease_expiry: 0,
         }],
         next_branch_seq: 1,
     }
@@ -166,17 +166,37 @@ fn prompt_summary_error_lease_and_lifecycle_fields_are_enforced() {
     state.branches[0].lease_expiry = 2;
     assert!(corruption_message(&state).contains("reservation lease"));
 
+    // A terminal branch must not retain a live lease.
+    let mut state = valid_state();
+    state.branches[0].reserved_at = 1;
+    state.branches[0].lease_expiry = 2;
+    assert!(corruption_message(&state).contains("terminal branch retains"));
+
+    // A pending branch must carry a live lease.
+    let mut state = valid_state();
+    state.branches[0].lifecycle = Lifecycle::Pending;
+    state.branches[0].summary.clear();
+    state.branches[0].rounds.clear();
+    state.branches[0].owner = "owner".to_string();
+    state.branches[0].reserved_at = 0;
+    state.branches[0].lease_expiry = 0;
+    assert!(corruption_message(&state).contains("invalid reservation lease"));
+
     let mut state = valid_state();
     state.branches[0].lifecycle = Lifecycle::Pending;
     state.branches[0].summary.clear();
     state.branches[0].rounds.clear();
     state.branches[0].owner = "o".repeat(MAX_RENDERED_FIELD_BYTES + 1);
+    state.branches[0].reserved_at = 1;
+    state.branches[0].lease_expiry = 2;
     assert!(corruption_message(&state).contains("owner token exceeds"));
 
     let mut state = valid_state();
     state.branches[0].lifecycle = Lifecycle::Failed;
     state.branches[0].summary.clear();
     state.branches[0].rounds.clear();
+    state.branches[0].reserved_at = 0;
+    state.branches[0].lease_expiry = 0;
     state.branches[0].error = "e".repeat(crate::redact::MAX_ERROR_TEXT_BYTES + 1);
     assert!(corruption_message(&state).contains("error exceeds"));
 }
