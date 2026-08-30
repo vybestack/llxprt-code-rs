@@ -303,6 +303,8 @@ export CARGO_NET_OFFLINE=true
 export HTTP_PROXY=http://127.0.0.1:9
 export HTTPS_PROXY=http://127.0.0.1:9
 export ALL_PROXY=http://127.0.0.1:9
+# The tests dial their own loopback servers; everything off-box stays blackholed.
+export NO_PROXY=127.0.0.1,localhost
 root_target="$stage/root-target"
 CARGO_TARGET_DIR="$root_target" cargo +1.88.0 test --offline --locked \
   --manifest-path xtask/Cargo.toml
