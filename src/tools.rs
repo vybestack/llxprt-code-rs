@@ -179,7 +179,13 @@ impl WorkspaceCap {
             .self_metadata()
             .map_err(|e| format!("fstat workspace root: {e}"))?;
         let st = m.stat();
+        // dev_t is u64 on linux and the bsds but a narrow type on darwin, so the
+        // widening belongs to the macos build alone; converting on linux trips
+        // clippy as an identity conversion.
+        #[cfg(target_os = "macos")]
         let dev = u64::try_from(st.st_dev).unwrap_or(u64::MAX);
+        #[cfg(not(target_os = "macos"))]
+        let dev = st.st_dev;
         let ino = st.st_ino;
         Ok(WorkspaceCap {
             root: d,
