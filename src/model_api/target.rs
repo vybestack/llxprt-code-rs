@@ -54,12 +54,9 @@ impl ModelApi {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TransportKind {
+    /// The only transport today; the deferred WebSocket variant returns with
+    /// the codex registration row once the vendored client ships that support.
     Http,
-    /// Reserved for the deferred WebSocket transport; re-adding the codex
-    /// registration row constructs it once the vendored client ships that
-    /// support.
-    #[allow(dead_code)]
-    WebSocket,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

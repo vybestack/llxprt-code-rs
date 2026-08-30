@@ -182,112 +182,15 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let (bodies_tx, bodies_rx) = std::sync::mpsc::channel::<serde_json::Value>();
         let server = std::thread::spawn(move || {
-            use std::io::{Read as _, Write as _};
+            use std::io::Write as _;
             for round in 0..2 {
                 let (mut stream, _) = listener.accept().expect("accept codex turn");
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                    .unwrap();
-                let mut request = Vec::new();
-                let mut buf = [0u8; 4096];
-                loop {
-                    let n = stream.read(&mut buf).expect("read codex request");
-                    assert!(n > 0, "codex connection closed before the body arrived");
-                    request.extend_from_slice(&buf[..n]);
-                    if let Some(body_start) = find_body_start(&request) {
-                        let headers =
-                            String::from_utf8_lossy(&request[..body_start]).to_lowercase();
-                        let length = headers
-                            .lines()
-                            .find_map(|line| line.strip_prefix("content-length:"))
-                            .and_then(|value| value.trim().parse::<usize>().ok())
-                            .unwrap_or(0);
-                        if request.len() >= body_start + length {
-                            break;
-                        }
-                    }
-                }
+                let request = read_codex_request(&mut stream);
                 let body_start = find_body_start(&request).expect("separator");
                 let body: serde_json::Value = serde_json::from_slice(&request[body_start..])
                     .expect("codex body must be JSON");
                 bodies_tx.send(body).expect("send captured body");
-
-                let turn = if round == 0 { "one" } else { "two" };
-                let response_id = format!("resp_loopback_{round}");
-                let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
-                    response_id.clone(),
-                    1,
-                    "loopback-codex",
-                    &serde_json::from_value(
-                        serde_json::json!({"model": "loopback-codex", "input": []}),
-                    )
-                    .unwrap(),
-                );
-                object.status = serdes_ai_responses::types::ResponseStatus::Completed;
-                object.usage = Some(serdes_ai_responses::types::ResponseUsage {
-                    input_tokens: Some(11),
-                    output_tokens: Some(7),
-                    total_tokens: Some(18),
-                });
-                let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
-                    sequence_number: 0,
-                    response: object.clone(),
-                };
-                let message = serdes_ai_responses::types::OutputItem::Message {
-                    id: format!("msg_{round}"),
-                    role: "assistant".to_string(),
-                    status: serdes_ai_responses::types::OutputItemStatus::Completed,
-                    content: vec![serdes_ai_responses::types::OutputContent::OutputText {
-                        text: format!("codex turn {turn}"),
-                        annotations: Vec::new(),
-                    }],
-                };
-                let item_added = serdes_ai_responses::types::StreamEvent::OutputItemAdded {
-                    sequence_number: 1,
-                    output_index: 0,
-                    item: message,
-                };
-                let text_delta = serdes_ai_responses::types::StreamEvent::OutputTextDelta {
-                    sequence_number: 2,
-                    item_id: format!("msg_{round}"),
-                    output_index: 0,
-                    content_index: 0,
-                    delta: format!("codex turn {turn}"),
-                };
-                let item_done = serdes_ai_responses::types::StreamEvent::OutputItemDone {
-                    sequence_number: 3,
-                    output_index: 0,
-                    item: serdes_ai_responses::types::OutputItem::Message {
-                        id: format!("msg_{round}"),
-                        role: "assistant".to_string(),
-                        status: serdes_ai_responses::types::OutputItemStatus::Completed,
-                        content: Vec::new(),
-                    },
-                };
-                let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
-                    sequence_number: 4,
-                    response: object,
-                };
-                let sse = |event: &serdes_ai_responses::types::StreamEvent| {
-                    format!("data: {}\n\n", serde_json::to_string(event).unwrap())
-                };
-                // Round 0 ends like the real codex backend: the terminal
-                // response event, then EOF, no `[DONE]` marker. Round 1
-                // keeps the marker so both terminations stay covered.
-                let done = if round == 0 {
-                    String::new()
-                } else {
-                    "data: [DONE]\n\n".to_string()
-                };
-                let payload = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}{}",
-                    sse(&created),
-                    sse(&item_added),
-                    sse(&text_delta),
-                    sse(&item_done),
-                    sse(&completed),
-                    done,
-                );
+                let payload = codex_turn_sse_payload(round);
                 stream
                     .write_all(payload.as_bytes())
                     .expect("write SSE response");
@@ -330,8 +233,130 @@ mod tests {
         server.join().expect("server thread");
 
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
+        assert_codex_wire_contract(&bodies);
+        assert!(
+            first.text.contains("codex turn one"),
+            "folded output missing: {first:?}"
+        );
+        assert!(
+            second.text.contains("codex turn two"),
+            "folded output missing: {second:?}"
+        );
+        assert_eq!(backend.request_calls(), 2);
+    }
+
+    /// Reads one full HTTP request (headers plus a content-length body) off
+    /// the accepted codex connection.
+    fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        use std::io::Read as _;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut buf).expect("read codex request");
+            assert!(n > 0, "codex connection closed before the body arrived");
+            request.extend_from_slice(&buf[..n]);
+            if let Some(body_start) = find_body_start(&request) {
+                let headers = String::from_utf8_lossy(&request[..body_start]).to_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if request.len() >= body_start + length {
+                    break;
+                }
+            }
+        }
+        request
+    }
+
+    /// Builds the SSE response for one codex turn. Round 0 ends like the
+    /// real codex backend: the terminal response event, then EOF, no
+    /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
+    /// covered.
+    fn codex_turn_sse_payload(round: usize) -> String {
+        let turn = if round == 0 { "one" } else { "two" };
+        let response_id = format!("resp_loopback_{round}");
+        let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
+            response_id.clone(),
+            1,
+            "loopback-codex",
+            &serde_json::from_value(serde_json::json!({"model": "loopback-codex", "input": []}))
+                .unwrap(),
+        );
+        object.status = serdes_ai_responses::types::ResponseStatus::Completed;
+        object.usage = Some(serdes_ai_responses::types::ResponseUsage {
+            input_tokens: Some(11),
+            output_tokens: Some(7),
+            total_tokens: Some(18),
+        });
+        let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
+            sequence_number: 0,
+            response: object.clone(),
+        };
+        let message = serdes_ai_responses::types::OutputItem::Message {
+            id: format!("msg_{round}"),
+            role: "assistant".to_string(),
+            status: serdes_ai_responses::types::OutputItemStatus::Completed,
+            content: vec![serdes_ai_responses::types::OutputContent::OutputText {
+                text: format!("codex turn {turn}"),
+                annotations: Vec::new(),
+            }],
+        };
+        let item_added = serdes_ai_responses::types::StreamEvent::OutputItemAdded {
+            sequence_number: 1,
+            output_index: 0,
+            item: message,
+        };
+        let text_delta = serdes_ai_responses::types::StreamEvent::OutputTextDelta {
+            sequence_number: 2,
+            item_id: format!("msg_{round}"),
+            output_index: 0,
+            content_index: 0,
+            delta: format!("codex turn {turn}"),
+        };
+        let item_done = serdes_ai_responses::types::StreamEvent::OutputItemDone {
+            sequence_number: 3,
+            output_index: 0,
+            item: serdes_ai_responses::types::OutputItem::Message {
+                id: format!("msg_{round}"),
+                role: "assistant".to_string(),
+                status: serdes_ai_responses::types::OutputItemStatus::Completed,
+                content: Vec::new(),
+            },
+        };
+        let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
+            sequence_number: 4,
+            response: object,
+        };
+        let sse = |event: &serdes_ai_responses::types::StreamEvent| {
+            format!("data: {}\n\n", serde_json::to_string(event).unwrap())
+        };
+        let done = if round == 0 {
+            String::new()
+        } else {
+            "data: [DONE]\n\n".to_string()
+        };
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}{}",
+            sse(&created),
+            sse(&item_added),
+            sse(&text_delta),
+            sse(&item_done),
+            sse(&completed),
+            done,
+        )
+    }
+
+    /// Pins the codex wire shape every turn must keep: `store: false`,
+    /// `stream: true`, no cap, no stored-state chaining, list input, and
+    /// full input replay on turn two.
+    fn assert_codex_wire_contract(bodies: &[serde_json::Value]) {
         assert_eq!(bodies.len(), 2);
-        for body in &bodies {
+        for body in bodies {
             assert_eq!(body["store"], false, "codex must never store");
             assert_eq!(body["stream"], true, "codex must stream over SSE");
             assert!(
@@ -345,19 +370,12 @@ mod tests {
             assert!(body["input"].is_array(), "codex requires list input");
         }
         let replayed = serde_json::to_string(&bodies[1]["input"]).unwrap();
+        let replayed_both_turns =
+            replayed.contains("first codex turn") && replayed.contains("second codex turn");
         assert!(
-            replayed.contains("first codex turn") && replayed.contains("second codex turn"),
+            replayed_both_turns,
             "turn two must replay the full input, got: {replayed}"
         );
-        assert!(
-            first.text.contains("codex turn one"),
-            "folded output missing: {first:?}"
-        );
-        assert!(
-            second.text.contains("codex turn two"),
-            "folded output missing: {second:?}"
-        );
-        assert_eq!(backend.request_calls(), 2);
     }
 
     /// A 200 whose body is JSON, not an SSE stream, must surface as an
