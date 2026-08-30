@@ -12,7 +12,7 @@
     }
   },
   "ephemeralSettings": {
-    "base-url": "https://api.friendli.ai/serverless/v1",
+    "base-url": "https://api.friendli.ai/v1",
     "context-limit": 262000
   }
 }

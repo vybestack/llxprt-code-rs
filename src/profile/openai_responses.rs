@@ -51,6 +51,7 @@ pub(super) fn parse(
             "profile {name:?}: unsupported OpenAI Responses setting"
         ));
     }
+    reject_inert_dsflash_settings(&ephemeral, &model_params, name)?;
     if ephemeral.timeout_ms.is_some() {
         return Err(format!(
             "profile {name:?}: timeout settings are unsupported for OpenAI Responses"
@@ -65,6 +66,51 @@ pub(super) fn parse(
         model_params,
         draft,
     })
+}
+
+/// Standard Chat and all Responses targets reject dsflash-only behavior
+/// (PLAN.md): any surviving flag/prompt-note key or typed dsflash marker field
+/// would be silently inert on this transport. BTreeSet ordering keeps the
+/// diagnostic deterministic and names each key once.
+fn reject_inert_dsflash_settings(
+    ephemeral: &EphemeralSettings,
+    model_params: &ModelParams,
+    name: &str,
+) -> Result<(), String> {
+    let mut inert: std::collections::BTreeSet<String> = ephemeral
+        .flags
+        .keys()
+        .chain(ephemeral.prompt_notes.keys())
+        .cloned()
+        .collect();
+    if ephemeral.shell_replacement.is_some() {
+        inert.insert("ephemeralSettings.shell-replacement".to_string());
+    }
+    if ephemeral.stream_idle_timeout_ms.is_some() {
+        inert.insert("ephemeralSettings.stream-idle-timeout-ms".to_string());
+    }
+    if ephemeral.reasoning_enabled.is_some() {
+        inert.insert("ephemeralSettings.reasoning.enabled".to_string());
+    }
+    if ephemeral.reasoning_include_in_response.is_some() {
+        inert.insert("ephemeralSettings.reasoning.includeInResponse".to_string());
+    }
+    if ephemeral.reasoning_include_in_context.is_some() {
+        inert.insert("ephemeralSettings.reasoning.includeInContext".to_string());
+    }
+    if ephemeral.reasoning_strip_from_context_none {
+        inert.insert("ephemeralSettings.reasoning.stripFromContext".to_string());
+    }
+    if model_params.chat_template_kwargs.is_some() {
+        inert.insert("modelParams.chat_template_kwargs".to_string());
+    }
+    if !inert.is_empty() {
+        let keys = inert.into_iter().collect::<Vec<_>>().join(", ");
+        return Err(format!(
+            "profile {name:?}: dsflash-only setting(s) {keys} are unsupported for OpenAI Responses"
+        ));
+    }
+    Ok(())
 }
 
 fn parse_draft(

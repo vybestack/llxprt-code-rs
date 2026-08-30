@@ -617,6 +617,20 @@ function buildClassificationTable() {
   add('reasoning.fieldName', rej, common, 'rejected');
   add('reasoning.update', rej, common, 'rejected');
   add('reasoning.display', rej, common, 'rejected');
+  // Registry keys with no applied behavior in this runtime: the fixed rejected
+  // template, same family as retries/socket-timeout.
+  add('circuit_breaker_enabled', rej, common, 'rejected circuit-breaker registry key');
+  add('circuit_breaker_failure_threshold', rej, common, 'rejected circuit-breaker registry key');
+  add('circuit_breaker_failure_window_ms', rej, common, 'rejected circuit-breaker registry key');
+  add('circuit_breaker_recovery_timeout_ms', rej, common, 'rejected circuit-breaker registry key');
+  add('frequency_penalty', rej, common, 'rejected sampling registry key');
+  add('include-folder-structure', rej, common, 'rejected');
+  add('model.allMemoriesAreCore', rej, common, 'rejected');
+  add('presence_penalty', rej, common, 'rejected sampling registry key');
+  add('stop', rej, common, 'rejected');
+  add('timeout_ms', rej, common, 'rejected');
+  add('top_k', rej, common, 'chat transport cannot serialize top_k; rejected');
+  add('tpm_threshold', rej, common, 'rejected');
   add('modelParams.provider', rej, common, 'nested modelParams.provider rejects');
   add('modelParams.parse_reasoning', rej, ds, 'parse_reasoning rejects');
   add('modelParams.clear_thinking', rej, ds, 'clear_thinking rejects');
@@ -758,14 +772,14 @@ function stagedLadderBuilders() {
       build: (r) => ({
         ...r,
         modelParams: { ...(r.modelParams ?? {}) },
-        ephemeralSettings: { ...(r.ephemeralSettings ?? {}), 'base-url': 'https://example-openai-compatible/v1' },
+        ephemeralSettings: { ...(r.ephemeralSettings ?? {}), 'base-url': 'https://api.friendli.ai/v1' },
       }),
     },
     {
       base: 'friendliglm.json',
       name: 'friendliglm.without-auth-key-name.synthetic.json',
       build: (r) => {
-        const es = { ...(r.ephemeralSettings ?? {}) };
+        const es = { ...(r.ephemeralSettings ?? {}), 'base-url': 'https://api.friendli.ai/v1' };
         delete es['auth-key-name'];
         return { ...r, modelParams: { ...(r.modelParams ?? {}) }, ephemeralSettings: es };
       },
@@ -774,23 +788,39 @@ function stagedLadderBuilders() {
       base: 'friendliglm.json',
       name: 'friendliglm.settings-accepted.synthetic.json',
       build: (r) => {
-        const es = { ...(r.ephemeralSettings ?? {}) };
+        const es = { ...(r.ephemeralSettings ?? {}), 'base-url': 'https://api.friendli.ai/v1' };
         delete es['auth-key-name'];
-        const mp = { temperature: 0.6, max_tokens: 4096, chat_template_kwargs: { enable_thinking: true } };
+        // Settings-accepted rung: enable_thinking only (no reasoning_effort), and
+        // no unsupported model parameters.
+        const mp = { temperature: 0.6, chat_template_kwargs: { enable_thinking: true } };
         return { ...r, modelParams: mp, ephemeralSettings: es };
       },
     },
     {
       base: 'chutesk2streaming.json',
       name: 'chutesk2streaming.with-discriminator.synthetic.json',
-      build: (r) => ({ ...r, modelParams: { chat_template_kwargs: { enable_thinking: false } } }),
+      build: (r) => ({
+        ...r,
+        modelParams: { chat_template_kwargs: { enable_thinking: false } },
+        ephemeralSettings: { ...(r.ephemeralSettings ?? {}), 'reasoning.stripFromContext': 'none' },
+      }),
     },
     {
       base: 'chutesk2streaming.json',
       name: 'chutesk2streaming.streaming-only.synthetic.json',
       build: (r) => {
+        // Streaming-only: every dsflash marker is removed so the unsupported
+        // `streaming` key is the first (class 6) failure without a discriminator.
         const es = { ...(r.ephemeralSettings ?? {}) };
-        delete es['reasoning.stripFromContext'];
+        for (const k of [
+          'shell-replacement',
+          'reasoning.enabled',
+          'reasoning.includeInResponse',
+          'reasoning.includeInContext',
+          'reasoning.stripFromContext',
+        ]) {
+          delete es[k];
+        }
         return { ...r, modelParams: { ...(r.modelParams ?? {}) }, ephemeralSettings: es };
       },
     },
@@ -917,6 +947,22 @@ function renderMarkdown(artifact) {
   push('exactly one classification and one owner. The repository self-tests in');
   push('`tests/profile_compatibility.rs` fail if the inventory is internally inconsistent or if');
   push('any fixture field is unclassified or multiply owned.');
+  push();
+  push('## Issue 1 OpenAI Responses extension');
+  push();
+  push('Public OpenAI Responses profiles select HTTP Responses with either provider `openai-responses`');
+  push('or provider `openai` plus a Responses selector. They use API-key credentials, send a complete');
+  push('transcript on every round, force `store: false`, and never send `previous_response_id`. Endpoint');
+  push('paths are limited to an origin, `/v1`, `/responses`, or `/v1/responses`, with one optional trailing');
+  push('slash.');
+  push();
+  push('Responses reasoning requires `reasoning.enabled: true`, effort `low`, `medium`, or `high`, and');
+  push('summary `concise`, `detailed`, or `auto`. Optional `text.verbosity` uses the same three levels.');
+  push('Omitted `prompt-caching`, `1h`, and `24h` send the validated session label as');
+  push('`prompt_cache_key` with retention `24h`; `off` omits both fields. Session labels therefore leave');
+  push('the process in cached mode and must not contain project or secret information. The literal');
+  push('`default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends');
+  push('neither that key nor a session header.');
   push();
   push(`## Persistable-key inventory`);
   push();
@@ -1084,6 +1130,14 @@ function runSelfTest() {
       inv.distinctKeys + dupCount === entries.length,
       'duplicate extra entries == entries - distinct',
     );
+    const classKeys = new Set((art.classifications || []).map((c) => c.key));
+    const aliasKeys = new Set(Object.keys(inv.aliasNormalizationRules || {}));
+    for (const e of entries) for (const a of e.aliases || []) aliasKeys.add(a);
+    const unclassified = [...distinct].filter((k) => !classKeys.has(k) && !aliasKeys.has(k));
+    pass(
+      unclassified.length === 0,
+      'every distinct inventory entry key has a classification row (missing: ' + unclassified.join(',') + ')',
+    );
   } else {
     pass(false, 'checked-in tests/fixtures/profile-compatibility-inventory.json present');
   }
@@ -1223,6 +1277,16 @@ function generate({ siblingRoot, profilesDir }) {
     });
   }
   installedRows.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const firstFailures = new Map([
+    ['friendliglm.json', 'arbitrary route prefix rejects (endpoint class) before the named secure-store reference'],
+    ['qwen38.json', 'named secure-store reference rejects before the structural dsflash gate'],
+    ['qwen38-mi300x.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement'],
+    ['ornith-runpod.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms'],
+  ]);
+  for (const row of installedRows) {
+    const failure = firstFailures.get(row.file);
+    if (failure) row.expectedDisposition = { ...row.expectedDisposition, firstFailure: failure };
+  }
 
   // Synthetic fixtures.
   const synthetic = [];

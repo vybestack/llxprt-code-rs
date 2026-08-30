@@ -1,4 +1,6 @@
 use super::*;
+
+mod codex_tools;
 use serde_json::json;
 
 #[test]
@@ -217,9 +219,9 @@ fn keyfile_aliases_are_credentials_and_debug_is_redacted() {
     }
 }
 
-/// `auth-key-name` is a named **secure-store** reference, never a keyfile path: it
-/// fails parsing with the fixed value-free refusal (its bytes never travel), and a
-/// same-named local file is never even considered as a keyfile.
+/// `auth-key-name` is a named **secure-store** reference, never a keyfile path:
+/// parsing only records its presence (the value never travels), and the fixed
+/// value-free refusal fires at credential-policy time after endpoint validation.
 #[test]
 fn auth_key_name_is_an_unsupported_secure_store_reference() {
     let marker = "secure-store-provider-key";
@@ -227,13 +229,27 @@ fn auth_key_name_is_an_unsupported_secure_store_reference() {
         &json!({
             "provider": "openai",
             "model": "m",
-            "ephemeralSettings": {"auth-key-name": marker}
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key-name": marker
+            }
         }),
         "named-ref",
+    )
+    .expect("parse records the deferred refusal");
+    assert!(p.ephemeral.auth_key_name);
+    let rendered = format!("{:?}", p);
+    assert!(!rendered.contains(marker), "the value must never travel");
+
+    let err =
+        crate::model::ModelConfig::from_profile_in(&p, false, false, std::path::Path::new("."))
+            .expect_err("credential policy refuses the named reference");
+    let message = err.to_string();
+    assert_eq!(
+        message,
+        format!("unsupported profile setting(s): {AUTH_KEY_NAME_UNSUPPORTED_MESSAGE}")
     );
-    let err = p.expect_err("auth-key-name must fail parsing");
-    assert_eq!(err, AUTH_KEY_NAME_UNSUPPORTED_MESSAGE);
-    assert!(!err.contains(marker), "the value must never travel: {err}");
+    assert!(!message.contains(marker));
 }
 
 /// The strict endpoint shape: a non-http(s) scheme, userinfo, query, fragment,
@@ -330,34 +346,151 @@ fn reasoning_effort_enforces_prompt_note_cap() {
 }
 
 #[test]
-fn ignored_behavior_settings_are_limited_to_dsflash_profiles() {
-    assert!(is_dsflash_profile_name("dsflash"));
-    assert!(is_dsflash_profile_name("/profiles/dsflash-mi300x.json"));
-    for near_match in [
-        "ordinary-dsflash",
-        "dsflashlike",
-        "deepseek",
-        "/profiles/not-dsflash.json",
-    ] {
-        assert!(!is_dsflash_profile_name(near_match), "{near_match}");
+fn dsflash_variant_is_structural_and_names_never_select() {
+    // Markers without the discriminator parse under ANY name (typed fields) and
+    // defer the fixed class-4 diagnostic naming the lexicographically first
+    // normalized marker path.
+    for name in ["dsflash-mi300x", "ordinary-profile", "qwen38"] {
+        let profile = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {
+                    "shell-replacement": true,
+                    "stream-idle-timeout-ms": 0,
+                    "reasoning.enabled": true,
+                    "reasoning.includeInResponse": true,
+                    "reasoning.includeInContext": true,
+                    "reasoning.stripFromContext": "none"
+                }
+            }),
+            name,
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(
+            profile.chat_missing_discriminator.as_deref(),
+            Some("ephemeralSettings.reasoning.enabled"),
+            "{name}: lexicographically first marker"
+        );
+        assert!(profile.model_params.chat_template_kwargs.is_none());
     }
-    let settings = [
-        ("emojifilter", json!("on")),
-        ("shell-replacement", json!("bash")),
-        ("stream-idle-timeout-ms", json!("1000")),
-        ("requires-auth", json!(true)),
-        ("streamIdleTimeoutMs", json!(1000)),
+
+    // The discriminator selects the dsflash variant under any name: parse
+    // succeeds, the marker diagnostic is gone, and the typed fields survive.
+    for name in ["dsflash-mi300x", "renamed-profile"] {
+        let profile = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"shell-replacement": true},
+                "modelParams": {"chat_template_kwargs": {"enable_thinking": true}}
+            }),
+            name,
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert!(profile.chat_missing_discriminator.is_none(), "{name}");
+        let kwargs = profile
+            .model_params
+            .chat_template_kwargs
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name}: discriminator must survive"));
+        assert!(kwargs.enable_thinking);
+        assert_eq!(kwargs.reasoning_effort, None);
+    }
+
+    // The discriminator alone (no markers) still selects the variant.
+    let kwargs_only = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "modelParams": {"chat_template_kwargs": {"enable_thinking": false}}
+        }),
+        "plain-name",
+    )
+    .unwrap();
+    assert!(kwargs_only.chat_missing_discriminator.is_none());
+    assert!(kwargs_only
+        .model_params
+        .chat_template_kwargs
+        .as_ref()
+        .is_some_and(|spec| !spec.enable_thinking));
+}
+
+#[test]
+fn dsflash_marker_types_are_structural_not_name_gated() {
+    // Correct types parse under any name; wrong types reject under any name.
+    let typed = [
+        ("shell-replacement", json!(true), json!("bash")),
+        ("stream-idle-timeout-ms", json!(0), json!("1000")),
+        ("streamIdleTimeoutMs", json!(250), json!(true)),
+        ("reasoning.enabled", json!(false), json!("on")),
+        ("reasoning.includeInResponse", json!(true), json!("yes")),
+        ("reasoning.includeInContext", json!(true), json!(1)),
+        (
+            "reasoning.stripFromContext",
+            json!("none"),
+            json!("context"),
+        ),
+    ];
+    for (key, good, bad) in typed {
+        for name in ["dsflash-mi300x", "ordinary-profile"] {
+            parse_profile_value(
+                &json!({
+                    "provider": "openai",
+                    "model": "m",
+                    "ephemeralSettings": {key: good.clone()}
+                }),
+                name,
+            )
+            .unwrap_or_else(|error| panic!("{key} {name} good: {error}"));
+            parse_profile_value(
+                &json!({
+                    "provider": "openai",
+                    "model": "m",
+                    "ephemeralSettings": {key: bad.clone()}
+                }),
+                name,
+            )
+            .expect_err(&format!("{key} {name} bad type must reject"));
+        }
+    }
+
+    // Kebab/camel stream-idle aliases must agree when duplicated.
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "stream-idle-timeout-ms": 500,
+                "streamIdleTimeoutMs": 500
+            }
+        }),
+        "any-name",
+    )
+    .unwrap();
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "stream-idle-timeout-ms": 500,
+                "streamIdleTimeoutMs": 501
+            }
+        }),
+        "any-name",
+    )
+    .expect_err("disagreeing stream-idle aliases must reject");
+}
+
+#[test]
+fn old_name_gated_dsflash_keys_are_unsupported_under_every_name() {
+    for (key, value) in [
         ("maxRetrywait", json!(1000)),
         ("reasoning.maxTokens", json!(1000)),
         ("reasoning.budgetTokens", json!(1000)),
         ("autokimi-style", json!(1)),
         ("sandbox-base-url", json!("https://sandbox.invalid")),
         ("default-tools", json!("all")),
-        ("tool-format", json!("json")),
-        ("reasoning.enabled", json!(true)),
-        ("reasoning.includeInResponse", json!(true)),
-        ("reasoning.includeInContext", json!(true)),
-        ("reasoning.stripFromContext", json!(true)),
         ("reasoning.effortWireFormat", json!("string")),
         ("reasoning.enabledWireFormat", json!("boolean")),
         ("reasoning.enabledMap", json!("enabled")),
@@ -366,35 +499,212 @@ fn ignored_behavior_settings_are_limited_to_dsflash_profiles() {
         ("reasoning.fieldName", json!("reasoning")),
         ("reasoning.update", json!(true)),
         ("reasoning.display", json!(true)),
-    ];
-    for (key, value) in settings {
-        let ordinary = parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "m",
-                "ephemeralSettings": {key: value.clone()}
-            }),
-            "ordinary-profile",
-        );
-        let error = ordinary.expect_err("ignored behavior must fail outside dsflash");
-        assert!(
-            error.contains("only supported for dsflash profiles"),
-            "{key}: {error}"
-        );
-
-        let dsflash = parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "m",
-                "ephemeralSettings": {key: value}
-            }),
-            "dsflash-mi300x",
-        )
-        .unwrap_or_else(|error| panic!("{key}: {error}"));
-        assert!(dsflash.ephemeral.is_dsflash, "{key}");
+    ] {
+        for name in ["dsflash-mi300x", "ordinary-profile"] {
+            let profile = parse_profile_value(
+                &json!({
+                    "provider": "openai",
+                    "model": "m",
+                    "ephemeralSettings": {key: value.clone()}
+                }),
+                name,
+            )
+            .unwrap_or_else(|error| panic!("{key} {name}: {error}"));
+            assert!(
+                profile.ephemeral.unsupported.contains(&key.to_string()),
+                "{key} {name}: must be unsupported, not applied"
+            );
+        }
     }
 }
 
+#[test]
+fn common_metadata_is_exact_and_name_independent() {
+    // emojifilter: exact "auto" metadata under any name; any other value rejects.
+    for name in ["dsflash-mi300x", "ordinary-profile"] {
+        parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"emojifilter": "auto"}
+            }),
+            name,
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+        parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"emojifilter": "on"}
+            }),
+            name,
+        )
+        .expect_err(&format!("{name}: non-auto emojifilter must reject"));
+    }
+
+    // requires-auth: boolean metadata under any name.
+    for value in [json!(true), json!(false)] {
+        parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"requires-auth": value}
+            }),
+            "ordinary-profile",
+        )
+        .unwrap();
+    }
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"requires-auth": "yes"}
+        }),
+        "ordinary-profile",
+    )
+    .expect_err("string requires-auth must reject");
+
+    // tool-format aliases: equal values parse (value judgment is deferred),
+    // disagreeing duplicates reject.
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"tool-format": "auto", "toolFormat": "auto"}
+        }),
+        "any-name",
+    )
+    .unwrap();
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"tool-format": "auto", "toolFormat": "openai"}
+        }),
+        "any-name",
+    )
+    .expect_err("disagreeing tool-format aliases must reject");
+}
+
+#[test]
+fn dsflash_effort_is_enum_validated_and_merged_into_the_discriminator() {
+    // kwargs effort alone.
+    let kwargs_effort = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "modelParams": {"chat_template_kwargs": {
+                "enable_thinking": true,
+                "reasoning_effort": "xhigh"
+            }}
+        }),
+        "any-name",
+    )
+    .unwrap();
+    assert_eq!(
+        kwargs_effort
+            .model_params
+            .chat_template_kwargs
+            .and_then(|spec| spec.reasoning_effort),
+        Some(crate::profile::DsflashEffort::Xhigh)
+    );
+
+    // Ephemeral effort alone: validated against the six-value enum and written
+    // into the discriminator spec (one-or-the-other becomes the wire effort).
+    let ephemeral_effort = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"reasoning.effort": "max"},
+            "modelParams": {"chat_template_kwargs": {"enable_thinking": true}}
+        }),
+        "any-name",
+    )
+    .unwrap();
+    assert_eq!(
+        ephemeral_effort
+            .model_params
+            .chat_template_kwargs
+            .and_then(|spec| spec.reasoning_effort),
+        Some(crate::profile::DsflashEffort::Max)
+    );
+    // The dsflash variant suppresses the legacy effort prompt note.
+    assert!(!ephemeral_effort
+        .ephemeral
+        .prompt_notes
+        .contains_key("reasoning:reasoning.effort"));
+}
+
+#[test]
+fn dsflash_effort_agreement_and_variant_scoping() {
+    // Agreement is enforced when both are present.
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"reasoning.effort": "high"},
+            "modelParams": {"chat_template_kwargs": {
+                "enable_thinking": true,
+                "reasoning_effort": "low"
+            }}
+        }),
+        "any-name",
+    )
+    .expect_err("disagreeing efforts must reject");
+
+    // A non-enum ephemeral effort rejects only for the dsflash variant; the
+    // Standard variant keeps the legacy note (any bounded string).
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"reasoning.effort": "seventy"},
+            "modelParams": {"chat_template_kwargs": {"enable_thinking": true}}
+        }),
+        "any-name",
+    )
+    .expect_err("non-enum effort must reject for the dsflash variant");
+    let standard = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {"reasoning.effort": "seventy"}
+        }),
+        "any-name",
+    )
+    .unwrap();
+    assert_eq!(
+        standard
+            .ephemeral
+            .prompt_notes
+            .get("reasoning:reasoning.effort")
+            .map(String::as_str),
+        Some("seventy")
+    );
+
+    // Malformed discriminator objects reject at parse.
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "modelParams": {"chat_template_kwargs": {"enable_thinking": "true"}}
+        }),
+        "any-name",
+    )
+    .expect_err("non-boolean enable_thinking must reject");
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "modelParams": {"chat_template_kwargs": {
+                "enable_thinking": true,
+                "reasoning_effort": "ultra"
+            }}
+        }),
+        "any-name",
+    )
+    .expect_err("non-enum kwargs reasoning_effort must reject");
+}
 #[test]
 fn openai_responses_settings_are_strict_and_typed() {
     let profile = parse_profile_value(

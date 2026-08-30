@@ -303,6 +303,28 @@ fn inventory_counts_are_exact() {
 }
 
 #[test]
+fn every_inventory_entry_key_is_classified_or_alias() {
+    let a = artifact();
+    let classified: BTreeSet<&str> = a.classifications.iter().map(|c| c.key.as_str()).collect();
+    let mut alias_keys: BTreeSet<&str> = a
+        .inventory
+        .alias_normalization_rules
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    for e in &a.inventory.entries {
+        for alias in &e.aliases {
+            alias_keys.insert(alias.as_str());
+        }
+        assert!(
+            classified.contains(e.key.as_str()) || alias_keys.contains(e.key.as_str()),
+            "inventory entry '{}' has no classification row and is not an alias",
+            e.key
+        );
+    }
+}
+
+#[test]
 fn inventory_is_internally_consistent() {
     let a = artifact();
     let entries = &a.inventory.entries;

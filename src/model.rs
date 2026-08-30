@@ -34,8 +34,10 @@ pub enum ModelError {
     NoBaseUrl,
     #[error("unsupported or invalid endpoint: {0}")]
     InvalidEndpoint(String),
-    #[error("unknown provider: {0}")]
-    UnsupportedProvider(String),
+    #[error(
+        "provider {0} selects a non-chat-completions API; this path supports chat completions only"
+    )]
+    UnsupportedApiSelection(String),
     #[error("insecure http base-url requires --allow-insecure-http")]
     InsecureHttp,
     #[error("file profile cannot fall back to settings.json credentials")]
@@ -54,9 +56,21 @@ pub enum ResolveOutcome {
 /// Resolver for named profiles from the llxprt-code profiles directory.
 pub struct ProfileResolver;
 
+fn profile_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 impl ProfileResolver {
     /// Load a named profile from `<config>/profiles/<name>.json`.
     pub fn load(&self, name: &str) -> Result<ResolveOutcome, ModelError> {
+        // The name-validity check is pure: an invalid name is Missing regardless of
+        // whether the configuration root can be resolved.
+        if !profile_name_is_valid(name) {
+            return Ok(ResolveOutcome::Missing(name.to_string()));
+        }
         let config_root = std_profile_dir().map_err(ModelError::Resolve)?;
         self.load_in(name, &config_root)
     }
@@ -66,11 +80,7 @@ impl ProfileResolver {
         name: &str,
         config_root: &std::path::Path,
     ) -> Result<ResolveOutcome, ModelError> {
-        if name.is_empty()
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
+        if !profile_name_is_valid(name) {
             return Ok(ResolveOutcome::Missing(name.to_string()));
         }
         let path = config_root.join("profiles").join(format!("{name}.json"));
@@ -374,8 +384,21 @@ impl ModelConfig {
         from_file: bool,
         allow_insecure_http: bool,
     ) -> Result<ModelConfig, ModelError> {
+        Self::ensure_chat_api(profile)?;
         let config_root = std_profile_dir().map_err(ModelError::SettingsRead)?;
         Self::from_profile_in(profile, from_file, allow_insecure_http, &config_root)
+    }
+
+    /// The API-kind gate is a pure profile check, so every caller runs it before any
+    /// environment or filesystem access (PLAN.md: configuration errors before
+    /// provider access).
+    fn ensure_chat_api(profile: &Profile) -> Result<(), ModelError> {
+        if profile.target.api != crate::model_api::target::ModelApi::ChatCompletions {
+            return Err(ModelError::UnsupportedApiSelection(
+                profile.provider.clone(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn from_profile_in(
@@ -384,11 +407,7 @@ impl ModelConfig {
         allow_insecure_http: bool,
         config_root: &std::path::Path,
     ) -> Result<ModelConfig, ModelError> {
-        if profile.target.api != crate::model_api::target::ModelApi::ChatCompletions {
-            return Err(ModelError::UnsupportedProvider(profile.provider.clone()));
-        }
-
-        let api_key = resolve_api_key(profile, from_file, config_root)?;
+        Self::ensure_chat_api(profile)?;
 
         let base_url = profile
             .ephemeral
@@ -401,6 +420,26 @@ impl ModelConfig {
         let policy_url = base_url.full().to_string();
         validate_base_url(&policy_url)?;
         check_http_policy(&policy_url, allow_insecure_http)?;
+
+        // Credential policy (class 3): the fixed value-free refusal for a named
+        // secure-store reference, after endpoint validation (class 2).
+        if profile.ephemeral.auth_key_name {
+            return Err(ModelError::UnsupportedSetting(
+                crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string(),
+            ));
+        }
+
+        // Structural dsflash selection (class 4): a marker without the
+        // `chat_template_kwargs` discriminator names its lexicographically first
+        // normalized path in the fixed diagnostic.
+        if let Some(marker) = &profile.chat_missing_discriminator {
+            return Err(ModelError::UnsupportedSetting(format!(
+                "{marker} is a dsflash-only chat setting and requires modelParams.chat_template_kwargs"
+            )));
+        }
+
+        // Target settings (class 6): unsupported keys, non-`auto`/`openai` tool
+        // formats, and a dsflash variant selected on an OpenAI Vercel Chat target.
         let unsupported: Vec<String> = profile
             .ephemeral
             .unsupported
@@ -411,6 +450,22 @@ impl ModelConfig {
         if !unsupported.is_empty() {
             return Err(ModelError::UnsupportedSetting(unsupported.join(", ")));
         }
+        if let Some(format) = profile.ephemeral.tool_format.as_deref() {
+            if format != "auto" && format != "openai" {
+                return Err(ModelError::UnsupportedSetting(format!(
+                    "tool-format {format:?} is not one of the accepted values: auto, openai"
+                )));
+            }
+        }
+        if profile.target.provider == crate::model_api::target::ProviderId::OpenAiVercel
+            && profile.model_params.chat_template_kwargs.is_some()
+        {
+            return Err(ModelError::UnsupportedSetting(
+                "dsflash chat settings are not supported on OpenAI Vercel Chat targets".to_string(),
+            ));
+        }
+
+        let api_key = resolve_api_key(profile, from_file, config_root)?;
 
         let timeout = profile
             .ephemeral
@@ -548,354 +603,4 @@ fn load_settings_json(config_root: &std::path::Path) -> Result<SettingsJson, Mod
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::model::{check_http_policy, classify_loopback, parse_base_url, validate_base_url};
-    use crate::profile::parse_profile_value;
-    use serde_json::json;
-
-    fn base_profile() -> crate::profile::Profile {
-        parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
-                "modelParams": { "temperature": 0.1 },
-                "ephemeralSettings": {
-                    "base-url": "http://127.0.0.1:8080/v1",
-                    "auth-keyfile": "~/nope.key"
-                }
-            }),
-            "test",
-        )
-        .unwrap()
-    }
-    /// The **public** strict validator accepts a bare origin, `/v1`, and the chat-route
-    /// forms (the full URL, including its path, is what is validated) with a host and
-    /// no userinfo/query/fragment, rejects a nested path, userinfo, query, and
-    /// fragment, and that rejection always stays sanitized/value-free.
-    #[test]
-    fn public_validate_base_url_full_url_routes_and_value_free_errors() {
-        for raw in [
-            "https://api.example.com",
-            "https://api.example.com/",
-            "https://api.example.com/v1",
-            "https://api.example.com/v1/",
-            "https://api.example.com/chat/completions",
-            "https://api.example.com/v1/chat/completions",
-        ] {
-            let url = crate::profile::RedactedUrl::from_unvalidated(raw);
-            let cfg = crate::model::ModelConfig {
-                model: "m".into(),
-                base_url: url.clone(),
-                api_key: "k".into(),
-                keyfile_path: None,
-                max_output_tokens: None,
-                timeout: None,
-                model_params: None,
-                context_limit: None,
-            };
-            assert!(
-                validate_base_url(url.full()).is_ok(),
-                "public validator must accept {raw}"
-            );
-            assert!(cfg.validate_url().is_ok(), "validate_url must accept {raw}");
-        }
-        for raw in [
-            "https://api.example.com/inference/v1",
-            "https://user@api.example.com/v1",
-            "https://:pass@api.example.com",
-            "https://api.example.com/v1?key=secret",
-            "https://api.example.com/v1#frag",
-            "https://api.example.com/inference/v1/chat/completions",
-        ] {
-            let url = crate::profile::RedactedUrl::from_unvalidated(raw);
-            let cfg = crate::model::ModelConfig {
-                model: "m".into(),
-                base_url: url.clone(),
-                api_key: "k".into(),
-                keyfile_path: None,
-                max_output_tokens: None,
-                timeout: None,
-                model_params: None,
-                context_limit: None,
-            };
-            let err = validate_base_url(url.full())
-                .expect_err("a nested/userinfo/query/fragment URL must be rejected");
-            assert!(
-                !err.to_string().contains("api.example.com"),
-                "the error must stay value-free: {err}"
-            );
-            assert!(!err.to_string().contains("secret"), "value-free: {err}");
-            assert!(
-                cfg.validate_url().is_err(),
-                "validate_url must reject {raw}"
-            );
-        }
-        // The **display** form hides the path, so a URL whose full path is an
-        // unsupported nested route must be rejected by the public validator (this is
-        // the finding: the redacted display used to hide it).
-        assert!(
-            validate_base_url("https://api.example.com/inference/v1/chat/completions").is_err()
-        );
-    }
-
-    #[test]
-    fn strict_parse_rejects_wrong_types() {
-        use crate::model::ModelConfig;
-        let bad = parse_profile_value(
-            &json!({"provider": "openai", "model": "m", "modelParams": []}),
-            "bad",
-        );
-        assert!(bad.is_err());
-        let bad = parse_profile_value(
-            &json!({"provider": "openai", "model": "m",
-                   "ephemeralSettings": {"base-url": {"x": 1}}}),
-            "bad",
-        );
-        assert!(bad.is_err());
-        let bad = parse_profile_value(
-            &json!({"provider": "openai", "model": "m",
-                   "ephemeralSettings": {"maxOutputTokens": "lots"}}),
-            "bad",
-        );
-        assert!(bad.is_err());
-        let bad = parse_profile_value(
-            &json!({"provider": "openai", "model": "m",
-                   "ephemeralSettings": {"stream-first-response-timeout-ms": "long"}}),
-            "bad",
-        );
-        assert!(bad.is_err());
-        for p in [
-            "http://127.0.0.1:1/v1",
-            "http://[::1]:1/v1",
-            "http://localhost:1/v1",
-            "https://api.example.com/v1",
-        ] {
-            let bp = base_profile();
-            let p = crate::profile::Profile {
-                ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(p)),
-                    auth_key: Some("k".into()),
-                    ..Default::default()
-                },
-                ..bp
-            };
-            assert!(ModelConfig::from_profile(&p, true, false).is_ok());
-        }
-        assert!(ModelConfig::from_profile(
-            &crate::profile::Profile {
-                ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                        "http://23.183.40.76:8080/v1"
-                    )),
-                    auth_key: Some("k".into()),
-                    ..Default::default()
-                },
-                ..base_profile()
-            },
-            true,
-            false,
-        )
-        .is_err());
-        assert!(ModelConfig::from_profile(
-            &crate::profile::Profile {
-                ephemeral: crate::profile::EphemeralSettings {
-                    base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                        "http://23.183.40.76:8080/v1"
-                    )),
-                    auth_key: Some("k".into()),
-                    ..Default::default()
-                },
-                ..base_profile()
-            },
-            true,
-            true,
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn whitespace_only_inline_auth_is_rejected_without_normalizing_other_keys() {
-        let mut profile = base_profile();
-        profile.ephemeral.auth_key = Some(" \t\n ".into());
-        assert!(matches!(
-            super::resolve_api_key(&profile, true, std::path::Path::new("/unused")),
-            Err(super::ModelError::NoAuth)
-        ));
-
-        profile.ephemeral.auth_key = Some("  key bytes  ".into());
-        assert_eq!(
-            super::resolve_api_key(&profile, true, std::path::Path::new("/unused")).unwrap(),
-            "  key bytes  "
-        );
-    }
-
-    #[test]
-    fn keyfile_content_enforces_exact_4096_byte_boundary() {
-        let dir = tempfile::tempdir().unwrap();
-        let keyfile = dir.path().join("boundary.key");
-        std::fs::write(&keyfile, "k".repeat(crate::redact::MAX_KEY_BYTES)).unwrap();
-        assert_eq!(
-            super::read_keyfile_bounded(keyfile.to_str().unwrap())
-                .unwrap()
-                .len(),
-            crate::redact::MAX_KEY_BYTES
-        );
-
-        std::fs::write(&keyfile, "k".repeat(crate::redact::MAX_KEY_BYTES + 1)).unwrap();
-        let error = super::read_keyfile_bounded(keyfile.to_str().unwrap()).unwrap_err();
-        let rendered = error.to_string();
-        assert_eq!(rendered, crate::redact::KEY_CAP_MESSAGE);
-        assert!(!rendered.contains(keyfile.to_str().unwrap()));
-    }
-
-    #[test]
-    fn parse_base_url_scheme_host_rules() {
-        assert!(parse_base_url("http://127.0.0.1:1/v1").is_ok());
-        assert!(parse_base_url("https://api.example.com/v1").is_ok());
-        assert!(parse_base_url("ftp://127.0.0.1/x").is_err());
-        assert!(parse_base_url("127.0.0.1:8080").is_err());
-        assert!(classify_loopback("http://[::1]:8080/v1"));
-        assert!(classify_loopback("http://localhost:8080/v1"));
-        assert!(!classify_loopback("http://23.183.40.76:8080/v1"));
-    }
-
-    #[test]
-    fn insecure_http_error_does_not_retain_the_endpoint() {
-        let endpoint = "http://user:secret@example.com/private?api-key=value#token";
-        let error = check_http_policy(endpoint, false).expect_err("plaintext remote URL must fail");
-        let display = error.to_string();
-        let debug = format!("{error:?}");
-        for secret in [
-            "user",
-            "secret",
-            "example.com",
-            "private",
-            "api-key",
-            "value",
-            "token",
-        ] {
-            assert!(!display.contains(secret), "display retained {secret:?}");
-            assert!(!debug.contains(secret), "debug retained {secret:?}");
-        }
-    }
-
-    #[test]
-    fn unknown_output_setting_fails() {
-        use crate::model::ModelError;
-        use crate::profile::ModelParams;
-        let inner = crate::profile::Profile {
-            ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                    "http://127.0.0.1:1/v1",
-                )),
-                auth_key: Some("k".into()),
-                ..Default::default()
-            },
-            model_params: ModelParams {
-                temperature: None,
-                top_p: None,
-                top_k: None,
-                seed: None,
-                unsupported: vec!["stop".into()],
-            },
-            ..base_profile()
-        };
-        let err = crate::model::ModelConfig::from_profile(&inner, true, true).unwrap_err();
-        assert!(matches!(err, ModelError::UnsupportedSetting(_)));
-    }
-
-    #[test]
-    fn debug_never_reveals_api_key() {
-        let cfg = crate::model::ModelConfig {
-            model: "m".into(),
-            base_url: crate::profile::RedactedUrl::from_unvalidated("http://127.0.0.1:1/v1"),
-            api_key: "sk-super-secret".into(),
-            keyfile_path: None,
-            max_output_tokens: Some(16384),
-            timeout: Some(std::time::Duration::from_millis(900000)),
-            model_params: None,
-            context_limit: None,
-        };
-        let redacted = format!("{cfg:?}");
-        assert!(
-            !redacted.contains("sk-super-secret"),
-            "Debug leaks the key: {redacted}"
-        );
-    }
-
-    #[test]
-    fn file_profile_uses_local_keyfile_and_no_settings_fallback() {
-        let dir = tempfile::tempdir().unwrap();
-        let local = dir.path().join("local.key");
-        std::fs::write(&local, "sk-local\n").unwrap();
-        let inner = crate::profile::Profile {
-            ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                    "http://127.0.0.1:1/v1",
-                )),
-                auth_keyfile_orig: Some(local.display().to_string()),
-                ..Default::default()
-            },
-            ..base_profile()
-        };
-        let cfg = crate::model::ModelConfig::from_profile(&inner, true, true).unwrap();
-        assert_eq!(cfg.api_key, "sk-local");
-
-        let inner = crate::profile::Profile {
-            ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                    "http://127.0.0.1:1/v1",
-                )),
-                auth_keyfile_orig: None,
-                ..Default::default()
-            },
-            ..base_profile()
-        };
-        let err = crate::model::ModelConfig::from_profile(&inner, true, true).unwrap_err();
-        assert!(matches!(err, crate::model::ModelError::NoProfileAuth));
-    }
-
-    #[test]
-    fn openai_responses_uses_the_openai_settings_keyfile_fallback() {
-        let dir = tempfile::tempdir().unwrap();
-        let keyfile = dir.path().join("openai.key");
-        std::fs::write(&keyfile, "sk-responses\n").unwrap();
-        std::fs::write(
-            dir.path().join("settings.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "providerKeyfiles": { "openai": keyfile }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let mut profile = base_profile();
-        profile.provider = "openai-responses".to_string();
-        profile.ephemeral.auth_key = None;
-        profile.ephemeral.auth_keyfile_orig = None;
-
-        assert_eq!(
-            super::resolve_api_key(&profile, false, dir.path()).unwrap(),
-            "sk-responses"
-        );
-    }
-
-    #[test]
-    fn dsflash_settings_preserved() {
-        let p = base_profile();
-        let inner = crate::profile::Profile {
-            ephemeral: crate::profile::EphemeralSettings {
-                base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                    "http://127.0.0.1:1/v1",
-                )),
-                auth_key: Some("k".into()),
-                timeout_ms: Some(900000),
-                max_output_tokens: Some(16384),
-                ..Default::default()
-            },
-            ..p
-        };
-        let cfg = crate::model::ModelConfig::from_profile(&inner, true, true).unwrap();
-        assert_eq!(cfg.timeout, Some(std::time::Duration::from_millis(900000)));
-        assert_eq!(cfg.max_output_tokens, Some(16384));
-    }
-}
+mod tests;

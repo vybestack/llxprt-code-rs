@@ -104,6 +104,12 @@ fn construct_openai_responses(
         .as_ref()
         .ok_or_else(|| "OpenAI Responses settings were not resolved".to_string())?;
 
+    // Credential policy after endpoint validation: the fixed value-free refusal
+    // for a named secure-store reference (mirrors the Chat path's class ordering).
+    if profile.ephemeral.auth_key_name {
+        return Err(crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
+    }
+
     let api_key = crate::model::resolve_api_key(
         profile,
         profile_from_file,
@@ -200,12 +206,27 @@ fn construct_codex(
         Some(value) => usize::try_from(value)
             .map_err(|_| "resolved maximum turn count is invalid".to_string())?,
     };
+    // Mirror the OpenAI Responses path: the profile's output-token bound and sampling
+    // parameters travel in `ModelSettings`; the vendored Codex client honors none of
+    // them on its own.
+    let model_settings = codex_model_settings(profile);
+    crate::agent::validate_timeout(model_settings.timeout)?;
     Ok(ConstructedBackend {
-        backend: Box::new(ResponsesBackend::new(model)?),
+        backend: Box::new(ResponsesBackend::new(model, model_settings)?),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
         max_rounds,
     })
+}
+
+fn codex_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
+    serdes_ai::ModelSettings {
+        max_tokens: profile.ephemeral.max_output_tokens,
+        temperature: profile.model_params.temperature,
+        top_p: profile.model_params.top_p,
+        timeout: Some(std::time::Duration::from_secs(900)),
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
@@ -325,6 +346,22 @@ mod tests {
             constructed.secret_values,
             vec!["token-value".to_string(), "account-value".to_string()]
         );
+    }
+
+    #[test]
+    fn codex_settings_forward_the_profile_output_bound() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/gpt56solhigh.json"
+        ))
+        .unwrap();
+        let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+        let settings = codex_model_settings(&profile);
+        assert_eq!(settings.max_tokens, Some(40_000));
+        assert_eq!(settings.temperature, profile.model_params.temperature);
+        assert_eq!(settings.top_p, profile.model_params.top_p);
+        assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(900)));
+        crate::agent::validate_timeout(settings.timeout)
+            .expect("900s Codex timeout must clear the lease bound");
     }
 
     #[test]

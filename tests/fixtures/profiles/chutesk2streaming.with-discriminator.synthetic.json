@@ -16,6 +16,6 @@
     "reasoning.enabled": true,
     "reasoning.includeInContext": true,
     "reasoning.includeInResponse": true,
-    "reasoning.stripFromContext": "all"
+    "reasoning.stripFromContext": "none"
   }
 }

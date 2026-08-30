@@ -1930,7 +1930,8 @@
         "expectedDisposition": {
           "stage": "in-scope installed openai",
           "target": "target-resolved",
-          "plaintextOptIn": true
+          "plaintextOptIn": true,
+          "firstFailure": "arbitrary route prefix rejects (endpoint class) before the named secure-store reference"
         }
       },
       {
@@ -2627,7 +2628,8 @@
         "expectedDisposition": {
           "stage": "in-scope installed openai",
           "target": "target-resolved",
-          "plaintextOptIn": true
+          "plaintextOptIn": true,
+          "firstFailure": "missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms"
         }
       },
       {
@@ -2734,7 +2736,8 @@
         "expectedDisposition": {
           "stage": "in-scope installed openai",
           "target": "target-resolved",
-          "plaintextOptIn": true
+          "plaintextOptIn": true,
+          "firstFailure": "missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement"
         }
       },
       {
@@ -2789,7 +2792,8 @@
         "expectedDisposition": {
           "stage": "in-scope installed openai",
           "target": "target-resolved",
-          "plaintextOptIn": true
+          "plaintextOptIn": true,
+          "firstFailure": "named secure-store reference rejects before the structural dsflash gate"
         }
       },
       {
@@ -4475,6 +4479,78 @@
       "note": "rejected"
     },
     {
+      "key": "circuit_breaker_enabled",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_failure_threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_failure_window_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_recovery_timeout_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "frequency_penalty",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected sampling registry key"
+    },
+    {
+      "key": "include-folder-structure",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "model.allMemoriesAreCore",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "presence_penalty",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected sampling registry key"
+    },
+    {
+      "key": "stop",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "timeout_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "top_k",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "chat transport cannot serialize top_k; rejected"
+    },
+    {
+      "key": "tpm_threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
       "key": "modelParams.provider",
       "classification": "rejected",
       "owner": "common",
@@ -4567,7 +4643,7 @@
   ],
   "security": {
     "note": "contains key paths and JSON types, frozen safe enums, and redacted placeholders only",
-    "classifiedKeys": 153,
+    "classifiedKeys": 165,
     "ownedExactlyOnce": true
   }
 }

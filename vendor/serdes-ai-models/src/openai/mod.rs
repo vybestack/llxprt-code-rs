@@ -38,14 +38,15 @@ pub mod types;
 // Re-exports
 #[doc(hidden)]
 pub use chat::chat_url;
-pub use chat::OpenAIChatModel;
+pub use chat::{OpenAIChatModel, OpenAIChatModelRequestSettings};
 pub use responses::{
     OpenAIResponsesModel, OpenAIResponsesModelSettings, PromptCacheRetention, ReasoningEffort,
     ReasoningSummary, ServiceTier, TextVerbosity, TruncationMode,
 };
 pub use types::{
-    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatTool,
-    ContentPart, FunctionDefinition, MessageContent, ResponseFormat, ToolChoiceValue, Usage,
+    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
+    ChatTemplateKwargs, ChatTemplateReasoningEffort, ChatTool, ContentPart, FunctionDefinition,
+    MessageContent, ResponseFormat, ToolChoiceValue, Usage,
 };
 
 /// Create a new OpenAI chat model.

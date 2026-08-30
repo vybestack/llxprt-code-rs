@@ -91,7 +91,8 @@ fn parse_common(
     settings.loop_detection_enabled = Some(false);
 
     require_exact_string(map, "emojifilter", "auto", name)?;
-    parse_disabled_tools(map, name)?;
+    settings.disabled_tools = parse_disabled_tools(map, name)?;
+    parse_allowed_tools(map, name)?;
     Ok(())
 }
 
@@ -159,22 +160,68 @@ fn parse_model_params(
     Ok(ModelParams::default())
 }
 
-fn parse_disabled_tools(map: &Map<String, Value>, name: &str) -> Result<(), String> {
-    let Some(value) = map.get("tools.disabled") else {
+/// Validate the bounded string array, accept the deprecated `disabled-tools`
+/// alias (byte-for-byte equal when both forms are present), and reject attempts
+/// to disable a registered Rust tool until a tool policy is implemented. Names
+/// absent from the registry are host-side tools this runtime does not register
+/// and stay accepted no-ops.
+fn parse_disabled_tools(map: &Map<String, Value>, name: &str) -> Result<Vec<String>, String> {
+    let primary = map.get("tools.disabled");
+    let alias = map.get("disabled-tools");
+    let parsed = |value: Option<&Value>, key: &str| -> Result<Vec<String>, String> {
+        let Some(value) = value else {
+            return Ok(Vec::new());
+        };
+        let values = value
+            .as_array()
+            .ok_or_else(|| format!("profile {name:?}: '{key}' must be an array"))?;
+        let mut tools = Vec::with_capacity(values.len());
+        for value in values {
+            let tool = value
+                .as_str()
+                .ok_or_else(|| format!("profile {name:?}: '{key}' entries must be strings"))?;
+            if tool.is_empty() || tool.len() > 64 || tool.chars().any(char::is_control) {
+                return Err(format!(
+                    "profile {name:?}: '{key}' entries must be bounded tool names"
+                ));
+            }
+            if crate::agent::known_tool(tool, true) {
+                return Err(format!(
+                    "profile {name:?}: '{key}' cannot disable the registered Rust tool '{tool}'"
+                ));
+            }
+            tools.push(tool.to_string());
+        }
+        Ok(tools)
+    };
+    let primary_tools = parsed(primary, "tools.disabled")?;
+    let alias_tools = parsed(alias, "disabled-tools")?;
+    if primary.is_some() && alias.is_some() && primary_tools != alias_tools {
+        return Err(format!(
+            "profile {name:?}: 'disabled-tools' must equal 'tools.disabled' exactly"
+        ));
+    }
+    Ok(if primary.is_some() {
+        primary_tools
+    } else {
+        alias_tools
+    })
+}
+
+/// An empty `tools.allowed` is no policy; applying a nonempty allowlist would be
+/// output-affecting and is not implemented, so it rejects with a fixed message.
+fn parse_allowed_tools(map: &Map<String, Value>, name: &str) -> Result<(), String> {
+    let Some(value) = map.get("tools.allowed") else {
         return Ok(());
     };
     let values = value
         .as_array()
-        .ok_or_else(|| format!("profile {name:?}: 'tools.disabled' must be an array"))?;
-    for value in values {
-        let tool = value
-            .as_str()
-            .ok_or_else(|| format!("profile {name:?}: 'tools.disabled' entries must be strings"))?;
-        if tool.is_empty() || tool.len() > 64 || tool.chars().any(char::is_control) {
-            return Err(format!(
-                "profile {name:?}: 'tools.disabled' entries must be bounded tool names"
-            ));
-        }
+        .ok_or_else(|| format!("profile {name:?}: 'tools.allowed' must be an array"))?;
+    if !values.is_empty() {
+        return Err(
+            "unsupported tool policy: 'tools.allowed' must be empty; nonempty allowlists are not implemented"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -200,6 +247,8 @@ fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), 
         "loopDetectionEnabled",
         "emojifilter",
         "tools.disabled",
+        "disabled-tools",
+        "tools.allowed",
         "stream-idle-timeout-ms",
         "task-default-timeout-seconds",
         "task-max-timeout-seconds",

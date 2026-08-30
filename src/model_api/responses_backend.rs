@@ -21,8 +21,11 @@ pub(crate) struct ResponsesBackend {
 }
 
 impl ResponsesBackend {
-    pub(crate) fn new(model: OpenResponsesModel) -> Result<Self, String> {
-        Self::with_model(ResponsesModel::Codex(model), ModelSettings::default())
+    pub(crate) fn new(
+        model: OpenResponsesModel,
+        model_settings: ModelSettings,
+    ) -> Result<Self, String> {
+        Self::with_model(ResponsesModel::Codex(model), model_settings)
     }
 
     pub(crate) fn new_openai(
@@ -78,7 +81,18 @@ impl ChatBackend for ResponsesBackend {
         tools: &[crate::tools::ToolSpec],
     ) -> Result<LlmResult, String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        self.runtime.block_on(self.request_async(requests, tools))
+        // The turn is bounded in the backend: neither the vendored Codex client nor
+        // its WebSocket applies `ModelSettings::timeout`, so an unbounded `block_on`
+        // here would let one request hang the agent forever.
+        self.runtime.block_on(async {
+            match self.model_settings.timeout {
+                Some(limit) => tokio::time::timeout(limit, self.request_async(requests, tools))
+                    .await
+                    .map_err(|_| "responses request exceeded the configured timeout".to_string())
+                    .and_then(|result| result),
+                None => self.request_async(requests, tools).await,
+            }
+        })
     }
 
     fn request_calls(&self) -> usize {
@@ -92,8 +106,11 @@ mod tests {
 
     #[test]
     fn failed_requests_are_counted_without_exposing_transport_details() {
-        let backend = ResponsesBackend::new(OpenResponsesModel::new("test-model", "not-a-url"))
-            .expect("test runtime must build");
+        let backend = ResponsesBackend::new(
+            OpenResponsesModel::new("test-model", "not-a-url"),
+            ModelSettings::default(),
+        )
+        .expect("test runtime must build");
         let error = backend
             .request(&[ModelRequest::default()], &[])
             .expect_err("invalid test endpoint must fail");
@@ -101,5 +118,43 @@ mod tests {
         assert_eq!(backend.request_calls(), 1);
         assert!(!error.contains("Bearer"));
         assert!(!error.contains("chatgpt-account-id"));
+    }
+
+    #[test]
+    fn codex_turn_is_bounded_by_the_configured_timeout() {
+        use std::io::Read as _;
+
+        // Accept the WebSocket TCP connection but never complete the handshake: the
+        // client would wait forever, so only the backend bound can end the turn.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf);
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+
+        let model = OpenResponsesModel::new("test-model", format!("ws://127.0.0.1:{port}"));
+        let backend = ResponsesBackend::new(
+            model,
+            ModelSettings {
+                timeout: Some(std::time::Duration::from_secs(1)),
+                ..Default::default()
+            },
+        )
+        .expect("test runtime must build");
+
+        let started = std::time::Instant::now();
+        let error = backend
+            .request(&[ModelRequest::default()], &[])
+            .expect_err("silent server must trip the backend timeout");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(4),
+            "turn must end via the bound, not the socket"
+        );
+        assert_eq!(error, "responses request exceeded the configured timeout");
+        assert_eq!(backend.request_calls(), 1);
     }
 }
