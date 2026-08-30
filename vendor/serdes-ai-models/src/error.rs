@@ -78,7 +78,9 @@ impl std::fmt::Display for ModelError {
                 write!(f, "Model request rate limited (retry after {retry_after:?})")
             }
             Self::Authentication(_) => f.write_str("Model authentication failed"),
-            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
+            Self::InvalidResponse(detail) => {
+                write!(f, "Model returned an invalid response: {detail}")
+            }
             Self::ResponseTooLarge { limit } => {
                 write!(f, "Provider response exceeded the {limit}-byte limit")
             }
@@ -96,7 +98,7 @@ impl std::fmt::Display for ModelError {
                 "Model context length exceeded ({max_tokens} tokens maximum, {requested_tokens} requested)"
             ),
             Self::Configuration(_) => f.write_str("Model configuration is invalid"),
-            Self::Network(_) => f.write_str("Model network request failed"),
+            Self::Network(detail) => write!(f, "Model network request failed: {detail}"),
             Self::Other(_) => f.write_str("Model operation failed"),
         }
     }

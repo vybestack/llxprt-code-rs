@@ -87,6 +87,7 @@ struct Inner {
     model_name: String,
     endpoint: String,
     transport: Transport,
+    codex_http: bool,
     headers: Vec<(String, String)>,
     reasoning: Option<ReasoningSettings>,
     http: reqwest::Client,
@@ -167,6 +168,7 @@ impl OpenResponsesModel {
                 model_name,
                 endpoint,
                 transport,
+                codex_http: false,
                 headers: Vec::new(),
                 reasoning: None,
                 http: reqwest::Client::new(),
@@ -189,6 +191,19 @@ impl OpenResponsesModel {
         Arc::get_mut(&mut self.inner)
             .expect("model already in use; configure before sharing")
             .transport = transport;
+        self
+    }
+
+    /// Switch the HTTP transport to the ChatGPT codex wire contract:
+    /// `store: false`, SSE streaming, no `max_output_tokens`, and full
+    /// input replay every turn (the backend stores nothing, so turns cannot
+    /// chain on `previous_response_id`). No effect on the websocket
+    /// transport.
+    #[must_use]
+    pub fn codex_http(mut self) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("model already in use; configure before sharing")
+            .codex_http = true;
         self
     }
 
@@ -471,6 +486,9 @@ fn build_request(
     previous_response_id: Option<String>,
     store: bool,
 ) -> Result<CreateResponseRequest, ModelError> {
+    // The codex contract replays the full input: nothing is stored, so no
+    // turn can be skipped as already-sent.
+    let skip = if inner.codex_http { 0 } else { skip };
     let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
     let tools: Option<Vec<_>> = if params.tools.is_empty() {
         None
@@ -483,11 +501,19 @@ fn build_request(
                 .collect(),
         )
     };
+    let (store, previous_response_id, max_output_tokens) = if inner.codex_http {
+        // The ChatGPT codex backend stores nothing and rejects the output
+        // cap parameter outright.
+        (false, None, None)
+    } else {
+        (store, previous_response_id, settings.max_tokens)
+    };
     Ok(CreateResponseRequest {
         model: inner.model_name.clone(),
-        input: if items.is_empty() {
+        input: if items.is_empty() && !inner.codex_http {
             crate::types::ResponseInput::Text(String::new())
         } else {
+            // The codex backend rejects the string shorthand outright.
             crate::types::ResponseInput::Items(items)
         },
         instructions,
@@ -495,7 +521,7 @@ fn build_request(
         tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
         temperature: settings.temperature,
         top_p: settings.top_p,
-        max_output_tokens: settings.max_tokens,
+        max_output_tokens,
         stream: None,
         background: None,
         store: Some(store),
@@ -557,6 +583,9 @@ impl Model for OpenResponsesModel {
                     &self.inner.model_name,
                     &response.id,
                 ))
+            }
+            Transport::Http if self.inner.codex_http => {
+                self.run_codex_http_turn(messages, settings, params).await
             }
             Transport::Http => self.run_http_turn(messages, settings, params).await,
         }
@@ -665,7 +694,41 @@ fn response_from_events(
 }
 
 impl OpenResponsesModel {
-    /// Non-streaming HTTP turn with `store: true` chaining.
+    /// One codex HTTP turn: the SSE request runs on a task, its events are
+    /// drained and folded into a complete response.
+    async fn run_codex_http_turn(
+        &self,
+        messages: &[ModelRequest],
+        settings: &ModelSettings,
+        params: &ModelRequestParameters,
+    ) -> Result<ModelResponse, ModelError> {
+        let (tx, mut rx) = mpsc::channel::<Result<ModelResponseStreamEvent, ModelError>>(64);
+        let inner = Arc::clone(&self.inner);
+        let messages: Vec<ModelRequest> = messages.to_vec();
+        let settings = settings.clone();
+        let params = params.clone();
+        let task =
+            tokio::spawn(
+                async move { run_http_stream(&inner, &messages, &settings, &params, &tx).await },
+            );
+        let mut events = Vec::new();
+        while let Some(item) = rx.recv().await {
+            events.push(item?);
+        }
+        // `run_http_stream` fails the stream on any wire error; the join
+        // result must propagate that error, not just the JoinError.
+        let terminal_id = task
+            .await
+            .map_err(|e| ModelError::Connection(e.to_string()))??;
+        Ok(response_from_events(
+            events,
+            &self.inner.model_name,
+            &terminal_id.as_deref().unwrap_or(""),
+        ))
+    }
+
+    /// Non-streaming HTTP turn with `store: true` chaining (default HTTP
+    /// mode; the codex contract uses [`Self::run_codex_http_turn`]).
     async fn run_http_turn(
         &self,
         messages: &[ModelRequest],
@@ -746,7 +809,8 @@ impl OpenResponsesModel {
     }
 }
 
-/// Streaming HTTP turn (SSE).
+/// Streaming HTTP turn (SSE). Returns the terminal response id when the
+/// stream completed.
 ///
 /// The request is established before any event escapes, so a
 /// `previous_response_not_found` on the status line clears the stale chain
@@ -759,7 +823,7 @@ async fn run_http_stream(
     settings: &ModelSettings,
     params: &ModelRequestParameters,
     tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
-) -> Result<(), ModelError> {
+) -> Result<Option<String>, ModelError> {
     use futures::StreamExt;
 
     let mut session = inner.session.lock().await;
@@ -802,6 +866,7 @@ async fn run_http_stream(
 
     let mut byte_stream = response.bytes_stream();
     let mut buffer = String::new();
+    let mut terminal_id = None;
     while let Some(chunk) = byte_stream.next().await {
         let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -812,15 +877,18 @@ async fn run_http_stream(
                 continue;
             };
             if payload == "[DONE]" {
-                return Ok(());
+                return Ok(terminal_id);
             }
             let event: StreamEvent = serde_json::from_str(payload)
                 .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
             if let StreamEvent::ResponseCompleted { response, .. }
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
-                session.previous_response_id = Some(response.id.clone());
-                session.sent_requests = messages.len();
+                terminal_id = Some(response.id.clone());
+                if !inner.codex_http {
+                    session.previous_response_id = Some(response.id.clone());
+                    session.sent_requests = messages.len();
+                }
             }
             for translated in assembler::translate(event) {
                 match translated {
@@ -833,7 +901,7 @@ async fn run_http_stream(
                         // Error delivered as a stream item; returning Ok
                         // avoids the task re-sending it.
                         let _ = tx.send(Err(error)).await;
-                        return Ok(());
+                        return Ok(None);
                     }
                 }
             }

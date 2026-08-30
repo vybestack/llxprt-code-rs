@@ -157,4 +157,243 @@ mod tests {
         assert_eq!(error, "responses request exceeded the configured timeout");
         assert_eq!(backend.request_calls(), 1);
     }
+
+    /// Offset just past the CRLF CRLF header/body separator.
+    fn find_body_start(request: &[u8]) -> Option<usize> {
+        request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|offset| offset + 4)
+    }
+
+    /// The codex HTTP wire contract, pinned offline: `store: false`,
+    /// `stream: true`, no `max_output_tokens` (even when the settings carry
+    /// one), no `previous_response_id`, and full input replay on every turn.
+    #[test]
+    fn codex_http_wire_contract_streams_without_store_or_cap_and_replays_input() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        let (bodies_tx, bodies_rx) = std::sync::mpsc::channel::<serde_json::Value>();
+        let server = std::thread::spawn(move || {
+            use std::io::{Read as _, Write as _};
+            for round in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept codex turn");
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut buf).expect("read codex request");
+                    assert!(n > 0, "codex connection closed before the body arrived");
+                    request.extend_from_slice(&buf[..n]);
+                    if let Some(body_start) = find_body_start(&request) {
+                        let headers =
+                            String::from_utf8_lossy(&request[..body_start]).to_lowercase();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= body_start + length {
+                            break;
+                        }
+                    }
+                }
+                let body_start = find_body_start(&request).expect("separator");
+                let body: serde_json::Value = serde_json::from_slice(&request[body_start..])
+                    .expect("codex body must be JSON");
+                bodies_tx.send(body).expect("send captured body");
+
+                let turn = if round == 0 { "one" } else { "two" };
+                let response_id = format!("resp_loopback_{round}");
+                let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
+                    response_id.clone(),
+                    1,
+                    "loopback-codex",
+                    &serde_json::from_value(
+                        serde_json::json!({"model": "loopback-codex", "input": []}),
+                    )
+                    .unwrap(),
+                );
+                object.status = serdes_ai_responses::types::ResponseStatus::Completed;
+                object.usage = Some(serdes_ai_responses::types::ResponseUsage {
+                    input_tokens: Some(11),
+                    output_tokens: Some(7),
+                    total_tokens: Some(18),
+                });
+                let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
+                    sequence_number: 0,
+                    response: object.clone(),
+                };
+                let message = serdes_ai_responses::types::OutputItem::Message {
+                    id: format!("msg_{round}"),
+                    role: "assistant".to_string(),
+                    status: serdes_ai_responses::types::OutputItemStatus::Completed,
+                    content: vec![serdes_ai_responses::types::OutputContent::OutputText {
+                        text: format!("codex turn {turn}"),
+                        annotations: Vec::new(),
+                    }],
+                };
+                let item_added = serdes_ai_responses::types::StreamEvent::OutputItemAdded {
+                    sequence_number: 1,
+                    output_index: 0,
+                    item: message,
+                };
+                let text_delta = serdes_ai_responses::types::StreamEvent::OutputTextDelta {
+                    sequence_number: 2,
+                    item_id: format!("msg_{round}"),
+                    output_index: 0,
+                    content_index: 0,
+                    delta: format!("codex turn {turn}"),
+                };
+                let item_done = serdes_ai_responses::types::StreamEvent::OutputItemDone {
+                    sequence_number: 3,
+                    output_index: 0,
+                    item: serdes_ai_responses::types::OutputItem::Message {
+                        id: format!("msg_{round}"),
+                        role: "assistant".to_string(),
+                        status: serdes_ai_responses::types::OutputItemStatus::Completed,
+                        content: Vec::new(),
+                    },
+                };
+                let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
+                    sequence_number: 4,
+                    response: object,
+                };
+                let sse = |event: &serdes_ai_responses::types::StreamEvent| {
+                    format!("data: {}\n\n", serde_json::to_string(event).unwrap())
+                };
+                let payload = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}data: [DONE]\n\n",
+                    sse(&created),
+                    sse(&item_added),
+                    sse(&text_delta),
+                    sse(&item_done),
+                    sse(&completed),
+                );
+                stream
+                    .write_all(payload.as_bytes())
+                    .expect("write SSE response");
+            }
+        });
+
+        let model = OpenResponsesModel::new(
+            "loopback-codex",
+            format!("http://127.0.0.1:{port}/responses"),
+        )
+        .codex_http()
+        .bearer("loopback-codex-key");
+        let backend = ResponsesBackend::new(
+            model,
+            ModelSettings {
+                // The cap is present in the settings; the codex mode must
+                // still keep it off the wire.
+                max_tokens: Some(40_000),
+                timeout: Some(std::time::Duration::from_secs(10)),
+                ..Default::default()
+            },
+        )
+        .expect("test runtime must build");
+
+        let turn = |text: &str| {
+            ModelRequest::with_parts(vec![
+                serdes_ai::core::messages::ModelRequestPart::UserPrompt(
+                    serdes_ai::core::messages::UserPromptPart::new(text),
+                ),
+            ])
+        };
+        let first_history = vec![turn("first codex turn")];
+        let second_history = vec![turn("first codex turn"), turn("second codex turn")];
+        let first = backend
+            .request(&first_history, &[])
+            .expect("first codex turn");
+        let second = backend
+            .request(&second_history, &[])
+            .expect("second codex turn");
+        server.join().expect("server thread");
+
+        let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
+        assert_eq!(bodies.len(), 2);
+        for body in &bodies {
+            assert_eq!(body["store"], false, "codex must never store");
+            assert_eq!(body["stream"], true, "codex must stream over SSE");
+            assert!(
+                body.get("max_output_tokens").is_none(),
+                "codex rejects max_output_tokens: {body}"
+            );
+            assert!(
+                body.get("previous_response_id").is_none(),
+                "nothing is stored, so nothing can chain"
+            );
+            assert!(body["input"].is_array(), "codex requires list input");
+        }
+        let replayed = serde_json::to_string(&bodies[1]["input"]).unwrap();
+        assert!(
+            replayed.contains("first codex turn") && replayed.contains("second codex turn"),
+            "turn two must replay the full input, got: {replayed}"
+        );
+        assert!(
+            first.text.contains("codex turn one"),
+            "folded output missing: {first:?}"
+        );
+        assert!(
+            second.text.contains("codex turn two"),
+            "folded output missing: {second:?}"
+        );
+        assert_eq!(backend.request_calls(), 2);
+    }
+
+    /// A 200 whose body is JSON, not an SSE stream, must surface as an
+    /// error rather than an empty turn: nothing was folded.
+    #[test]
+    fn codex_http_rejects_non_sse_success_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            use std::io::{Read as _, Write as _};
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 4096];
+            let mut request = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).unwrap_or(0);
+                assert!(n > 0, "connection closed before the body arrived");
+                request.extend_from_slice(&buf[..n]);
+                if let Some(body_start) = find_body_start(&request) {
+                    let headers = String::from_utf8_lossy(&request[..body_start]).to_lowercase();
+                    let length = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= body_start + length {
+                        break;
+                    }
+                }
+            }
+            let body = br#"{"id":"r","object":"response","created_at":1,"status":"completed","model":"m","output":[]}"#;
+            let payload = format!(
+                "HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+",
+                body.len()
+            );
+            stream.write_all(payload.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+        });
+        let model = OpenResponsesModel::new(
+            "loopback-codex",
+            format!("http://127.0.0.1:{port}/responses"),
+        )
+        .codex_http();
+        let backend = ResponsesBackend::new(model, ModelSettings::default()).expect("runtime");
+        let error = backend
+            .request(&[ModelRequest::default()], &[])
+            .expect_err("JSON body cannot fold into a codex turn");
+        assert!(error.contains("sse stream"), "unexpected error: {error}");
+        server.join().expect("server");
+    }
 }

@@ -192,6 +192,7 @@ fn construct_codex(
 
     let user_agent = format!("llxprt-code-rs/{}", env!("CARGO_PKG_VERSION"));
     let mut model = OpenResponsesModel::new(draft.model(), draft.endpoint().responses_url())
+        .codex_http()
         .bearer(credential.access_token())
         .header("chatgpt-account-id", credential.account_id())
         .header("OpenAI-Beta", CODEX_RESPONSES_BETA)
@@ -221,7 +222,9 @@ fn construct_codex(
 
 fn codex_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
     serdes_ai::ModelSettings {
-        max_tokens: profile.ephemeral.max_output_tokens,
+        // The ChatGPT codex backend rejects `max_output_tokens` outright, so
+        // the output bound stays host-side (context limit + turn budget).
+        max_tokens: None,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
         timeout: Some(std::time::Duration::from_secs(900)),
@@ -356,7 +359,9 @@ mod tests {
         .unwrap();
         let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
         let settings = codex_model_settings(&profile);
-        assert_eq!(settings.max_tokens, Some(40_000));
+        // The ChatGPT codex backend rejects `max_output_tokens` outright;
+        // the profile's 40000 cap stays host-side instead of on the wire.
+        assert_eq!(settings.max_tokens, None);
         assert_eq!(settings.temperature, profile.model_params.temperature);
         assert_eq!(settings.top_p, profile.model_params.top_p);
         assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(900)));
