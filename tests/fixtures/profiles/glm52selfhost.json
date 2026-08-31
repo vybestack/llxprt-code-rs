@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "glm-5.2-selfhost",
+  "modelParams": {
+    "temperature": 0.6,
+    "top_p": 0.95
+  },
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "http://70.78.140.110:44110/v1",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "context-limit": 200192,
+    "maxOutputTokens": 32000
+  }
+}

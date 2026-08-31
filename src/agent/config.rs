@@ -48,3 +48,23 @@ pub fn coding_system_prompt(cwd: &std::path::Path, reasoning: &str, shell_on: bo
         cwd.display()
     )
 }
+
+/// The per-turn round-limit diagnostic. The loop enforces its **effective** round cap
+/// (`max_rounds`); a profile override lowers that cap, so the diagnostic names the
+/// effective cap, never a hardcoded constant.
+pub fn round_limit_message(max_rounds: usize) -> String {
+    format!("turn would exceed the {max_rounds} round cap; give a final summary instead")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_limit_message_names_the_effective_cap() {
+        assert_eq!(
+            round_limit_message(7),
+            "turn would exceed the 7 round cap; give a final summary instead"
+        );
+    }
+}

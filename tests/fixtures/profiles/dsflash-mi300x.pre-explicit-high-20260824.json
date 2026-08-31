@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "http://23.183.40.76:8080/v1",
+    "auth-keyfile": "<redacted-keyfile-path>",
+    "context-limit": 393216,
+    "maxOutputTokens": 16384,
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "stream-idle-timeout-ms": 0,
+    "stream-first-response-timeout-ms": 900000,
+    "shell-replacement": true,
+    "emojifilter": "auto",
+    "reasoning.effort": "max"
+  },
+  "name": "dsflash-mi300x",
+  "_note": "Pinned DeepSeek-V4-Flash-0731 DSpark K=7 deployment on one MI300X. The profile requests max reasoning and the server also enforces max as its default."
+}

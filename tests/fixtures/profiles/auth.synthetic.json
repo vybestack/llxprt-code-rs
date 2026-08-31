@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "type": "standard",
+  "provider": "openai",
+  "model": "auth-fixture-model",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "https://api.openai.com/v1"
+  },
+  "auth": {
+    "type": "apikey"
+  }
+}

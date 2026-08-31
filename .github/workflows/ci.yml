@@ -22,12 +22,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
-      CARGO_HOME: ${{ runner.temp }}/test-cargo-home
-      CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
       CARGO_NET_OFFLINE: true
-      HTTP_PROXY: http://127.0.0.1:9
-      HTTPS_PROXY: http://127.0.0.1:9
-      ALL_PROXY: http://127.0.0.1:9
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +39,12 @@ jobs:
       - name: Shell syntax check
         run: bash -n scripts/*.sh
       - name: Verify shipped dependency sources and empty Cargo home
+        env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
         run: |
           rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR"
           mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
@@ -51,22 +52,56 @@ jobs:
           cargo metadata --offline --locked --no-deps --format-version 1 >/dev/null
           test ! -e "$CARGO_HOME/registry"
       - name: Cargo fmt check
+        env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
         run: cargo fmt --all -- --check && cargo fmt --all --manifest-path xtask/Cargo.toml -- --check
       - name: xtask tests and production quality limits
+        env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
         run: |
           cargo test --offline --locked --manifest-path xtask/Cargo.toml
           cargo clippy --offline --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
           cargo xtask quality
       - name: Cargo clippy (-D warnings, offline locked workspace/all targets/features)
+        env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
         run: cargo clippy --offline --locked --workspace --all-targets --all-features -- -D warnings
       - name: Cargo test (offline locked workspace/all targets/features)
-        run: cargo test --offline --locked --workspace --all-targets --all-features
-      - name: Direct offline vendored SerdesAI OpenAI provider clippy and tests
         env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/test-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          # The blackhole stays for off-box hosts, but loopback servers the
+          # tests talk to must be exempt or every HTTP client proxies itself
+          # into the dead port.
+          NO_PROXY: 127.0.0.1,localhost
+        run: cargo test --offline --locked --workspace --all-targets --all-features
+      - name: Direct offline vendored SerdesAI model and Responses clippy and tests
+        env:
+          CARGO_HOME: ${{ runner.temp }}/test-cargo-home
           CARGO_TARGET_DIR: ${{ runner.temp }}/serdes-ai-models-target
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
         run: |
           cargo clippy --offline --locked --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai --all-targets -- -D warnings
           cargo test --offline --locked --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai
+          cargo clippy --offline --locked --manifest-path vendor/serdes-ai-responses/Cargo.toml --all-targets -- -D warnings
+          cargo test --offline --locked --manifest-path vendor/serdes-ai-responses/Cargo.toml
 
   shellcheck:
     name: shellcheck
@@ -280,7 +315,7 @@ jobs:
       - name: install cargo-audit (pinned, --locked)
         # Run outside the checkout so this explicitly online tool does not inherit the project's
         # crates.io-to-registry-vendor replacement.
-        run: (cd "$RUNNER_TEMP" && cargo install cargo-audit --version 0.21.2 --locked)
+        run: (cd "$RUNNER_TEMP" && cargo install cargo-audit --version 0.22.2 --locked)
       - name: cargo audit (normal advisory fetch)
         run: |
           cargo audit --color always

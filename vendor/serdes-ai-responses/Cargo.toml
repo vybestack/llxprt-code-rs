@@ -1,0 +1,32 @@
+[package]
+name = "serdes-ai-responses"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.88"
+authors = ["serdes-ai contributors"]
+description = "Client for the OpenAI Responses API over WebSocket and HTTP"
+license = "MIT"
+repository = "https://github.com/janfeddersen-wq/serdesAI"
+readme = "README.md"
+publish = false
+
+[dependencies]
+serdes-ai-core = { path = "../serdes-ai-core", version = "=0.2.6" }
+serdes-ai-models = { path = "../serdes-ai-models", version = "=0.2.6" }
+serdes-ai-tools = { path = "../serdes-ai-tools", version = "=0.2.6" }
+serdes-ai-streaming = { path = "../serdes-ai-streaming", version = "=0.2.6", features = ["websocket"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.49", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+futures = "0.3"
+tracing = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio-stream = "0.1"
+base64 = "0.22"
+
+[dev-dependencies]
+tokio-tungstenite = "0.28"

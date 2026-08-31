@@ -67,6 +67,39 @@ pub struct ChatCompletionRequest {
     /// Top log probabilities.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_logprobs: Option<u32>,
+    /// Typed dsflash-only request extension; serialized only when construction
+    /// supplied it. Every non-dsflash Chat target constructs `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
+}
+
+/// Bounded reasoning effort accepted inside `chat_template_kwargs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatTemplateReasoningEffort {
+    /// Minimal effort.
+    Minimal,
+    /// Low effort.
+    Low,
+    /// Medium effort.
+    Medium,
+    /// High effort.
+    High,
+    /// Extra-high effort.
+    Xhigh,
+    /// Maximum effort.
+    Max,
+}
+
+/// Bounded dsflash-only request extension: `enable_thinking` is required, the
+/// effort is optional and omitted entirely when `None`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatTemplateKwargs {
+    /// Whether template thinking mode is enabled.
+    pub enable_thinking: bool,
+    /// Optional bounded reasoning effort; omitted from the wire when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ChatTemplateReasoningEffort>,
 }
 
 impl ChatCompletionRequest {
@@ -92,6 +125,7 @@ impl ChatCompletionRequest {
             stream_options: None,
             logprobs: None,
             top_logprobs: None,
+            chat_template_kwargs: None,
         }
     }
 }

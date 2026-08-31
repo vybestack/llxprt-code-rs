@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "provider": "google",
+  "model": "gemini-pro",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "<redacted-keyfile-path>"
+  }
+}

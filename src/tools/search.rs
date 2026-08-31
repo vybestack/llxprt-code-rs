@@ -359,7 +359,10 @@ pub(super) fn search_file_content_tool(
     args: &BTreeMap<String, JsonValue>,
     max_output_bytes: usize,
 ) -> Result<String, String> {
-    reject_unknown(args, &["pattern", "max_results", "path"])?;
+    reject_unknown(
+        args,
+        &["pattern", "max_results", "path", "max_output_bytes"],
+    )?;
     let pattern = arg_str(args, "pattern", true)?.unwrap();
     let max = bounded(
         arg_u64(args, "max_results")?,

@@ -174,7 +174,43 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
     let timeout = config
         .timeout
         .unwrap_or(std::time::Duration::from_millis(900_000));
-    let model = openai_chat_model(&config.model, &config.api_key, &base_url, timeout);
+    // The structural dsflash discriminator travels as per-model request settings;
+    // Standard Chat keeps the default (the wire key stays absent).
+    let mut model = openai_chat_model(&config.model, &config.api_key, &base_url, timeout);
+    if let Some(spec) = config
+        .model_params
+        .as_ref()
+        .and_then(|params| params.chat_template_kwargs.as_ref())
+    {
+        let wire_effort = spec.reasoning_effort.map(|effort| match effort {
+            crate::profile::DsflashEffort::Minimal => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::Minimal
+            }
+            crate::profile::DsflashEffort::Low => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::Low
+            }
+            crate::profile::DsflashEffort::Medium => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::Medium
+            }
+            crate::profile::DsflashEffort::High => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::High
+            }
+            crate::profile::DsflashEffort::Xhigh => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::Xhigh
+            }
+            crate::profile::DsflashEffort::Max => {
+                serdes_ai::models::openai::ChatTemplateReasoningEffort::Max
+            }
+        });
+        model = model.with_request_settings(
+            serdes_ai::models::openai::OpenAIChatModelRequestSettings {
+                chat_template_kwargs: Some(serdes_ai::models::openai::ChatTemplateKwargs {
+                    enable_thinking: spec.enable_thinking,
+                    reasoning_effort: wire_effort,
+                }),
+            },
+        );
+    }
     Ok(ModelAdapter {
         inner: model,
         timeout,

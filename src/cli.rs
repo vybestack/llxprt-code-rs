@@ -6,9 +6,11 @@
 //! JSON object.
 
 use crate::agent::CodingAgent;
-use crate::model::{ModelConfig, ProfileResolver, ResolveOutcome};
+use crate::model::{ProfileResolver, ResolveOutcome};
+use crate::model_api::dependencies::RuntimeDependencies;
+use crate::model_api::registry::construct_backend;
 use crate::profile::Profile;
-use crate::session::load_session_store;
+use crate::session::load_session_store_in;
 use crate::session::SessionId;
 use clap::Parser;
 use std::io::IsTerminal;
@@ -90,7 +92,9 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
         None => read_stdin_prompt()?,
     };
 
-    let profile = resolve_profile(&args)?;
+    let dependencies = RuntimeDependencies::production()
+        .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
+    let profile = resolve_profile(&args, dependencies.config_home().as_path())?;
 
     let cwd = match &args.cwd {
         Some(p) => p.clone(),
@@ -107,30 +111,25 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
     // Canonicalize now so the pinned path and every tool-resolved path agree.
     let cwd = cwd.canonicalize().unwrap_or(cwd.clone());
 
-    let config = ModelConfig::from_profile(
+    let constructed = construct_backend(
         &profile,
+        &session_id,
+        &dependencies,
         args.profile_load.is_some(),
         args.allow_insecure_http,
     )
-    .map_err(|e| {
-        let fixed = if crate::model::insecure_http_error(&e) {
-            "a plaintext http:// endpoint requires --allow-insecure-http; pass it explicitly to use a remote clear-text endpoint".to_string()
-        } else {
-            e.to_string()
-        };
-        AppError::new(Code::Config, model_err_key(&e), fixed)
-    })?;
+    .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
 
-    // Build the agent first so any config/adapter failure happens BEFORE the session
-    // store reserves a turn. The agent carries the resolved key bytes and keyfile path as
-    // its own secret values (see [`CodingAgent`]), so provider error text is scrubbed
-    // before it reaches the CLI's stdout or session persistence. There is no process-global
-    // secret state, so nothing can leak across runs or tests.
+    // Construct the selected backend before session reservation. Credential failures and
+    // provider-specific configuration errors therefore cannot create session artifacts.
     let reason_note = CodingAgent::prompt_reason_note(&profile);
-    let mut agent = CodingAgent::new(&config, &cwd, args.allow_shell)
-        .map_err(|e| AppError::new(e.code, e.key, e.message))?;
+    let mut agent = CodingAgent::new_with_backend(constructed.backend, &cwd, args.allow_shell)
+        .map_err(|e| AppError::new(e.code, e.key, e.message))?
+        .with_secrets(constructed.secret_values)
+        .with_context_limit(constructed.context_limit)
+        .with_max_rounds(constructed.max_rounds);
     agent.prompt_notes = reason_note;
-    let store = load_session_store(&session_id)
+    let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|e| AppError::new(Code::Session, "session-store", e))?;
 
     let reserved = store
@@ -328,14 +327,14 @@ fn read_stdin_prompt() -> Result<String, AppError> {
     }
 }
 
-fn resolve_profile(args: &Args) -> Result<Profile, AppError> {
+fn resolve_profile(args: &Args, config_root: &std::path::Path) -> Result<Profile, AppError> {
     match &args.profile_load {
         Some(path) => {
             Profile::load_file(path).map_err(|e| AppError::new(Code::Config, "profile-load", e))
         }
         None => {
             let name = args.profile.as_deref().unwrap_or("dsflash-mi300x");
-            match ProfileResolver.load(name) {
+            match ProfileResolver.load_in(name, config_root) {
                 Ok(ResolveOutcome::Loaded(p)) => Ok(*p),
                 Ok(ResolveOutcome::Missing(name)) => Err(AppError::new(
                     Code::Config,
@@ -346,8 +345,4 @@ fn resolve_profile(args: &Args) -> Result<Profile, AppError> {
             }
         }
     }
-}
-
-fn model_err_key(_e: &crate::model::ModelError) -> &'static str {
-    "model-config"
 }

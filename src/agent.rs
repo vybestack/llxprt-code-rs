@@ -26,29 +26,22 @@ use serde_json::Value as JsonValue;
 mod finish;
 pub use finish::finish_check;
 
-/// Cap on the combined assistant text bytes materialized in one turn.
-pub const MAX_TURN_ASSISTANT_BYTES: usize = 1024 * 1024;
-/// Cap on the combined raw tool-call argument bytes in one turn.
-pub const MAX_TURN_ARGS_BYTES: usize = 1024 * 1024;
-/// Cap on the combined tool-result bytes materialized in one turn.
-pub const MAX_TURN_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-/// Cap on the number of assistant/tool rounds persisted in one turn.
-pub const MAX_TURN_ROUNDS: usize = 32;
-/// Cap on the tool calls one attempt may execute (the agent's `max_steps` budget). The
-/// parity harness enforces the same cap on the success envelope's `tool_calls`, so a CLI
-/// that reports more than one attempt could ever run (e.g. `u64::MAX`) is a
-/// protocol failure, never a pass.
-pub const MAX_TOOL_CALLS_PER_TURN: usize = 16;
-/// Hard cap on one model reply (bytes). A reply over this bound is refused by the
-/// agent's model-call path as a typed `model` failure rather than ever becoming an
-/// unbounded assistant round, so it can never be counted toward the aggregate turn caps or
-/// touch session-persist. The error path persists the failure (owner cleared, lease
-/// released) with a scrubbed bounded diagnostic.
-pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
-/// Maximum UTF-8 byte length of one provider-supplied tool-call identifier.
-pub const MAX_TOOL_CALL_ID_BYTES: usize = 256;
-/// Maximum UTF-8 byte length of one provider-supplied tool name.
-pub const MAX_TOOL_NAME_BYTES: usize = 64;
+// Compatibility alias retained while route construction remains owned by the adapter.
+pub use crate::adapter::chat_route;
+
+/// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
+/// the **complete** outgoing request on top of the message parts. The value stays
+/// published from the root module ([`crate::agent`]) for phase 1 consumers.
+pub use request_budget::REQUEST_FIXED_OVERHEAD_BYTES;
+pub use request_budget::{
+    context_exceeded_message, estimate_history_bytes, estimate_request_bytes, history_needs_check,
+    history_within, materialization_budget, round_budget_exceeded, turn_args_bytes,
+    MAX_RESPONSE_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES,
+    MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS,
+    PER_PART_OVERHEAD_BYTES, PER_REQUEST_OVERHEAD_BYTES,
+};
+
+mod request_budget;
 
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
@@ -85,7 +78,8 @@ mod helpers;
 use helpers::{final_summary_request, tool_call_record, validate_provider_result};
 mod config;
 pub use config::{
-    coding_system_prompt, prompt_digest, validate_timeout, TIMEOUT_LEASE_MARGIN_SECONDS,
+    coding_system_prompt, prompt_digest, round_limit_message, validate_timeout,
+    TIMEOUT_LEASE_MARGIN_SECONDS,
 };
 
 struct TurnUsage {
@@ -136,6 +130,31 @@ impl CodingAgent {
             secrets: config.secret_values(),
             prompt_notes: None,
             context_limit: config.context_limit,
+        })
+    }
+
+    pub(crate) fn new_with_backend(
+        backend: Box<dyn ChatBackend>,
+        cwd: &std::path::Path,
+        allow_shell: bool,
+    ) -> Result<CodingAgent, crate::adapter::ModelErrorAdapter> {
+        let workspace = crate::tools::WorkspaceCap::open(cwd).map_err(|message| {
+            crate::adapter::ModelErrorAdapter {
+                key: "workspace",
+                message,
+                code: crate::cli::Code::Config,
+            }
+        })?;
+        Ok(CodingAgent {
+            backend: std::sync::Arc::from(backend),
+            cwd: cwd.to_path_buf(),
+            workspace,
+            max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_rounds: MAX_TURN_ROUNDS,
+            allow_shell,
+            secrets: Vec::new(),
+            prompt_notes: None,
+            context_limit: None,
         })
     }
 
@@ -447,9 +466,7 @@ impl CodingAgent {
                 store,
                 reserved,
                 "turn-budget",
-                &format!(
-                    "turn would exceed the {MAX_TURN_ROUNDS} round cap; give a final summary instead"
-                ),
+                &round_limit_message(self.max_rounds),
                 rounds,
             ));
         }
@@ -747,9 +764,9 @@ impl CodingAgent {
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
         Ok(crate::tools::ToolConfig {
             ws: self.workspace.try_clone()?,
-            max_output_bytes: 16 * 1024 * 1024,
+            max_output_bytes: crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT,
             shell: crate::tools::ShellConfig {
-                max_shell_output: 32 * 1024,
+                max_shell_output: crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT,
                 max_shell_timeout: std::time::Duration::from_secs(120),
                 allow_shell: shell_on,
             },
@@ -814,140 +831,6 @@ pub fn known_tool(name: &str, allow_shell: bool) -> bool {
         name,
         "read_file" | "write_file" | "replace" | "list_directory" | "search_file_content"
     ) || (name == "run_shell_command" && allow_shell)
-}
-
-/// A conservative per-request byte budget for the *materialized* history the model
-/// sees, derived from the profile's `context-limit` at 3 bytes per configured token.
-/// This is a memory/request-size heuristic, not a tokenizer or a guarantee that a provider
-/// will accept the request. `None` falls back to a fixed cap so
-/// memory stays bounded even without a profile.
-pub fn materialization_budget(context_limit: Option<u64>) -> usize {
-    match context_limit {
-        Some(n) if n > 0 => (n as usize).saturating_mul(3).min(512 * 1024 * 1024),
-        _ => 32 * 1024 * 1024,
-    }
-}
-
-/// Whether materialized history is worth checking (it only grows across turns).
-pub fn history_needs_check(history: &[crate::session::HistoryTurn]) -> bool {
-    !history.is_empty()
-}
-
-/// Whether the materialized history is inside the byte budget.
-pub fn history_within(history: &[crate::session::HistoryTurn], budget: usize) -> bool {
-    estimate_history_bytes(history) <= budget
-}
-
-/// Estimate the bytes a history turn will occupy when materialized (prompt + assistant
-/// text + calls + results). Used only for the conservative context gate.
-pub fn estimate_history_bytes(h: &[crate::session::HistoryTurn]) -> usize {
-    let mut n = 0usize;
-    for t in h {
-        n = n
-            .saturating_add(t.prompt.len())
-            .saturating_add(t.summary.len());
-        for r in &t.rounds {
-            n = n.saturating_add(r.assistant.len());
-            for c in &r.calls {
-                n = n
-                    .saturating_add(c.args.len())
-                    .saturating_add(c.result.len());
-            }
-        }
-        n = n.saturating_add(16 * 1024);
-    }
-    n
-}
-
-/// The aggregate raw tool-call argument bytes in one round (the bytes that would be
-/// persisted as the round's tool calls and materialized back into the next request).
-pub fn turn_args_bytes(result: &LlmResult) -> usize {
-    result.calls.iter().map(|c| c.args_json.len()).sum()
-}
-
-/// The chat-completions route for a base URL: a bare origin or a trailing slash maps
-/// to `/v1/chat/completions`, `/v1` (with or without a trailing slash) maps to
-/// `/v1/chat/completions`, and an already-ending `/chat/completions` stays untouched
-/// (never doubled). No arbitrary path prefix reaches here:
-/// [`crate::model::validate_base_url`] rejected it before any request.
-pub fn chat_route(base: &str) -> String {
-    let trimmed = base.trim_end_matches('/');
-    let t = if trimmed.ends_with('/') {
-        trimmed.trim_end_matches('/')
-    } else {
-        trimmed
-    };
-    if t.ends_with("/chat/completions") {
-        t.to_string()
-    } else if t.ends_with("/v1") {
-        format!("{t}/chat/completions")
-    } else {
-        format!("{t}/v1/chat/completions")
-    }
-}
-
-/// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
-/// the **complete** outgoing request on top of the message parts: the model identifier
-/// (capped at [`crate::profile::MAX_MODEL_NAME_BYTES`]), the full
-/// chat-completions route (base URL capped at
-/// [`crate::redact::MAX_ENDPOINT_BYTES`] plus the route suffix), the serialized
-/// provider-settings fields, and the HTTP/JSON request framing. Every value here is
-/// bounded by a fixed over-count; the live values are never echoed.
-pub const REQUEST_FIXED_OVERHEAD_BYTES: usize = 8192;
-/// Per-request overhead: the role wrapper, preserved call/turn ids, and JSON framing.
-pub const PER_REQUEST_OVERHEAD_BYTES: usize = 512;
-/// Per-part overhead: the part role/id and JSON framing.
-pub const PER_PART_OVERHEAD_BYTES: usize = 128;
-
-/// A conservative estimate of the *complete* outgoing request: every serialized part of
-/// every `serdes_ai::core::ModelRequest` plus the model identifier, the route, the
-/// provider-settings fields, and bounded framing/role/id overhead. This is a byte
-/// estimate of `serde_json`-serialized parts alongside the fixed overhead constants, so
-/// it is always a conservative over-count of the transport payload plus serialization
-/// overhead, and the accumulator uses saturated arithmetic so an oversized request can
-/// never wrap a smaller value.
-pub fn estimate_request_bytes(requests: &[serdes_ai::core::ModelRequest]) -> usize {
-    let mut n = REQUEST_FIXED_OVERHEAD_BYTES;
-    for r in requests {
-        n = n.saturating_add(PER_REQUEST_OVERHEAD_BYTES);
-        for p in &r.parts {
-            n = n
-                .saturating_add(PER_PART_OVERHEAD_BYTES)
-                .saturating_add(serde_json::to_vec(p).map(|v| v.len()).unwrap_or(0));
-        }
-    }
-    n
-}
-
-/// Whether the complete outgoing request (parts + tool schemas) is over the conservative
-/// context budget, so it is refused before the backend call rather than sent over budget.
-pub fn round_budget_exceeded(
-    requests: &[serdes_ai::core::ModelRequest],
-    tools: &[crate::tools::ToolSpec],
-    context_limit: Option<u64>,
-) -> bool {
-    estimate_request_bytes(requests)
-        .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
-        > materialization_budget(context_limit)
-}
-
-/// The conservative refusal message for an over-budget outgoing request.
-pub fn context_exceeded_message(
-    requests: &[serdes_ai::core::ModelRequest],
-    tools: &[crate::tools::ToolSpec],
-    context_limit: Option<u64>,
-) -> String {
-    let budget = materialization_budget(context_limit);
-    let total = estimate_request_bytes(requests)
-        .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools));
-    match context_limit {
-        Some(n) => format!(
-            "the complete outgoing request would be {total} bytes, over the configured context-limit of {n} tokens ({budget}-byte heuristic guard); no request is sent"
-        ),
-        None => format!(
-            "the complete outgoing request would be {total} bytes, over the {budget} byte context budget; no request is sent"
-        ),
-    }
 }
 
 #[cfg(test)]

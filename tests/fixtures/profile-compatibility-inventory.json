@@ -1,0 +1,4649 @@
+{
+  "generator": {
+    "name": "scripts/generate-profile-compatibility-inventory.mjs",
+    "siblingTypescriptVersion": "5.8.3",
+    "note": "operator-run; not a CI or release gate; regenerate before candidate freeze"
+  },
+  "counts": {
+    "profileJsonFiles": 62,
+    "inScopeOpenAi": 38,
+    "inScopeCodex": 1,
+    "installedInScope": 39,
+    "loadBalancer": 3,
+    "unsupportedProviders": 6,
+    "inventoryTotalEntries": 124,
+    "inventoryDistinctKeys": 123,
+    "duplicateGroups": 1,
+    "duplicateExtraEntries": 1
+  },
+  "inventory": {
+    "totalEntries": 124,
+    "distinctKeys": 123,
+    "duplicateGroups": [
+      {
+        "key": "auth.noBrowser",
+        "count": 2,
+        "files": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      }
+    ],
+    "aliasNormalizationRules": {
+      "max-tokens": "max_tokens",
+      "maxTokens": "max_tokens",
+      "response-format": "response_format",
+      "responseFormat": "response_format",
+      "tool-choice": "tool_choice",
+      "toolChoice": "tool_choice",
+      "disabled-tools": "tools.disabled"
+    },
+    "entries": [
+      {
+        "key": "auth-key",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "auth-keyfile",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "auth-key-name",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "base-url",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "sandbox-base-url",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "requires-auth",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "model",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "defaultModel",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "toolFormat",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "toolFormatOverride",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "api-version",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "apiMode",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "responsesMode",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "responses-mode",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "openaiResponsesEnabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.effort",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.effortWireFormat",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.enabledWireFormat",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.effortMap",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.enabledMap",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.maxTokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.budgetTokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.adaptiveThinking",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.includeInResponse",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.includeInContext",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.stripFromContext",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.format",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.fieldName",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "reasoning.summary",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "text.verbosity",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "prompt-caching",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "responses-stateful",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "media.pdf.enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "rate-limit-throttle",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "rate-limit-throttle-threshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "rate-limit-max-wait",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "shell-replacement",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "streaming",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "context-limit",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "compression-threshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "tool-output-max-items",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "file-read-max-lines",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "image-resize.enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "image-resize.maxLongEdge",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "image-resize.maxShortEdge",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "image-resize.maxPixels",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "max-image-dimension",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "max-image-pixels",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "tool-output-max-tokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "tool-output-truncate-mode",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-1.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-1.ts"
+        ]
+      },
+      {
+        "key": "tool-output-item-size-limit",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "max-prompt-tokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "maxTurnsPerPrompt",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "loopDetectionEnabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "toolCallLoopThreshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "contentLoopThreshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "retries",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "retrywait",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "auth-retry-timeout",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "socket-timeout",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "socket-keepalive",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "socket-nodelay",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "emojifilter",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "dumponerror",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "dumpcontext",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "authOnly",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "auth.noBrowser",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "todo-continuation",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "tools.disabled",
+        "type": "string-array",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "tools.allowed",
+        "type": "string-array",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "stream-options",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "include-folder-structure",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/profiles/ProfileManager.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "enable-tool-prompts",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "model.allMemoriesAreCore",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "task-default-timeout-seconds",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "task-max-timeout-seconds",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "task-max-async",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-max-background-jobs",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-background-log-max-bytes",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "subagents.async.enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-default-timeout-seconds",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-max-timeout-seconds",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-inactivity-timeout-seconds",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "shell-output-retention-max-bytes",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "token-usage-log",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "mcp.lazy",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "mcp.eagerServers",
+        "type": "string-array",
+        "source": "packages/settings/src/settings/registry/registry-entries-2.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts"
+        ]
+      },
+      {
+        "key": "temperature",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "max_tokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "max_output_tokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "maxOutputTokens",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "top_p",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "top_k",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "frequency_penalty",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "presence_penalty",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "seed",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "stop",
+        "type": "string-array",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "response_format",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "logit_bias",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "tool_choice",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "custom-headers",
+        "type": "json",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "user-agent",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts",
+          "packages/settings/src/settings/settingsRegistry.ts"
+        ]
+      },
+      {
+        "key": "GOOGLE_CLOUD_PROJECT",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "GOOGLE_CLOUD_LOCATION",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/providers/src/runtime/profileApplication.ts",
+          "packages/providers/src/runtime/profileSnapshot.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "tpm_threshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "timeout_ms",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "circuit_breaker_enabled",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "circuit_breaker_failure_threshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "circuit_breaker_failure_window_ms",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "circuit_breaker_recovery_timeout_ms",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.strategy",
+        "type": "enum",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.profile",
+        "type": "string",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.readWritePruning",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.fileDedupe",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.recencyPruning",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.recencyRetention",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.compressHeadroom",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "compression.density.optimizeThreshold",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "auth.noBrowser",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-2.ts",
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "stream-idle-timeout-ms",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "stream-first-response-timeout-ms",
+        "type": "number",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      },
+      {
+        "key": "kimi.experimental-video",
+        "type": "boolean",
+        "source": "packages/settings/src/settings/registry/registry-entries-3.ts",
+        "aliases": [],
+        "applicationPaths": [
+          "packages/settings/src/settings/registry/registry-entries-3.ts"
+        ]
+      }
+    ]
+  },
+  "profiles": {
+    "installedInScope": [
+      {
+        "file": "absolute-path.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "autokimi.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "context-limit": "number",
+            "emojifilter": "string",
+            "dumpcontext": "string",
+            "tools.disabled": {
+              "arrayOf": [
+                "string"
+              ]
+            }
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.dumpcontext",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.tools.disabled",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "both-auth-methods.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key": "string",
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key",
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "chutesglm52.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "top_p": "number",
+            "temperature": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "shell-replacement": "boolean",
+            "streaming": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.stripFromContext": "string",
+            "auth-key-name": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.streaming",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "chutesk2streaming.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "base-url": "string",
+            "shell-replacement": "boolean",
+            "streaming": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.stripFromContext": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.streaming",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "crusoeglm.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "max_tokens": "number",
+            "temperature": "number",
+            "top_p": "string"
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.effort": "string",
+            "prompt-caching": "string",
+            "context-limit": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.prompt-caching",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "model",
+          "modelParams.max_tokens",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "decartglm.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "max_tokens": "number",
+            "temperature": "number",
+            "top_p": "number",
+            "provider": {
+              "order": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "allow_fallbacks": "boolean"
+            }
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "context-limit": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "model",
+          "modelParams.max_tokens",
+          "modelParams.provider.allow_fallbacks",
+          "modelParams.provider.order",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "deepseekchat.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "deepseekreasoner.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "dev-env.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "dsflash-mi300x.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings",
+          "name",
+          "_note"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "chat_template_kwargs": {
+              "enable_thinking": "boolean",
+              "reasoning_effort": "string"
+            }
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "stream-idle-timeout-ms": "number",
+            "stream-first-response-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "emojifilter": "string",
+            "reasoning.effort": "string"
+          },
+          "name": "string",
+          "_note": "string"
+        },
+        "paths": [
+          "_note",
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.chat_template_kwargs.enable_thinking",
+          "modelParams.chat_template_kwargs.reasoning_effort",
+          "name",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "dsflash-mi300x.pre-explicit-high-20260824.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings",
+          "name",
+          "_note"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "stream-idle-timeout-ms": "number",
+            "stream-first-response-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "emojifilter": "string",
+            "reasoning.effort": "string"
+          },
+          "name": "string",
+          "_note": "string"
+        },
+        "paths": [
+          "_note",
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "name",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "dsflash-mi300x.pre-repetition-detection-20260825.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings",
+          "name",
+          "_note"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "chat_template_kwargs": {
+              "enable_thinking": "boolean",
+              "reasoning_effort": "string"
+            }
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "stream-idle-timeout-ms": "number",
+            "stream-first-response-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "emojifilter": "string",
+            "reasoning.effort": "string"
+          },
+          "name": "string",
+          "_note": "string"
+        },
+        "paths": [
+          "_note",
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.chat_template_kwargs.enable_thinking",
+          "modelParams.chat_template_kwargs.reasoning_effort",
+          "name",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "dsflash.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "friendliglm.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "max_tokens": "number",
+            "temperature": "number",
+            "top_p": "number",
+            "parse_reasoning": "boolean",
+            "chat_template_kwargs": {
+              "enable_thinking": "boolean"
+            }
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "context-limit": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "model",
+          "modelParams.chat_template_kwargs.enable_thinking",
+          "modelParams.max_tokens",
+          "modelParams.parse_reasoning",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true,
+          "firstFailure": "arbitrary route prefix rejects (endpoint class) before the named secure-store reference"
+        }
+      },
+      {
+        "file": "glm52-runpod.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "top_p": "number",
+            "temperature": "number",
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "stream-idle-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "streaming": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.stripFromContext": "string",
+            "stream-first-response-timeout-ms": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "ephemeralSettings.streaming",
+          "model",
+          "modelParams.maxOutputTokens",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "glm52-vast.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "top_p": "number",
+            "temperature": "number",
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "stream-idle-timeout-ms": "number",
+            "stream-first-response-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "streaming": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.stripFromContext": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "ephemeralSettings.streaming",
+          "model",
+          "modelParams.maxOutputTokens",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "glm52selfhost.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number"
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "gpt56solhigh.json",
+        "provider": "codex",
+        "scope": "codex",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.effort": "string",
+            "reasoning.adaptiveThinking": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "reasoning.summary": "string",
+            "text.verbosity": "string",
+            "prompt-caching": "string",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "loopDetectionEnabled": "boolean",
+            "emojifilter": "string",
+            "tools.disabled": {
+              "arrayOf": [
+                "string"
+              ]
+            },
+            "stream-idle-timeout-ms": "number",
+            "task-default-timeout-seconds": "number",
+            "task-max-timeout-seconds": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.loopDetectionEnabled",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.prompt-caching",
+          "ephemeralSettings.reasoning.adaptiveThinking",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.reasoning.summary",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "ephemeralSettings.task-default-timeout-seconds",
+          "ephemeralSettings.task-max-timeout-seconds",
+          "ephemeralSettings.text.verbosity",
+          "ephemeralSettings.tools.disabled",
+          "ephemeralSettings.tools.disabled",
+          "model",
+          "modelParams.maxOutputTokens",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed codex",
+          "target": "codex-responses-http",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "invalid-content-0.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "invalid-content-1.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "invalid-content-2.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "invalid-content-3.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "keyfile-test.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number"
+          },
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "modelParams.temperature",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "missing-keyfile.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "nested-keyfile.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "ollamaglm51.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "top_p": "number",
+            "temperature": "number"
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "ollamakimi.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.effort": "string",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "reasoning.summary": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.reasoning.summary",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "ollamaqwen3coder.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "tool-format": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.tool-format",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "openai-profile.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "ornith-runpod.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number",
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "stream-idle-timeout-ms": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.maxOutputTokens",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true,
+          "firstFailure": "missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms"
+        }
+      },
+      {
+        "file": "parasailglm.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "max_tokens": "number",
+            "temperature": "number",
+            "top_p": "number",
+            "provider": {
+              "order": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "allow_fallbacks": "boolean"
+            }
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "context-limit": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "model",
+          "modelParams.max_tokens",
+          "modelParams.provider.allow_fallbacks",
+          "modelParams.provider.order",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "qwen38-mi300x.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings",
+          "name"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "auth-keyfile": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "stream-idle-timeout-ms": "number",
+            "stream-first-response-timeout-ms": "number",
+            "shell-replacement": "boolean",
+            "emojifilter": "string"
+          },
+          "name": "string"
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-first-response-timeout-ms",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "name",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true,
+          "firstFailure": "missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement"
+        }
+      },
+      {
+        "file": "qwen38.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number"
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "reasoning.effort": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number",
+            "stream-idle-timeout-ms": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true,
+          "firstFailure": "named secure-store reference rejects before the structural dsflash gate"
+        }
+      },
+      {
+        "file": "simulation-test.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "smol3-mlx.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "top_p": "number",
+            "max_tokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "api-key": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.api-key",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "model",
+          "modelParams.max_tokens",
+          "modelParams.temperature",
+          "modelParams.top_p",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "stepfun-37.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "context-limit": "number",
+            "maxOutputTokens": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.maxOutputTokens",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "update-test.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "wrong-perms.json",
+        "provider": "openai",
+        "scope": "openai",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed openai",
+          "target": "target-resolved",
+          "plaintextOptIn": true
+        }
+      }
+    ],
+    "loadBalancer": [
+      {
+        "file": "glm.json",
+        "provider": "",
+        "type": "loadbalancer",
+        "reason": "fixed unsupported-load-balancing diagnostic",
+        "topLevel": [
+          "version",
+          "type",
+          "policy",
+          "profiles",
+          "contextLimit",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "type": "string",
+          "policy": "string",
+          "profiles": {
+            "arrayOf": [
+              "string"
+            ]
+          },
+          "contextLimit": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "reasoning": {
+              "enabled": "boolean",
+              "includeInResponse": "boolean",
+              "includeInContext": "boolean",
+              "stripFromContext": "string"
+            },
+            "maxOutputTokens": "number",
+            "shell-replacement": "boolean"
+          }
+        }
+      },
+      {
+        "file": "gptfirst.json",
+        "provider": "",
+        "type": "loadbalancer",
+        "reason": "fixed unsupported-load-balancing diagnostic",
+        "topLevel": [
+          "version",
+          "type",
+          "policy",
+          "profiles",
+          "contextLimit",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "type": "string",
+          "policy": "string",
+          "profiles": {
+            "arrayOf": [
+              "string"
+            ]
+          },
+          "contextLimit": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "reasoning": {
+              "enabled": "boolean",
+              "effort": "string",
+              "adaptiveThinking": "boolean",
+              "includeInResponse": "boolean",
+              "includeInContext": "boolean",
+              "stripFromContext": "string",
+              "summary": "string"
+            },
+            "prompt-caching": "string",
+            "maxTurnsPerPrompt": "number",
+            "loopDetectionEnabled": "boolean"
+          }
+        }
+      },
+      {
+        "file": "opusfirst.json",
+        "provider": "",
+        "type": "loadbalancer",
+        "reason": "fixed unsupported-load-balancing diagnostic",
+        "topLevel": [
+          "version",
+          "type",
+          "policy",
+          "profiles",
+          "contextLimit",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "type": "string",
+          "policy": "string",
+          "profiles": {
+            "arrayOf": [
+              "string"
+            ]
+          },
+          "contextLimit": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "reasoning": {
+              "enabled": "boolean",
+              "effort": "string",
+              "adaptiveThinking": "boolean",
+              "includeInResponse": "boolean",
+              "includeInContext": "boolean",
+              "stripFromContext": "string",
+              "summary": "string"
+            },
+            "prompt-caching": "string",
+            "maxTurnsPerPrompt": "number",
+            "loopDetectionEnabled": "boolean"
+          }
+        }
+      }
+    ],
+    "unsupportedProviders": [
+      {
+        "provider": "Fireworks",
+        "files": [
+          "fireworkskimi.json",
+          "fireworkskimioai.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-key-name": "string",
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.summary": "string",
+              "streaming": "string",
+              "context-limit": "number",
+              "emojifilter": "string",
+              "maxOutputTokens": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-key-name": "string",
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.summary": "string",
+              "streaming": "string",
+              "context-limit": "number",
+              "emojifilter": "string",
+              "maxOutputTokens": "number"
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      },
+      {
+        "provider": "LM Studio",
+        "files": [
+          "ollamanorth.json",
+          "ornith-lmstudio.json",
+          "smol3-mlx-lmstudio.json",
+          "smol3.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.fieldName": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {
+              "temperature": "number",
+              "top_p": "number"
+            },
+            "ephemeralSettings": {
+              "base-url": "string",
+              "context-limit": "number",
+              "maxOutputTokens": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "base-url": "string",
+              "context-limit": "number",
+              "maxOutputTokens": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "base-url": "string",
+              "context-limit": "number",
+              "maxOutputTokens": "number"
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      },
+      {
+        "provider": "anthropic",
+        "files": [
+          "anthropic-profile.json",
+          "fable.json",
+          "fable5.json",
+          "home-path.json",
+          "prod-env.json",
+          "tilde-test.json",
+          "zai.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {
+              "maxOutputTokens": "number"
+            },
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.summary": "string",
+              "shell-replacement": "boolean",
+              "context-limit": "number",
+              "maxTurnsPerPrompt": "number",
+              "loopDetectionEnabled": "boolean",
+              "emojifilter": "string",
+              "tools.disabled": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "task-default-timeout-seconds": "number",
+              "task-max-timeout-seconds": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {
+              "maxOutputTokens": "number"
+            },
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.summary": "string",
+              "shell-replacement": "boolean",
+              "context-limit": "number",
+              "maxTurnsPerPrompt": "number",
+              "loopDetectionEnabled": "boolean",
+              "emojifilter": "string",
+              "tools.disabled": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "task-default-timeout-seconds": "number",
+              "task-max-timeout-seconds": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {
+              "temperature": "number",
+              "clear_thinking": "boolean"
+            },
+            "ephemeralSettings": {
+              "auth-key-name": "string",
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "shell-replacement": "boolean",
+              "context-limit": "number",
+              "emojifilter": "string",
+              "maxOutputTokens": "number",
+              "stream-idle-timeout-ms": "number"
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      },
+      {
+        "provider": "claudecode",
+        "files": [
+          "opus5.json",
+          "opusthinking.json",
+          "opusthinkingbucketed.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "prompt-caching": "string",
+              "context-limit": "number",
+              "maxOutputTokens": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {
+              "maxOutputTokens": "number"
+            },
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "reasoning.summary": "string",
+              "shell-replacement": "boolean",
+              "maxTurnsPerPrompt": "number",
+              "loopDetectionEnabled": "boolean",
+              "emojifilter": "string",
+              "tools.disabled": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "task-default-timeout-seconds": "number",
+              "task-max-timeout-seconds": "number",
+              "maxOutputTokens": "number"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "base-url": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.effort": "string",
+              "reasoning.adaptiveThinking": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "shell-replacement": "boolean",
+              "context-limit": "number",
+              "emojifilter": "string",
+              "tools.disabled": {
+                "arrayOf": [
+                  "string"
+                ]
+              },
+              "max_tokens": "number",
+              "maxOutputTokens": "number"
+            },
+            "auth": {
+              "type": "string",
+              "buckets": {
+                "arrayOf": [
+                  "string"
+                ]
+              }
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      },
+      {
+        "provider": "gemini",
+        "files": [
+          "flash3.json",
+          "geminimaria.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {}
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-key-name": "string",
+              "reasoning.enabled": "boolean",
+              "reasoning.includeInResponse": "boolean",
+              "reasoning.includeInContext": "boolean",
+              "reasoning.stripFromContext": "string",
+              "emojifilter": "string",
+              "tools.disabled": {
+                "arrayOf": [
+                  "string"
+                ]
+              }
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      },
+      {
+        "provider": "google",
+        "files": [
+          "google-profile.json",
+          "test-env.json"
+        ],
+        "structures": [
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          },
+          {
+            "version": "number",
+            "provider": "string",
+            "model": "string",
+            "modelParams": {},
+            "ephemeralSettings": {
+              "auth-keyfile": "string"
+            }
+          }
+        ],
+        "reason": "exact provider-resolution rejection"
+      }
+    ],
+    "synthetic": [
+      {
+        "file": "auth.synthetic.json",
+        "kind": "top-level-auth",
+        "expectedOutcome": "top-level 'auth' rejects (unsafe to ignore credential policy)"
+      },
+      {
+        "file": "chutesk2streaming.streaming-only.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "chutesk2streaming.with-discriminator.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "crusoeglm.with-discriminator.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "crusoeglm.without-auth-key-name.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "crusoeglm.without-prompt-caching.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "friendliglm.accepted-route.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "friendliglm.settings-accepted.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "friendliglm.without-auth-key-name.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "gpt56solhigh.omit-adaptiveThinking.synthetic.json",
+        "kind": "codex-omission",
+        "expectedOutcome": "normalized omission diagnostic per frozen matrix"
+      },
+      {
+        "file": "gpt56solhigh.omit-includeInContext.synthetic.json",
+        "kind": "codex-omission",
+        "expectedOutcome": "normalized omission diagnostic per frozen matrix"
+      },
+      {
+        "file": "gpt56solhigh.omit-includeInResponse.synthetic.json",
+        "kind": "codex-omission",
+        "expectedOutcome": "normalized omission diagnostic per frozen matrix"
+      },
+      {
+        "file": "gpt56solhigh.omit-stripFromContext.synthetic.json",
+        "kind": "codex-omission",
+        "expectedOutcome": "normalized omission diagnostic per frozen matrix"
+      },
+      {
+        "file": "gpt56solhigh.type-standard.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "gpt56solhigh.without-optional-metadata.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "loadbalancer.glm.synthetic.json",
+        "kind": "load-balancer-shape",
+        "expectedOutcome": "fixed unsupported-load-balancing diagnostic"
+      },
+      {
+        "file": "loadbalancer.gptfirst.synthetic.json",
+        "kind": "load-balancer-shape",
+        "expectedOutcome": "fixed unsupported-load-balancing diagnostic"
+      },
+      {
+        "file": "loadbalancer.opusfirst.synthetic.json",
+        "kind": "load-balancer-shape",
+        "expectedOutcome": "fixed unsupported-load-balancing diagnostic"
+      },
+      {
+        "file": "ollamakimi.standard-summary.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "ollamakimi.without-auth-key-name.synthetic.json",
+        "kind": "named-staged-case",
+        "expectedOutcome": "named plan disposition per profile-compatibility.md"
+      },
+      {
+        "file": "unsupported.anthropic.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "unsupported.claudecode.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "unsupported.fireworks.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "unsupported.gemini.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "unsupported.google.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "unsupported.lm-studio.synthetic.json",
+        "kind": "unsupported-provider-shape",
+        "expectedOutcome": "exact provider-resolution rejection"
+      }
+    ]
+  },
+  "classifications": [
+    {
+      "key": "temperature",
+      "classification": "wire-applied",
+      "owner": "standard-chat",
+      "note": "finite JSON number"
+    },
+    {
+      "key": "top_p",
+      "classification": "wire-applied",
+      "owner": "standard-chat",
+      "note": "finite JSON number"
+    },
+    {
+      "key": "topP",
+      "classification": "wire-applied",
+      "owner": "standard-chat",
+      "note": "alias of top_p"
+    },
+    {
+      "key": "max_tokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "max-output family; normalized common integer"
+    },
+    {
+      "key": "max-tokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "alias of max_tokens (max-output family)"
+    },
+    {
+      "key": "maxTokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "alias of max_tokens (max-output family)"
+    },
+    {
+      "key": "max_output_tokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "max-output family; alias max-output-tokens"
+    },
+    {
+      "key": "max-output-tokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "alias of max_output_tokens"
+    },
+    {
+      "key": "maxOutputTokens",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "max-output family; alias max-output"
+    },
+    {
+      "key": "max-output",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "alias of maxOutputTokens"
+    },
+    {
+      "key": "maxOutput",
+      "classification": "wire-applied",
+      "owner": "common",
+      "note": "Rust-only max-output spelling; normalized common integer"
+    },
+    {
+      "key": "seed",
+      "classification": "wire-applied",
+      "owner": "standard-chat",
+      "note": "nonnegative integer; Standard Chat only"
+    },
+    {
+      "key": "stream-first-response-timeout-ms",
+      "classification": "host-applied",
+      "owner": "standard-chat",
+      "note": "nonnegative integer; alias streamFirstResponseTimeoutMs"
+    },
+    {
+      "key": "streamFirstResponseTimeoutMs",
+      "classification": "host-applied",
+      "owner": "standard-chat",
+      "note": "alias of stream-first-response-timeout-ms"
+    },
+    {
+      "key": "stream-idle-timeout-ms",
+      "classification": "host-applied",
+      "owner": "dsflash-chat",
+      "note": "nonnegative integer; dsflash; Codex accepts only 0"
+    },
+    {
+      "key": "streamIdleTimeoutMs",
+      "classification": "host-applied",
+      "owner": "dsflash-chat",
+      "note": "alias of stream-idle-timeout-ms"
+    },
+    {
+      "key": "auth-key",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "inline API-key credential source; Codex rejects"
+    },
+    {
+      "key": "authKey",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-key"
+    },
+    {
+      "key": "api-key",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-key; newly accepted non-Codex"
+    },
+    {
+      "key": "apiKey",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-key"
+    },
+    {
+      "key": "auth-keyfile",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "keyfile credential source; Codex rejects"
+    },
+    {
+      "key": "authKeyfile",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-keyfile"
+    },
+    {
+      "key": "api-keyfile",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-keyfile; newly accepted non-Codex"
+    },
+    {
+      "key": "apiKeyfile",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of auth-keyfile"
+    },
+    {
+      "key": "auth-key-name",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "fixed unsupported-credential-source diagnostic"
+    },
+    {
+      "key": "base-url",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "API-specific endpoint alias; Codex requires fixed endpoint"
+    },
+    {
+      "key": "baseUrl",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of base-url"
+    },
+    {
+      "key": "baseURL",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of base-url"
+    },
+    {
+      "key": "user-agent",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "credential-bearing custom-header key rejects"
+    },
+    {
+      "key": "User-Agent",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of user-agent; rejects"
+    },
+    {
+      "key": "custom-headers",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "custom headers reject"
+    },
+    {
+      "key": "auth.noBrowser",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "accepted exact metadata; registry defines it twice"
+    },
+    {
+      "key": "authOnly",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "accepted exact compatibility metadata"
+    },
+    {
+      "key": "apiMode",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "selector chat|responses; exact lowercase untrimmed"
+    },
+    {
+      "key": "responsesMode",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "selector chat|responses; precedence after apiMode"
+    },
+    {
+      "key": "responses-mode",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "selector chat|responses; precedence after responsesMode"
+    },
+    {
+      "key": "openaiResponsesEnabled",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "inert validated boolean metadata"
+    },
+    {
+      "key": "requires-auth",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "accepted exact compatibility metadata"
+    },
+    {
+      "key": "model",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "validated bounded model identifier (top-level field)"
+    },
+    {
+      "key": "defaultModel",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected; not an accepted profile key"
+    },
+    {
+      "key": "enabled",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "accepted exact compatibility metadata"
+    },
+    {
+      "key": "toolFormat",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "tool-format owner; alias tool-format"
+    },
+    {
+      "key": "tool-format",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of toolFormat"
+    },
+    {
+      "key": "toolFormatOverride",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "toolFormatOverride rejects"
+    },
+    {
+      "key": "tool-format-override",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of toolFormatOverride; rejects"
+    },
+    {
+      "key": "tool_choice",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "tool-choice/toolChoice aliases; reject"
+    },
+    {
+      "key": "tool-choice",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of tool_choice; reject"
+    },
+    {
+      "key": "toolChoice",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of tool_choice; reject"
+    },
+    {
+      "key": "response_format",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "response-format/responseFormat aliases; reject"
+    },
+    {
+      "key": "response-format",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of response_format; reject"
+    },
+    {
+      "key": "responseFormat",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "alias of response_format; reject"
+    },
+    {
+      "key": "logit_bias",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected model-param"
+    },
+    {
+      "key": "api-version",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "GOOGLE_CLOUD_PROJECT",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "GOOGLE_CLOUD_LOCATION",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "context-limit",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "host context limit; Codex exact 262144 predicate"
+    },
+    {
+      "key": "contextLimit",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "ephemeralSettings.contextLimit alias"
+    },
+    {
+      "key": "maxTurnsPerPrompt",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "effective round cap: -1 or 1..=32"
+    },
+    {
+      "key": "loopDetectionEnabled",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "exact false accepted; other values reject"
+    },
+    {
+      "key": "toolCallLoopThreshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "contentLoopThreshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "retries",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "retrywait",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "auth-retry-timeout",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "socket-timeout",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "socket-keepalive",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "socket-nodelay",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "todo-continuation",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "stream-options",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "enable-tool-prompts",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "emojifilter",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "exact auto metadata"
+    },
+    {
+      "key": "dumponerror",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "dumponerror rejects"
+    },
+    {
+      "key": "dumpcontext",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "dumpcontext rejects"
+    },
+    {
+      "key": "tools.disabled",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "exact bounded string array; disabled-tools alias"
+    },
+    {
+      "key": "disabled-tools",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "alias of tools.disabled; equality required"
+    },
+    {
+      "key": "tools.allowed",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "empty array only; nonempty allowlist rejects"
+    },
+    {
+      "key": "shell-replacement",
+      "classification": "rejected",
+      "owner": "dsflash-chat",
+      "note": "dsflash boolean metadata; sibling string values allowlist/all/none/true/false reject"
+    },
+    {
+      "key": "streaming",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "fixed rejection of streaming"
+    },
+    {
+      "key": "compression-threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.strategy",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.profile",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.readWritePruning",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.fileDedupe",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.recencyPruning",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.recencyRetention",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.compressHeadroom",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "compression.density.optimizeThreshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "kimi.experimental-video",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "mcp.lazy",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "mcp.eagerServers",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "task-default-timeout-seconds",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "exact 3600 metadata"
+    },
+    {
+      "key": "task-max-timeout-seconds",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "exact 7200 metadata"
+    },
+    {
+      "key": "task-max-async",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-max-background-jobs",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-background-log-max-bytes",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-default-timeout-seconds",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-max-timeout-seconds",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-inactivity-timeout-seconds",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "shell-output-retention-max-bytes",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "subagents.async.enabled",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "token-usage-log",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "max-prompt-tokens",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "tool-output-max-items",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "tool-output-max-tokens",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "tool-output-truncate-mode",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "tool-output-item-size-limit",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "file-read-max-lines",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "image-resize.enabled",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "image-resize.maxLongEdge",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "image-resize.maxShortEdge",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "image-resize.maxPixels",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "max-image-dimension",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "max-image-pixels",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected image-sizing key"
+    },
+    {
+      "key": "prompt-caching",
+      "classification": "exact-compatibility-metadata",
+      "owner": "openai-responses",
+      "note": "responses/codex cache mode off|1h|24h; 5m rejects"
+    },
+    {
+      "key": "responses-stateful",
+      "classification": "rejected",
+      "owner": "openai-responses",
+      "note": "fixed unsupported-stateful-Responses diagnostic"
+    },
+    {
+      "key": "media.pdf.enabled",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "rate-limit-throttle",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "rate-limit-throttle-threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "rate-limit-max-wait",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "sandbox-base-url",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "nested reasoning object rejects"
+    },
+    {
+      "key": "reasoning.enabled",
+      "classification": "exact-compatibility-metadata",
+      "owner": "standard-chat",
+      "note": "reasoning enablement metadata"
+    },
+    {
+      "key": "reasoning.effort",
+      "classification": "exact-compatibility-metadata",
+      "owner": "standard-chat",
+      "note": "effort enum; dsflash optional wire effort"
+    },
+    {
+      "key": "reasoning.includeInResponse",
+      "classification": "exact-compatibility-metadata",
+      "owner": "standard-chat",
+      "note": "accepted metadata; inverted stateless behavior"
+    },
+    {
+      "key": "reasoning.includeInContext",
+      "classification": "exact-compatibility-metadata",
+      "owner": "standard-chat",
+      "note": "accepted metadata; inverted stateless behavior"
+    },
+    {
+      "key": "reasoning.stripFromContext",
+      "classification": "exact-compatibility-metadata",
+      "owner": "dsflash-chat",
+      "note": "exact string; dsflash marker"
+    },
+    {
+      "key": "reasoning.summary",
+      "classification": "wire-applied",
+      "owner": "openai-responses",
+      "note": "summary enum; codex requires auto"
+    },
+    {
+      "key": "reasoning.effortMap",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.enabledMap",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.maxTokens",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.budgetTokens",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.adaptiveThinking",
+      "classification": "exact-compatibility-metadata",
+      "owner": "codex-responses",
+      "note": "codex requires true"
+    },
+    {
+      "key": "reasoning.effortWireFormat",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.enabledWireFormat",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.format",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.fieldName",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.update",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "reasoning.display",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "circuit_breaker_enabled",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_failure_threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_failure_window_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "circuit_breaker_recovery_timeout_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected circuit-breaker registry key"
+    },
+    {
+      "key": "frequency_penalty",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected sampling registry key"
+    },
+    {
+      "key": "include-folder-structure",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "model.allMemoriesAreCore",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "presence_penalty",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected sampling registry key"
+    },
+    {
+      "key": "stop",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "timeout_ms",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "top_k",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "chat transport cannot serialize top_k; rejected"
+    },
+    {
+      "key": "tpm_threshold",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "rejected"
+    },
+    {
+      "key": "modelParams.provider",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "nested modelParams.provider rejects"
+    },
+    {
+      "key": "modelParams.parse_reasoning",
+      "classification": "rejected",
+      "owner": "dsflash-chat",
+      "note": "parse_reasoning rejects"
+    },
+    {
+      "key": "modelParams.clear_thinking",
+      "classification": "rejected",
+      "owner": "dsflash-chat",
+      "note": "clear_thinking rejects"
+    },
+    {
+      "key": "modelParams.chat_template_kwargs",
+      "classification": "wire-applied",
+      "owner": "dsflash-chat",
+      "note": "required discriminator object enable_thinking bool"
+    },
+    {
+      "key": "text.verbosity",
+      "classification": "wire-applied",
+      "owner": "codex-responses",
+      "note": "codex requires medium; responses optional"
+    },
+    {
+      "key": "type",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "exact standard accepted; loadbalancer rejects"
+    },
+    {
+      "key": "version",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "exact integer 1; omission accepted"
+    },
+    {
+      "key": "provider",
+      "classification": "host-applied",
+      "owner": "common",
+      "note": "provider resolution; unsupported providers reject"
+    },
+    {
+      "key": "name",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "bounded inert profile metadata"
+    },
+    {
+      "key": "_note",
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "bounded inert profile metadata"
+    },
+    {
+      "key": "policy",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "load-balancer container key rejects"
+    },
+    {
+      "key": "profiles",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "load-balancer container key rejects"
+    },
+    {
+      "key": "loadBalancer",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "explicit loadBalancer container rejects"
+    },
+    {
+      "key": "ephemeralSettings.contextLimit",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "top-level load-balancer contextLimit rejects (distinct from accepted nested alias)"
+    },
+    {
+      "key": "auth.type",
+      "classification": "rejected",
+      "owner": "common",
+      "note": "top-level auth container member rejects"
+    }
+  ],
+  "security": {
+    "note": "contains key paths and JSON types, frozen safe enums, and redacted placeholders only",
+    "classifiedKeys": 165,
+    "ownedExactlyOnce": true
+  }
+}

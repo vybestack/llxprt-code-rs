@@ -3,6 +3,7 @@ use serde_json::json;
 use std::time::Duration;
 
 mod advanced;
+mod output_caps;
 
 fn cfg(root: &std::path::Path) -> ToolConfig {
     let ws = WorkspaceCap::open(root).unwrap();

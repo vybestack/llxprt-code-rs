@@ -209,9 +209,8 @@ fn missing_finish_reason_fails() {
 fn endpoint_route_matrix_and_loopback_requests() {
     use llxprt_code_rs::model::ModelConfig;
     use llxprt_code_rs::model::ModelError;
-    use llxprt_code_rs::profile::EphemeralSettings;
-    use llxprt_code_rs::profile::Profile;
-    use llxprt_code_rs::profile::RedactedUrl;
+    use llxprt_code_rs::profile::parse_profile_value;
+    use serde_json::json;
 
     // Accepted base forms derive the same full route.
     for (base, expected) in [
@@ -258,17 +257,15 @@ fn endpoint_route_matrix_and_loopback_requests() {
     ] {
         let addr = serve(chat_body("stop", None));
         let base = format!("http://{addr}{host_path}");
-        let p = Profile {
-            name: "t".into(),
-            provider: "openai".into(),
-            model: "m".into(),
-            model_params: Default::default(),
-            ephemeral: EphemeralSettings {
-                base_url: Some(RedactedUrl::parse(&base).unwrap()),
-                auth_key: Some("k".into()),
-                ..Default::default()
-            },
-        };
+        let p = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"base-url": base, "auth-key": "k"}
+            }),
+            "t",
+        )
+        .expect("loopback profile must parse");
         let cfg = ModelConfig::from_profile(&p, true, true)
             .unwrap_or_else(|e| panic!("base {base} must resolve: {e}"));
         // The real adapter reaches the loopback request path for every accepted form.
@@ -281,17 +278,18 @@ fn endpoint_route_matrix_and_loopback_requests() {
     }
 
     // An arbitrary path prefix is rejected before any request.
-    let p = Profile {
-        name: "t".into(),
-        provider: "openai".into(),
-        model: "m".into(),
-        model_params: Default::default(),
-        ephemeral: EphemeralSettings {
-            base_url: Some(RedactedUrl::parse("http://127.0.0.1:8080/inference/v1").unwrap()),
-            auth_key: Some("k".into()),
-            ..Default::default()
-        },
-    };
+    let p = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "http://127.0.0.1:8080/inference/v1",
+                "auth-key": "k"
+            }
+        }),
+        "t",
+    )
+    .expect("arbitrary route profile must parse before construction");
     let err = ModelConfig::from_profile(&p, true, true).expect_err("arbitrary prefix must reject");
 
     assert!(
@@ -302,4 +300,10 @@ fn endpoint_route_matrix_and_loopback_requests() {
         !format!("{err:?}").contains("inference"),
         "no unsanitized path echoed"
     );
+}
+
+#[test]
+fn request_budget_constants_keep_their_public_agent_paths() {
+    assert_eq!(llxprt_code_rs::agent::PER_REQUEST_OVERHEAD_BYTES, 512);
+    assert_eq!(llxprt_code_rs::agent::PER_PART_OVERHEAD_BYTES, 128);
 }

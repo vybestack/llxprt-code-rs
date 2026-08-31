@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "repository": "git@github.com:acoliver/serdesAI.git",
+  "commit": "bd6aefc96f699276afb6384257b101039a663b5f",
+  "tree": "03ede42733ec694cc14889d057f5ca5ddd37b480",
+  "subtree": "cfd657b44e439cb8a8fd69a835e9d44fd622928f",
+  "path": "serdes-ai-responses",
+  "archive": "vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz",
+  "archive_sha256": "162f1880edf6c9e9e25848d3e6a0ddd1139e4fd636fb80d47f229482c0d23217"
+}

@@ -1,8 +1,8 @@
 # Vendored local patches on serdes-ai 0.2.6
 
-`llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path
-dependency `vendor/serdes-ai` (`default-features = false, features = ["openai"]`).
-The vendored tree is the 0.2.6 release with the local transport patches below.
+`llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path dependency
+`vendor/serdes-ai` (`default-features = false, features = ["openai", "chatgpt-oauth"]`).
+The retained crates are based on the 0.2.6 release. The Responses client is based on the tested `serdes-ai-responses` subtree at Git commit `bd6aefc96f699276afb6384257b101039a663b5f`. The local transport patches below adapt those sources into one offline build.
 `publish = false` in `Cargo.toml`: `cargo package` would normalize the path
 dependency back to the unpatched crates.io `=0.2.6`, silently dropping these
 behavior fixes, so the crate is never published and the local vendor tree is the
@@ -14,6 +14,7 @@ required by the path dependency's normal (non-optional) `serdes-ai` dependencies
 - serdes-ai-core    - `serdes_ai::core` (messages, requests, FinishReason)
 - serdes-ai-agent   - agent, builder
 - serdes-ai-models  - Model trait, `openai::OpenAIChatModel` (patched)
+- serdes-ai-responses - Open Responses client and Codex WebSocket transport (patched Git snapshot)
 - serdes-ai-output  - output validation
 - serdes-ai-providers, serdes-ai-retries, serdes-ai-streaming,
   serdes-ai-tools, serdes-ai-toolsets, serdes-ai-macros
@@ -21,11 +22,10 @@ required by the path dependency's normal (non-optional) `serdes-ai` dependencies
 No other serdes-ai workspace crates (embeddings/evals/graph/mcp) are vendored. Features and
 dependencies for those absent crates are removed from the retained manifests.
 
-The retained feature surface is limited to combinations that compile from the shipped offline
-inputs. Unavailable Bedrock, OpenTelemetry, JSON-schema validation, WebSocket, and third-party
-common-tool dependencies are removed rather than advertised as non-building options. The release
-gate discovers every feature in each retained manifest, checks each one independently, and checks
-each crate with all of its retained features enabled.
+The root path dependency enables the retained `openai` and `chatgpt-oauth` model features. Every
+retained feature combination must compile from the shipped offline inputs. Unavailable Bedrock, OpenTelemetry, JSON-schema validation, and third-party common-tool dependencies are removed rather than advertised as non-building options. The retained WebSocket feature uses `tokio-tungstenite` with an explicit Rustls client configuration and the shipped WebPKI root set. The release gate discovers every feature
+in each retained manifest, checks each one independently, and checks each crate with all of its
+retained features enabled.
 
 The vendored crate archives shipped by the 0.2.6 source distribution carry no
 `LICENSE` file; the exact MIT notice from the upstream repository is reproduced in
@@ -52,17 +52,13 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives to
-`vendor/`, including path-dependency rewrites and source compatibility changes
-needed by `FinishReason::Other`. Its SHA-256 is
-`08cf84799c600850a1d3b90ff5321ad75edfd6eaba0c9491435a10de220daac7`.
-`bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 archives in a temporary
-Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `4ac2d91d0320f0ed3ceeee7766a0e0bc27bc2ff72026cbd2404704ce0af74de6`.
+`bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
-The 11 exact archives are retained under `vendor-upstream/`. To reproduce the vendored tree:
+The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
 
-1. Verify the retained archives against the checksums above.
-2. Extract each archive as `vendor/<crate-name>` in a fresh directory.
+1. Verify the retained archives and snapshot with `scripts/verify-upstream-evidence.py` and `scripts/verify-serdes-responses-evidence.py`.
+2. Extract each crates.io archive as `vendor/<crate-name>` and the Responses snapshot under `vendor/serdes-ai-responses` in a fresh directory.
 3. From that directory, run
    `patch --batch --forward --remove-empty-files -p1 < SERDES-AI-0.2.6.patch`, then
    `find vendor -depth -type d -empty -delete`. Removing patched-away empty files and directories
@@ -167,6 +163,49 @@ Public retry-delay calculations in both retry APIs handle attempt zero, checked-
 and invalid or non-finite floating-point configuration without panicking. Linear and exponential
 overflow saturates at the configured maximum delay. Invalid multipliers or jitter produce a
 deterministic zero delay rather than reaching panicking `Duration` conversion APIs.
+
+## Patch 8 - Open Responses WebSocket client
+
+The client-side `serdes-ai-responses` source is retained from the live-tested Git snapshot. Server, engine, store, and standalone serving surfaces are removed. The client sends flat `response.create` WebSocket frames, maintains socket-local `previous_response_id`, retries stale continuations with full input, and reconnects only before a partial response can be exposed. Codex WSS uses a Rustls connector with the shipped WebPKI roots. Compatibility changes add an explicit terminal stream event to Serdes 0.2.6 and map provider failures into its existing redacted error types. Scripted local WebSocket tests cover flat frames, continuation recovery, and reconnect behavior without credentials or provider access.
+
+## Patch 9 - dsflash chat-template wire channel
+(`vendor/serdes-ai-models/src/openai/types.rs`, `chat_template_kwargs` + `ChatTemplateKwargs`;
+`vendor/serdes-ai-models/src/openai/chat.rs`, `OpenAIChatModelRequestSettings`)
+
+`ChatCompletionRequest` gains an optional `chat_template_kwargs` object. It serializes only when
+construction supplied it, so every non-dsflash Chat target omits the key entirely. The object is the
+bounded pair `enable_thinking: bool` and `reasoning_effort` restricted to
+`minimal | low | medium | high | xhigh | max`; an omitted effort omits the wire key. The model
+carries the pair through a separate `OpenAIChatModelRequestSettings` value set with
+`with_request_settings`, so ambient `ModelSettings` are never reinterpreted and no other request
+field changes. The host constructs the value only for structurally detected dsflash profiles
+(`modelParams.chat_template_kwargs` present), applies it after endpoint, credential-policy, and
+class-4 ordering checks, and rejects the dsflash variant for Vercel Chat targets before
+credential resolution. Direct model tests pin the exact serialized shape, the omitted-effort
+shape, and the key's absence for a default-constructed model.
+
+## Patch 10 - codex HTTP streaming wire mode
+(`vendor/serdes-ai-responses/src/client/mod.rs`, `Inner.codex_http` + `codex_http()` builder +
+`build_request` store/cap/chaining override + `run_codex_http_turn`)
+
+The ChatGPT codex responses backend accepts neither `store: true` nor a non-streaming request and
+rejects `max_output_tokens` outright, so the default HTTP turn shape cannot reach it. `codex_http()`
+selects a turn mode that sends `store: false`, `stream: true`, omits `max_output_tokens` even when
+the model settings carry one (the output bound stays host-side), and never uses the
+string-input shorthand or `previous_response_id` chaining; because nothing is stored, every turn
+replays the full input list. The turn drains the SSE event stream and folds it through the
+existing assembler, propagating stream errors instead of folding them into an empty response, and
+a stream that closes cleanly after the terminal response event terminates normally because the
+codex backend sends no `[DONE]` marker. A completed response whose folded output contains tool
+calls reports `ToolCall` as the finish reason because the responses wire has no tool-call finish
+reason of its own (mirroring the sibling openai client). The vendored `ModelError` keeps external
+text out of its public formatting; the host (`src/model_api/responses_backend.rs`) renders the
+`InvalidResponse` and `Network` details on its own trusted diagnostic path so wire failures still
+name the actual cause. The host (`src/model_api/registry.rs`) enables the mode for the codex
+provider and stops forwarding `max_tokens` for it. The wire contract is pinned offline by
+`codex_http_wire_contract_streams_without_store_or_cap_and_replays_input` (asserting per-turn body
+shape and full replay) and `codex_http_rejects_non_sse_success_body` (a JSON 200 without SSE is an
+error, not an empty turn).
 
 ## Tests
 

@@ -105,10 +105,13 @@ pub struct BranchRecord {
     /// Unique owner token of the process holding the reservation.
     #[serde(default)]
     pub owner: String,
-    /// Wall-clock unix seconds when the reservation was made.
+    /// Wall-clock unix seconds when the reservation was made; zero once the
+    /// branch reaches a terminal lifecycle.
     #[serde(default)]
     pub reserved_at: u64,
-    /// Wall-clock unix seconds when the lease expires; past means stale.
+    /// Wall-clock unix seconds when the lease expires; past means stale. Zero
+    /// once the branch reaches a terminal lifecycle: a completed or failed
+    /// branch is no longer leased and cannot be reclaimed.
     #[serde(default)]
     pub lease_expiry: u64,
 }
@@ -236,17 +239,8 @@ impl std::fmt::Debug for StoreError {
 
 impl std::error::Error for StoreError {}
 
-fn sessions_root() -> Result<PathBuf, String> {
-    Ok(crate::profile::std_profile_dir()?.join("code-rs-sessions"))
-}
-
-/// A safe identifier is a bounded single path component of `[A-Za-z0-9_-]`.
-pub fn is_safe_component(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
+mod paths;
+pub use paths::is_safe_component;
 
 /// The on-disk session store. All state reads and writes happen under one exclusive lock
 /// and validate invariants every time.
@@ -517,16 +511,21 @@ impl SessionId {
 
     /// The on-disk directory for this session.
     pub fn path(&self) -> Result<PathBuf, String> {
-        Ok(sessions_root()?.join(&self.id))
+        let sessions_dir = paths::sessions_root()?;
+        Ok(sessions_dir.join(&self.id))
     }
 }
 
 impl SessionStore {
     fn open(session: &SessionId) -> Result<Self, StoreError> {
-        let config_path = crate::profile::std_profile_dir().map_err(StoreError::Invalid)?;
-        std::fs::create_dir_all(&config_path)
+        let config_path = paths::config_root().map_err(StoreError::Invalid)?;
+        Self::open_in(session, &config_path)
+    }
+
+    fn open_in(session: &SessionId, config_path: &Path) -> Result<Self, StoreError> {
+        std::fs::create_dir_all(config_path)
             .map_err(|_| StoreError::Io("create configuration directory failed".into()))?;
-        let config = crate::tools::open_root(&config_path)
+        let config = crate::tools::open_root(config_path)
             .map_err(|_| StoreError::Io("open configuration directory safely failed".into()))?;
         let sessions = ensure_private_subdir(&config, "code-rs-sessions")?;
         let dir_cap = ensure_private_subdir(&sessions, &session.id)?;
@@ -548,7 +547,14 @@ impl SessionStore {
         Self::open(session)
     }
 
-    /// Return the configuration-root-derived path retained when this store was opened.
+    pub(crate) fn load_in(
+        session: &SessionId,
+        config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+    ) -> Result<SessionStore, StoreError> {
+        Self::open_in(session, config_root.as_path())
+    }
+
+    /// The configuration-root-derived path retained when this store was opened.
     pub fn session_dir(&self) -> &Path {
         &self.session_dir
     }
@@ -883,6 +889,8 @@ impl SessionStore {
             t.summary = summary.to_string();
             t.lifecycle = Lifecycle::Completed;
             t.owner.clear();
+            t.reserved_at = 0;
+            t.lease_expiry = 0;
             self.write(&state)
         })
     }
@@ -921,6 +929,8 @@ impl SessionStore {
             t.error = error.to_string();
             t.lifecycle = Lifecycle::Failed;
             t.owner.clear();
+            t.reserved_at = 0;
+            t.lease_expiry = 0;
             self.write(&state)
         })
     }
@@ -951,6 +961,13 @@ impl Drop for SessionFileLock<'_> {
 /// Convenience: open a store for a session (used by the CLI).
 pub fn load_session_store(session: &SessionId) -> Result<SessionStore, String> {
     SessionStore::load(session).map_err(|e| e.to_string())
+}
+
+pub(crate) fn load_session_store_in(
+    session: &SessionId,
+    config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+) -> Result<SessionStore, String> {
+    SessionStore::load_in(session, config_root).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

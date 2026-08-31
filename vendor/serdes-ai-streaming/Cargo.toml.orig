@@ -13,6 +13,12 @@ readme = "README.md"
 
 [features]
 default = []
+websocket = [
+    "dep:rustls",
+    "dep:tokio-tungstenite",
+    "dep:webpki-roots",
+    "tokio-tungstenite/__rustls-tls",
+]
 
 [dependencies]
 serdes-ai-core = { workspace = true }
@@ -28,6 +34,9 @@ bytes = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std"] }
+tokio-tungstenite = { version = "0.28", optional = true }
+webpki-roots = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

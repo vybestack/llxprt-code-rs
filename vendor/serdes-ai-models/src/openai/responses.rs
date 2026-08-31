@@ -18,8 +18,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serdes_ai_core::messages::{
-    ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
-    ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
+    ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, UserContent, UserContentPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
@@ -58,6 +57,35 @@ pub struct OpenAIResponsesModelSettings {
 
     /// Previous response ID for continuation
     pub previous_response_id: Option<String>,
+
+    /// Text verbosity for generated output.
+    pub text_verbosity: Option<TextVerbosity>,
+
+    /// Stable prompt-cache identity for this stateless session.
+    pub prompt_cache_key: Option<String>,
+
+    /// Prompt-cache retention policy.
+    pub prompt_cache_retention: Option<PromptCacheRetention>,
+}
+
+/// Text verbosity for generated output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextVerbosity {
+    /// Concise output.
+    Low,
+    /// Normal output detail.
+    Medium,
+    /// Detailed output.
+    High,
+}
+
+/// Prompt-cache retention policy supported by the Responses API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PromptCacheRetention {
+    /// Retain the cache entry for 24 hours.
+    #[serde(rename = "24h")]
+    Hours24,
 }
 
 /// Reasoning effort level for reasoning models.
@@ -217,12 +245,27 @@ pub struct ResponsesApiRequest {
     /// User identifier for tracking.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
-    /// Store response for later retrieval.
+    /// Store response for later retrieval. Stateless clients always send `false`.
+    pub store: bool,
+    /// Text generation configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub store: Option<bool>,
+    pub text: Option<ResponseTextConfig>,
+    /// Stable prompt-cache identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    /// Prompt-cache retention policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_retention: Option<PromptCacheRetention>,
     /// Metadata for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<JsonValue>,
+}
+
+/// Text generation configuration.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResponseTextConfig {
+    /// Requested output verbosity.
+    pub verbosity: TextVerbosity,
 }
 
 /// Reasoning configuration.
@@ -246,25 +289,55 @@ pub struct TruncationConfig {
 
 /// Input item for the Responses API.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "role")]
+#[serde(untagged)]
 #[allow(missing_docs)]
 pub enum ResponseInput {
-    /// User message.
-    #[serde(rename = "user")]
-    User { content: ResponseInputContent },
-    /// Assistant message (for multi-turn).
-    #[serde(rename = "assistant")]
-    Assistant {
+    /// User or assistant message.
+    Message {
+        role: ResponseInputRole,
         content: ResponseInputContent,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reasoning_id: Option<String>,
     },
-    /// Tool output.
-    #[serde(rename = "tool")]
-    Tool {
-        tool_call_id: String,
-        content: String,
+    /// A prior assistant function call.
+    FunctionCall {
+        #[serde(rename = "type")]
+        item_type: FunctionCallInputType,
+        call_id: String,
+        name: String,
+        arguments: String,
     },
+    /// Output that matches a prior assistant function call.
+    FunctionCallOutput {
+        #[serde(rename = "type")]
+        item_type: FunctionCallOutputInputType,
+        call_id: String,
+        output: String,
+    },
+}
+
+/// Role for an input message.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponseInputRole {
+    /// User-authored message.
+    User,
+    /// Assistant-authored message.
+    Assistant,
+}
+
+/// Wire discriminator for a function-call input.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum FunctionCallInputType {
+    /// A function call made by the assistant.
+    #[serde(rename = "function_call")]
+    FunctionCall,
+}
+
+/// Wire discriminator for a function-call-output input.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum FunctionCallOutputInputType {
+    /// Output from a function call.
+    #[serde(rename = "function_call_output")]
+    FunctionCallOutput,
 }
 
 /// Content for response input.
@@ -768,77 +841,88 @@ impl OpenAIResponsesModel {
         }
     }
 
-    /// Convert our messages to Responses API input format.
+    /// Convert the complete transcript to ordered Responses API input items.
     fn map_messages(
         &self,
         messages: &[ModelRequest],
-        _settings: &OpenAIResponsesModelSettings,
-    ) -> (Vec<ResponseInput>, Option<String>) {
+    ) -> Result<(Vec<ResponseInput>, Option<String>), ModelError> {
         let mut inputs = Vec::new();
         let mut instructions = None;
+        let mut prior_calls = std::collections::BTreeSet::new();
+        let mut completed_calls = std::collections::BTreeSet::new();
 
         for req in messages {
             for part in &req.parts {
                 match part {
                     ModelRequestPart::SystemPrompt(sys) => {
-                        // System prompts become instructions in Responses API
                         instructions = Some(sys.content.clone());
                     }
-                    ModelRequestPart::UserPrompt(user) => {
-                        inputs.push(self.convert_user_prompt(user));
-                    }
+                    ModelRequestPart::UserPrompt(user) => inputs.push(ResponseInput::Message {
+                        role: ResponseInputRole::User,
+                        content: self.convert_user_content(&user.content)?,
+                    }),
                     ModelRequestPart::ToolReturn(tool_ret) => {
-                        inputs.push(self.convert_tool_return(tool_ret));
-                    }
-                    ModelRequestPart::RetryPrompt(retry) => {
-                        inputs.push(self.convert_retry_prompt(retry));
-                    }
-                    ModelRequestPart::BuiltinToolReturn(builtin) => {
-                        // Convert builtin tool return to tool input
-                        let content_str = serde_json::to_string(&builtin.content)
-                            .unwrap_or_else(|_| builtin.content_type().to_string());
-                        inputs.push(ResponseInput::Tool {
-                            tool_call_id: builtin.tool_call_id.clone(),
-                            content: content_str,
+                        let call_id = required_call_id(tool_ret.tool_call_id.as_deref())?;
+                        if !prior_calls.contains(call_id) {
+                            return Err(ModelError::api(
+                                "tool output does not match a prior function call",
+                            ));
+                        }
+                        if !completed_calls.insert(call_id.to_string()) {
+                            return Err(ModelError::api("duplicate function call output"));
+                        }
+                        inputs.push(ResponseInput::FunctionCallOutput {
+                            item_type: FunctionCallOutputInputType::FunctionCallOutput,
+                            call_id: call_id.to_string(),
+                            output: tool_ret.content.to_string_content(),
                         });
                     }
+                    ModelRequestPart::RetryPrompt(retry) => inputs.push(ResponseInput::Message {
+                        role: ResponseInputRole::User,
+                        content: ResponseInputContent::Text(retry.content.message().to_string()),
+                    }),
+                    ModelRequestPart::BuiltinToolReturn(_) => {
+                        return Err(ModelError::api(
+                            "built-in tool output is unsupported by this Responses transport",
+                        ));
+                    }
                     ModelRequestPart::ModelResponse(response) => {
-                        // Add the assistant response to inputs for proper alternation
-                        inputs.push(self.convert_response_to_input(response));
+                        self.append_response_inputs(response, &mut inputs, &mut prior_calls)?;
                     }
                 }
             }
         }
 
-        (inputs, instructions)
+        Ok((inputs, instructions))
     }
 
-    fn convert_user_prompt(&self, user: &UserPromptPart) -> ResponseInput {
-        let content = self.convert_user_content(&user.content);
-        ResponseInput::User { content }
-    }
-
-    fn convert_user_content(&self, content: &UserContent) -> ResponseInputContent {
+    fn convert_user_content(
+        &self,
+        content: &UserContent,
+    ) -> Result<ResponseInputContent, ModelError> {
         match content {
-            UserContent::Text(text) => ResponseInputContent::Text(text.clone()),
+            UserContent::Text(text) => Ok(ResponseInputContent::Text(text.clone())),
             UserContent::Parts(parts) => {
-                let converted: Vec<ResponseInputPart> = parts
+                let converted = parts
                     .iter()
-                    .filter_map(|p| self.convert_content_part(p))
-                    .collect();
+                    .map(|part| self.convert_content_part(part))
+                    .collect::<Result<Vec<_>, _>>()?;
                 if converted.len() == 1 {
                     if let ResponseInputPart::Text { text } = &converted[0] {
-                        return ResponseInputContent::Text(text.clone());
+                        return Ok(ResponseInputContent::Text(text.clone()));
                     }
                 }
-                ResponseInputContent::Parts(converted)
+                Ok(ResponseInputContent::Parts(converted))
             }
         }
     }
 
-    fn convert_content_part(&self, part: &UserContentPart) -> Option<ResponseInputPart> {
+    fn convert_content_part(
+        &self,
+        part: &UserContentPart,
+    ) -> Result<ResponseInputPart, ModelError> {
         match part {
-            UserContentPart::Text { text } => Some(ResponseInputPart::Text { text: text.clone() }),
+            UserContentPart::Text { text } => Ok(ResponseInputPart::Text { text: text.clone() }),
             UserContentPart::Image { image } => {
                 let url = match image {
                     ImageContent::Url(u) => u.url.clone(),
@@ -850,62 +934,50 @@ impl OpenAIResponsesModel {
                         )
                     }
                 };
-                Some(ResponseInputPart::ImageUrl {
+                Ok(ResponseInputPart::ImageUrl {
                     image_url: url,
                     detail: None,
                 })
             }
-            _ => None, // Skip unsupported types
+            _ => Err(ModelError::api(
+                "unsupported user content in Responses request",
+            )),
         }
     }
 
-    fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ResponseInput {
-        ResponseInput::Tool {
-            tool_call_id: tool_ret.tool_call_id.clone().unwrap_or_default(),
-            content: tool_ret.content.to_string_content(),
-        }
-    }
-
-    fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ResponseInput {
-        ResponseInput::User {
-            content: ResponseInputContent::Text(retry.content.message().to_string()),
-        }
-    }
-
-    /// Convert a ModelResponse to an assistant input for multi-turn conversations.
-    fn convert_response_to_input(&self, response: &ModelResponse) -> ResponseInput {
-        let mut content_parts = Vec::new();
-
+    fn append_response_inputs(
+        &self,
+        response: &ModelResponse,
+        inputs: &mut Vec<ResponseInput>,
+        prior_calls: &mut std::collections::BTreeSet<String>,
+    ) -> Result<(), ModelError> {
         for part in &response.parts {
             match part {
-                ModelResponsePart::Text(text) => {
-                    content_parts.push(text.content.clone());
+                ModelResponsePart::Text(text) => inputs.push(ResponseInput::Message {
+                    role: ResponseInputRole::Assistant,
+                    content: ResponseInputContent::Text(text.content.clone()),
+                }),
+                ModelResponsePart::ToolCall(call) => {
+                    let call_id = required_call_id(call.tool_call_id.as_deref())?;
+                    if !prior_calls.insert(call_id.to_string()) {
+                        return Err(ModelError::api("duplicate function call identifier"));
+                    }
+                    inputs.push(ResponseInput::FunctionCall {
+                        item_type: FunctionCallInputType::FunctionCall,
+                        call_id: call_id.to_string(),
+                        name: call.tool_name.clone(),
+                        arguments: call.args.to_json_string()?,
+                    });
                 }
-                ModelResponsePart::ToolCall(_) => {
-                    // Tool calls are handled by the model, not included in assistant input
-                }
-                ModelResponsePart::Thinking(_) => {
-                    // Thinking parts are not sent back
-                }
-                ModelResponsePart::File(_) => {
-                    // Files are not sent back
-                }
-                ModelResponsePart::BuiltinToolCall(_) => {
-                    // Builtin tool calls are not sent back
+                ModelResponsePart::Thinking(_) => {}
+                ModelResponsePart::File(_) | ModelResponsePart::BuiltinToolCall(_) => {
+                    return Err(ModelError::api(
+                        "unsupported assistant output in Responses transcript",
+                    ));
                 }
             }
         }
-
-        let content = if content_parts.is_empty() {
-            ResponseInputContent::Text(String::new())
-        } else {
-            ResponseInputContent::Text(content_parts.join(""))
-        };
-
-        ResponseInput::Assistant {
-            content,
-            reasoning_id: None,
-        }
+        Ok(())
     }
 
     /// Convert tool definitions to Responses API format.
@@ -933,8 +1005,8 @@ impl OpenAIResponsesModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
         stream: bool,
-    ) -> ResponsesApiRequest {
-        let (input, instructions) = self.map_messages(messages, &self.default_settings);
+    ) -> Result<ResponsesApiRequest, ModelError> {
+        let (input, instructions) = self.map_messages(messages)?;
 
         let tools = if params.tools.is_empty() {
             None
@@ -958,7 +1030,7 @@ impl OpenAIResponsesModel {
             .truncation
             .map(|t| TruncationConfig { truncation_type: t });
 
-        ResponsesApiRequest {
+        Ok(ResponsesApiRequest {
             model: self.model_name.clone(),
             input,
             instructions,
@@ -972,24 +1044,44 @@ impl OpenAIResponsesModel {
             service_tier: self.default_settings.service_tier,
             truncation,
             user: None,
-            store: None,
+            store: false,
+            text: self
+                .default_settings
+                .text_verbosity
+                .map(|verbosity| ResponseTextConfig { verbosity }),
+            prompt_cache_key: self.default_settings.prompt_cache_key.clone(),
+            prompt_cache_retention: self.default_settings.prompt_cache_retention,
             metadata: None,
-        }
+        })
     }
 
     /// Parse the Responses API response into our format.
     fn process_response(&self, resp: ResponsesApiResponse) -> Result<ModelResponse, ModelError> {
-        // Check for errors
-        if resp.status == ResponseStatus::Failed {
-            return Err(ModelError::api("provider reported a failed response"));
+        if resp.object != "response" {
+            return Err(ModelError::api(
+                "provider returned an invalid response object",
+            ));
+        }
+        if resp.status != ResponseStatus::Completed {
+            return Err(ModelError::api(
+                "provider returned a non-completed response",
+            ));
+        }
+        if resp.error.is_some() {
+            return Err(ModelError::api("provider returned a response error"));
         }
 
         let mut parts = Vec::new();
+        let mut seen_call_ids = std::collections::BTreeSet::new();
 
         for output in resp.output {
             match output {
-                ResponseOutputItem::Reasoning { id, summary, .. } => {
-                    // Convert reasoning to ThinkingPart
+                ResponseOutputItem::Reasoning {
+                    id,
+                    summary,
+                    status,
+                } => {
+                    require_completed_status(status.as_deref())?;
                     let content: String = summary
                         .iter()
                         .map(|s| match s {
@@ -1005,7 +1097,16 @@ impl OpenAIResponsesModel {
                         parts.push(ModelResponsePart::Thinking(thinking));
                     }
                 }
-                ResponseOutputItem::Message { content, .. } => {
+                ResponseOutputItem::Message {
+                    role,
+                    content,
+                    status,
+                    ..
+                } => {
+                    if role != "assistant" {
+                        return Err(ModelError::api("provider returned an invalid message role"));
+                    }
+                    require_completed_status(status.as_deref())?;
                     for item in content {
                         match item {
                             MessageContentItem::Text { text, .. } => {
@@ -1013,8 +1114,10 @@ impl OpenAIResponsesModel {
                                     parts.push(ModelResponsePart::Text(TextPart::new(text)));
                                 }
                             }
-                            MessageContentItem::Refusal { refusal } => {
-                                return Err(ModelError::ContentFiltered(refusal));
+                            MessageContentItem::Refusal { .. } => {
+                                return Err(ModelError::ContentFiltered(
+                                    "provider refused the response".to_string(),
+                                ));
                             }
                         }
                     }
@@ -1023,31 +1126,39 @@ impl OpenAIResponsesModel {
                     call_id,
                     name,
                     arguments,
+                    status,
                     ..
                 } => {
+                    require_completed_status(status.as_deref())?;
+                    let call_id = required_call_id(Some(&call_id))?;
+                    if !seen_call_ids.insert(call_id.to_string()) {
+                        return Err(ModelError::api("duplicate function call identifier"));
+                    }
                     parts.push(ModelResponsePart::ToolCall(
                         ToolCallPart::new(name, ToolCallArgs::from(arguments))
                             .with_tool_call_id(call_id),
                     ));
                 }
-                // Built-in tool results are typically internal, but we can expose them
                 ResponseOutputItem::WebSearchCall { .. }
                 | ResponseOutputItem::CodeInterpreterCall { .. }
                 | ResponseOutputItem::FileSearchCall { .. }
                 | ResponseOutputItem::ImageGenerationCall { .. }
                 | ResponseOutputItem::McpCall { .. }
                 | ResponseOutputItem::FunctionCallOutput { .. } => {
-                    // These are intermediate results, usually not exposed to user
+                    return Err(ModelError::api(
+                        "provider returned an unsupported output item",
+                    ));
                 }
             }
         }
 
-        let finish_reason = match resp.status {
-            ResponseStatus::Completed => Some(FinishReason::Stop),
-            ResponseStatus::Incomplete => Some(FinishReason::Length),
-            ResponseStatus::Cancelled => Some(FinishReason::Other("cancelled".to_string())),
-            ResponseStatus::Failed => Some(FinishReason::Other("failed".to_string())),
-            ResponseStatus::InProgress => Some(FinishReason::Other("in_progress".to_string())),
+        let finish_reason = if parts
+            .iter()
+            .any(|part| matches!(part, ModelResponsePart::ToolCall(_)))
+        {
+            Some(FinishReason::ToolCall)
+        } else {
+            Some(FinishReason::Stop)
         };
 
         let usage = resp.usage.map(|u| RequestUsage {
@@ -1083,6 +1194,21 @@ impl OpenAIResponsesModel {
     }
 }
 
+fn required_call_id(call_id: Option<&str>) -> Result<&str, ModelError> {
+    call_id
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ModelError::api("function call identifier is missing"))
+}
+
+fn require_completed_status(status: Option<&str>) -> Result<(), ModelError> {
+    if status != Some("completed") {
+        return Err(ModelError::api(
+            "provider returned an invalid output status",
+        ));
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl Model for OpenAIResponsesModel {
     fn name(&self) -> &str {
@@ -1103,7 +1229,7 @@ impl Model for OpenAIResponsesModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<ModelResponse, ModelError> {
-        let body = self.build_request(messages, settings, params, false);
+        let body = self.build_request(messages, settings, params, false)?;
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
@@ -1243,23 +1369,104 @@ mod tests {
 
     #[test]
     fn test_response_input_serialization() {
-        let input = ResponseInput::User {
+        let input = ResponseInput::Message {
+            role: ResponseInputRole::User,
             content: ResponseInputContent::Text("Hello".to_string()),
         };
-        let json = serde_json::to_string(&input).unwrap();
-        assert!(json.contains("\"role\":\"user\""));
-        assert!(json.contains("\"content\":\"Hello\""));
+        assert_eq!(
+            serde_json::to_value(input).unwrap(),
+            serde_json::json!({"role": "user", "content": "Hello"})
+        );
     }
 
     #[test]
     fn test_tool_input_serialization() {
-        let input = ResponseInput::Tool {
-            tool_call_id: "call_123".to_string(),
-            content: "Result: 42".to_string(),
+        let input = ResponseInput::FunctionCallOutput {
+            item_type: FunctionCallOutputInputType::FunctionCallOutput,
+            call_id: "call_123".to_string(),
+            output: "Result: 42".to_string(),
         };
-        let json = serde_json::to_string(&input).unwrap();
-        assert!(json.contains("\"role\":\"tool\""));
-        assert!(json.contains("\"tool_call_id\":\"call_123\""));
+        assert_eq!(
+            serde_json::to_value(input).unwrap(),
+            serde_json::json!({
+                "type": "function_call_output",
+                "call_id": "call_123",
+                "output": "Result: 42"
+            })
+        );
+    }
+
+    #[test]
+    fn stateless_request_replays_ordered_function_history() {
+        use serdes_ai_core::messages::{ToolReturnPart, UserPromptPart};
+
+        let response = ModelResponse::with_parts(vec![
+            ModelResponsePart::Text(TextPart::new("before")),
+            ModelResponsePart::ToolCall(
+                ToolCallPart::new("lookup", ToolCallArgs::String("{raw".to_string()))
+                    .with_tool_call_id("call_1"),
+            ),
+            ModelResponsePart::Text(TextPart::new("after")),
+        ]);
+        let history = vec![ModelRequest::with_parts(vec![
+            ModelRequestPart::UserPrompt(UserPromptPart::new("first")),
+            ModelRequestPart::ModelResponse(Box::new(response)),
+            ModelRequestPart::ToolReturn(
+                ToolReturnPart::success("lookup", "result").with_tool_call_id("call_1"),
+            ),
+        ])];
+        let model = OpenAIResponsesModel::new("o3-mini", "key").with_settings(
+            OpenAIResponsesModelSettings {
+                text_verbosity: Some(TextVerbosity::High),
+                prompt_cache_key: Some("session_1".to_string()),
+                prompt_cache_retention: Some(PromptCacheRetention::Hours24),
+                ..Default::default()
+            },
+        );
+        let request = model
+            .build_request(
+                &history,
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+                false,
+            )
+            .unwrap();
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["store"], false);
+        assert!(value.get("previous_response_id").is_none());
+        assert_eq!(value["text"]["verbosity"], "high");
+        assert_eq!(value["prompt_cache_key"], "session_1");
+        assert_eq!(value["prompt_cache_retention"], "24h");
+        assert_eq!(
+            value["input"],
+            serde_json::json!([
+                {"role":"user","content":"first"},
+                {"role":"assistant","content":"before"},
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{raw"},
+                {"role":"assistant","content":"after"},
+                {"type":"function_call_output","call_id":"call_1","output":"result"}
+            ])
+        );
+    }
+
+    #[test]
+    fn malformed_function_history_is_rejected_before_sending() {
+        use serdes_ai_core::messages::ToolReturnPart;
+
+        let unmatched = vec![ModelRequest::with_parts(vec![
+            ModelRequestPart::ToolReturn(
+                ToolReturnPart::success("lookup", "result").with_tool_call_id("unknown"),
+            ),
+        ])];
+        let error = OpenAIResponsesModel::new("o3-mini", "key")
+            .build_request(
+                &unmatched,
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Model API error");
     }
 
     #[test]
@@ -1292,5 +1499,48 @@ mod tests {
             ModelResponsePart::ToolCall(call)
                 if call.args == ToolCallArgs::String("<not-json>".to_string())
         ));
+        assert_eq!(result.finish_reason, Some(FinishReason::ToolCall));
+    }
+
+    #[test]
+    fn response_object_status_role_and_item_status_are_strict() {
+        let base = serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 1,
+            "model": "o3-mini",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type":"output_text","text":"done"}],
+                "status": "completed"
+            }],
+            "status": "completed"
+        });
+        let invalid = [
+            ("object", serde_json::json!("chat.completion")),
+            ("status", serde_json::json!("incomplete")),
+            ("output.0.role", serde_json::json!("user")),
+            ("output.0.status", serde_json::Value::Null),
+            ("output.0.status", serde_json::json!("in_progress")),
+        ];
+        for (path, replacement) in invalid {
+            let mut value = base.clone();
+            match path {
+                "object" => value["object"] = replacement,
+                "status" => value["status"] = replacement,
+                "output.0.role" => value["output"][0]["role"] = replacement,
+                "output.0.status" => value["output"][0]["status"] = replacement,
+                _ => unreachable!(),
+            }
+            let response: ResponsesApiResponse = serde_json::from_value(value).unwrap();
+            assert!(
+                OpenAIResponsesModel::new("o3-mini", "key")
+                    .process_response(response)
+                    .is_err(),
+                "{path}"
+            );
+        }
     }
 }

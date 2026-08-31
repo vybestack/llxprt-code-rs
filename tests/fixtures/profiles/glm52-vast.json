@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "glm-5.2-ud-iq2-m-mainline",
+  "modelParams": {
+    "top_p": 0.95,
+    "temperature": 1,
+    "maxOutputTokens": 60000
+  },
+  "ephemeralSettings": {
+    "base-url": "http://72.49.231.201:19074/v1",
+    "auth-keyfile": "<redacted-keyfile-path>",
+    "context-limit": 200000,
+    "maxTurnsPerPrompt": -1,
+    "stream-idle-timeout-ms": 0,
+    "stream-first-response-timeout-ms": 0,
+    "shell-replacement": true,
+    "streaming": "enabled",
+    "reasoning.enabled": true,
+    "reasoning.includeInContext": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.stripFromContext": "none"
+  }
+}

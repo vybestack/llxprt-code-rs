@@ -22,8 +22,9 @@
 # Allows: crate files (Cargo.toml/Cargo.lock/LICENSE/README.md/PATCHES.md/.gitignore),
 # the whole src/, tests/, scripts/, docs/, provenance/, .github/, THIRD_PARTY_LICENSES/,
 # the checksum-pinned vendor-upstream/ crate archives, the complete checksum-locked
-# registry-vendor/ source closure, .cargo/config.toml, xtask sources, and the required vendored
-# serdes-ai crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock.
+# registry-vendor/ source closure, .cargo/config.toml, xtask sources, the retained 0.2.6 Serdes
+# crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock, and the complete pinned Responses
+# client subtree.
 # All retained vendor lockfiles are source-provenance inputs. The models lockfile is also required
 # for the --locked direct provider test (CARGO_TARGET_DIR=... cargo test --offline --locked
 # --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai). The explicit allow-list is
@@ -49,8 +50,14 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 
 
-top_files=(Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch .gitignore)
-source_dirs=(src tests scripts docs provenance .github THIRD_PARTY_LICENSES vendor-upstream)
+top_files=(
+  Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch
+  .gitignore .gitattributes project-plans/issue1/PLAN.md
+)
+source_dirs=(
+  src tests scripts docs provenance .github THIRD_PARTY_LICENSES vendor-upstream
+  vendor/serdes-ai-responses
+)
 config_files=(.cargo/config.toml)
 xtask_files=(xtask/Cargo.toml xtask/Cargo.lock)
 vendor_crates=(
@@ -90,6 +97,7 @@ emit_registry_tree() {
 emit_manifest() {
   {
     printf '%s\n' "${top_files[@]}"
+    printf '%s\n' 'project-plans/' 'project-plans/issue1/'
     local d
     for d in "${source_dirs[@]}"; do
       emit_tree "$d"

@@ -8,6 +8,9 @@
 //! must be JSON objects when present, and every known field must have the right scalar
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
+mod codex;
+mod openai_responses;
+mod parsing;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -60,6 +63,14 @@ pub struct Profile {
     pub model: String,
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
+    pub(crate) target: crate::model_api::target::ModelTarget,
+    pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
+    pub(crate) openai_responses_settings:
+        Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
+    /// Chat targets only: a dsflash marker is present without the
+    /// `modelParams.chat_template_kwargs` discriminator; the fixed class-4
+    /// diagnostic is deferred so endpoint and credential-policy classes run first.
+    pub(crate) chat_missing_discriminator: Option<String>,
 }
 
 /// Model sampling parameters (the fields the transport can honor) plus keys we know we
@@ -70,7 +81,55 @@ pub struct ModelParams {
     pub top_p: Option<f64>,
     pub top_k: Option<u64>,
     pub seed: Option<u64>,
+    /// The structural dsflash discriminator: a bounded kwargs object. Presence
+    /// selects the dsflash Chat settings variant regardless of the profile name.
+    pub chat_template_kwargs: Option<ChatTemplateKwargsSpec>,
     pub unsupported: Vec<String>,
+}
+
+/// Host-side mirror of the vendored `chat_template_kwargs` wire object: validated
+/// values only, never raw profile strings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatTemplateKwargsSpec {
+    pub enable_thinking: bool,
+    pub reasoning_effort: Option<DsflashEffort>,
+}
+
+/// The dsflash six-value wire effort enum (`reasoning.effort` must agree with the
+/// kwargs `reasoning_effort` when both are present).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DsflashEffort {
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl DsflashEffort {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "minimal" => Some(Self::Minimal),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" => Some(Self::Xhigh),
+            "max" => Some(Self::Max),
+            _ => None,
+        }
+    }
+
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
 }
 
 /// One round of assistant/tool history.
@@ -179,6 +238,8 @@ pub struct EphemeralSettings {
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    pub max_turns_per_prompt: Option<i64>,
+    pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
     /// final component are never both shown if one of them looks like a key name).
@@ -190,9 +251,28 @@ pub struct EphemeralSettings {
     pub prompt_notes: BTreeMap<String, String>,
     /// Unsupported keys that would change output if ignored.
     pub unsupported: Vec<String>,
-    /// Whether this profile is the installed `dsflash` profile family (documented for the
-    /// transport so unsupported output-affecting behavior is rejected).
-    pub is_dsflash: bool,
+    /// Validated `tools.disabled` entries (deprecated `disabled-tools` alias merged).
+    /// Registered Rust tools never appear here (the parser rejects them); the names
+    /// that remain refer to host-side tools this runtime does not register.
+    pub disabled_tools: Vec<String>,
+    /// `auth-key-name` presence: a named secure-store reference, deferred to
+    /// credential-policy rejection (class 3) so endpoint validation (class 2)
+    /// reports first.
+    pub auth_key_name: bool,
+    /// Dsflash marker fields, structurally typed: presence makes the profile a
+    /// dsflash candidate regardless of its name.
+    pub shell_replacement: Option<bool>,
+    pub stream_idle_timeout_ms: Option<u64>,
+    pub reasoning_enabled: Option<bool>,
+    pub reasoning_include_in_response: Option<bool>,
+    pub reasoning_include_in_context: Option<bool>,
+    pub reasoning_strip_from_context_none: bool,
+    /// Raw `reasoning.effort` (bounded); the dsflash variant validates it against
+    /// the six-value enum, Standard Chat keeps the legacy effort prompt note.
+    pub reasoning_effort: Option<String>,
+    /// Raw `tool-format`/`toolFormat` (equal-value aliases); normalized value
+    /// `auto`/`openai` is accepted, anything else rejects at target-settings time.
+    pub tool_format: Option<String>,
 }
 
 impl std::fmt::Debug for EphemeralSettings {
@@ -205,11 +285,31 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("auth_keyfile_orig", &"[redacted keyfile]")
             .field("context_limit", &self.context_limit)
             .field("max_output_tokens", &self.max_output_tokens)
+            .field("max_turns_per_prompt", &self.max_turns_per_prompt)
+            .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)
-            .field("is_dsflash", &self.is_dsflash)
+            .field("disabled_tools", &self.disabled_tools)
+            .field("auth_key_name", &self.auth_key_name)
+            .field("shell_replacement", &self.shell_replacement)
+            .field("stream_idle_timeout_ms", &self.stream_idle_timeout_ms)
+            .field("reasoning_enabled", &self.reasoning_enabled)
+            .field(
+                "reasoning_include_in_response",
+                &self.reasoning_include_in_response,
+            )
+            .field(
+                "reasoning_include_in_context",
+                &self.reasoning_include_in_context,
+            )
+            .field(
+                "reasoning_strip_from_context_none",
+                &self.reasoning_strip_from_context_none,
+            )
+            .field("reasoning_effort", &self.reasoning_effort)
+            .field("tool_format", &self.tool_format)
             .finish()
     }
 }
@@ -263,33 +363,7 @@ pub const MAX_MODEL_NAME_BYTES: usize = 512;
 /// [`crate::redact::PROFILE_FILE_CAP_MESSAGE`] before the JSON is parsed.
 pub const MAX_PROFILE_FILE_BYTES: usize = crate::redact::MAX_PROFILE_FILE_BYTES;
 
-pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Profile, String> {
-    let obj = value
-        .as_object()
-        .ok_or_else(|| format!("profile {name:?} must be a JSON object"))?;
-
-    let provider = obj
-        .get("provider")
-        .ok_or_else(|| format!("profile {name:?} missing 'provider'"))?;
-    let provider = provider
-        .as_str()
-        .ok_or_else(|| format!("profile {name:?}: 'provider' must be a string"))?
-        .to_string();
-    if !matches!(
-        provider.as_str(),
-        "openai" | "openaivercel" | "openai-compatible"
-    ) {
-        return Err(format!(
-            "profile {name:?}: unsupported provider {provider:?}; only the openai family is supported"
-        ));
-    }
-
-    let model = obj
-        .get("model")
-        .ok_or_else(|| format!("profile {name:?} missing 'model'"))?;
-    let model = model
-        .as_str()
-        .ok_or_else(|| format!("profile {name:?}: 'model' must be a string"))?;
+fn validate_model_name(model: &str, name: &str) -> Result<(), String> {
     if model.len() > MAX_MODEL_NAME_BYTES {
         return Err(crate::redact::MODEL_NAME_CAP_MESSAGE.to_string());
     }
@@ -303,10 +377,69 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
             "profile {name:?}: 'model' must not contain control characters"
         ));
     }
+    Ok(())
+}
+
+pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Profile, String> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| format!("profile {name:?} must be a JSON object"))?;
+    parsing::validate_top_level(obj, name)?;
+
+    let provider_value = obj
+        .get("provider")
+        .ok_or_else(|| format!("profile {name:?} missing 'provider'"))?;
+    let provider_id = crate::model_api::target::ProviderId::parse(provider_value, name)?;
+    let provider = provider_id.as_str().to_string();
+
+    let model = obj
+        .get("model")
+        .ok_or_else(|| format!("profile {name:?} missing 'model'"))?;
+    let model = model
+        .as_str()
+        .ok_or_else(|| format!("profile {name:?}: 'model' must be a string"))?;
+    validate_model_name(model, name)?;
     let model = model.to_string();
 
-    let ephemeral = parse_ephemeral(obj, name)?;
-    let model_params = parse_model_params(obj, name)?;
+    let target = crate::model_api::target::resolve_model_target(
+        provider_id,
+        obj.get("ephemeralSettings"),
+        name,
+    )?;
+    let (
+        ephemeral,
+        model_params,
+        codex_settings,
+        openai_responses_settings,
+        chat_missing_discriminator,
+    ) = if provider_id == crate::model_api::target::ProviderId::Codex {
+        let parsed = codex::parse(obj, name, model.clone())?;
+        (
+            parsed.ephemeral,
+            parsed.model_params,
+            Some(parsed.draft),
+            None,
+            None,
+        )
+    } else if target.api == crate::model_api::target::ModelApi::Responses {
+        let parsed = openai_responses::parse(obj, name)?;
+        (
+            parsed.ephemeral,
+            parsed.model_params,
+            None,
+            Some(parsed.draft),
+            None,
+        )
+    } else {
+        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
+        (
+            ephemeral,
+            model_params,
+            None,
+            None,
+            chat_missing_discriminator,
+        )
+    };
 
     Ok(Profile {
         name: name.to_string(),
@@ -314,7 +447,83 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model,
         model_params,
         ephemeral,
+        target,
+        codex_settings,
+        openai_responses_settings,
+        chat_missing_discriminator,
     })
+}
+
+/// Chat-target parse: the shared syntax layer plus the structural dsflash variant
+/// selection. Markers are typed fields; `modelParams.chat_template_kwargs` is the
+/// discriminator. Markers without a discriminator defer the fixed class-4
+/// diagnostic (`chat_missing_discriminator`); the variant never depends on the
+/// profile name.
+fn parse_chat(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Result<(EphemeralSettings, ModelParams, Option<String>), String> {
+    let mut ephemeral = parse_ephemeral(obj, name)?;
+    let mut model_params = parse_model_params(obj, name)?;
+    let discriminator = model_params.chat_template_kwargs.is_some();
+
+    let mut markers: Vec<&'static str> = Vec::new();
+    if ephemeral.shell_replacement.is_some() {
+        markers.push("ephemeralSettings.shell-replacement");
+    }
+    if ephemeral.stream_idle_timeout_ms.is_some() {
+        markers.push("ephemeralSettings.stream-idle-timeout-ms");
+    }
+    if ephemeral.reasoning_enabled.is_some() {
+        markers.push("ephemeralSettings.reasoning.enabled");
+    }
+    if ephemeral.reasoning_include_in_response.is_some() {
+        markers.push("ephemeralSettings.reasoning.includeInResponse");
+    }
+    if ephemeral.reasoning_include_in_context.is_some() {
+        markers.push("ephemeralSettings.reasoning.includeInContext");
+    }
+    if ephemeral.reasoning_strip_from_context_none {
+        markers.push("ephemeralSettings.reasoning.stripFromContext");
+    }
+    markers.sort_unstable();
+    let chat_missing_discriminator =
+        (!discriminator && !markers.is_empty()).then(|| markers[0].to_string());
+
+    if discriminator {
+        // Dsflash variant: the ephemeral effort must be one of the six wire values
+        // and must agree with the kwargs effort (one or the other becomes the wire
+        // effort); the legacy Standard Chat effort prompt note is suppressed.
+        if let Some(effort) = &ephemeral.reasoning_effort {
+            let parsed = DsflashEffort::parse(effort).ok_or_else(|| {
+                format!(
+                    "profile {name:?}: 'reasoning.effort' must be one of minimal, low, medium, high, xhigh, max for dsflash chat settings"
+                )
+            })?;
+            if let Some(kwargs) = &model_params.chat_template_kwargs {
+                if let Some(kwargs_effort) = kwargs.reasoning_effort {
+                    if kwargs_effort != parsed {
+                        return Err(format!(
+                            "profile {name:?}: 'reasoning.effort' must agree with 'chat_template_kwargs.reasoning_effort'"
+                        ));
+                    }
+                }
+            }
+        }
+        // One-or-the-other becomes the wire effort: agreement is validated above,
+        // so the ephemeral value (when present) is written into the spec the
+        // adapter reads; the spec stays the single wire source.
+        if let Some(effort) = &ephemeral.reasoning_effort {
+            let parsed =
+                DsflashEffort::parse(effort).expect("validated above for the dsflash variant");
+            if let Some(spec) = model_params.chat_template_kwargs.as_mut() {
+                spec.reasoning_effort = Some(parsed);
+            }
+        }
+        ephemeral.prompt_notes.remove("reasoning:reasoning.effort");
+    }
+
+    Ok((ephemeral, model_params, chat_missing_discriminator))
 }
 
 fn parse_ephemeral(
@@ -330,10 +539,7 @@ fn parse_ephemeral(
             ));
         }
     };
-    let mut settings = EphemeralSettings {
-        is_dsflash: is_dsflash_profile_name(name),
-        ..EphemeralSettings::default()
-    };
+    let mut settings = EphemeralSettings::default();
     let mut unsupported = Vec::new();
     for (key, value) in &map {
         if !parse_ephemeral_entry(&mut settings, key, value, name)? {
@@ -375,6 +581,7 @@ fn parse_ephemeral_primary(
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
         "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
+        "apiMode" | "responsesMode" | "responses-mode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;
             let url = parse_url(raw)?;
@@ -383,12 +590,19 @@ fn parse_ephemeral_primary(
             }
             settings.base_url = Some(url);
         }
-        "auth-key" | "authKey" | "apiKey" => {
+        "auth-key" | "authKey" | "apiKey" | "api-key" => {
             let key_value = required_string(value, name, key)?;
             let over_limit =
                 !key_value.is_empty() && key_value.len() > crate::redact::MAX_KEY_BYTES;
             if key_value.as_bytes().contains(&0) || over_limit {
                 return Err(crate::redact::KEY_CAP_MESSAGE.to_string());
+            }
+            if settings
+                .auth_key
+                .as_deref()
+                .is_some_and(|existing| existing != key_value)
+            {
+                return Err(format!("profile {name:?}: conflicting API-key aliases"));
             }
             settings.auth_key = Some(key_value.to_string());
         }
@@ -405,39 +619,87 @@ fn parse_ephemeral_credentials(
 ) -> Result<bool, String> {
     match key {
         "auth-key-name" => {
+            // Validate the shape now, defer the fixed refusal to credential-policy
+            // time so endpoint validation (class 2) reports first.
             required_string(value, name, key)?;
-            return Err(AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
+            settings.auth_key_name = true;
         }
-        "auth-keyfile" | "authKeyfile" | "apiKeyfile" => {
+        "auth-keyfile" | "authKeyfile" | "apiKeyfile" | "api-keyfile" => {
             let path = required_string(value, name, key)?;
             let over_limit = !path.is_empty() && path.len() > crate::redact::MAX_KEYFILE_PATH_BYTES;
             if path.as_bytes().contains(&0) || over_limit {
                 return Err(crate::redact::KEY_PATH_CAP_MESSAGE.to_string());
             }
+            if settings
+                .auth_keyfile_orig
+                .as_deref()
+                .is_some_and(|existing| existing != path)
+            {
+                return Err(format!(
+                    "profile {name:?}: conflicting API-key-file aliases"
+                ));
+            }
             settings.auth_keyfile_orig = Some(path.to_string());
             settings.auth_keyfile = Some(redact_keyfile(path));
-        }
-        "emojifilter" | "shell-replacement" | "stream-idle-timeout-ms" => {
-            require_dsflash(settings, name, key)?;
-            let note = required_string(value, name, key)?;
-            if note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
-                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
-            }
-            settings
-                .prompt_notes
-                .insert(key.to_string(), note.to_string());
-            settings.flags.insert(key.to_string(), true);
-        }
-        "requires-auth" => {
-            require_dsflash(settings, name, key)?;
-            value
-                .as_bool()
-                .ok_or_else(|| format!("profile {name:?}: '{key}' must be a boolean"))?;
-            settings.flags.insert(key.to_string(), true);
         }
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// The dsflash marker set: structurally typed presence, never name-gated. Each
+/// marker records its typed value; `from_profile_in` later requires the
+/// `modelParams.chat_template_kwargs` discriminator when any marker is present.
+fn parse_dsflash_marker(
+    settings: &mut EphemeralSettings,
+    key: &str,
+    value: &serde_json::Value,
+    name: &str,
+) -> Result<bool, String> {
+    match key {
+        "shell-replacement" => {
+            settings.shell_replacement = Some(bool_value(value, name, key)?);
+        }
+        "reasoning.enabled" => {
+            settings.reasoning_enabled = Some(bool_value(value, name, key)?);
+        }
+        "reasoning.includeInResponse" => {
+            settings.reasoning_include_in_response = Some(bool_value(value, name, key)?);
+        }
+        "reasoning.includeInContext" => {
+            settings.reasoning_include_in_context = Some(bool_value(value, name, key)?);
+        }
+        "reasoning.stripFromContext" => {
+            if required_string(value, name, key)? != "none" {
+                return Err(format!(
+                    "profile {name:?}: 'reasoning.stripFromContext' must be exactly \"none\""
+                ));
+            }
+            settings.reasoning_strip_from_context_none = true;
+        }
+        "stream-idle-timeout-ms" | "streamIdleTimeoutMs" => {
+            let parsed = nonneg_u64(value).ok_or_else(|| {
+                format!("profile {name:?}: '{key}' must be a non-negative integer")
+            })?;
+            if settings
+                .stream_idle_timeout_ms
+                .is_some_and(|existing| existing != parsed)
+            {
+                return Err(format!(
+                    "profile {name:?}: 'stream-idle-timeout-ms' aliases must agree"
+                ));
+            }
+            settings.stream_idle_timeout_ms = Some(parsed);
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn bool_value(value: &serde_json::Value, name: &str, key: &str) -> Result<bool, String> {
+    value
+        .as_bool()
+        .ok_or_else(|| format!("profile {name:?}: '{key}' must be a boolean"))
 }
 
 fn parse_ephemeral_flags(
@@ -446,76 +708,67 @@ fn parse_ephemeral_flags(
     value: &serde_json::Value,
     name: &str,
 ) -> Result<bool, String> {
+    if parse_dsflash_marker(settings, key, value, name)? {
+        return Ok(true);
+    }
     match key {
-        "streamIdleTimeoutMs"
-        | "maxRetrywait"
-        | "reasoning.maxTokens"
-        | "reasoning.budgetTokens"
-        | "autokimi-style" => {
-            require_dsflash(settings, name, key)?;
-            nonneg_u64(value).ok_or_else(|| {
-                format!("profile {name:?}: '{key}' must be a non-negative integer")
-            })?;
-            settings.flags.insert(key.to_string(), true);
-        }
-        "sandbox-base-url" | "default-tools" | "tool-format" => {
-            require_dsflash(settings, name, key)?;
-            let note = required_string(value, name, key)?;
-            if note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
-                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
-            }
-            settings
-                .prompt_notes
-                .insert(key.to_string(), note.to_string());
-            settings.flags.insert(key.to_string(), true);
-        }
+        // The effort note is variant-resolved later: Standard Chat keeps the
+        // legacy prompt note, the dsflash variant validates the enum instead.
         "reasoning.effort" => {
             let effort = required_string(value, name, key)?;
             if effort.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
                 return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
             }
-            settings.flags.insert(key.to_string(), true);
+            if settings
+                .reasoning_effort
+                .as_deref()
+                .is_some_and(|existing| existing != effort)
+            {
+                return Err(format!(
+                    "profile {name:?}: conflicting 'reasoning.effort' values"
+                ));
+            }
+            settings.reasoning_effort = Some(effort.to_string());
+            // Standard Chat keeps the legacy effort prompt note; the dsflash variant
+            // suppresses it and validates the six-value enum instead.
             if !effort.is_empty() {
                 settings
                     .prompt_notes
                     .insert(format!("reasoning:{key}"), effort.to_string());
             }
         }
-        "reasoning.enabled"
-        | "reasoning.includeInResponse"
-        | "reasoning.includeInContext"
-        | "reasoning.stripFromContext"
-        | "reasoning.effortWireFormat"
-        | "reasoning.enabledWireFormat"
-        | "reasoning.enabledMap"
-        | "reasoning.effortMap"
-        | "reasoning.format"
-        | "reasoning.fieldName"
-        | "reasoning.update"
-        | "reasoning.display" => {
-            require_dsflash(settings, name, key)?;
-            if !matches!(
-                value,
-                serde_json::Value::Bool(_) | serde_json::Value::String(_)
-            ) {
+        // Common compatibility metadata: accepted with the exact documented shape,
+        // never forwarded anywhere.
+        "emojifilter" => {
+            let note = required_string(value, name, key)?;
+            if note != "auto" {
                 return Err(format!(
-                    "profile {name:?}: '{key}' must be a string or a boolean"
+                    "profile {name:?}: 'emojifilter' must be exactly \"auto\""
                 ));
             }
-            settings.flags.insert(key.to_string(), true);
+        }
+        "requires-auth" => {
+            value
+                .as_bool()
+                .ok_or_else(|| format!("profile {name:?}: '{key}' must be a boolean"))?;
+        }
+        "tool-format" | "toolFormat" => {
+            let note = required_string(value, name, key)?;
+            if note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
+                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
+            }
+            if let Some(existing) = &settings.tool_format {
+                if existing != note {
+                    return Err(format!(
+                        "profile {name:?}: 'tool-format' aliases must agree"
+                    ));
+                }
+            }
+            settings.tool_format = Some(note.to_string());
         }
         _ => return Ok(false),
     }
     Ok(true)
-}
-fn require_dsflash(settings: &EphemeralSettings, name: &str, key: &str) -> Result<(), String> {
-    if settings.is_dsflash {
-        Ok(())
-    } else {
-        Err(format!(
-            "profile {name:?}: setting '{key}' is only supported for dsflash profiles"
-        ))
-    }
 }
 
 fn required_string<'a>(
@@ -588,6 +841,40 @@ fn parse_model_params(
                 })?;
                 m.seed = Some(n);
             }
+            // The structural dsflash discriminator: an object with a required
+            // `enable_thinking` boolean and an optional six-value `reasoning_effort`.
+            "chat_template_kwargs" => {
+                let object = v.as_object().ok_or_else(|| {
+                    format!("profile {name:?}: 'chat_template_kwargs' must be an object")
+                })?;
+                let enable_thinking = object
+                    .get("enable_thinking")
+                    .and_then(|value| value.as_bool())
+                    .ok_or_else(|| {
+                        format!(
+                            "profile {name:?}: 'chat_template_kwargs.enable_thinking' must be a boolean"
+                        )
+                    })?;
+                let reasoning_effort = match object.get("reasoning_effort") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(serde_json::Value::String(effort)) => {
+                        Some(DsflashEffort::parse(effort).ok_or_else(|| {
+                            format!(
+                                "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be one of minimal, low, medium, high, xhigh, max"
+                            )
+                        })?)
+                    }
+                    Some(_) => {
+                        return Err(format!(
+                            "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be a string"
+                        ));
+                    }
+                };
+                m.chat_template_kwargs = Some(ChatTemplateKwargsSpec {
+                    enable_thinking,
+                    reasoning_effort,
+                });
+            }
             other if MODELPARAM_OUTPUT_AFFECTING.contains(&other) => {
                 unsupported.push(k.clone());
             }
@@ -616,331 +903,5 @@ pub fn is_plaintext_url(u: &RedactedUrl) -> bool {
     u.as_display().starts_with("http://")
 }
 
-/// Whether the profile is in the installed `dsflash` family. A family member is named
-/// exactly `dsflash` or `dsflash-<variant>`; arbitrary paths or names that merely contain
-/// `dsflash` or `deepseek` do not opt into ignored behavior-affecting settings.
-pub fn is_dsflash_profile_name(name: &str) -> bool {
-    let stem = Path::new(name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or(name)
-        .to_ascii_lowercase();
-    stem == "dsflash"
-        || stem
-            .strip_prefix("dsflash-")
-            .is_some_and(|variant| !variant.is_empty())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn configuration_selectors_require_nonempty_absolute_paths() {
-        assert!(require_absolute_path("TEST_CONFIG", PathBuf::new()).is_err());
-        assert!(require_absolute_path("TEST_CONFIG", PathBuf::from("relative")).is_err());
-        assert_eq!(
-            require_absolute_path("TEST_CONFIG", PathBuf::from("/absolute/config")).unwrap(),
-            PathBuf::from("/absolute/config")
-        );
-    }
-
-    /// A strict profile type table: `ephemeralSettings`/`modelParams` must be JSON
-    /// objects when present, and each known scalar field must have the right type. Every
-    /// bound field stays error-on-wrong-type, never a silent ignore.
-    #[test]
-    fn ephemeral_and_modelparam_strict_type_table() {
-        // `ephemeralSettings` non-object.
-        let p = parse_profile_value(
-            &json!({"provider":"openai","model":"m","ephemeralSettings":[]}),
-            "bad",
-        );
-        assert!(p.is_err(), "ephemeralSettings array must be rejected");
-        // Each known scalar field is type-enforced.
-        for (k, v) in [
-            ("base-url", json!(5)),
-            ("baseUrl", json!(true)),
-            ("auth-key", json!(1)),
-            ("authKey", json!([])),
-            ("auth-keyfile", json!(0)),
-            ("context-limit", json!("many")),
-            ("maxOutputTokens", json!("lots")),
-            ("stream-first-response-timeout-ms", json!({"ms":1})),
-        ] {
-            let p = parse_profile_value(
-                &json!({"provider":"openai","model":"m",
-                       "ephemeralSettings": {k: v}}),
-                "bad",
-            );
-            assert!(p.is_err(), "ephemeral '{k}' wrong type must be rejected");
-        }
-        // `modelParams` non-object.
-        let p = parse_profile_value(
-            &json!({"provider":"openai","model":"m","modelParams":42}),
-            "bad",
-        );
-        assert!(p.is_err(), "modelParams non-object must be rejected");
-        for (k, v) in [
-            ("temperature", json!("hot")),
-            ("top_p", json!("p")),
-            ("topP", json!([])),
-            ("seed", json!("s")),
-        ] {
-            let p = parse_profile_value(
-                &json!({"provider":"openai","model":"m",
-                       "modelParams": {k: v}}),
-                "bad",
-            );
-            assert!(p.is_err(), "modelparam '{k}' wrong type must be rejected");
-        }
-        // The well-typed form still parses.
-        let p = parse_profile_value(
-            &json!({"provider":"openai","model":"m",
-            "modelParams": {"temperature":0.2,"top_p":0.9,"seed":7},
-            "ephemeralSettings": {
-                "base-url":"http://127.0.0.1:1/v1",
-                "auth-key":"k",
-                "context-limit":100,
-                "maxOutputTokens":16384,
-                "stream-first-response-timeout-ms":30000
-            }}),
-            "ok",
-        );
-        let p = p.expect("valid profile must parse");
-        assert_eq!(p.model_params.temperature, Some(0.2));
-        assert_eq!(p.model_params.top_p, Some(0.9));
-        assert_eq!(p.model_params.seed, Some(7));
-        assert_eq!(p.ephemeral.context_limit, Some(100));
-        assert_eq!(p.ephemeral.max_output_tokens, Some(16384));
-        assert_eq!(p.ephemeral.timeout_ms, Some(30000));
-    }
-    #[test]
-    fn model_identifier_rejects_empty_whitespace_and_controls() {
-        for model in ["", "   \t", "model\nname", "model\u{7f}name"] {
-            let result =
-                parse_profile_value(&json!({"provider": "openai", "model": model}), "bad-model");
-            assert!(
-                result.is_err(),
-                "invalid model identifier {model:?} must fail"
-            );
-        }
-        for model in ["gpt-5.6", "owner/model_name:v1"] {
-            let profile = parse_profile_value(
-                &json!({"provider": "openai", "model": model}),
-                "valid-model",
-            )
-            .expect("valid model punctuation must parse");
-            assert_eq!(profile.model, model);
-        }
-    }
-
-    #[test]
-    fn keyfile_aliases_are_credentials_and_debug_is_redacted() {
-        for alias in ["auth-keyfile", "authKeyfile", "apiKeyfile"] {
-            let marker = format!("/private/credential/{alias}-marker.key");
-            let profile = parse_profile_value(
-                &json!({
-                    "provider": "openai",
-                    "model": "m",
-                    "ephemeralSettings": {alias: marker}
-                }),
-                "aliases",
-            )
-            .expect("keyfile alias must parse as a credential path");
-            assert_eq!(
-                profile.ephemeral.auth_keyfile_orig.as_deref(),
-                Some(marker.as_str()),
-                "{alias}"
-            );
-            assert!(
-                !profile.ephemeral.prompt_notes.contains_key(alias),
-                "{alias}"
-            );
-            let rendered = format!("{:?}", profile.ephemeral);
-            assert!(!rendered.contains(&marker), "{alias}: {rendered}");
-            assert!(
-                !rendered.contains(&format!("{alias}-marker.key")),
-                "{alias}: {rendered}"
-            );
-        }
-    }
-
-    /// `auth-key-name` is a named **secure-store** reference, never a keyfile path: it
-    /// fails parsing with the fixed value-free refusal (its bytes never travel), and a
-    /// same-named local file is never even considered as a keyfile.
-    #[test]
-    fn auth_key_name_is_an_unsupported_secure_store_reference() {
-        let marker = "secure-store-provider-key";
-        let p = parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "m",
-                "ephemeralSettings": {"auth-key-name": marker}
-            }),
-            "named-ref",
-        );
-        let err = p.expect_err("auth-key-name must fail parsing");
-        assert_eq!(err, AUTH_KEY_NAME_UNSUPPORTED_MESSAGE);
-        assert!(!err.contains(marker), "the value must never travel: {err}");
-    }
-
-    /// The strict endpoint shape: a non-http(s) scheme, userinfo, query, fragment,
-    /// or a non-URL each fail so the configured endpoint is never ambiguous. (A
-    /// non-URL never renders the raw value; everything still collapses to the redacted
-    /// form on error surfaces.)
-    #[test]
-    fn base_url_strict_rejection_table() {
-        for raw in [
-            "ftp://127.0.0.1/x",
-            "https://alice:secret@api.example.com/v1",
-            "http://127.0.0.1/v1?q=1",
-            "http://127.0.0.1/v1#frag",
-            "not a url",
-        ] {
-            let p = parse_profile_value(
-                &json!({"provider":"openai","model":"m",
-                       "ephemeralSettings":{"base-url":raw,"auth-key":"k"}}),
-                "bad",
-            );
-            assert!(p.is_err(), "base-url {raw:?} must be rejected");
-        }
-        // A well-formed loopback base-url still parses (strict shape kept).
-        let p = parse_profile_value(
-            &json!({"provider":"openai","model":"m",
-                   "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1","auth-key":"k"}}),
-            "ok",
-        );
-        assert!(p.is_ok(), "a valid loopback base-url must parse");
-        // The stored `scheme://host:port` rendering stays verbatim for the transport
-        // (so routing/billing reach the real endpoint) but the full value never carries
-        // userinfo/query/fragment.
-        let p = parse_profile_value(
-            &json!({"provider":"openai","model":"m",
-                   "ephemeralSettings":{"base-url":"https://api.example.com/v1","auth-key":"k"}}),
-            "ok",
-        )
-        .expect("a conventional path-prefix base-url must parse");
-        assert_eq!(
-            p.ephemeral
-                .base_url
-                .as_ref()
-                .map(|u| u.full().to_string())
-                .as_deref(),
-            Some("https://api.example.com/v1")
-        );
-    }
-
-    #[test]
-    fn public_redacted_url_constructor_enforces_endpoint_policy() {
-        let secret = "constructor-secret-marker";
-        for raw in [
-            "ftp://127.0.0.1/x".to_string(),
-            format!("https://alice:{secret}@api.example.com/v1"),
-            format!("https://api.example.com/v1?token={secret}"),
-            format!("https://api.example.com/v1#{secret}"),
-        ] {
-            let err = RedactedUrl::parse(&raw).expect_err("unsafe public URL must reject");
-            assert!(!err.contains(secret));
-            assert!(!format!("{err:?}").contains(secret));
-        }
-        let valid = RedactedUrl::parse("https://api.example.com/v1").unwrap();
-        assert_eq!(valid.as_display(), "https://api.example.com");
-    }
-
-    #[test]
-    fn reasoning_effort_enforces_prompt_note_cap() {
-        let exact = "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES);
-        let profile = parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "m",
-                "ephemeralSettings": {"reasoning.effort": exact}
-            }),
-            "bounded",
-        )
-        .unwrap();
-        assert_eq!(
-            profile.ephemeral.prompt_notes["reasoning:reasoning.effort"].len(),
-            crate::redact::MAX_PROMPT_NOTE_BYTES
-        );
-
-        let over = "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES + 1);
-        let error = parse_profile_value(
-            &json!({
-                "provider": "openai",
-                "model": "m",
-                "ephemeralSettings": {"reasoning.effort": over}
-            }),
-            "bounded",
-        )
-        .unwrap_err();
-        assert_eq!(error, crate::redact::PROMPT_NOTE_CAP_MESSAGE);
-    }
-
-    #[test]
-    fn ignored_behavior_settings_are_limited_to_dsflash_profiles() {
-        assert!(is_dsflash_profile_name("dsflash"));
-        assert!(is_dsflash_profile_name("/profiles/dsflash-mi300x.json"));
-        for near_match in [
-            "ordinary-dsflash",
-            "dsflashlike",
-            "deepseek",
-            "/profiles/not-dsflash.json",
-        ] {
-            assert!(!is_dsflash_profile_name(near_match), "{near_match}");
-        }
-        let settings = [
-            ("emojifilter", json!("on")),
-            ("shell-replacement", json!("bash")),
-            ("stream-idle-timeout-ms", json!("1000")),
-            ("requires-auth", json!(true)),
-            ("streamIdleTimeoutMs", json!(1000)),
-            ("maxRetrywait", json!(1000)),
-            ("reasoning.maxTokens", json!(1000)),
-            ("reasoning.budgetTokens", json!(1000)),
-            ("autokimi-style", json!(1)),
-            ("sandbox-base-url", json!("https://sandbox.invalid")),
-            ("default-tools", json!("all")),
-            ("tool-format", json!("json")),
-            ("reasoning.enabled", json!(true)),
-            ("reasoning.includeInResponse", json!(true)),
-            ("reasoning.includeInContext", json!(true)),
-            ("reasoning.stripFromContext", json!(true)),
-            ("reasoning.effortWireFormat", json!("string")),
-            ("reasoning.enabledWireFormat", json!("boolean")),
-            ("reasoning.enabledMap", json!("enabled")),
-            ("reasoning.effortMap", json!("effort")),
-            ("reasoning.format", json!("text")),
-            ("reasoning.fieldName", json!("reasoning")),
-            ("reasoning.update", json!(true)),
-            ("reasoning.display", json!(true)),
-        ];
-        for (key, value) in settings {
-            let ordinary = parse_profile_value(
-                &json!({
-                    "provider": "openai",
-                    "model": "m",
-                    "ephemeralSettings": {key: value.clone()}
-                }),
-                "ordinary-profile",
-            );
-            let error = ordinary.expect_err("ignored behavior must fail outside dsflash");
-            assert!(
-                error.contains("only supported for dsflash profiles"),
-                "{key}: {error}"
-            );
-
-            let dsflash = parse_profile_value(
-                &json!({
-                    "provider": "openai",
-                    "model": "m",
-                    "ephemeralSettings": {key: value}
-                }),
-                "dsflash-mi300x",
-            )
-            .unwrap_or_else(|error| panic!("{key}: {error}"));
-            assert!(dsflash.ephemeral.is_dsflash, "{key}");
-        }
-    }
-}
+mod tests;

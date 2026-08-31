@@ -163,10 +163,12 @@ fn oversized_corrupt_branch_cwd_parent_field_is_one_bounded_json() {
     run_case("parent", &format!("{}pa", uniq()));
 }
 
-/// `auth-key-name` is a named **secure-store** reference, never a keyfile path: the
-/// compiled CLI fails during profile resolution with the fixed value-free refusal. A
-/// same-named local file is never read as a keyfile (its contents never travel) and
-/// stdout is exactly one bounded JSON error.
+/// `auth-key-name` is a named **secure-store** reference, never a keyfile path. The
+/// parser records only its presence; the refusal fires in `from_profile_in`'s
+/// credential-policy class, so the compiled CLI reports it at the model-config
+/// stage with the fixed value-free refusal. A same-named local file is never read
+/// as a keyfile (its contents never travel) and stdout is exactly one bounded
+/// JSON error.
 #[test]
 fn auth_key_name_fails_with_fixed_message_and_never_reads_a_local_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -193,7 +195,7 @@ fn auth_key_name_fails_with_fixed_message_and_never_reads_a_local_file() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let parsed: Value = serde_json::from_str(stdout.trim()).expect("exactly one JSON object");
     assert_eq!(parsed["status"], "error");
-    assert_eq!(parsed["error"]["code"], "profile-load");
+    assert_eq!(parsed["error"]["code"], "model-config");
     let msg = parsed["error"]["message"].as_str().unwrap_or("");
     assert!(
         msg.contains("secure-store"),
@@ -386,10 +388,10 @@ fn configuration_root_must_be_available_and_absolute() {
         .unwrap();
     assert_eq!(missing.status.code(), Some(3));
     let missing_json = stdout_json(&missing);
-    assert_eq!(missing_json["error"]["code"], "profile-load");
+    assert_eq!(missing_json["error"]["code"], "config-home");
     assert_eq!(
         missing_json["error"]["message"],
-        "profile resolution failed: absolute configuration directory is unavailable"
+        "absolute configuration directory is unavailable"
     );
 
     let absolute_fallback = tempfile::tempdir().unwrap();
@@ -404,10 +406,10 @@ fn configuration_root_must_be_available_and_absolute() {
         .unwrap();
     assert_eq!(relative.status.code(), Some(3));
     let relative_json = stdout_json(&relative);
-    assert_eq!(relative_json["error"]["code"], "profile-load");
+    assert_eq!(relative_json["error"]["code"], "config-home");
     assert_eq!(
         relative_json["error"]["message"],
-        "profile resolution failed: LLXPRT_CONFIG_HOME must name a nonempty absolute directory"
+        "LLXPRT_CONFIG_HOME must name a nonempty absolute directory"
     );
 }
 

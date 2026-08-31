@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "glm-5.2",
+  "modelParams": {
+    "top_p": 0.95,
+    "temperature": 1
+  },
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://ollama.com/v1/",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "context-limit": 225000,
+    "maxOutputTokens": 40000
+  }
+}

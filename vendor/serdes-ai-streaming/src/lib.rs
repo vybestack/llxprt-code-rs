@@ -68,6 +68,8 @@ pub mod events;
 pub mod partial_response;
 pub mod parts_manager;
 pub mod sse;
+#[cfg(feature = "websocket")]
+pub mod websocket;
 
 // Re-exports
 pub use agent_stream::{

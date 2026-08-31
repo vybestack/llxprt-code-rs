@@ -49,6 +49,7 @@ rustdoc-args = [
 
 [features]
 anthropic = ["serdes-ai-models/anthropic"]
+chatgpt-oauth = ["serdes-ai-models/chatgpt-oauth"]
 azure = ["serdes-ai-models/azure"]
 default = [
     "openai",

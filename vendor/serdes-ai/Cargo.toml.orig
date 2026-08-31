@@ -31,6 +31,7 @@ full = [
 
 # Model providers
 openai = ["serdes-ai-models/openai"]
+chatgpt-oauth = ["serdes-ai-models/chatgpt-oauth"]
 anthropic = ["serdes-ai-models/anthropic"]
 gemini = ["serdes-ai-models/gemini"]
 mistral = ["serdes-ai-models/mistral"]

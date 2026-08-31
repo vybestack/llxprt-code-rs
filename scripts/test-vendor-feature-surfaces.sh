@@ -38,7 +38,7 @@ check_features() {
 for package in \
   serdes-ai-core serdes-ai-agent serdes-ai-models serdes-ai-output serdes-ai-providers \
   serdes-ai-retries serdes-ai-streaming serdes-ai-tools serdes-ai-toolsets serdes-ai-macros \
-  serdes-ai
+  serdes-ai serdes-ai-responses
 do
   check_features "$package"
 done

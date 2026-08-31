@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "zai-org/GLM-5.2",
+  "modelParams": {
+    "max_tokens": 32000,
+    "temperature": 1,
+    "top_p": 0.95,
+    "parse_reasoning": true,
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://api.friendli.ai/v1",
+    "context-limit": 262000
+  }
+}

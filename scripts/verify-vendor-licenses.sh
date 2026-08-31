@@ -28,6 +28,7 @@ required_vendor=(
   vendor/serdes-ai-tools/Cargo.toml
   vendor/serdes-ai-toolsets/Cargo.toml
   vendor/serdes-ai-macros/Cargo.toml
+  vendor/serdes-ai-responses/Cargo.toml
 )
 for p in "${required_vendor[@]}"; do
   if [[ ! -f "$p" ]]; then
@@ -39,6 +40,9 @@ done
 
 expected_vcs='20fc3077e77a38ccc6d0ab5763098e44138630b5'
 for manifest in "${required_vendor[@]}"; do
+  if [[ "$manifest" == "vendor/serdes-ai-responses/Cargo.toml" ]]; then
+    continue
+  fi
   vcs="$(dirname "$manifest")/.cargo_vcs_info.json"
   if [[ ! -f "$vcs" ]] || ! grep -q "\"sha1\": \"$expected_vcs\"" "$vcs"; then
     echo "missing or unexpected vendored VCS identity: $vcs" >&2
@@ -47,7 +51,7 @@ for manifest in "${required_vendor[@]}"; do
 done
 
 patch_file=SERDES-AI-0.2.6.patch
-expected_patch='08cf84799c600850a1d3b90ff5321ad75edfd6eaba0c9491435a10de220daac7'
+expected_patch='4ac2d91d0320f0ed3ceeee7766a0e0bc27bc2ff72026cbd2404704ce0af74de6'
 if [[ ! -f "$patch_file" ]]; then
   echo "missing reproducible vendor patch: $patch_file" >&2
   fail=1

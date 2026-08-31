@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "zai/GLM-5.2",
+  "modelParams": {
+    "max_tokens": 60000,
+    "temperature": 1,
+    "top_p": ".95"
+  },
+  "ephemeralSettings": {
+    "auth-key-name": "<redacted-credential>",
+    "base-url": "https://api.inference.crusoecloud.com/v1/",
+    "reasoning.enabled": true,
+    "reasoning.effort": "high",
+    "prompt-caching": "24h",
+    "context-limit": 262000
+  }
+}

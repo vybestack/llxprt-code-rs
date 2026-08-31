@@ -139,8 +139,8 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str) -> BranchRecord {
         summary: "done".into(),
         error: String::new(),
         owner: String::new(),
-        reserved_at: 1,
-        lease_expiry: 2,
+        reserved_at: 0,
+        lease_expiry: 0,
     }
 }
 
@@ -286,6 +286,26 @@ fn second_store_reclaims_stale_pending_child_on_the_same_branch() {
         2,
         "stale reclaim must not add a branch"
     );
+}
+
+/// Terminal branches release their reservation: finalize and fail both zero the
+/// lease fields, so a terminal branch can never look owned or reclaimable.
+#[test]
+fn terminal_branches_release_their_reservation() {
+    let cwd = new_cwd();
+    let st = store("resv-release");
+    complete_turn1(&st, "P1", &cwd);
+    let r2 = reserved(&st, Some(2), None, "P2", &cwd).unwrap();
+    st.fail(&r2, "boom", &[]).unwrap();
+    let snap = st.snapshot().unwrap();
+    assert_eq!(snap.branches.len(), 2);
+    let (completed, failed) = (&snap.branches[0], &snap.branches[1]);
+    assert_eq!(completed.lifecycle, Lifecycle::Completed);
+    assert_eq!(completed.reserved_at, 0);
+    assert_eq!(completed.lease_expiry, 0);
+    assert_eq!(failed.lifecycle, Lifecycle::Failed);
+    assert_eq!(failed.reserved_at, 0);
+    assert_eq!(failed.lease_expiry, 0);
 }
 
 /// A completed child at the same turn/prompt replays: no new branch, no backend call.

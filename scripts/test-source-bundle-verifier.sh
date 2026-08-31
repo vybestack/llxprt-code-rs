@@ -1544,6 +1544,12 @@ PY
   git -C "$build_fixture" add .
   git -C "$build_fixture" add -f registry-vendor
   git -C "$build_fixture" commit -q -m snapshot
+  vendor_attribute="$(git -C "$build_fixture" check-attr text -- \
+    registry-vendor/core-foundation-0.10.1/Cargo.toml)"
+  if [[ "$vendor_attribute" != *': text: unset' ]]; then
+    echo "registry-vendor files are not protected from line-ending conversion" >&2
+    exit 1
+  fi
   mkdir "$tmp/clean-output"
   PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
     "$tmp/clean-output/source.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"
@@ -1552,6 +1558,53 @@ PY
     echo "successful source-bundle build contaminated its output directory" >&2
     exit 1
   fi
+
+  # The issue plan is the one static plan input. Its parent directories and the
+  # repository's attribute policy must be explicit archive members.
+  tar -tzf "$tmp/clean-output/source.tar.gz" |
+    sed -e 's|^\./||' -e 's|^bundle/||' > "$tmp/archive-members"
+  for member in \
+    .gitattributes \
+    project-plans/ \
+    project-plans/issue1/ \
+    project-plans/issue1/PLAN.md; do
+    if ! grep -Fqx "$member" "$tmp/archive-members"; then
+      echo "source bundle omitted required static member: $member" >&2
+      exit 1
+    fi
+  done
+
+  plan_fixture_commit="$(git -C "$build_fixture" rev-parse HEAD)"
+  rm "$build_fixture/project-plans/issue1/PLAN.md"
+  git -C "$build_fixture" add -u project-plans/issue1/PLAN.md
+  git -C "$build_fixture" commit -q -m omitted-plan-fixture
+  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+      "$tmp/omitted-plan.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle builder accepted omission of the required issue plan" >&2
+    exit 1
+  fi
+  git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
+
+  rm "$build_fixture/project-plans/issue1/PLAN.md"
+  ln -s /tmp "$build_fixture/project-plans/issue1/PLAN.md"
+  git -C "$build_fixture" add project-plans/issue1/PLAN.md
+  git -C "$build_fixture" commit -q -m symlink-plan-fixture
+  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+      "$tmp/symlink-plan.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle builder accepted a symlink in place of the issue plan" >&2
+    exit 1
+  fi
+  git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
+
+  printf '%s\n' 'unlisted issue plan' > "$build_fixture/project-plans/issue1/UNLISTED.md"
+  git -C "$build_fixture" add project-plans/issue1/UNLISTED.md
+  git -C "$build_fixture" commit -q -m unlisted-plan-fixture
+  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+      "$tmp/unlisted-plan.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle builder accepted an unlisted issue plan" >&2
+    exit 1
+  fi
+  git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
 
   # The whole builder must not re-resolve private cleanup paths after the publisher has retained
   # the source and destination directories. Replace the output parent from inside verification,

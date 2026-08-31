@@ -179,7 +179,13 @@ impl WorkspaceCap {
             .self_metadata()
             .map_err(|e| format!("fstat workspace root: {e}"))?;
         let st = m.stat();
+        // dev_t is u64 on linux and the bsds but a narrow type on darwin, so the
+        // widening belongs to the macos build alone; converting on linux trips
+        // clippy as an identity conversion.
+        #[cfg(target_os = "macos")]
         let dev = u64::try_from(st.st_dev).unwrap_or(u64::MAX);
+        #[cfg(not(target_os = "macos"))]
+        let dev = st.st_dev;
         let ino = st.st_ino;
         Ok(WorkspaceCap {
             root: d,
@@ -468,8 +474,8 @@ const MAX_SEARCH_RESULT_BYTES: usize = MAX_SEARCH_RESULTS * MAX_LINE_BYTES;
 /// Space reserved inside the result cap for all truncation-reason metadata.
 const MAX_SEARCH_NOTE_BYTES: usize = 128;
 const MAX_SEARCH_DATA_BYTES: usize = MAX_SEARCH_RESULT_BYTES - MAX_SEARCH_NOTE_BYTES;
+pub(crate) mod output_limits;
 
-/// The tool schemas sent with every model request.
 /// Whether a name belongs to a tool that this agent can persist in a transcript.
 pub(crate) fn is_known_tool_name(name: &str) -> bool {
     matches!(
@@ -492,6 +498,11 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
                 ("path".into(), json!({"type": "string"}), true),
                 ("offset".into(), json!({"type": "integer"}), false),
                 ("limit".into(), json!({"type": "integer"}), false),
+                (
+                    "max_output_bytes".into(),
+                    json!({"type": "integer"}),
+                    false,
+                ),
             ],
         },
         ToolSpec {
@@ -525,6 +536,11 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
                 ("pattern".into(), json!({"type": "string"}), true),
                 ("max_results".into(), json!({"type": "integer"}), false),
                 ("path".into(), json!({"type": "string"}), false),
+                (
+                    "max_output_bytes".into(),
+                    json!({"type": "integer"}),
+                    false,
+                ),
             ],
         },
         ToolSpec {
@@ -684,7 +700,7 @@ fn read_file_tool(
     args: &BTreeMap<String, JsonValue>,
     max_output: usize,
 ) -> Result<String, String> {
-    reject_unknown(args, &["path", "offset", "limit"])?;
+    reject_unknown(args, &["path", "offset", "limit", "max_output_bytes"])?;
     let rel = arg_str(args, "path", true)?.unwrap();
     let offset = arg_u64(args, "offset")?;
     let limit = arg_u64(args, "limit")?;
@@ -986,6 +1002,14 @@ pub(crate) fn execute_tool_with_limit(
                 truncate("tool arguments must be a JSON object", output_limit),
             )
         }
+    };
+    let output_limit = if matches!(name, "read_file" | "search_file_content") {
+        match arg_u64(&map, "max_output_bytes") {
+            Ok(value) => bounded(value, output_limit, output_limit),
+            Err(error) => return (false, truncate(&error, output_limit)),
+        }
+    } else {
+        output_limit
     };
     let result = match name {
         "read_file" => read_file_tool(&config.ws, &map, output_limit),

@@ -178,14 +178,14 @@ impl SessionState {
         if branch.prompt.len() > MAX_PROMPT_BYTES {
             return Err(branch_corrupt(branch, "prompt exceeds its byte cap"));
         }
-        if branch.reserved_at == 0 || branch.lease_expiry <= branch.reserved_at {
-            return Err(branch_corrupt(branch, "invalid reservation lease fields"));
-        }
         if branch.owner.len() > MAX_RENDERED_FIELD_BYTES {
             return Err(branch_corrupt(branch, "owner token exceeds its byte cap"));
         }
         match branch.lifecycle {
             Lifecycle::Pending => {
+                if branch.reserved_at == 0 || branch.lease_expiry <= branch.reserved_at {
+                    return Err(branch_corrupt(branch, "invalid reservation lease fields"));
+                }
                 if branch.owner.is_empty() || !branch.summary.is_empty() || !branch.error.is_empty()
                 {
                     return Err(branch_corrupt(
@@ -195,6 +195,12 @@ impl SessionState {
                 }
             }
             Lifecycle::Completed => {
+                if branch.reserved_at != 0 || branch.lease_expiry != 0 {
+                    return Err(branch_corrupt(
+                        branch,
+                        "terminal branch retains reservation lease fields",
+                    ));
+                }
                 if !branch.owner.is_empty() || !branch.error.is_empty() {
                     return Err(branch_corrupt(
                         branch,
@@ -215,6 +221,12 @@ impl SessionState {
                 }
             }
             Lifecycle::Failed => {
+                if branch.reserved_at != 0 || branch.lease_expiry != 0 {
+                    return Err(branch_corrupt(
+                        branch,
+                        "terminal branch retains reservation lease fields",
+                    ));
+                }
                 if !branch.owner.is_empty() || branch.error.is_empty() || !branch.summary.is_empty()
                 {
                     return Err(branch_corrupt(

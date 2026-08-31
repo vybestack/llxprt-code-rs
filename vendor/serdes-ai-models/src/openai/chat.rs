@@ -58,6 +58,16 @@ pub struct OpenAIChatModel {
     project: Option<String>,
     profile: ModelProfile,
     default_timeout: Duration,
+    request_settings: OpenAIChatModelRequestSettings,
+}
+
+/// Per-model typed request-extension settings. Only construction decides whether
+/// the dsflash `chat_template_kwargs` object reaches requests; the per-request
+/// `ModelSettings` carries no extension.
+#[derive(Debug, Clone, Default)]
+pub struct OpenAIChatModelRequestSettings {
+    /// The dsflash request extension; `None` keeps the wire key absent.
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
 }
 
 impl std::fmt::Debug for OpenAIChatModel {
@@ -89,6 +99,7 @@ impl OpenAIChatModel {
             project: None,
             profile,
             default_timeout: Duration::from_secs(120),
+            request_settings: OpenAIChatModelRequestSettings::default(),
         }
     }
 
@@ -125,6 +136,13 @@ impl OpenAIChatModel {
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.default_timeout = timeout;
+        self
+    }
+
+    /// Set the typed per-model request-extension settings.
+    #[must_use]
+    pub fn with_request_settings(mut self, settings: OpenAIChatModelRequestSettings) -> Self {
+        self.request_settings = settings;
         self
     }
 
@@ -398,6 +416,7 @@ impl OpenAIChatModel {
             },
             logprobs: None,
             top_logprobs: None,
+            chat_template_kwargs: self.request_settings.chat_template_kwargs.clone(),
         }
     }
 
@@ -607,6 +626,59 @@ mod tests {
         let model = OpenAIChatModel::new("gpt-4o", "sk-test-key");
         assert_eq!(model.name(), "gpt-4o");
         assert_eq!(model.system(), "openai");
+    }
+
+    #[test]
+    fn test_chat_template_kwargs_wire_shape() {
+        // A dsflash-constructed model serializes exactly the bounded object.
+        let model = OpenAIChatModel::new("deepseek", "key").with_request_settings(
+            OpenAIChatModelRequestSettings {
+                chat_template_kwargs: Some(ChatTemplateKwargs {
+                    enable_thinking: true,
+                    reasoning_effort: Some(ChatTemplateReasoningEffort::High),
+                }),
+            },
+        );
+        let request =
+            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            wire["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking": true, "reasoning_effort": "high"})
+        );
+
+        // An omitted effort omits the key entirely.
+        let without_effort = OpenAIChatModel::new("deepseek", "key").with_request_settings(
+            OpenAIChatModelRequestSettings {
+                chat_template_kwargs: Some(ChatTemplateKwargs {
+                    enable_thinking: false,
+                    reasoning_effort: None,
+                }),
+            },
+        );
+        let request = without_effort.build_request(
+            &[],
+            &ModelSettings::default(),
+            &Default::default(),
+            false,
+        );
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            wire["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking": false})
+        );
+    }
+
+    #[test]
+    fn test_chat_template_kwargs_absent_without_request_settings() {
+        // Every non-dsflash Chat target constructs without request settings; the
+        // key must be absent from the wire body, not null.
+        let model = OpenAIChatModel::new("gpt-4o", "key");
+        assert!(model.request_settings.chat_template_kwargs.is_none());
+        let request =
+            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
+        let wire = serde_json::to_value(&request).unwrap();
+        assert!(wire.get("chat_template_kwargs").is_none());
     }
 
     #[test]

@@ -1,0 +1,2 @@
+# Cargo registry sources must remain byte-for-byte identical to their checksums.
+registry-vendor/** -text -whitespace
