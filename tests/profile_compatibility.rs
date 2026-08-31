@@ -28,6 +28,7 @@ struct Counts {
     profile_json_files: usize,
     in_scope_open_ai: usize,
     in_scope_codex: usize,
+    in_scope_anthropic: usize,
     installed_in_scope: usize,
     load_balancer: usize,
     unsupported_providers: usize,
@@ -264,9 +265,9 @@ fn inventory_counts_are_exact() {
     // counts.profile_json_files counts the installed profiles directory (the
     // installed sources) plus the checked-in codex fixture rows; the three
     // installed load-balancer shapes are inventoried as rows but the fixtures
-    // directory carries 66 redacted files.
+    // directory carries 73 redacted files.
     assert_eq!(a.counts.profile_json_files, 62);
-    assert_eq!(a.counts.installed_in_scope, 39);
+    assert_eq!(a.counts.installed_in_scope, 46);
     assert_eq!(a.inventory.total_entries, 124);
     assert_eq!(a.inventory.distinct_keys, 123);
     assert_eq!(
@@ -277,14 +278,18 @@ fn inventory_counts_are_exact() {
         a.counts.in_scope_codex, 1,
         "installed provider=codex profile"
     );
+    assert_eq!(
+        a.counts.in_scope_anthropic, 7,
+        "installed provider=anthropic profiles"
+    );
     assert_eq!(a.counts.load_balancer, 3);
-    assert_eq!(a.counts.unsupported_providers, 6);
+    assert_eq!(a.counts.unsupported_providers, 5);
     assert_eq!(a.counts.inventory_total_entries, 124);
     assert_eq!(a.counts.inventory_distinct_keys, 123);
     assert_eq!(a.counts.duplicate_groups, 1);
     assert_eq!(a.counts.duplicate_extra_entries, 1);
 
-    assert_eq!(a.profiles.installed_in_scope.len(), 39);
+    assert_eq!(a.profiles.installed_in_scope.len(), 46);
     let openai_count = a
         .profiles
         .installed_in_scope
@@ -292,6 +297,32 @@ fn inventory_counts_are_exact() {
         .filter(|r| r.provider == "openai")
         .count();
     assert_eq!(openai_count, 38);
+    let anthropic_count = a
+        .profiles
+        .installed_in_scope
+        .iter()
+        .filter(|r| r.provider == "anthropic")
+        .count();
+    assert_eq!(anthropic_count, 7);
+    let zai = a
+        .profiles
+        .installed_in_scope
+        .iter()
+        .find(|r| r.file == "zai.json")
+        .expect("zai.json row");
+    assert_eq!(zai.scope, "anthropic");
+    assert_eq!(
+        zai.expected_disposition
+            .get("target")
+            .and_then(|v| v.as_str()),
+        Some("anthropic-messages")
+    );
+    assert_eq!(
+        zai.expected_disposition
+            .get("firstFailure")
+            .and_then(|v| v.as_str()),
+        Some("named secure-store reference rejects after Anthropic Messages target resolution")
+    );
     let codex = a
         .profiles
         .installed_in_scope
@@ -417,7 +448,7 @@ fn load_balancer_and_unsupported_rows_are_present() {
         );
         assert!(row.reason.contains("unsupported-load-balancing"));
     }
-    assert_eq!(a.profiles.unsupported_providers.len(), 6);
+    assert_eq!(a.profiles.unsupported_providers.len(), 5);
     for row in &a.profiles.unsupported_providers {
         assert!(!row.provider.is_empty());
         assert!(!row.files.is_empty());
@@ -467,10 +498,10 @@ fn fixture_directory_matches_inventory_rows() {
         .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
         .filter(|name| name != "openai-responses-live.json")
         .collect();
-    assert_eq!(on_disk.len(), 66);
+    assert_eq!(on_disk.len(), 73);
     assert!(installed.iter().all(|f| on_disk.contains(*f)));
     assert!(synthetic.iter().all(|f| on_disk.contains(*f)));
-    assert_eq!(installed.iter().collect::<BTreeSet<_>>().len(), 39);
+    assert_eq!(installed.iter().collect::<BTreeSet<_>>().len(), 46);
     assert_eq!(synthetic.iter().collect::<BTreeSet<_>>().len(), 27);
 }
 
@@ -526,7 +557,7 @@ fn documentation_is_present_and_consistent() {
         doc.contains(&format!(
             "({} openai + {} codex)",
             c.in_scope_open_ai, c.in_scope_codex
-        )) || doc.contains("38` provider"),
-        "docs mention the in-scope 38 openai + 1 codex partition"
+        )) || (doc.contains("`38` provider") && doc.contains("`7` provider `anthropic`")),
+        "docs mention the in-scope 38 openai + 7 anthropic + 1 codex partition"
     );
 }

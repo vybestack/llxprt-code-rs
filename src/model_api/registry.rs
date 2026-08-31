@@ -220,22 +220,23 @@ fn construct_anthropic(
         dependencies.config_home().as_path(),
     )
     .map_err(|error| error.to_string())?;
+    let timeout = std::time::Duration::from_millis(profile.ephemeral.timeout_ms.unwrap_or(900_000));
     let secret_config = ModelConfig {
         model: profile.model.clone(),
         base_url: crate::profile::RedactedUrl::parse(base_url)?,
         api_key: api_key.clone(),
         keyfile_path: profile.ephemeral.auth_keyfile_orig.clone(),
         max_output_tokens: profile.ephemeral.max_output_tokens,
-        timeout: anthropic_timeout(profile),
+        timeout: Some(timeout),
         model_params: Some(profile.model_params.clone()),
         context_limit: profile.ephemeral.context_limit,
     };
     let secret_values = secret_config.secret_values();
-    let model_settings = anthropic_model_settings(profile);
+    let model_settings = anthropic_model_settings(profile, timeout);
     crate::agent::validate_timeout(model_settings.timeout)?;
     let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
-        .with_timeout(model_settings.timeout.expect("Anthropic timeout is fixed"));
+        .with_timeout(timeout);
     let max_rounds = resolve_max_rounds(profile)?;
 
     Ok(ConstructedBackend {
@@ -246,18 +247,15 @@ fn construct_anthropic(
     })
 }
 
-fn anthropic_timeout(profile: &Profile) -> Option<std::time::Duration> {
-    Some(std::time::Duration::from_millis(
-        profile.ephemeral.timeout_ms.unwrap_or(900_000),
-    ))
-}
-
-fn anthropic_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
+fn anthropic_model_settings(
+    profile: &Profile,
+    timeout: std::time::Duration,
+) -> serdes_ai::ModelSettings {
     serdes_ai::ModelSettings {
         max_tokens: profile.ephemeral.max_output_tokens,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
-        timeout: anthropic_timeout(profile),
+        timeout: Some(timeout),
         ..Default::default()
     }
 }

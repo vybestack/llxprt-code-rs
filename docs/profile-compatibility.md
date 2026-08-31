@@ -20,8 +20,9 @@ enums and fixed redacted placeholders). This file records no scalar credential, 
 id, token, local path, or credential-store value.
 
 The checked-in `tests/fixtures/profile-compatibility-inventory.json` is the exhaustive
-authority for the disposition of the 39 installed in-scope profiles (`38` provider
-`openai` plus `gpt56solhigh.json` provider `codex`). Every tracked fixture field has
+authority for the disposition of the 46 installed in-scope profiles (
+`38` provider `openai`, `7` provider `anthropic`, plus
+`gpt56solhigh.json` provider `codex`). Every tracked fixture field has
 exactly one classification and one owner. The repository self-tests in
 `tests/profile_compatibility.rs` fail if the inventory is internally inconsistent or if
 any fixture field is unclassified or multiply owned.
@@ -183,11 +184,12 @@ Duplicate definitions:
 | `stream-first-response-timeout-ms` | number |  | registry-entries-3.ts |
 | `kimi.experimental-video` | boolean |  | registry-entries-3.ts |
 
-## In-scope installed profile disposition (39 fixtures)
+## In-scope installed profile disposition (46 fixtures)
 
 | fixture | provider | expected disposition |
 | --- | --- | --- |
 | `absolute-path.json` | openai | in-scope installed openai |
+| `anthropic-profile.json` | anthropic | in-scope installed anthropic |
 | `autokimi.json` | openai | in-scope installed openai |
 | `both-auth-methods.json` | openai | in-scope installed openai |
 | `chutesglm52.json` | openai | in-scope installed openai |
@@ -201,11 +203,14 @@ Duplicate definitions:
 | `dsflash-mi300x.pre-explicit-high-20260824.json` | openai | in-scope installed openai |
 | `dsflash-mi300x.pre-repetition-detection-20260825.json` | openai | in-scope installed openai |
 | `dsflash.json` | openai | in-scope installed openai |
+| `fable.json` | anthropic | in-scope installed anthropic |
+| `fable5.json` | anthropic | in-scope installed anthropic |
 | `friendliglm.json` | openai | in-scope installed openai |
 | `glm52-runpod.json` | openai | in-scope installed openai |
 | `glm52-vast.json` | openai | in-scope installed openai |
 | `glm52selfhost.json` | openai | in-scope installed openai |
 | `gpt56solhigh.json` | codex | in-scope installed codex |
+| `home-path.json` | anthropic | in-scope installed anthropic |
 | `invalid-content-0.json` | openai | in-scope installed openai |
 | `invalid-content-1.json` | openai | in-scope installed openai |
 | `invalid-content-2.json` | openai | in-scope installed openai |
@@ -219,13 +224,16 @@ Duplicate definitions:
 | `openai-profile.json` | openai | in-scope installed openai |
 | `ornith-runpod.json` | openai | in-scope installed openai |
 | `parasailglm.json` | openai | in-scope installed openai |
+| `prod-env.json` | anthropic | in-scope installed anthropic |
 | `qwen38-mi300x.json` | openai | in-scope installed openai |
 | `qwen38.json` | openai | in-scope installed openai |
 | `simulation-test.json` | openai | in-scope installed openai |
 | `smol3-mlx.json` | openai | in-scope installed openai |
 | `stepfun-37.json` | openai | in-scope installed openai |
+| `tilde-test.json` | anthropic | in-scope installed anthropic |
 | `update-test.json` | openai | in-scope installed openai |
 | `wrong-perms.json` | openai | in-scope installed openai |
+| `zai.json` | anthropic | in-scope installed anthropic |
 
 ## Load-balancer shapes (3 rows; out of target construction scope)
 
@@ -235,18 +243,17 @@ Duplicate definitions:
 | `gptfirst.json` | fixed unsupported-load-balancing diagnostic |
 | `opusfirst.json` | fixed unsupported-load-balancing diagnostic |
 
-## Unsupported-provider shapes (6 groups; exact provider-resolution rejection)
+## Unsupported-provider shapes (5 groups; exact provider-resolution rejection)
 
 | provider | files | reason |
 | --- | --- | --- |
 | `Fireworks` | `fireworkskimi.json`, `fireworkskimioai.json` | exact provider-resolution rejection |
 | `LM Studio` | `ollamanorth.json`, `ornith-lmstudio.json`, `smol3-mlx-lmstudio.json`, `smol3.json` | exact provider-resolution rejection |
-| `anthropic` | `anthropic-profile.json`, `fable.json`, `fable5.json`, `home-path.json`, `prod-env.json`, `tilde-test.json`, `zai.json` | Anthropic Messages backend (issue 4); legacy profile settings remain strict |
 | `claudecode` | `opus5.json`, `opusthinking.json`, `opusthinkingbucketed.json` | exact provider-resolution rejection |
 | `gemini` | `flash3.json`, `geminimaria.json` | exact provider-resolution rejection |
 | `google` | `google-profile.json`, `test-env.json` | exact provider-resolution rejection |
 
-## Synthetic staged fixtures (26)
+## Synthetic staged fixtures (27)
 
 | fixture | kind | expected outcome |
 | --- | --- | --- |
@@ -271,9 +278,9 @@ Duplicate definitions:
 | `ollamakimi.standard-summary.synthetic.json` | named-staged-case | named plan disposition per profile-compatibility.md |
 | `ollamakimi.without-auth-key-name.synthetic.json` | named-staged-case | named plan disposition per profile-compatibility.md |
 | `unsupported.bedrock.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
-| `zai.anthropic.synthetic.json` | anthropic-messages-shape | Anthropic Messages target resolves offline |
 | `unsupported.claudecode.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.fireworks.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.gemini.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.google.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.lm-studio.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
+| `zai.anthropic.synthetic.json` | anthropic-messages-shape | Anthropic Messages target resolves offline |

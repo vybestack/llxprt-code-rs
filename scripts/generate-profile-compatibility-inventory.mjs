@@ -758,6 +758,9 @@ function expectDisposition(file, provider) {
   if (provider === 'codex') {
     return { stage: 'in-scope installed codex', target: 'codex-responses-http', plaintextOptIn: true };
   }
+  if (provider === 'anthropic') {
+    return { stage: 'in-scope installed anthropic', target: 'anthropic-messages', plaintextOptIn: true };
+  }
   return { stage: 'in-scope installed openai', target: 'target-resolved', plaintextOptIn: true };
 }
 
@@ -942,8 +945,9 @@ function renderMarkdown(artifact) {
   push('id, token, local path, or credential-store value.');
   push();
   push('The checked-in `tests/fixtures/profile-compatibility-inventory.json` is the exhaustive');
-  push('authority for the disposition of the 39 installed in-scope profiles (`38` provider');
-  push('`openai` plus `gpt56solhigh.json` provider `codex`). Every tracked fixture field has');
+  push(`authority for the disposition of the ${c.installedInScope} installed in-scope profiles (`);
+  push(`\`${c.inScopeOpenAi}\` provider \`openai\`, \`${c.inScopeAnthropic}\` provider \`anthropic\`, plus`);
+  push(`\`gpt56solhigh.json\` provider \`codex\`). Every tracked fixture field has`);
   push('exactly one classification and one owner. The repository self-tests in');
   push('`tests/profile_compatibility.rs` fail if the inventory is internally inconsistent or if');
   push('any fixture field is unclassified or multiply owned.');
@@ -1213,6 +1217,7 @@ function generate({ siblingRoot, profilesDir }) {
     .sort();
 
   const inScope = [];
+  const anthropic = [];
   const loadBalancer = [];
   const codex = [];
   const unsupported = new Map();
@@ -1239,6 +1244,10 @@ function generate({ siblingRoot, profilesDir }) {
       inScope.push({ file: f, provider, topLevel: topLevelKeysOf(parsed), structure: shapeOf(parsed) });
       continue;
     }
+    if (provider === 'anthropic') {
+      anthropic.push({ file: f, provider, topLevel: topLevelKeysOf(parsed), structure: shapeOf(parsed) });
+      continue;
+    }
     if (!unsupported.has(provider)) unsupported.set(provider, { provider, files: [], structures: [], reason: 'exact provider-resolution rejection' });
     unsupported.get(provider).files.push(f);
     unsupported.get(provider).structures.push(shapeOf(parsed));
@@ -1250,7 +1259,8 @@ function generate({ siblingRoot, profilesDir }) {
     profileJsonFiles: profileFiles.length,
     inScopeOpenAi: inScope.length,
     inScopeCodex: codex.length,
-    installedInScope: inScope.length + codex.length,
+    inScopeAnthropic: anthropic.length,
+    installedInScope: inScope.length + codex.length + anthropic.length,
     loadBalancer: loadBalancer.length,
     unsupportedProviders: unsupportedProviders.length,
     inventoryTotalEntries: entries.length,
@@ -1262,14 +1272,14 @@ function generate({ siblingRoot, profilesDir }) {
   // Redacted installed fixtures.
   fs.mkdirSync(FIXTURES_ROOT, { recursive: true });
   const installedRows = [];
-  for (const p of [...inScope, ...codex]) {
+  for (const p of [...inScope, ...codex, ...anthropic]) {
     const raw = readJson(path.join(profilesDir, p.file));
     const redacted = redactProfile(p.file.replace(/\.json$/, ''), raw);
     fs.writeFileSync(path.join(FIXTURES_ROOT, p.file), stableJson(redacted));
     installedRows.push({
       file: p.file,
       provider: p.provider,
-      scope: p.provider === 'codex' ? 'codex' : 'openai',
+      scope: p.provider,
       topLevel: topLevelKeysOf(raw),
       structure: shapeOf(raw),
       paths: extractPaths(raw),
@@ -1282,6 +1292,7 @@ function generate({ siblingRoot, profilesDir }) {
     ['qwen38.json', 'named secure-store reference rejects before the structural dsflash gate'],
     ['qwen38-mi300x.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement'],
     ['ornith-runpod.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms'],
+    ['zai.json', 'named secure-store reference rejects after Anthropic Messages target resolution'],
   ]);
   for (const row of installedRows) {
     const failure = firstFailures.get(row.file);
@@ -1326,6 +1337,33 @@ function generate({ siblingRoot, profilesDir }) {
     const target = 'auth.synthetic.json';
     fs.writeFileSync(path.join(FIXTURES_ROOT, target), stableJson(authProfile));
     synthetic.push({ file: target, kind: 'top-level-auth', expectedOutcome: "top-level 'auth' rejects (unsafe to ignore credential policy)" });
+  }
+  {
+    const target = 'unsupported.bedrock.synthetic.json';
+    const bedrockProfile = {
+      version: 1,
+      provider: 'bedrock',
+      model: 'anthropic.claude-3-opus',
+      modelParams: {},
+      ephemeralSettings: {},
+    };
+    fs.writeFileSync(path.join(FIXTURES_ROOT, target), stableJson(bedrockProfile));
+    synthetic.push({ file: target, kind: 'unsupported-provider-shape', expectedOutcome: 'exact provider-resolution rejection' });
+  }
+  {
+    const target = 'zai.anthropic.synthetic.json';
+    const anthropicProfile = {
+      version: 1,
+      provider: 'anthropic',
+      model: 'glm-5.3',
+      modelParams: {},
+      ephemeralSettings: {
+        'base-url': 'https://api.z.ai/api/anthropic',
+        'auth-key-name': 'zai',
+      },
+    };
+    fs.writeFileSync(path.join(FIXTURES_ROOT, target), stableJson(anthropicProfile));
+    synthetic.push({ file: target, kind: 'anthropic-messages-shape', expectedOutcome: 'Anthropic Messages target resolves offline' });
   }
   for (const u of unsupportedProviders) {
     const f = u.files[0];
@@ -1373,7 +1411,7 @@ function generate({ siblingRoot, profilesDir }) {
   console.log(
     [
       'generated profile-compatibility inventory',
-      `  installed redacted fixtures: ${installedRows.length} (${inScope.length} openai + ${codex.length} codex)`,
+      `  installed redacted fixtures: ${installedRows.length} (${inScope.length} openai + ${codex.length} codex + ${anthropic.length} anthropic)`,
       `  synthetic fixtures: ${synthetic.length}`,
       `  inventory entries: ${entries.length} / distinct: ${distinctKeys.length} / duplicate extra: ${entries.length - distinctKeys.length}`,
       `  load-balancer rows: ${loadBalancer.length} / unsupported-provider groups: ${unsupportedProviders.length}`,
