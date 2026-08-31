@@ -121,7 +121,9 @@ jobs:
     # offline gates used by maintainers. The script builds and verifies the allow-listed bundle.
     name: release build + source bundle
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The full offline gate chain (workspace + vendored suites, bundle build and verify)
+    # measures ~35 min on 2-core runners; 40 left no headroom for runner variance.
+    timeout-minutes: 60
     steps:
       # actions/checkout@v4
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
