@@ -969,4 +969,6 @@ pub fn is_plaintext_url(u: &RedactedUrl) -> bool {
 }
 
 #[cfg(test)]
+mod max_tool_calls_tests;
+#[cfg(test)]
 mod tests;
