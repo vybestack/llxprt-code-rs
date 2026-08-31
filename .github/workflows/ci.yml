@@ -166,7 +166,7 @@ jobs:
       - name: Run strict release gates
         env:
           LLXPRT_SKIP_LOCAL_AUDIT: "1"
-        run: bash scripts/release-gates.sh
+        run: cargo xtask release-gates
 
       - name: Record source-bundle digest
         env:

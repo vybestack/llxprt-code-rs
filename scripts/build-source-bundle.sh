@@ -226,7 +226,7 @@ floor_members=(
   .cargo/config.toml
   scripts/build-source-bundle.sh scripts/verify-source-bundle.sh
   scripts/source-bundle-validate.py
-  xtask/Cargo.toml xtask/Cargo.lock xtask/src/main.rs
+  xtask/Cargo.toml xtask/Cargo.lock xtask/src/main.rs xtask/src/release.rs
 )
 for member in "${floor_members[@]}"; do
   grep -Fqx "$member" "$tracked_list" || {

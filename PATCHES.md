@@ -215,5 +215,5 @@ envelope, endpoint-route matrix plus loopback request-path coverage), direct all
 (provider-specific malformed-argument handling, missing and unknown terminal reasons, and public
 redaction), `src/adapter.rs` round-replay tests, and `tests/cli_contract.rs` / `tests/phase2.rs`
 (offline, no configured endpoint request). The end-to-end release
-gate is `scripts/release-gates.sh` (release build of the source tree with the vendor
+gate is `cargo xtask release-gates` (release build of the source tree with the vendor
 path deps plus the vendor/license file checks); `cargo package` is not a release gate.

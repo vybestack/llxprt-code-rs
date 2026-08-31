@@ -158,6 +158,7 @@ required=(
   Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch .gitignore
   src/lib.rs src/bin/llxprt-parity.rs
   .cargo/config.toml xtask/Cargo.toml xtask/Cargo.lock xtask/src/main.rs xtask/src/lib.rs
+  xtask/src/release.rs
   vendor/serdes-ai/Cargo.toml vendor/serdes-ai/.cargo_vcs_info.json vendor/serdes-ai/src/lib.rs
   vendor/serdes-ai-core/Cargo.toml vendor/serdes-ai-core/src/lib.rs
   vendor/serdes-ai-models/Cargo.toml vendor/serdes-ai-models/src/openai/chat.rs
