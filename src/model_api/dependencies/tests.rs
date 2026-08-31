@@ -54,7 +54,12 @@ fn production_registration_slice_is_exact_and_typed() {
         .iter()
         .map(|registration| registration.target)
         .collect::<Vec<_>>();
-    assert_eq!(targets.len(), 6);
+    assert_eq!(targets.len(), 7);
+    assert!(targets.contains(&ModelTarget {
+        provider: ProviderId::Anthropic,
+        api: ModelApi::AnthropicMessages,
+        transport: TransportKind::Http,
+    }));
     assert!(targets.contains(&ModelTarget {
         provider: ProviderId::Codex,
         api: ModelApi::Responses,

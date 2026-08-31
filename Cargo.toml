@@ -40,7 +40,7 @@ name = "llxprt-parity"
 path = "src/bin/llxprt-parity.rs"
 
 [dependencies]
-serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai", "chatgpt-oauth"] }
+serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"] }
 serdes-ai-responses = { path = "vendor/serdes-ai-responses", version = "=0.3.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

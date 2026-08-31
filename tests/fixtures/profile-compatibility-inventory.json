@@ -3618,9 +3618,14 @@
         "expectedOutcome": "named plan disposition per profile-compatibility.md"
       },
       {
-        "file": "unsupported.anthropic.synthetic.json",
+        "file": "unsupported.bedrock.synthetic.json",
         "kind": "unsupported-provider-shape",
         "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "zai.anthropic.synthetic.json",
+        "kind": "anthropic-messages-shape",
+        "expectedOutcome": "Anthropic Messages target resolves offline"
       },
       {
         "file": "unsupported.claudecode.synthetic.json",

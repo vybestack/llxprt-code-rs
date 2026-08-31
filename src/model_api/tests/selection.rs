@@ -16,6 +16,7 @@ fn provider_spellings_are_exact() {
         ("openai-responses", ProviderId::OpenAiResponses),
         ("openaivercel", ProviderId::OpenAiVercel),
         ("openai-compatible", ProviderId::OpenAiCompatible),
+        ("anthropic", ProviderId::Anthropic),
         ("codex", ProviderId::Codex),
     ] {
         assert_eq!(
@@ -23,7 +24,7 @@ fn provider_spellings_are_exact() {
             expected
         );
     }
-    for unsupported in ["openai-vercel", "OpenAI", " openai", "anthropic", ""] {
+    for unsupported in ["openai-vercel", "OpenAI", " openai", "bedrock", ""] {
         assert!(
             ProviderId::parse(&json!(unsupported), "selection").is_err(),
             "{unsupported:?}"
@@ -93,10 +94,23 @@ fn provider_defaults_and_api_compatibility_are_typed() {
     assert_eq!(responses.api, ModelApi::Responses);
     assert_eq!(responses.transport, TransportKind::Http);
 
+    let anthropic = resolve("anthropic", json!({})).unwrap();
+    assert_eq!(anthropic.api, ModelApi::AnthropicMessages);
+    assert_eq!(anthropic.transport, TransportKind::Http);
+
     let codex = resolve("codex", json!({})).unwrap();
     assert_eq!(codex.api, ModelApi::Responses);
     assert_eq!(codex.transport, TransportKind::Http);
 
+    for api_mode in ["chat", "responses"] {
+        let error = resolve("anthropic", json!({"apiMode": api_mode})).unwrap_err();
+        assert_eq!(
+            error,
+            format!(
+                "profile \"selection\": provider \"anthropic\" does not support API \"{api_mode}\""
+            )
+        );
+    }
     assert!(resolve("openai-responses", json!({"apiMode": "chat"})).is_err());
     assert!(resolve("openaivercel", json!({"apiMode": "responses"})).is_err());
     assert!(resolve("openai-compatible", json!({"apiMode": "responses"})).is_err());

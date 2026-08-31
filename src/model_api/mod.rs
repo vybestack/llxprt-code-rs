@@ -1,3 +1,4 @@
+mod anthropic_backend;
 pub(crate) mod credentials;
 pub(crate) mod dependencies;
 #[cfg(target_os = "macos")]

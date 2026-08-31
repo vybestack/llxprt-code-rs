@@ -264,7 +264,7 @@ fn inventory_counts_are_exact() {
     // counts.profile_json_files counts the installed profiles directory (the
     // installed sources) plus the checked-in codex fixture rows; the three
     // installed load-balancer shapes are inventoried as rows but the fixtures
-    // directory carries 65 redacted files.
+    // directory carries 66 redacted files.
     assert_eq!(a.counts.profile_json_files, 62);
     assert_eq!(a.counts.installed_in_scope, 39);
     assert_eq!(a.inventory.total_entries, 124);
@@ -467,11 +467,11 @@ fn fixture_directory_matches_inventory_rows() {
         .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
         .filter(|name| name != "openai-responses-live.json")
         .collect();
-    assert_eq!(on_disk.len(), 65);
+    assert_eq!(on_disk.len(), 66);
     assert!(installed.iter().all(|f| on_disk.contains(*f)));
     assert!(synthetic.iter().all(|f| on_disk.contains(*f)));
     assert_eq!(installed.iter().collect::<BTreeSet<_>>().len(), 39);
-    assert_eq!(synthetic.iter().collect::<BTreeSet<_>>().len(), 26);
+    assert_eq!(synthetic.iter().collect::<BTreeSet<_>>().len(), 27);
 }
 
 #[test]

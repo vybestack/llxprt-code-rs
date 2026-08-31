@@ -241,7 +241,7 @@ Duplicate definitions:
 | --- | --- | --- |
 | `Fireworks` | `fireworkskimi.json`, `fireworkskimioai.json` | exact provider-resolution rejection |
 | `LM Studio` | `ollamanorth.json`, `ornith-lmstudio.json`, `smol3-mlx-lmstudio.json`, `smol3.json` | exact provider-resolution rejection |
-| `anthropic` | `anthropic-profile.json`, `fable.json`, `fable5.json`, `home-path.json`, `prod-env.json`, `tilde-test.json`, `zai.json` | exact provider-resolution rejection |
+| `anthropic` | `anthropic-profile.json`, `fable.json`, `fable5.json`, `home-path.json`, `prod-env.json`, `tilde-test.json`, `zai.json` | Anthropic Messages backend (issue 4); legacy profile settings remain strict |
 | `claudecode` | `opus5.json`, `opusthinking.json`, `opusthinkingbucketed.json` | exact provider-resolution rejection |
 | `gemini` | `flash3.json`, `geminimaria.json` | exact provider-resolution rejection |
 | `google` | `google-profile.json`, `test-env.json` | exact provider-resolution rejection |
@@ -270,7 +270,8 @@ Duplicate definitions:
 | `loadbalancer.opusfirst.synthetic.json` | load-balancer-shape | fixed unsupported-load-balancing diagnostic |
 | `ollamakimi.standard-summary.synthetic.json` | named-staged-case | named plan disposition per profile-compatibility.md |
 | `ollamakimi.without-auth-key-name.synthetic.json` | named-staged-case | named plan disposition per profile-compatibility.md |
-| `unsupported.anthropic.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
+| `unsupported.bedrock.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
+| `zai.anthropic.synthetic.json` | anthropic-messages-shape | Anthropic Messages target resolves offline |
 | `unsupported.claudecode.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.fireworks.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
 | `unsupported.gemini.synthetic.json` | unsupported-provider-shape | exact provider-resolution rejection |
