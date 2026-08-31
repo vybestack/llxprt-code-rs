@@ -13,13 +13,16 @@ pub const MAX_TURN_ASSISTANT_BYTES: usize = 1024 * 1024;
 pub const MAX_TURN_ARGS_BYTES: usize = 1024 * 1024;
 /// Cap on the combined tool-result bytes materialized in one turn.
 pub const MAX_TURN_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-/// Cap on the number of assistant/tool rounds persisted in one turn.
-pub const MAX_TURN_ROUNDS: usize = 32;
-/// Cap on the tool calls one attempt may execute (the agent's `max_steps` budget). The
-/// parity harness enforces the same cap on the success envelope's `tool_calls`, so a CLI
-/// that reports more than one attempt could ever run (e.g. `u64::MAX`) is a
-/// protocol failure, never a pass.
-pub const MAX_TOOL_CALLS_PER_TURN: usize = 16;
+/// Default cap on the number of assistant/tool rounds in one turn: none. Rounds are
+/// uncapped unless the profile (`maxTurnsPerPrompt`) or an explicit value caps them;
+/// byte/output caps and the declared tool-call and turn-time budgets still bound the
+/// run.
+pub const MAX_TURN_ROUNDS: usize = usize::MAX;
+/// Default per-prompt tool-call budget: none. Tools are uncapped unless the profile
+/// (`maxToolCallsPerPrompt`) or `--max-tool-calls` caps them; the round cap
+/// (`maxTurnsPerPrompt`), the turn-time budget, and byte/output caps still bound the
+/// run. The parity harness validates the envelope's `tool_calls` against the declared
+/// budget, so an uncapped run must still account for every call it executed.
 /// Hard cap on one model reply (bytes). A reply over this bound is refused by the
 /// agent's model-call path as a typed `model` failure rather than ever becoming an
 /// unbounded assistant round, so it can never be counted toward the aggregate turn caps or

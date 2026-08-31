@@ -297,6 +297,8 @@ pub struct EphemeralSettings {
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    /// `ephemeralSettings.maxTurnsPerPrompt`: `-1` = unlimited (no round cap), as is an
+    /// absent knob; a positive integer caps the rounds.
     pub max_turns_per_prompt: Option<i64>,
     /// `ephemeralSettings.maxToolCallsPerPrompt`: `-1` = unlimited, else `1..=512`.
     pub max_tool_calls_per_prompt: MaxToolCalls,

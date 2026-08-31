@@ -76,9 +76,9 @@ fn parse_common(
     settings.context_limit = Some(context_limit);
 
     let max_turns = required_i64(map, "maxTurnsPerPrompt", name)?;
-    if max_turns != -1 && !(1..=32).contains(&max_turns) {
+    if max_turns != -1 && max_turns < 1 {
         return Err(format!(
-            "profile {name:?}: 'maxTurnsPerPrompt' must be -1 or an integer from 1 through 32"
+            "profile {name:?}: 'maxTurnsPerPrompt' must be -1 (unlimited) or a positive integer"
         ));
     }
     settings.max_turns_per_prompt = Some(max_turns);

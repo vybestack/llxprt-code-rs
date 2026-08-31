@@ -606,8 +606,9 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
     let cwd = new_cwd();
     let st = store("s14");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
-    // 17 tool rounds against the 16-call budget: the 17th must be refused,
-    // never executed, and the turn must complete through a forced summary.
+    // 17 tool rounds against a declared 16-call budget: the 17th must be refused,
+    // never executed, and the turn must complete through a forced summary. (The
+    // default budget is unlimited; caps are opt-in.)
     let mut replies: Vec<LlmResult> = (0..17)
         .map(|i| LlmResult {
             text: String::new(),
@@ -624,7 +625,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
     });
-    let a = agent(Box::new(MockBackend::new(replies)), &cwd);
+    let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(16));
     let run = a.run(&st, &r).expect("exhaustion must complete gracefully");
     assert_eq!(run.tool_count, 16, "only the fitting calls execute");
     assert!(run.budget_exhausted, "the envelope flags exhaustion");

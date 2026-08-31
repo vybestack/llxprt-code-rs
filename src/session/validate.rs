@@ -264,9 +264,9 @@ impl SessionState {
     }
 
     fn validate_tool_calls(&self, branch: &BranchRecord) -> Result<(), StoreError> {
-        if branch.rounds.len() > crate::agent::MAX_TURN_ROUNDS {
-            return Err(branch_corrupt(branch, "too many assistant/tool rounds"));
-        }
+        // No round-count ceiling: round budgets are declared per run (`maxTurnsPerPrompt`
+        // is unlimited unless capped), so a long branch is policy, not corruption. The
+        // byte totals below remain the corruption signal, as they are for tool calls.
         let mut ids = std::collections::HashSet::new();
         let mut calls = 0usize;
         let mut assistant_bytes = 0usize;

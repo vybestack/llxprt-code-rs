@@ -36,9 +36,9 @@ pub use request_budget::REQUEST_FIXED_OVERHEAD_BYTES;
 pub use request_budget::{
     context_exceeded_message, estimate_history_bytes, estimate_request_bytes, history_needs_check,
     history_within, materialization_budget, round_budget_exceeded, turn_args_bytes,
-    MAX_RESPONSE_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES,
-    MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS,
-    PER_PART_OVERHEAD_BYTES, PER_REQUEST_OVERHEAD_BYTES,
+    MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES, MAX_TURN_ARGS_BYTES,
+    MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS, PER_PART_OVERHEAD_BYTES,
+    PER_REQUEST_OVERHEAD_BYTES,
 };
 
 mod request_budget;
@@ -143,7 +143,7 @@ impl CodingAgent {
             backend: std::sync::Arc::new(adapter),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            max_tool_calls: None,
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -169,7 +169,7 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            max_tool_calls: None,
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -191,7 +191,7 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd,
             workspace,
-            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            max_tool_calls: None,
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -209,7 +209,7 @@ impl CodingAgent {
     }
 
     /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// tool-less budgets instead of the full [`MAX_TURN_ROUNDS`] default).
+    /// budgets instead of the uncapped default).
     pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
         self.max_rounds = max_rounds;
         self
@@ -475,8 +475,13 @@ impl CodingAgent {
         } else {
             String::new()
         };
-        // The notice must survive truncation, so reserve its bytes first.
-        let body_budget = remaining_output.saturating_sub(notice.len().saturating_add(2));
+        // The notice must survive truncation, so reserve its bytes (plus the blank
+        // line that carries it) first; with no notice there is nothing to reserve.
+        let body_budget = if notice.is_empty() {
+            remaining_output
+        } else {
+            remaining_output.saturating_sub(notice.len().saturating_add(2))
+        };
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
         let text = if notice.is_empty() {
             text
@@ -814,7 +819,7 @@ impl CodingAgent {
     /// Run the forced final-summary round, renewing the lease around the model request. The
     /// renewal before the call extends the lease so the request can always finish inside one
     /// lease, and the renewal after the call re-arms it for the persist; the lease is never
-    /// left held dead by the bounded max-`MAX_TURN_ROUNDS`-round finalize.
+    /// left held dead by the single-round finalize.
     fn run_final_round(
         &self,
         store: &SessionStore,

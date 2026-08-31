@@ -104,7 +104,7 @@ fn unknown_tools_and_impossible_completed_transcripts_are_rejected() {
 fn refused_calls_never_count_as_executed() {
     let mut state = valid_state();
     let template = state.branches[0].rounds[0].calls[0].clone();
-    state.branches[0].rounds[0].calls = (0..crate::agent::MAX_TOOL_CALLS_PER_TURN)
+    state.branches[0].rounds[0].calls = (0..16)
         .map(|index| ToolCallRecord {
             id: format!("call-{index}"),
             ..template.clone()
@@ -124,7 +124,10 @@ fn refused_calls_never_count_as_executed() {
     state.branches[0].lifecycle = Lifecycle::Failed;
     state.branches[0].summary.clear();
     state.branches[0].error = "failed".into();
-    state.branches[0].rounds = (0..=crate::agent::MAX_TURN_ROUNDS)
+    // A long round history is policy, not corruption: round budgets are declared per
+    // run and unlimited unless capped, so the store no longer enforces a round-count
+    // constant (byte totals remain the corruption signal).
+    state.branches[0].rounds = (0..64)
         .map(|index| RoundRecord {
             assistant: String::new(),
             calls: vec![ToolCallRecord {
@@ -137,7 +140,7 @@ fn refused_calls_never_count_as_executed() {
             }],
         })
         .collect();
-    assert!(corruption_message(&state).contains("too many assistant/tool rounds"));
+    state.validate().unwrap();
 
     let mut state = valid_state();
     state.branches[0].rounds[0].calls[0].result = "r".repeat(crate::agent::MAX_TURN_OUTPUT_BYTES);
