@@ -29,6 +29,8 @@ pub fn run_release_gates(root: &Path) -> Result<(), String> {
     run_xtask_checks(root)?;
     run_release_fixtures(root)?;
     run_vendor_policy_fixtures(root)?;
+    heading("published envelope schema drift");
+    cargo(root, &["xtask", "envelope-schema", "--check"])?;
     run_workspace_checks(root)?;
     run_direct_vendor_checks(root)?;
     run_msrv_and_docs(root)?;

@@ -434,9 +434,15 @@ fn ok_envelope_rejects_tool_calls_over_the_attempt_budget() {
 /// error carrying success fields is rejected by the typed contract.
 #[test]
 fn error_envelope_requires_detail_and_nonzero_exit() {
-    // Bare status error, no detail: parse fails.
+    // Bare status error, no required session identity or detail: parse fails.
     let env: Result<Envelope, _> = serde_json::from_str(r#"{"status":"error"}"#);
-    assert!(env.is_err(), "error without detail must not parse");
+    assert!(env.is_err(), "error without identity/detail must not parse");
+    let env: Result<Envelope, _> =
+        serde_json::from_str(r#"{"status":"error","error":{"code":"e","message":"m"}}"#);
+    assert!(
+        env.is_err(),
+        "error without required session_id must not parse"
+    );
     // Error with a success field is rejected by deny_unknown_fields.
     let env: Result<Envelope, _> =
         serde_json::from_str(r#"{"status":"error","error":{"code":"e","message":"m"},"turn":1}"#);
@@ -762,7 +768,7 @@ fn cli_and_harness_share_one_prompt_digest() {
             },
         };
         assert_eq!(
-            cli::to_json(&Ok(outcome))["prompt_digest"],
+            cli::json(&Ok(outcome), "s")["prompt_digest"],
             serde_json::Value::String(digest.clone()),
             "the CLI serializes the shared digest for {prompt:?}"
         );
