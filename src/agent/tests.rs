@@ -151,7 +151,7 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
     );
     assert_eq!(b.summary.len(), MAX_TURN_ASSISTANT_BYTES - pre);
     assert_eq!(b.rounds[1].assistant.len(), MAX_TURN_ASSISTANT_BYTES - pre);
-    assert!(b.owner.is_empty(), "finalize cleared the owner token");
+    assert!(!b.owner.is_empty(), "finalize retained the owner identity");
 }
 
 /// A forced response exactly at `MAX_TURN_ASSISTANT_BYTES` bytes after an empty
@@ -235,7 +235,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
     let b = snap.branches[0].clone();
     assert_eq!(b.lifecycle, Lifecycle::Failed);
     assert!(b.error.contains("assistant content"), "{}", b.error);
-    assert!(b.owner.is_empty(), "the failed branch released its owner");
+    assert!(!b.owner.is_empty(), "failure retained the owner identity");
 }
 
 #[test]

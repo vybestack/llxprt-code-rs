@@ -144,58 +144,19 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str) -> BranchRecord {
     }
 }
 
-fn current_slot(store: &SessionStore) -> (PathBuf, serde_json::Value, SessionState) {
-    ["session.json", "session.alt.json"]
-        .into_iter()
-        .filter_map(|name| {
-            let path = store.session_dir.join(name);
-            let value: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-            let generation = value
-                .get("store_generation")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let state_value = value.get("state").unwrap_or(&value);
-            let state = serde_json::from_value(state_value.clone()).ok()?;
-            Some((generation, path, value, state))
-        })
-        .max_by_key(|(generation, _, _, _)| *generation)
-        .map(|(_, path, value, state)| (path, value, state))
-        .expect("a valid state slot")
-}
-
-fn write_current_slot(path: &Path, mut envelope: serde_json::Value, state: &SessionState) {
-    if let Some(value) = envelope.get_mut("state") {
-        *value = serde_json::to_value(state).unwrap();
-    } else {
-        envelope = serde_json::to_value(state).unwrap();
-    }
-    std::fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
-    let other_name = if path.file_name().unwrap() == "session.json" {
-        "session.alt.json"
-    } else {
-        "session.json"
-    };
-    let _ = std::fs::remove_file(path.with_file_name(other_name));
-}
-
-/// Expire every pending lease on disk, leaving the owner in place (a stale lease is
-/// what marks a reservation recoverable).
 fn expire_pending(store: &SessionStore) {
-    let (path, envelope, mut state) = current_slot(store);
+    let mut state = store.snapshot().unwrap();
     for branch in &mut state.branches {
         if branch.lifecycle == Lifecycle::Pending {
             branch.lease_expiry = now_secs().saturating_sub(1);
             branch.reserved_at = branch.lease_expiry.saturating_sub(1);
         }
     }
-    write_current_slot(&path, envelope, &state);
+    store.replace_snapshot(&state).unwrap();
 }
 
-/// Overwrite the pending branch's `lease_expiry` on disk without touching its rounds,
-/// lifecycle, owner, or any other field.
 fn set_lease_expiry(store: &SessionStore, branch_id: &str, expiry: u64) {
-    let (path, envelope, mut state) = current_slot(store);
+    let mut state = store.snapshot().unwrap();
     let branch = state
         .branches
         .iter_mut()
@@ -205,7 +166,7 @@ fn set_lease_expiry(store: &SessionStore, branch_id: &str, expiry: u64) {
     if branch.reserved_at >= expiry {
         branch.reserved_at = expiry.saturating_sub(1);
     }
-    write_current_slot(&path, envelope, &state);
+    store.replace_snapshot(&state).unwrap();
 }
 
 fn noop_rounds() -> Vec<RoundRecord> {
@@ -288,8 +249,8 @@ fn second_store_reclaims_stale_pending_child_on_the_same_branch() {
     );
 }
 
-/// Terminal branches release their reservation: finalize and fail both zero the
-/// lease fields, so a terminal branch can never look owned or reclaimable.
+/// Terminal branches release their live reservation by zeroing lease fields while
+/// retaining the owner identity needed for safe idempotent retries.
 #[test]
 fn terminal_branches_release_their_reservation() {
     let cwd = new_cwd();
@@ -681,4 +642,57 @@ fn mismatched_agent_capability_is_rejected_before_backend_call() {
     let error = agent.run(&st, &reservation).unwrap_err();
     assert_eq!(error.key, "session");
     assert_eq!(agent.model_calls(), 0);
+}
+
+/// Retrying a terminal operation across lifecycle classes is client misuse, not store
+/// corruption. Same-owner same-state retries remain idempotent.
+#[test]
+fn cross_lifecycle_terminal_retries_are_invalid_not_corrupt() {
+    let cwd = new_cwd();
+
+    let completed = store("terminal-cross-completed");
+    let completed_request = reserved(&completed, Some(1), None, "P", &cwd).unwrap();
+    completed
+        .finalize(&completed_request, "rejected", &noop_rounds())
+        .unwrap();
+    completed
+        .finalize(&completed_request, "rejected", &noop_rounds())
+        .expect("same completed terminal retry is idempotent");
+    match completed.fail(&completed_request, "wrong lifecycle", &noop_rounds()) {
+        Err(StoreError::Invalid(_)) => {}
+        other => panic!("fail on Completed must be Invalid, got {other:?}"),
+    }
+
+    let failed = store("terminal-cross-failed");
+    let failed_request = reserved(&failed, Some(1), None, "P", &cwd).unwrap();
+    failed.fail(&failed_request, "failed", &[]).unwrap();
+    failed
+        .fail(&failed_request, "failed", &[])
+        .expect("same failed terminal retry is idempotent");
+    match failed.finalize(&failed_request, "wrong lifecycle", &[]) {
+        Err(StoreError::Invalid(_)) => {}
+        other => panic!("finalize on Failed must be Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn stale_owner_cannot_retry_terminal_state_after_reclaim() {
+    let cwd = new_cwd();
+    let old_store = store("terminal-reclaimed-owner");
+    let new_store = store("terminal-reclaimed-owner");
+    let old = reserved(&old_store, Some(1), None, "P", &cwd).unwrap();
+    expire_pending(&old_store);
+    let reclaimed = reserved(&new_store, Some(1), None, "P", &cwd).unwrap();
+    assert_ne!(old.owner, reclaimed.owner);
+    new_store
+        .finalize(&reclaimed, "rejected", &noop_rounds())
+        .unwrap();
+    new_store
+        .finalize(&reclaimed, "rejected", &noop_rounds())
+        .expect("same owner terminal retry remains idempotent");
+
+    assert!(matches!(
+        old_store.finalize(&old, "rejected", &noop_rounds()),
+        Err(StoreError::Stale)
+    ));
 }

@@ -24,18 +24,30 @@ fn uniq() -> String {
     format!("lb{}", nanos % 1_000_000_000_000)
 }
 
-fn read_current_session(session_dir: &std::path::Path) -> Value {
-    ["session.json", "session.alt.json"]
-        .into_iter()
-        .filter_map(|name| std::fs::read(session_dir.join(name)).ok())
-        .filter_map(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .max_by_key(|value| {
-            value
-                .get("store_generation")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        })
-        .expect("a valid session slot")
+fn read_current_session(config_root: &std::path::Path, session: &str) -> Value {
+    let store = llxprt_code_rs::session::SessionStore::load_at(
+        &llxprt_code_rs::session::SessionId::parse(session).unwrap(),
+        config_root,
+    )
+    .unwrap();
+    serde_json::to_value(store.snapshot().unwrap()).unwrap()
+}
+
+fn read_all_session_bytes(config_root: &std::path::Path, session: &str) -> Vec<u8> {
+    let session_dir = config_root.join("code-rs-sessions").join(session);
+    let mut names = std::fs::read_dir(&session_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    names.sort();
+    let mut all = Vec::new();
+    for name in names {
+        let path = session_dir.join(name);
+        if path.is_file() {
+            all.extend_from_slice(&std::fs::read(path).unwrap());
+        }
+    }
+    all
 }
 
 /// A server that answers a bound number of POSTs by returning an HTTP error body with
@@ -181,8 +193,12 @@ fn run_success_cap_case(total: usize, chunked: bool, suffix: &str) -> (Output, V
         .unwrap();
     assert!(!contains(&output.stdout, marker.as_bytes()));
     assert!(!contains(&output.stderr, marker.as_bytes()));
-    let state = read_current_session(&workspace.path().join("code-rs-sessions").join(session));
+    let state = read_current_session(workspace.path(), &session);
     assert!(!state.to_string().contains(&marker));
+    assert!(!contains(
+        &read_all_session_bytes(workspace.path(), &session),
+        marker.as_bytes()
+    ));
     (output, state)
 }
 
@@ -619,9 +635,12 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
         assert_eq!(parsed["error"]["code"], "context-limit");
         assert!(!contains(&out.stdout, format!("sk-oo-{uid}").as_bytes()));
         // The session on disk: a failed lifecycle and no pending branch.
-        let session_dir = ws.join("code-rs-sessions").join(&session_id);
-        let all = read_current_session(&session_dir).to_string();
+        let all = read_current_session(&ws, &session_id).to_string();
         assert!(!all.contains(&format!("sk-oo-{uid}")), "marker in session");
+        assert!(!contains(
+            &read_all_session_bytes(&ws, &session_id),
+            format!("sk-oo-{uid}").as_bytes()
+        ));
         assert!(
             !all.contains("\"pending\""),
             "no pending branch may survive: {all}"
@@ -692,11 +711,15 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
             .windows(marker.len())
             .any(|w| w == marker.as_bytes()));
         // The authoritative session slot is failed with no pending owner or marker.
-        let j = read_current_session(&ws.join("code-rs-sessions").join(&session_id)).to_string();
+        let j = read_current_session(&ws, &session_id).to_string();
         assert!(
             !j.contains(&format!("sk-lbmarker-{uid}")),
             "marker in session"
         );
+        assert!(!contains(
+            &read_all_session_bytes(&ws, &session_id),
+            marker.as_bytes()
+        ));
         assert!(!j.contains("\"pending\""), "no pending branch may survive");
         assert!(
             j.contains("\"failed\""),
@@ -912,11 +935,9 @@ fn openai_responses_replays_function_history_to_final_completion() {
     }));
     let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
-    assert!(
-        read_current_session(&workspace.path().join("code-rs-sessions").join(session))
-            .to_string()
-            .contains("loopback complete")
-    );
+    assert!(read_current_session(workspace.path(), &session)
+        .to_string()
+        .contains("loopback complete"));
 }
 /// Whether `needle` appears anywhere inside `haystack`.
 fn contains(h: &[u8], needle: &[u8]) -> bool {
