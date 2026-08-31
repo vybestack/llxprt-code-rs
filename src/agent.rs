@@ -36,9 +36,9 @@ pub use request_budget::REQUEST_FIXED_OVERHEAD_BYTES;
 pub use request_budget::{
     context_exceeded_message, estimate_history_bytes, estimate_request_bytes, history_needs_check,
     history_within, materialization_budget, round_budget_exceeded, turn_args_bytes,
-    MAX_RESPONSE_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES,
-    MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS,
-    PER_PART_OVERHEAD_BYTES, PER_REQUEST_OVERHEAD_BYTES,
+    MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES, MAX_TURN_ARGS_BYTES,
+    MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS, PER_PART_OVERHEAD_BYTES,
+    PER_REQUEST_OVERHEAD_BYTES,
 };
 
 mod request_budget;
@@ -51,6 +51,12 @@ pub struct CompletedRun {
     pub branch_id: String,
     pub summary: String,
     pub tool_count: usize,
+    /// The budget this run declared: `None` = unlimited. Serialized as -1 in
+    /// the envelope so consumers can require the field.
+    pub declared_tool_calls: Option<usize>,
+    /// True when the turn hit its tool-call budget: excess calls were refused
+    /// and the summary came from the forced final round.
+    pub budget_exhausted: bool,
     pub prompt_digest: String,
     pub status: String,
     pub branch: bool,
@@ -62,7 +68,14 @@ pub struct CodingAgent {
     backend: std::sync::Arc<dyn ChatBackend>,
     cwd: std::path::PathBuf,
     workspace: crate::tools::WorkspaceCap,
-    max_steps: usize,
+    /// The resolved per-prompt tool-call budget: `None` = unlimited, `Some(n)` =
+    /// `n` calls. Constructors start at the 16-call default; the CLI resolves
+    /// CLI-over-profile and overrides via [`Self::with_max_tool_calls`].
+    pub max_tool_calls: Option<usize>,
+
+    /// Wall-clock budget for one prompt turn. `None` (the default) means no
+    /// time limit; set from the CLI `--turn-time` flag.
+    turn_time_budget: Option<std::time::Duration>,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -75,7 +88,11 @@ pub struct CodingAgent {
 mod error;
 pub use error::AgentError;
 mod helpers;
-use helpers::{final_summary_request, tool_call_record, validate_provider_result};
+pub(crate) use helpers::budget_notice;
+use helpers::{
+    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
+    validate_provider_result,
+};
 mod config;
 pub use config::{
     coding_system_prompt, prompt_digest, round_limit_message, validate_timeout,
@@ -95,6 +112,8 @@ struct AttemptState {
     current: LlmResult,
     ids: std::collections::HashSet<String>,
     usage: TurnUsage,
+    started: std::time::Instant,
+    budget_exhausted: bool,
 }
 
 impl CodingAgent {
@@ -124,7 +143,8 @@ impl CodingAgent {
             backend: std::sync::Arc::new(adapter),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: None,
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -149,7 +169,8 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: None,
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -170,7 +191,8 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd,
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: None,
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -187,9 +209,21 @@ impl CodingAgent {
     }
 
     /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// tool-less budgets instead of the full [`MAX_TURN_ROUNDS`] default).
+    /// budgets instead of the uncapped default).
     pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
         self.max_rounds = max_rounds;
+        self
+    }
+
+    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
+    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
+        self.max_tool_calls = max_tool_calls;
+        self
+    }
+
+    /// Override the wall-clock turn budget (`None` = no time limit).
+    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
+        self.turn_time_budget = budget;
         self
     }
 
@@ -218,7 +252,7 @@ impl CodingAgent {
             .verify_workspace_identity(self.workspace.identity())
             .map_err(AgentError::from_store)?;
         if reserved.replay {
-            return Ok(Self::replayed_run(reserved));
+            return Ok(self.replayed_run(reserved));
         }
         store
             .renew_lease(reserved)
@@ -235,16 +269,23 @@ impl CodingAgent {
         self.complete_attempt(store, reserved, summary, attempt)
     }
 
-    fn replayed_run(reserved: &ReservedRequest) -> CompletedRun {
+    fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
         CompletedRun {
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
             summary: reserved.summary.clone(),
-            tool_count: reserved.rounds.iter().map(|round| round.calls.len()).sum(),
+            tool_count: reserved
+                .rounds
+                .iter()
+                .flat_map(|round| round.calls.iter())
+                .filter(|call| !call.refused)
+                .count(),
             prompt_digest: prompt_digest(&reserved.prompt),
             status: "ok".into(),
             branch: reserved.attempt > 1,
+            declared_tool_calls: self.max_tool_calls,
+            budget_exhausted: false,
             replayed: true,
         }
     }
@@ -280,6 +321,7 @@ impl CodingAgent {
             &self.cwd,
             note,
             self.allow_shell,
+            self.max_tool_calls,
         ))];
         for history in &reserved.history {
             requests.push(user_request(&history.prompt));
@@ -318,6 +360,8 @@ impl CodingAgent {
             current,
             ids: std::collections::HashSet::new(),
             usage,
+            started: std::time::Instant::now(),
+            budget_exhausted: false,
         })
     }
 
@@ -330,7 +374,11 @@ impl CodingAgent {
         attempt: &mut AttemptState,
     ) -> Result<(), AgentError> {
         while !attempt.current.calls.is_empty() {
-            self.execute_tool_round(store, reserved, config, attempt)?;
+            if self.execute_tool_round(store, reserved, config, attempt)? {
+                // The budget truncated this round; no more exploration. The
+                // loop exit resolves the forced summary from here.
+                break;
+            }
             self.request_next_round(store, reserved, tools, attempt)?;
         }
         Ok(())
@@ -342,33 +390,11 @@ impl CodingAgent {
         reserved: &ReservedRequest,
         config: &crate::tools::ToolConfig,
         attempt: &mut AttemptState,
-    ) -> Result<(), AgentError> {
+    ) -> Result<bool, AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
-        let calls = validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell).map_err(
-            |error| {
-                self.dead(
-                    store,
-                    reserved,
-                    "invalid-tool-call",
-                    &error,
-                    &attempt.rounds,
-                )
-            },
-        )?;
-        self.check_tool_limit(
-            store,
-            reserved,
-            &attempt.rounds,
-            &attempt.usage,
-            calls.len(),
-        )?;
-        attempt.requests.push(assistant_request(&attempt.current));
-        let mut round = RoundRecord {
-            assistant: attempt.current.text.clone(),
-            calls: Vec::new(),
-        };
-        for call in &calls {
-            let parsed = parse_object_args(call).map_err(|error| {
+        self.check_time_limit(store, reserved, &attempt.rounds, attempt.started.elapsed())?;
+        let mut calls = validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell)
+            .map_err(|error| {
                 self.dead(
                     store,
                     reserved,
@@ -377,37 +403,97 @@ impl CodingAgent {
                     &attempt.rounds,
                 )
             })?;
-            let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
-            if remaining_output == 0 {
-                return Err(self.dead(
-                    store,
-                    reserved,
-                    "limit",
-                    &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
-                    &attempt.rounds,
-                ));
-            }
-            let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-                &self.cwd,
-                &call.name,
-                parsed,
-                config,
-                remaining_output,
-            );
-            let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
-            let text = crate::redact::truncate_utf8(scrubbed, remaining_output);
-            attempt.usage.total_calls += 1;
-            attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-            attempt
-                .requests
-                .push(tool_return_request(&call.name, &call.id, ok, &text));
-            round.calls.push(tool_call_record(call, ok, text));
+        attempt.requests.push(assistant_request(&attempt.current));
+        // Enforce the tool-call budget by executing only what fits: the model
+        // gets explicit refusals for the rest, and the turn resolves through a
+        // forced summary instead of dying mid-work.
+        let skipped = split_over_budget(self.max_tool_calls, &attempt.usage, &mut calls);
+        let truncated = !skipped.is_empty();
+        if truncated {
+            attempt.budget_exhausted = true;
         }
+        let mut round = RoundRecord {
+            assistant: attempt.current.text.clone(),
+            calls: Vec::new(),
+        };
+        for (index, call) in calls.iter().enumerate() {
+            self.execute_one_call(config, attempt, &mut round, call, index, calls.len())
+                .map_err(|failure| match failure {
+                    ToolCallFailure::Invalid(error) => self.dead(
+                        store,
+                        reserved,
+                        "invalid-tool-call",
+                        &error,
+                        &attempt.rounds,
+                    ),
+                    ToolCallFailure::OutputCap => self.dead(
+                        store,
+                        reserved,
+                        "limit",
+                        &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
+                        &attempt.rounds,
+                    ),
+                })?;
+        }
+        refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
         attempt.rounds.push(round);
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         store
             .checkpoint(reserved, &attempt.rounds)
-            .map_err(AgentError::from_store)
+            .map_err(AgentError::from_store)?;
+        Ok(truncated)
+    }
+
+    /// Execute one tool call of a round and record it. `index`/`total` decide
+    /// whether the budget notice rides on this result (last call of the round).
+    /// Failures carry their kind so the caller keeps the right error code.
+    fn execute_one_call(
+        &self,
+        config: &crate::tools::ToolConfig,
+        attempt: &mut AttemptState,
+        round: &mut RoundRecord,
+        call: &ToolCall,
+        index: usize,
+        total: usize,
+    ) -> Result<(), ToolCallFailure> {
+        let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
+        if remaining_output == 0 {
+            return Err(ToolCallFailure::OutputCap);
+        }
+        let parsed = parse_object_args(call).map_err(ToolCallFailure::Invalid)?;
+        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
+            &self.cwd,
+            &call.name,
+            parsed,
+            config,
+            remaining_output,
+        );
+        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
+        attempt.usage.total_calls += 1;
+        let notice = if index + 1 == total {
+            budget_notice(self.max_tool_calls, attempt.usage.total_calls)
+        } else {
+            String::new()
+        };
+        // The notice must survive truncation, so reserve its bytes (plus the blank
+        // line that carries it) first; with no notice there is nothing to reserve.
+        let body_budget = if notice.is_empty() {
+            remaining_output
+        } else {
+            remaining_output.saturating_sub(notice.len().saturating_add(2))
+        };
+        let text = crate::redact::truncate_utf8(scrubbed, body_budget);
+        let text = if notice.is_empty() {
+            text
+        } else {
+            format!("{text}\n\n{notice}")
+        };
+        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
+        attempt
+            .requests
+            .push(tool_return_request(&call.name, &call.id, ok, &text));
+        round.calls.push(tool_call_record(call, ok, text));
+        Ok(())
     }
 
     fn request_next_round(
@@ -473,22 +559,24 @@ impl CodingAgent {
         Ok(())
     }
 
-    fn check_tool_limit(
+    fn check_time_limit(
         &self,
         store: &SessionStore,
         reserved: &ReservedRequest,
         rounds: &[RoundRecord],
-        usage: &TurnUsage,
-        next: usize,
+        elapsed: std::time::Duration,
     ) -> Result<(), AgentError> {
-        if usage.total_calls + next > self.max_steps {
+        let Some(budget) = self.turn_time_budget else {
+            return Ok(());
+        };
+        if elapsed >= budget {
             return Err(self.dead(
                 store,
                 reserved,
-                "budget-exhausted",
+                "turn-time-exhausted",
                 &format!(
-                    "tool-call budget ({}) would be exceeded; reduce tool calls",
-                    self.max_steps
+                    "turn time budget ({}s) exceeded; raise --turn-time or pass 0 to disable",
+                    budget.as_secs()
                 ),
                 rounds,
             ));
@@ -603,6 +691,8 @@ impl CodingAgent {
             branch_id: reserved.branch_id.clone(),
             summary,
             tool_count: attempt.usage.total_calls,
+            declared_tool_calls: self.max_tool_calls,
+            budget_exhausted: attempt.budget_exhausted,
             prompt_digest: prompt_digest(&reserved.prompt),
             status: "ok".into(),
             branch: reserved.attempt > 1,
@@ -729,7 +819,7 @@ impl CodingAgent {
     /// Run the forced final-summary round, renewing the lease around the model request. The
     /// renewal before the call extends the lease so the request can always finish inside one
     /// lease, and the renewal after the call re-arms it for the persist; the lease is never
-    /// left held dead by the bounded max-`MAX_TURN_ROUNDS`-round finalize.
+    /// left held dead by the single-round finalize.
     fn run_final_round(
         &self,
         store: &SessionStore,
@@ -831,6 +921,14 @@ pub fn known_tool(name: &str, allow_shell: bool) -> bool {
         name,
         "read_file" | "write_file" | "replace" | "list_directory" | "search_file_content"
     ) || (name == "run_shell_command" && allow_shell)
+}
+
+/// The budget notice appended to the last tool result of a round so the model
+/// always knows what remains. `None` budget stays silent.
+/// Per-call failure kinds that keep the caller's error codes intact.
+enum ToolCallFailure {
+    Invalid(String),
+    OutputCap,
 }
 
 #[cfg(test)]

@@ -97,6 +97,8 @@ sys.stdout.write(json.dumps({
     "status": "ok",
     "summary": "done",
     "tool_calls": 3,
+    "declared_tool_calls": 16,
+    "budget_exhausted": False,
     "prompt_digest": fnv1a(prompt or ""),
 }))
 sys.stdout.flush()

@@ -264,9 +264,9 @@ impl SessionState {
     }
 
     fn validate_tool_calls(&self, branch: &BranchRecord) -> Result<(), StoreError> {
-        if branch.rounds.len() > crate::agent::MAX_TURN_ROUNDS {
-            return Err(branch_corrupt(branch, "too many assistant/tool rounds"));
-        }
+        // No round-count ceiling: round budgets are declared per run (`maxTurnsPerPrompt`
+        // is unlimited unless capped), so a long branch is policy, not corruption. The
+        // byte totals below remain the corruption signal, as they are for tool calls.
         let mut ids = std::collections::HashSet::new();
         let mut calls = 0usize;
         let mut assistant_bytes = 0usize;
@@ -286,7 +286,9 @@ impl SessionState {
             self.validate_mapped_response_size(branch, mapped_bytes)?;
             for call in &round.calls {
                 self.validate_persisted_call(branch, call, &mut ids)?;
-                calls = checked_total(branch, calls, 1)?;
+                if !call.refused {
+                    calls = checked_total(branch, calls, 1)?;
+                }
                 argument_bytes = checked_total(branch, argument_bytes, call.args.len())?;
                 result_bytes = checked_total(branch, result_bytes, call.result.len())?;
                 mapped_bytes = mapped_bytes
@@ -296,9 +298,6 @@ impl SessionState {
                     .ok_or_else(|| branch_corrupt(branch, "mapped response size overflow"))?;
                 self.validate_mapped_response_size(branch, mapped_bytes)?;
             }
-        }
-        if calls > crate::agent::MAX_TOOL_CALLS_PER_TURN {
-            return Err(branch_corrupt(branch, "too many tool calls"));
         }
         if assistant_bytes > crate::agent::MAX_TURN_ASSISTANT_BYTES {
             return Err(branch_corrupt(

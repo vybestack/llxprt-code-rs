@@ -69,12 +69,27 @@ fn construct_chat(
     let secret_values = config.secret_values();
     let context_limit = config.context_limit;
     let backend = make_adapter(&config).map_err(|error| error.to_string())?;
+    let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
         backend: Box::new(backend),
         secret_values,
         context_limit,
-        max_rounds: 32,
+        max_rounds,
     })
+}
+
+/// `maxTurnsPerPrompt`: `-1` (and an absent knob, matching the TS ephemerals contract)
+/// is unlimited — no round cap; the run still ends on the model's own completion, the
+/// tool-call budget, the turn-time budget, and byte/output caps. A positive integer is
+/// the cap.
+fn resolve_max_rounds(profile: &Profile) -> Result<usize, String> {
+    match profile.ephemeral.max_turns_per_prompt {
+        None | Some(-1) => Ok(usize::MAX),
+        Some(value) if value > 0 => {
+            usize::try_from(value).map_err(|_| "resolved maximum turn count is invalid".to_string())
+        }
+        Some(_) => Err("resolved maximum turn count is invalid".to_string()),
+    }
 }
 
 fn construct_openai_responses(
@@ -140,11 +155,7 @@ fn construct_openai_responses(
         ..Default::default()
     };
     crate::agent::validate_timeout(model_settings.timeout)?;
-    let max_rounds = match profile.ephemeral.max_turns_per_prompt {
-        Some(-1) | None => 32,
-        Some(value) => usize::try_from(value)
-            .map_err(|_| "resolved maximum turn count is invalid".to_string())?,
-    };
+    let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
         backend: Box::new(ResponsesBackend::new_openai(model, model_settings)?),
         secret_values,
@@ -202,11 +213,7 @@ fn construct_codex(
         model = model.with_reasoning(reasoning);
     }
 
-    let max_rounds = match profile.ephemeral.max_turns_per_prompt {
-        Some(-1) | None => 32,
-        Some(value) => usize::try_from(value)
-            .map_err(|_| "resolved maximum turn count is invalid".to_string())?,
-    };
+    let max_rounds = resolve_max_rounds(profile)?;
     // Mirror the OpenAI Responses path: the profile's output-token bound and sampling
     // parameters travel in `ModelSettings`; the vendored Codex client honors none of
     // them on its own.
@@ -344,11 +351,34 @@ mod tests {
 
         assert_eq!(source.calls.load(Ordering::SeqCst), 1);
         assert_eq!(constructed.context_limit, Some(262_144));
-        assert_eq!(constructed.max_rounds, 32);
+        assert_eq!(constructed.max_rounds, usize::MAX);
         assert_eq!(
             constructed.secret_values,
             vec!["token-value".to_string(), "account-value".to_string()]
         );
+    }
+
+    #[test]
+    fn max_turns_per_prompt_resolves_the_documented_sentinels() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/gpt56solhigh.json"
+        ))
+        .unwrap();
+        let mut profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+        // The fixture declares -1, which the profile contract defines as unlimited.
+        assert_eq!(resolve_max_rounds(&profile).unwrap(), usize::MAX);
+        profile.ephemeral.max_turns_per_prompt = None;
+        // An absent knob is unlimited too, matching the TS ephemerals contract.
+        assert_eq!(resolve_max_rounds(&profile).unwrap(), usize::MAX);
+        profile.ephemeral.max_turns_per_prompt = Some(64);
+        assert_eq!(resolve_max_rounds(&profile).unwrap(), 64);
+        for invalid in [0, -2] {
+            profile.ephemeral.max_turns_per_prompt = Some(invalid);
+            assert!(
+                resolve_max_rounds(&profile).is_err(),
+                "{invalid} must not resolve"
+            );
+        }
     }
 
     #[test]

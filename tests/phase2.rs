@@ -602,14 +602,16 @@ fn duplicate_ids_fail() {
 }
 
 #[test]
-fn exact_budget_prevents_side_effect() {
+fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
     let cwd = new_cwd();
     let st = store("s14");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
-    // 40 calls exceeds the bounded budget; the overflow must never run.
-    let replies = (0..40)
+    // 17 tool rounds against a declared 16-call budget: the 17th must be refused,
+    // never executed, and the turn must complete through a forced summary. (The
+    // default budget is unlimited; caps are opt-in.)
+    let mut replies: Vec<LlmResult> = (0..17)
         .map(|i| LlmResult {
-            text: format!("r{i}"),
+            text: String::new(),
             calls: vec![ToolCall {
                 id: format!("c{i}"),
                 name: "write_file".into(),
@@ -618,9 +620,20 @@ fn exact_budget_prevents_side_effect() {
             finish_reason: Some(FinishReason::ToolCall),
         })
         .collect();
-    let a = agent(Box::new(MockBackend::new(replies)), &cwd);
-    let e = a.run(&st, &r).expect_err("budget must be enforced");
-    assert_eq!(e.key, "budget-exhausted");
+    replies.push(LlmResult {
+        text: "wrapped up".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    });
+    let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(16));
+    let run = a.run(&st, &r).expect("exhaustion must complete gracefully");
+    assert_eq!(run.tool_count, 16, "only the fitting calls execute");
+    assert!(run.budget_exhausted, "the envelope flags exhaustion");
+    assert_eq!(run.declared_tool_calls, Some(16));
+    assert_eq!(run.summary, "wrapped up", "the forced summary wins");
+    assert!(run.status == "ok");
+    assert!(!cwd.join("g16.txt").exists(), "the refused call never runs");
+    assert!(cwd.join("g15.txt").exists(), "the last fitting call ran");
 }
 
 #[test]
@@ -895,6 +908,7 @@ fn checkpoint_extends_lease() {
             name: "read_file".into(),
             args: r#"{"path":"checkpoint.txt"}"#.into(),
             ok: true,
+            refused: false,
             result: "checkpoint result".into(),
         }],
     }];

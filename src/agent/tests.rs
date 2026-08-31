@@ -240,9 +240,35 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
 
 #[test]
 fn system_prompt_formats_reasoning_context_once() {
-    let prompt = coding_system_prompt(std::path::Path::new("/workspace"), "use care", false);
+    let prompt = coding_system_prompt(
+        std::path::Path::new("/workspace"),
+        "use care",
+        false,
+        Some(16),
+    );
     assert_eq!(prompt.matches("Reasoning context:").count(), 1);
     assert!(prompt.contains("Reasoning context: use care\n"));
+}
+
+#[test]
+fn system_prompt_states_the_resolved_tool_budget() {
+    let bounded = coding_system_prompt(std::path::Path::new("/w"), "", false, Some(48));
+    assert!(bounded.contains("at most 48 tool calls"));
+    let unbounded = coding_system_prompt(std::path::Path::new("/w"), "", false, None);
+    assert!(unbounded.contains("no fixed tool-call limit"));
+}
+
+#[test]
+fn budget_notice_reports_remaining_and_escalates_near_the_end() {
+    use crate::agent::budget_notice;
+    assert_eq!(
+        budget_notice(Some(16), 4),
+        "[budget: 12 of 16 tool calls left]"
+    );
+    assert!(budget_notice(Some(16), 13)
+        .contains("only 3 of 16 tool calls left; wrap up and produce your final summary"));
+    assert!(budget_notice(Some(16), 16).contains("reply with your final summary only"));
+    assert_eq!(budget_notice(None, 999), "");
 }
 
 #[test]

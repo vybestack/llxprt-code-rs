@@ -26,6 +26,7 @@ fn valid_state() -> SessionState {
                         args: "{}".to_string(),
                         ok: true,
                         result: String::new(),
+                        refused: false,
                     }],
                 },
                 RoundRecord {
@@ -100,27 +101,33 @@ fn unknown_tools_and_impossible_completed_transcripts_are_rejected() {
 }
 
 #[test]
-fn per_branch_call_round_and_transcript_caps_are_enforced() {
+fn refused_calls_never_count_as_executed() {
     let mut state = valid_state();
     let template = state.branches[0].rounds[0].calls[0].clone();
-    state.branches[0].rounds[0].calls = (0..crate::agent::MAX_TOOL_CALLS_PER_TURN)
+    state.branches[0].rounds[0].calls = (0..16)
         .map(|index| ToolCallRecord {
             id: format!("call-{index}"),
             ..template.clone()
         })
         .collect();
-    state.validate().unwrap();
     state.branches[0].rounds[0].calls.push(ToolCallRecord {
-        id: "call-over".into(),
+        id: "call-refused".into(),
+        refused: true,
         ..template.clone()
     });
-    assert!(corruption_message(&state).contains("too many tool calls"));
+    // Executed calls sit at the cap and the refusal rides on top: the store
+    // no longer enforces a call-count constant because budgets are declared
+    // per run, but refused records must never look like executed ones.
+    state.validate().unwrap();
 
     let mut state = valid_state();
     state.branches[0].lifecycle = Lifecycle::Failed;
     state.branches[0].summary.clear();
     state.branches[0].error = "failed".into();
-    state.branches[0].rounds = (0..=crate::agent::MAX_TURN_ROUNDS)
+    // A long round history is policy, not corruption: round budgets are declared per
+    // run and unlimited unless capped, so the store no longer enforces a round-count
+    // constant (byte totals remain the corruption signal).
+    state.branches[0].rounds = (0..64)
         .map(|index| RoundRecord {
             assistant: String::new(),
             calls: vec![ToolCallRecord {
@@ -128,11 +135,12 @@ fn per_branch_call_round_and_transcript_caps_are_enforced() {
                 name: "read_file".into(),
                 args: "{}".into(),
                 ok: false,
+                refused: false,
                 result: String::new(),
             }],
         })
         .collect();
-    assert!(corruption_message(&state).contains("too many assistant/tool rounds"));
+    state.validate().unwrap();
 
     let mut state = valid_state();
     state.branches[0].rounds[0].calls[0].result = "r".repeat(crate::agent::MAX_TURN_OUTPUT_BYTES);

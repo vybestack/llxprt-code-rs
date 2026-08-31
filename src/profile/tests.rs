@@ -85,6 +85,29 @@ fn parsed_profile_stores_the_resolved_target() {
 }
 
 #[test]
+fn codex_max_turns_accepts_unlimited_and_any_positive_cap() {
+    let base: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    for (raw, expected) in [(-1_i64, -1_i64), (64, 64), (1000, 1000)] {
+        let mut value = base.clone();
+        value["ephemeralSettings"]["maxTurnsPerPrompt"] = json!(raw);
+        let parsed = parse_profile_value(&value, "gpt56solhigh").unwrap();
+        assert_eq!(parsed.ephemeral.max_turns_per_prompt, Some(expected));
+    }
+    for invalid in [0, -2] {
+        let mut value = base.clone();
+        value["ephemeralSettings"]["maxTurnsPerPrompt"] = json!(invalid);
+        let error = parse_profile_value(&value, "gpt56solhigh").unwrap_err();
+        assert!(
+            error.contains("maxTurnsPerPrompt"),
+            "rejection must name the knob: {error}"
+        );
+    }
+}
+
+#[test]
 fn codex_loop_detection_cannot_be_silently_ignored() {
     let mut value: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/gpt56solhigh.json"

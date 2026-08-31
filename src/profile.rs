@@ -228,6 +228,65 @@ pub(crate) fn parse_url(raw: &str) -> Result<RedactedUrl, String> {
     Ok(RedactedUrl::from_unvalidated(trimmed))
 }
 
+/// The declared per-prompt tool-call budget parsed from
+/// `ephemeralSettings.maxToolCallsPerPrompt`.
+///
+/// Accepted on all provider targets: `-1` maps to `Unlimited`, an integer
+/// from 1 through 512 maps to `Limited`, and an absent key stays `Unset`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaxToolCalls {
+    /// The `maxToolCallsPerPrompt` key was absent from `ephemeralSettings`.
+    #[default]
+    Unset,
+    /// A bounded budget of `n` tool calls per prompt (`1..=512`).
+    Limited(usize),
+    /// `-1`: no tool-call budget; the turn is capped by the other limits only.
+    Unlimited,
+}
+
+/// The default per-prompt tool-call budget: applied when neither the CLI flag
+/// nor the profile field declares one (the historical hardcoded 16).
+pub const DEFAULT_CALLS: usize = 16;
+
+impl MaxToolCalls {
+    /// Strict parse in the file's sibling-key error style: only a JSON
+    /// integer is accepted; 0, out-of-range values, strings, floats, and
+    /// objects are profile-load errors.
+    pub fn parse(value: &serde_json::Value, name: &str) -> Result<Self, String> {
+        let n = value.as_i64().ok_or_else(|| {
+            format!("profile {name:?}: 'maxToolCallsPerPrompt' must be an integer")
+        })?;
+        if n == -1 {
+            Ok(Self::Unlimited)
+        } else if (1..=512).contains(&n) {
+            Ok(Self::Limited(n as usize))
+        } else {
+            Err(format!(
+                "profile {name:?}: 'maxToolCallsPerPrompt' must be -1 or an integer from 1 through 512"
+            ))
+        }
+    }
+}
+
+/// Resolve the effective per-prompt tool-call budget: the CLI
+/// `--max-tool-calls` flag wins over the profile `maxToolCallsPerPrompt`
+/// field, and an absent profile field falls back to [`DEFAULT_CALLS`].
+///
+/// Returns `None` for an unlimited budget (`-1`) and `Some(n)` for a bounded
+/// one. Out-of-range CLI values (`0` or above 512) are rejected upstream as
+/// CLI usage errors; treated defensively as absent here.
+pub fn resolve_max_tool_calls(cli: Option<i64>, profile: MaxToolCalls) -> Option<usize> {
+    match cli {
+        Some(-1) => None,
+        Some(n) if (1..=512).contains(&n) => Some(n as usize),
+        _ => match profile {
+            MaxToolCalls::Unlimited => None,
+            MaxToolCalls::Limited(n) => Some(n),
+            MaxToolCalls::Unset => Some(DEFAULT_CALLS),
+        },
+    }
+}
+
 /// Transport + request settings from a profile's `ephemeralSettings`.
 #[derive(Clone, Default)]
 pub struct EphemeralSettings {
@@ -238,7 +297,11 @@ pub struct EphemeralSettings {
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    /// `ephemeralSettings.maxTurnsPerPrompt`: `-1` = unlimited (no round cap), as is an
+    /// absent knob; a positive integer caps the rounds.
     pub max_turns_per_prompt: Option<i64>,
+    /// `ephemeralSettings.maxToolCallsPerPrompt`: `-1` = unlimited, else `1..=512`.
+    pub max_tool_calls_per_prompt: MaxToolCalls,
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
@@ -286,6 +349,7 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("context_limit", &self.context_limit)
             .field("max_output_tokens", &self.max_output_tokens)
             .field("max_turns_per_prompt", &self.max_turns_per_prompt)
+            .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)
             .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
             .field("flags", &self.flags)
@@ -578,6 +642,9 @@ fn parse_ephemeral_primary(
     match key {
         "maxOutput" | "max-output" | "maxOutputTokens" => {
             settings.max_output_tokens = Some(nonnegative()?);
+        }
+        "maxToolCallsPerPrompt" => {
+            settings.max_tool_calls_per_prompt = MaxToolCalls::parse(value, name)?;
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
         "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
@@ -903,5 +970,7 @@ pub fn is_plaintext_url(u: &RedactedUrl) -> bool {
     u.as_display().starts_with("http://")
 }
 
+#[cfg(test)]
+mod max_tool_calls_tests;
 #[cfg(test)]
 mod tests;

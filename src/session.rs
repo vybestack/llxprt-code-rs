@@ -62,6 +62,10 @@ pub struct ToolCallRecord {
     pub args: String,
     /// Whether the tool run reported success.
     pub ok: bool,
+    /// True when the host refused to run the call (budget exhaustion);
+    /// refused records never count as executed tool calls.
+    #[serde(default)]
+    pub refused: bool,
     pub result: String,
 }
 

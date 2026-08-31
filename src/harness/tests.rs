@@ -106,6 +106,8 @@ fn ok_env(success: &str) -> OkEnvelope {
         "replayed": false,
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p"),
     }))
     .unwrap()
@@ -125,6 +127,8 @@ fn ok_envelope_contract_passes() {
         "status": "ok",
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p"),
     }))
     .unwrap();
@@ -160,6 +164,8 @@ fn previous_adversarial_envelope_ok_false() {
         "replayed": false,
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p")
     });
     let text = serde_json::to_string(&json).unwrap();
@@ -207,6 +213,8 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "status": "ok",
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p"),
     });
     good["exit"] = serde_json::json!(0);
@@ -224,6 +232,8 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "status": "ok",
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p"),
         "error": { "code": "x", "message": "y" },
     });
@@ -416,7 +426,7 @@ fn ok_envelope_rejects_tool_calls_over_the_attempt_budget() {
     e.tool_calls = u64::MAX;
     let e = Envelope::Ok(e);
     let err = fill(&mut r, &e, &spec("sess"), &mut ContinuationState::default()).unwrap_err();
-    assert!(err.contains("exceeds the per-turn budget"), "{err}");
+    assert!(err.contains("disagrees with the declared budget"), "{err}");
     assert!(!r.ok);
 }
 
@@ -508,6 +518,8 @@ fn trailing_or_multiple_json_is_rejected_by_parse() {
         "status": "ok",
         "summary": "done",
         "tool_calls": 3,
+        "declared_tool_calls": 16,
+        "budget_exhausted": false,
         "prompt_digest": crate::agent::prompt_digest("p")
     });
     let padded = format!("  {full}  ");
@@ -744,6 +756,8 @@ fn cli_and_harness_share_one_prompt_digest() {
                 prompt_digest: digest.clone(),
                 status: "ok".into(),
                 branch: false,
+                declared_tool_calls: Some(16),
+                budget_exhausted: false,
                 replayed: false,
             },
         };
@@ -756,7 +770,7 @@ fn cli_and_harness_share_one_prompt_digest() {
         let env: Envelope = serde_json::from_value(serde_json::json!({
             "session_id": "s", "session_dir": "/tmp/sessions/s",
             "turn": 1, "attempt": 1, "branch_id": "b1", "branch": false,
-            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3,
+            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false,
             "prompt_digest": digest,
         }))
         .unwrap();
