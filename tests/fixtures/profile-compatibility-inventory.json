@@ -8,9 +8,10 @@
     "profileJsonFiles": 62,
     "inScopeOpenAi": 38,
     "inScopeCodex": 1,
-    "installedInScope": 39,
+    "inScopeAnthropic": 7,
+    "installedInScope": 46,
     "loadBalancer": 3,
-    "unsupportedProviders": 6,
+    "unsupportedProviders": 5,
     "inventoryTotalEntries": 124,
     "inventoryDistinctKeys": 123,
     "duplicateGroups": 1,
@@ -1242,6 +1243,38 @@
         }
       },
       {
+        "file": "anthropic-profile.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true
+        }
+      },
+      {
         "file": "autokimi.json",
         "provider": "openai",
         "scope": "openai",
@@ -1885,6 +1918,144 @@
         }
       },
       {
+        "file": "fable.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.effort": "string",
+            "reasoning.adaptiveThinking": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "reasoning.summary": "string",
+            "shell-replacement": "boolean",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "loopDetectionEnabled": "boolean",
+            "emojifilter": "string",
+            "tools.disabled": {
+              "arrayOf": [
+                "string"
+              ]
+            },
+            "task-default-timeout-seconds": "number",
+            "task-max-timeout-seconds": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.loopDetectionEnabled",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.reasoning.adaptiveThinking",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.reasoning.summary",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.task-default-timeout-seconds",
+          "ephemeralSettings.task-max-timeout-seconds",
+          "ephemeralSettings.tools.disabled",
+          "model",
+          "modelParams.maxOutputTokens",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "fable5.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "maxOutputTokens": "number"
+          },
+          "ephemeralSettings": {
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.effort": "string",
+            "reasoning.adaptiveThinking": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "reasoning.summary": "string",
+            "shell-replacement": "boolean",
+            "context-limit": "number",
+            "maxTurnsPerPrompt": "number",
+            "loopDetectionEnabled": "boolean",
+            "emojifilter": "string",
+            "tools.disabled": {
+              "arrayOf": [
+                "string"
+              ]
+            },
+            "task-default-timeout-seconds": "number",
+            "task-max-timeout-seconds": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.loopDetectionEnabled",
+          "ephemeralSettings.maxTurnsPerPrompt",
+          "ephemeralSettings.reasoning.adaptiveThinking",
+          "ephemeralSettings.reasoning.effort",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.reasoning.summary",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.task-default-timeout-seconds",
+          "ephemeralSettings.task-max-timeout-seconds",
+          "ephemeralSettings.tools.disabled",
+          "model",
+          "modelParams.maxOutputTokens",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true
+        }
+      },
+      {
         "file": "friendliglm.json",
         "provider": "openai",
         "scope": "openai",
@@ -2178,6 +2349,38 @@
         "expectedDisposition": {
           "stage": "in-scope installed codex",
           "target": "codex-responses-http",
+          "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "home-path.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
           "plaintextOptIn": true
         }
       },
@@ -2686,6 +2889,38 @@
         }
       },
       {
+        "file": "prod-env.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true
+        }
+      },
+      {
         "file": "qwen38-mi300x.json",
         "provider": "openai",
         "scope": "openai",
@@ -2912,6 +3147,38 @@
         }
       },
       {
+        "file": "tilde-test.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {},
+          "ephemeralSettings": {
+            "auth-keyfile": "string"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-keyfile",
+          "model",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true
+        }
+      },
+      {
         "file": "update-test.json",
         "provider": "openai",
         "scope": "openai",
@@ -2973,6 +3240,64 @@
           "stage": "in-scope installed openai",
           "target": "target-resolved",
           "plaintextOptIn": true
+        }
+      },
+      {
+        "file": "zai.json",
+        "provider": "anthropic",
+        "scope": "anthropic",
+        "topLevel": [
+          "version",
+          "provider",
+          "model",
+          "modelParams",
+          "ephemeralSettings"
+        ],
+        "structure": {
+          "version": "number",
+          "provider": "string",
+          "model": "string",
+          "modelParams": {
+            "temperature": "number",
+            "clear_thinking": "boolean"
+          },
+          "ephemeralSettings": {
+            "auth-key-name": "string",
+            "base-url": "string",
+            "reasoning.enabled": "boolean",
+            "reasoning.includeInResponse": "boolean",
+            "reasoning.includeInContext": "boolean",
+            "reasoning.stripFromContext": "string",
+            "shell-replacement": "boolean",
+            "context-limit": "number",
+            "emojifilter": "string",
+            "maxOutputTokens": "number",
+            "stream-idle-timeout-ms": "number"
+          }
+        },
+        "paths": [
+          "ephemeralSettings.auth-key-name",
+          "ephemeralSettings.base-url",
+          "ephemeralSettings.context-limit",
+          "ephemeralSettings.emojifilter",
+          "ephemeralSettings.maxOutputTokens",
+          "ephemeralSettings.reasoning.enabled",
+          "ephemeralSettings.reasoning.includeInContext",
+          "ephemeralSettings.reasoning.includeInResponse",
+          "ephemeralSettings.reasoning.stripFromContext",
+          "ephemeralSettings.shell-replacement",
+          "ephemeralSettings.stream-idle-timeout-ms",
+          "model",
+          "modelParams.clear_thinking",
+          "modelParams.temperature",
+          "provider",
+          "version"
+        ],
+        "expectedDisposition": {
+          "stage": "in-scope installed anthropic",
+          "target": "anthropic-messages",
+          "plaintextOptIn": true,
+          "firstFailure": "named secure-store reference rejects after Anthropic Messages target resolution"
         }
       }
     ],
@@ -3223,139 +3548,6 @@
               "base-url": "string",
               "context-limit": "number",
               "maxOutputTokens": "number"
-            }
-          }
-        ],
-        "reason": "exact provider-resolution rejection"
-      },
-      {
-        "provider": "anthropic",
-        "files": [
-          "anthropic-profile.json",
-          "fable.json",
-          "fable5.json",
-          "home-path.json",
-          "prod-env.json",
-          "tilde-test.json",
-          "zai.json"
-        ],
-        "structures": [
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {},
-            "ephemeralSettings": {
-              "auth-keyfile": "string"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {
-              "maxOutputTokens": "number"
-            },
-            "ephemeralSettings": {
-              "base-url": "string",
-              "reasoning.enabled": "boolean",
-              "reasoning.effort": "string",
-              "reasoning.adaptiveThinking": "boolean",
-              "reasoning.includeInResponse": "boolean",
-              "reasoning.includeInContext": "boolean",
-              "reasoning.stripFromContext": "string",
-              "reasoning.summary": "string",
-              "shell-replacement": "boolean",
-              "context-limit": "number",
-              "maxTurnsPerPrompt": "number",
-              "loopDetectionEnabled": "boolean",
-              "emojifilter": "string",
-              "tools.disabled": {
-                "arrayOf": [
-                  "string"
-                ]
-              },
-              "task-default-timeout-seconds": "number",
-              "task-max-timeout-seconds": "number"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {
-              "maxOutputTokens": "number"
-            },
-            "ephemeralSettings": {
-              "base-url": "string",
-              "reasoning.enabled": "boolean",
-              "reasoning.effort": "string",
-              "reasoning.adaptiveThinking": "boolean",
-              "reasoning.includeInResponse": "boolean",
-              "reasoning.includeInContext": "boolean",
-              "reasoning.stripFromContext": "string",
-              "reasoning.summary": "string",
-              "shell-replacement": "boolean",
-              "context-limit": "number",
-              "maxTurnsPerPrompt": "number",
-              "loopDetectionEnabled": "boolean",
-              "emojifilter": "string",
-              "tools.disabled": {
-                "arrayOf": [
-                  "string"
-                ]
-              },
-              "task-default-timeout-seconds": "number",
-              "task-max-timeout-seconds": "number"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {},
-            "ephemeralSettings": {
-              "auth-keyfile": "string"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {},
-            "ephemeralSettings": {
-              "auth-keyfile": "string"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {},
-            "ephemeralSettings": {
-              "auth-keyfile": "string"
-            }
-          },
-          {
-            "version": "number",
-            "provider": "string",
-            "model": "string",
-            "modelParams": {
-              "temperature": "number",
-              "clear_thinking": "boolean"
-            },
-            "ephemeralSettings": {
-              "auth-key-name": "string",
-              "base-url": "string",
-              "reasoning.enabled": "boolean",
-              "reasoning.includeInResponse": "boolean",
-              "reasoning.includeInContext": "boolean",
-              "reasoning.stripFromContext": "string",
-              "shell-replacement": "boolean",
-              "context-limit": "number",
-              "emojifilter": "string",
-              "maxOutputTokens": "number",
-              "stream-idle-timeout-ms": "number"
             }
           }
         ],
@@ -3618,7 +3810,7 @@
         "expectedOutcome": "named plan disposition per profile-compatibility.md"
       },
       {
-        "file": "unsupported.anthropic.synthetic.json",
+        "file": "unsupported.bedrock.synthetic.json",
         "kind": "unsupported-provider-shape",
         "expectedOutcome": "exact provider-resolution rejection"
       },
@@ -3646,6 +3838,11 @@
         "file": "unsupported.lm-studio.synthetic.json",
         "kind": "unsupported-provider-shape",
         "expectedOutcome": "exact provider-resolution rejection"
+      },
+      {
+        "file": "zai.anthropic.synthetic.json",
+        "kind": "anthropic-messages-shape",
+        "expectedOutcome": "Anthropic Messages target resolves offline"
       }
     ]
   },

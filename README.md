@@ -104,13 +104,15 @@ Key precedence (matches llxprt-code):
 
 1. `ephemeralSettings.auth-key` (inline),
 2. `ephemeralSettings.auth-keyfile` (`~` is expanded),
-3. `settings.json` → `providerKeyfiles[provider]` (openai family; `openaivercel`
+3. `settings.json` → `providerKeyfiles[provider]` (OpenAI and Anthropic; `openaivercel`
    also falls back to `openai`).
 
 `ephemeralSettings.auth-key-name` is a named **secure-store** reference, never a keyfile
-path. Public OpenAI HTTP profiles reject it with a fixed value-free refusal: the name is never
-treated as a path and no filesystem access is attempted for it. Codex is separate. On macOS it
-loads the native Codex OAuth credential from Keychain and does not use API-key profile fields.
+path. Public API-key profiles reject it with a fixed value-free refusal: the name is never
+treated as a path and no filesystem access is attempted for it. Anthropic profiles use the Messages API, append `/v1/messages` to their configured base URL,
+and authenticate with `x-api-key` plus `anthropic-version: 2023-06-01` (not bearer auth).
+Codex is separate. On macOS it loads the native Codex OAuth credential from Keychain and does
+not use API-key profile fields.
 
 A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile`; it
 never falls back to ambient `settings.json` credentials. The resolved key lives only in

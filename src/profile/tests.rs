@@ -85,6 +85,38 @@ fn parsed_profile_stores_the_resolved_target() {
 }
 
 #[test]
+fn zai_anthropic_fixture_resolves_messages_target() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
+    ))
+    .unwrap();
+    let profile = parse_profile_value(&value, "zai").expect("z.ai profile must parse offline");
+
+    assert_eq!(profile.provider, "anthropic");
+    assert_eq!(profile.model, "glm-5.3");
+    assert_eq!(
+        profile.target.api,
+        crate::model_api::target::ModelApi::AnthropicMessages
+    );
+    assert_eq!(
+        profile.ephemeral.base_url.as_ref().map(RedactedUrl::full),
+        Some("https://api.z.ai/api/anthropic")
+    );
+}
+
+#[test]
+fn unsupported_provider_coverage_uses_bedrock() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/unsupported.bedrock.synthetic.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        parse_profile_value(&value, "unsupported-bedrock").unwrap_err(),
+        "profile \"unsupported-bedrock\": unsupported provider \"bedrock\""
+    );
+}
+
+#[test]
 fn codex_max_turns_accepts_unlimited_and_any_positive_cap() {
     let base: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/gpt56solhigh.json"

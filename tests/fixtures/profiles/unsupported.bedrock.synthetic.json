@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "provider": "bedrock",
+  "model": "anthropic.claude-3-opus",
+  "modelParams": {},
+  "ephemeralSettings": {}
+}

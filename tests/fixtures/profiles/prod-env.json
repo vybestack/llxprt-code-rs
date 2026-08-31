@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "provider": "anthropic",
+  "model": "test-model",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "<redacted-keyfile-path>"
+  }
+}

@@ -1,7 +1,7 @@
 # Vendored local patches on serdes-ai 0.2.6
 
 `llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path dependency
-`vendor/serdes-ai` (`default-features = false, features = ["openai", "chatgpt-oauth"]`).
+`vendor/serdes-ai` (`default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"]`).
 The retained crates are based on the 0.2.6 release. The Responses client is based on the tested `serdes-ai-responses` subtree at Git commit `bd6aefc96f699276afb6384257b101039a663b5f`. The local transport patches below adapt those sources into one offline build.
 `publish = false` in `Cargo.toml`: `cargo package` would normalize the path
 dependency back to the unpatched crates.io `=0.2.6`, silently dropping these
@@ -22,7 +22,7 @@ required by the path dependency's normal (non-optional) `serdes-ai` dependencies
 No other serdes-ai workspace crates (embeddings/evals/graph/mcp) are vendored. Features and
 dependencies for those absent crates are removed from the retained manifests.
 
-The root path dependency enables the retained `openai` and `chatgpt-oauth` model features. Every
+The root path dependency enables the retained `openai`, `anthropic`, and `chatgpt-oauth` model features. Every
 retained feature combination must compile from the shipped offline inputs. Unavailable Bedrock, OpenTelemetry, JSON-schema validation, and third-party common-tool dependencies are removed rather than advertised as non-building options. The retained WebSocket feature uses `tokio-tungstenite` with an explicit Rustls client configuration and the shipped WebPKI root set. The release gate discovers every feature
 in each retained manifest, checks each one independently, and checks each crate with all of its
 retained features enabled.

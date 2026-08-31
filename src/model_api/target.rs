@@ -6,6 +6,7 @@ pub(crate) enum ProviderId {
     OpenAiResponses,
     OpenAiVercel,
     OpenAiCompatible,
+    Anthropic,
     Codex,
 }
 
@@ -19,6 +20,7 @@ impl ProviderId {
             "openai-responses" => Ok(Self::OpenAiResponses),
             "openaivercel" => Ok(Self::OpenAiVercel),
             "openai-compatible" => Ok(Self::OpenAiCompatible),
+            "anthropic" => Ok(Self::Anthropic),
             "codex" => Ok(Self::Codex),
             _ => Err(format!(
                 "profile {profile_name:?}: unsupported provider {provider:?}"
@@ -32,6 +34,7 @@ impl ProviderId {
             Self::OpenAiResponses => "openai-responses",
             Self::OpenAiVercel => "openaivercel",
             Self::OpenAiCompatible => "openai-compatible",
+            Self::Anthropic => "anthropic",
             Self::Codex => "codex",
         }
     }
@@ -41,6 +44,7 @@ impl ProviderId {
 pub(crate) enum ModelApi {
     ChatCompletions,
     Responses,
+    AnthropicMessages,
 }
 
 impl ModelApi {
@@ -48,6 +52,7 @@ impl ModelApi {
         match self {
             Self::ChatCompletions => "chat",
             Self::Responses => "responses",
+            Self::AnthropicMessages => "anthropic-messages",
         }
     }
 }
@@ -83,10 +88,14 @@ pub(crate) fn resolve_model_target(
 
     let selected = parse_api_selector(ephemeral, profile_name)?;
     let api = match (provider, selected) {
-        (ProviderId::OpenAi, Some(api)) => api,
+        (ProviderId::Anthropic, Some(selector)) => {
+            return Err(unsupported_target(profile_name, provider, selector.api()));
+        }
+        (ProviderId::Anthropic, None) => ModelApi::AnthropicMessages,
+        (ProviderId::OpenAi, Some(selector)) => selector.api(),
         (ProviderId::OpenAi, None) => ModelApi::ChatCompletions,
-        (ProviderId::OpenAiResponses, Some(ModelApi::Responses) | None) => ModelApi::Responses,
-        (ProviderId::OpenAiVercel | ProviderId::OpenAiCompatible, Some(ModelApi::Responses)) => {
+        (ProviderId::OpenAiResponses, Some(ApiSelector::Responses) | None) => ModelApi::Responses,
+        (ProviderId::OpenAiVercel | ProviderId::OpenAiCompatible, Some(ApiSelector::Responses)) => {
             return Err(unsupported_target(
                 profile_name,
                 provider,
@@ -95,17 +104,17 @@ pub(crate) fn resolve_model_target(
         }
         (
             ProviderId::OpenAiVercel | ProviderId::OpenAiCompatible,
-            Some(ModelApi::ChatCompletions) | None,
+            Some(ApiSelector::Chat) | None,
         ) => ModelApi::ChatCompletions,
-        (ProviderId::Codex, Some(ModelApi::ChatCompletions)) => {
+        (ProviderId::Codex, Some(ApiSelector::Chat)) => {
             return Err(unsupported_target(
                 profile_name,
                 provider,
                 ModelApi::ChatCompletions,
             ));
         }
-        (ProviderId::Codex, Some(ModelApi::Responses) | None) => ModelApi::Responses,
-        (ProviderId::OpenAiResponses, Some(ModelApi::ChatCompletions)) => {
+        (ProviderId::Codex, Some(ApiSelector::Responses) | None) => ModelApi::Responses,
+        (ProviderId::OpenAiResponses, Some(ApiSelector::Chat)) => {
             return Err(unsupported_target(
                 profile_name,
                 provider,
@@ -122,10 +131,25 @@ pub(crate) fn resolve_model_target(
     })
 }
 
+#[derive(Clone, Copy)]
+enum ApiSelector {
+    Chat,
+    Responses,
+}
+
+impl ApiSelector {
+    const fn api(self) -> ModelApi {
+        match self {
+            Self::Chat => ModelApi::ChatCompletions,
+            Self::Responses => ModelApi::Responses,
+        }
+    }
+}
+
 fn parse_api_selector(
     ephemeral: Option<&Map<String, Value>>,
     profile_name: &str,
-) -> Result<Option<ModelApi>, String> {
+) -> Result<Option<ApiSelector>, String> {
     let Some(settings) = ephemeral else {
         return Ok(None);
     };
@@ -147,7 +171,7 @@ fn parse_selector(
     settings: &Map<String, Value>,
     key: &str,
     profile_name: &str,
-) -> Result<Option<ModelApi>, String> {
+) -> Result<Option<ApiSelector>, String> {
     let Some(value) = settings.get(key) else {
         return Ok(None);
     };
@@ -155,8 +179,8 @@ fn parse_selector(
         .as_str()
         .ok_or_else(|| format!("profile {profile_name:?}: '{key}' must be a string"))?;
     match selector {
-        "chat" => Ok(Some(ModelApi::ChatCompletions)),
-        "responses" => Ok(Some(ModelApi::Responses)),
+        "chat" => Ok(Some(ApiSelector::Chat)),
+        "responses" => Ok(Some(ApiSelector::Responses)),
         _ => Err(format!(
             "profile {profile_name:?}: '{key}' must be exactly 'chat' or 'responses'"
         )),

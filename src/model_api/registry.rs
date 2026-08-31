@@ -3,6 +3,7 @@ use crate::model::ModelConfig;
 use crate::profile::Profile;
 use serdes_ai_responses::client::OpenResponsesModel;
 
+use super::anthropic_backend::AnthropicBackend;
 use super::dependencies::{ConstructorKind, RuntimeDependencies};
 use super::responses_backend::ResponsesBackend;
 
@@ -38,6 +39,12 @@ pub(crate) fn construct_backend(
         ConstructorKind::OpenAiResponses => construct_openai_responses(
             profile,
             session_id,
+            dependencies,
+            profile_from_file,
+            allow_insecure_http,
+        ),
+        ConstructorKind::AnthropicMessages => construct_anthropic(
+            profile,
             dependencies,
             profile_from_file,
             allow_insecure_http,
@@ -183,6 +190,95 @@ fn responses_transport_base(endpoint: &crate::profile::RedactedUrl) -> &str {
     endpoint.full().trim_end_matches('/')
 }
 
+fn construct_anthropic(
+    profile: &Profile,
+    dependencies: &RuntimeDependencies,
+    profile_from_file: bool,
+    allow_insecure_http: bool,
+) -> Result<ConstructedBackend, String> {
+    let base_url = profile
+        .ephemeral
+        .base_url
+        .as_ref()
+        .map(crate::profile::RedactedUrl::full)
+        .unwrap_or("https://api.anthropic.com");
+    crate::model::check_http_policy(base_url, allow_insecure_http).map_err(|error| {
+        if crate::model::insecure_http_error(&error) {
+            "a plaintext http:// endpoint requires --allow-insecure-http; pass it explicitly to use a remote clear-text endpoint".to_string()
+        } else {
+            error.to_string()
+        }
+    })?;
+    if profile.ephemeral.auth_key_name {
+        return Err(crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
+    }
+    validate_anthropic_settings(profile)?;
+
+    let api_key = crate::model::resolve_api_key(
+        profile,
+        profile_from_file,
+        dependencies.config_home().as_path(),
+    )
+    .map_err(|error| error.to_string())?;
+    let timeout = std::time::Duration::from_millis(profile.ephemeral.timeout_ms.unwrap_or(900_000));
+    let secret_config = ModelConfig {
+        model: profile.model.clone(),
+        base_url: crate::profile::RedactedUrl::parse(base_url)?,
+        api_key: api_key.clone(),
+        keyfile_path: profile.ephemeral.auth_keyfile_orig.clone(),
+        max_output_tokens: profile.ephemeral.max_output_tokens,
+        timeout: Some(timeout),
+        model_params: Some(profile.model_params.clone()),
+        context_limit: profile.ephemeral.context_limit,
+    };
+    let secret_values = secret_config.secret_values();
+    let model_settings = anthropic_model_settings(profile, timeout);
+    crate::agent::validate_timeout(model_settings.timeout)?;
+    let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
+        .with_base_url(base_url.trim_end_matches('/'))
+        .with_timeout(timeout);
+    let max_rounds = resolve_max_rounds(profile)?;
+
+    Ok(ConstructedBackend {
+        backend: Box::new(AnthropicBackend::new(model, model_settings)?),
+        secret_values,
+        context_limit: profile.ephemeral.context_limit,
+        max_rounds,
+    })
+}
+
+fn anthropic_model_settings(
+    profile: &Profile,
+    timeout: std::time::Duration,
+) -> serdes_ai::ModelSettings {
+    serdes_ai::ModelSettings {
+        max_tokens: profile.ephemeral.max_output_tokens,
+        temperature: profile.model_params.temperature,
+        top_p: profile.model_params.top_p,
+        top_k: profile.model_params.top_k,
+        timeout: Some(timeout),
+        ..Default::default()
+    }
+}
+
+fn validate_anthropic_settings(profile: &Profile) -> Result<(), String> {
+    let unsupported = profile
+        .ephemeral
+        .unsupported
+        .iter()
+        .chain(profile.model_params.unsupported.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    if unsupported.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported Anthropic Messages setting(s): {}",
+            unsupported.join(", ")
+        ))
+    }
+}
+
 fn construct_codex(
     profile: &Profile,
     dependencies: &RuntimeDependencies,
@@ -321,6 +417,142 @@ mod tests {
 
         assert_eq!(source.calls.load(Ordering::SeqCst), 0);
         assert_eq!(constructed.secret_values, vec!["chat-secret".to_string()]);
+    }
+
+    #[test]
+    fn zai_anthropic_backend_constructs_offline_without_native_credentials() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
+        ))
+        .unwrap();
+        value["ephemeralSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("auth-key-name");
+        value["ephemeralSettings"]["auth-key"] = serde_json::json!("zai-test-key");
+        let profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let source = Arc::new(InMemorySource {
+            calls: AtomicUsize::new(0),
+        });
+        let dependencies = RuntimeDependencies::new(
+            source.clone(),
+            Arc::new(FixedClock),
+            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
+        );
+
+        let constructed = construct_backend(
+            &profile,
+            &crate::session::SessionId::parse("zai-session").unwrap(),
+            &dependencies,
+            true,
+            false,
+        )
+        .expect("z.ai-shaped Anthropic profile must construct without a request");
+
+        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(constructed.backend.request_calls(), 0);
+        assert_eq!(constructed.secret_values, vec!["zai-test-key"]);
+    }
+
+    #[test]
+    fn anthropic_settings_forward_profile_top_k() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
+        ))
+        .unwrap();
+        let mut profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
+        profile.model_params.top_k = Some(37);
+        let timeout = std::time::Duration::from_secs(30);
+
+        let settings = anthropic_model_settings(&profile, timeout);
+
+        assert_eq!(settings.top_k, Some(37));
+    }
+
+    #[test]
+    fn anthropic_messages_wire_uses_expected_route_and_headers() {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let body = r#"{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"glm-5.3","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8(request).unwrap()
+        });
+
+        let model = serdes_ai::models::anthropic::AnthropicModel::new("glm-5.3", "wire-key")
+            .with_base_url(format!("http://127.0.0.1:{port}/api/anthropic"));
+        let backend = AnthropicBackend::new(
+            model,
+            serdes_ai::ModelSettings {
+                timeout: Some(std::time::Duration::from_secs(5)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let request_message = serdes_ai::core::ModelRequest::with_parts(vec![
+            serdes_ai::core::messages::ModelRequestPart::UserPrompt(
+                serdes_ai::core::messages::UserPromptPart::new("hello"),
+            ),
+        ]);
+        backend.request(&[request_message], &[]).unwrap();
+        let request = server.join().unwrap().to_ascii_lowercase();
+
+        assert!(request.starts_with("post /api/anthropic/v1/messages http/1.1"));
+        assert!(request.contains("\r\nx-api-key: wire-key\r\n"));
+        assert!(request.contains("\r\nanthropic-version: 2023-06-01\r\n"));
+        assert!(!request.contains("\r\nauthorization:"));
+    }
+
+    #[test]
+    fn zai_acceptance_profile_parses_before_named_credential_policy() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
+        ))
+        .unwrap();
+        let profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let source = Arc::new(InMemorySource {
+            calls: AtomicUsize::new(0),
+        });
+        let dependencies = RuntimeDependencies::new(
+            source.clone(),
+            Arc::new(FixedClock),
+            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
+        );
+
+        let error = match construct_backend(
+            &profile,
+            &crate::session::SessionId::parse("zai-session").unwrap(),
+            &dependencies,
+            false,
+            false,
+        ) {
+            Ok(_) => panic!("named secure-store references remain unsupported"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

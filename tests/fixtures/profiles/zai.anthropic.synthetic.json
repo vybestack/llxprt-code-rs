@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "provider": "anthropic",
+  "model": "glm-5.3",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "https://api.z.ai/api/anthropic",
+    "auth-key-name": "zai"
+  }
+}
