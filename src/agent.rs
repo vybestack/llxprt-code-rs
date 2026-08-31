@@ -63,6 +63,10 @@ pub struct CodingAgent {
     cwd: std::path::PathBuf,
     workspace: crate::tools::WorkspaceCap,
     max_steps: usize,
+    /// The resolved per-prompt tool-call budget: `None` = unlimited, `Some(n)` =
+    /// `n` calls. Constructors start at the 16-call default; the CLI resolves
+    /// CLI-over-profile and overrides via [`Self::with_max_tool_calls`].
+    pub max_tool_calls: Option<usize>,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -125,6 +129,7 @@ impl CodingAgent {
             cwd: cwd.to_path_buf(),
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -150,6 +155,7 @@ impl CodingAgent {
             cwd: cwd.to_path_buf(),
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -171,6 +177,7 @@ impl CodingAgent {
             cwd,
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
+            max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -190,6 +197,12 @@ impl CodingAgent {
     /// tool-less budgets instead of the full [`MAX_TURN_ROUNDS`] default).
     pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
         self.max_rounds = max_rounds;
+        self
+    }
+
+    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
+    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
+        self.max_tool_calls = max_tool_calls;
         self
     }
 

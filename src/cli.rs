@@ -73,6 +73,11 @@ pub struct Args {
     /// Explicit opt-in to register the run_shell_command tool.
     #[arg(long)]
     pub allow_shell: bool,
+
+    /// Per-prompt tool-call budget: `1..=512`, or `-1` for unlimited. Overrides the
+    /// profile's `maxToolCallsPerPrompt`; when omitted, the profile field (then 16) applies.
+    #[arg(long, value_name = "N")]
+    pub max_tool_calls: Option<i64>,
 }
 
 /// Outcome of a successful invocation.
@@ -123,11 +128,26 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
     // Construct the selected backend before session reservation. Credential failures and
     // provider-specific configuration errors therefore cannot create session artifacts.
     let reason_note = CodingAgent::prompt_reason_note(&profile);
+    let cli_max_tool_calls = match args.max_tool_calls {
+        None | Some(-1) | Some(1..=512) => args.max_tool_calls,
+        Some(n) => {
+            return Err(AppError::new(
+                Code::Usage,
+                "max-tool-calls",
+                format!("--max-tool-calls must be -1 or an integer from 1 through 512 (got {n})"),
+            ));
+        }
+    };
+    let max_tool_calls = crate::profile::resolve_max_tool_calls(
+        cli_max_tool_calls,
+        profile.ephemeral.max_tool_calls_per_prompt,
+    );
     let mut agent = CodingAgent::new_with_backend(constructed.backend, &cwd, args.allow_shell)
         .map_err(|e| AppError::new(e.code, e.key, e.message))?
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
-        .with_max_rounds(constructed.max_rounds);
+        .with_max_rounds(constructed.max_rounds)
+        .with_max_tool_calls(max_tool_calls);
     agent.prompt_notes = reason_note;
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|e| AppError::new(Code::Session, "session-store", e))?;

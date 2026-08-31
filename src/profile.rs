@@ -244,6 +244,10 @@ pub enum MaxToolCalls {
     Unlimited,
 }
 
+/// The default per-prompt tool-call budget: applied when neither the CLI flag
+/// nor the profile field declares one (the historical hardcoded 16).
+pub const DEFAULT_CALLS: usize = 16;
+
 impl MaxToolCalls {
     /// Strict parse in the file's sibling-key error style: only a JSON
     /// integer is accepted; 0, out-of-range values, strings, floats, and
@@ -261,6 +265,25 @@ impl MaxToolCalls {
                 "profile {name:?}: 'maxToolCallsPerPrompt' must be -1 or an integer from 1 through 512"
             ))
         }
+    }
+}
+
+/// Resolve the effective per-prompt tool-call budget: the CLI
+/// `--max-tool-calls` flag wins over the profile `maxToolCallsPerPrompt`
+/// field, and an absent profile field falls back to [`DEFAULT_CALLS`].
+///
+/// Returns `None` for an unlimited budget (`-1`) and `Some(n)` for a bounded
+/// one. Out-of-range CLI values (`0` or above 512) are rejected upstream as
+/// CLI usage errors; treated defensively as absent here.
+pub fn resolve_max_tool_calls(cli: Option<i64>, profile: MaxToolCalls) -> Option<usize> {
+    match cli {
+        Some(-1) => None,
+        Some(n) if (1..=512).contains(&n) => Some(n as usize),
+        _ => match profile {
+            MaxToolCalls::Unlimited => None,
+            MaxToolCalls::Limited(n) => Some(n),
+            MaxToolCalls::Unset => Some(DEFAULT_CALLS),
+        },
     }
 }
 

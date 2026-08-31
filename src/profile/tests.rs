@@ -868,3 +868,49 @@ fn max_tool_calls_per_prompt_codex_target() {
     let error = parse_profile_value(&value, "gpt56solhigh").unwrap_err();
     assert!(error.contains("maxToolCallsPerPrompt"), "{error}");
 }
+
+/// Effective-budget precedence matrix: CLI flag > profile field > default 16.
+#[test]
+fn max_tool_calls_resolution_precedence() {
+    // CLI + profile: the flag wins in both directions, including `-1` over a
+    // bounded profile.
+    assert_eq!(
+        resolve_max_tool_calls(Some(5), MaxToolCalls::Limited(8)),
+        Some(5)
+    );
+    assert_eq!(
+        resolve_max_tool_calls(Some(-1), MaxToolCalls::Limited(8)),
+        None
+    );
+    assert_eq!(
+        resolve_max_tool_calls(Some(1), MaxToolCalls::Unlimited),
+        Some(1)
+    );
+    // CLI only.
+    assert_eq!(
+        resolve_max_tool_calls(Some(512), MaxToolCalls::Unset),
+        Some(512)
+    );
+    assert_eq!(
+        resolve_max_tool_calls(Some(16), MaxToolCalls::Unset),
+        Some(16)
+    );
+    // Profile only.
+    assert_eq!(
+        resolve_max_tool_calls(None, MaxToolCalls::Limited(8)),
+        Some(8)
+    );
+    assert_eq!(resolve_max_tool_calls(None, MaxToolCalls::Unlimited), None);
+    // Neither: the default of 16.
+    assert_eq!(resolve_max_tool_calls(None, MaxToolCalls::Unset), Some(16));
+    assert_eq!(
+        resolve_max_tool_calls(None, MaxToolCalls::Unset),
+        Some(DEFAULT_CALLS)
+    );
+    // Out-of-range CLI values are a CLI usage error; defensively they defer to
+    // the profile field.
+    assert_eq!(
+        resolve_max_tool_calls(Some(0), MaxToolCalls::Limited(8)),
+        Some(8)
+    );
+}
