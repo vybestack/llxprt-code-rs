@@ -22,6 +22,7 @@ for production_path in \
   scripts/build-source-bundle.sh \
   scripts/verify-source-bundle.sh \
   scripts/release-gates.sh \
+  xtask/src/release.rs \
   scripts/publish-release.sh \
   scripts/publish-source-oci.py; do
   if grep -Fq 'llxprt-code-rs-0.1.0-source.tar.gz' "$root/$production_path"; then
@@ -33,9 +34,10 @@ vendor_manifest_count=$(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.
 vendor_lock_count=$(find "$root/vendor" -mindepth 2 -maxdepth 2 -name Cargo.lock -type f | wc -l | tr -d ' ')
 [[ "$vendor_manifest_count" -gt 0 ]]
 [[ "$vendor_lock_count" == "$vendor_manifest_count" ]]
-for audit_gate in scripts/release-gates.sh .github/workflows/ci.yml; do
-  grep -Fq 'for lockfile in vendor/*/Cargo.lock; do' "$root/$audit_gate"
-done
+grep -Fq 'vendor_lockfiles(root)?' "$root/xtask/src/release.rs"
+grep -Fq 'for lockfile in vendor/*/Cargo.lock; do' "$root/.github/workflows/ci.yml"
+grep -Fq 'run: cargo xtask release-gates' "$root/.github/workflows/ci.yml"
+grep -Fq 'exec cargo +1.88.0 xtask release-gates "$@"' "$root/scripts/release-gates.sh"
 grep -Fq "GH_TOKEN: \${{ secrets.RELEASE_ADMIN_TOKEN }}" "$root/.github/workflows/ci.yml"
 grep -Fq 'Create atomic immutable release record' "$root/.github/workflows/ci.yml"
 grep -Fq "repos/\$GITHUB_REPOSITORY/immutable-releases" "$root/scripts/publish-release.sh"

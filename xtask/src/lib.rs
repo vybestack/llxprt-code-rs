@@ -1,5 +1,5 @@
-//! The llxprt-code-rs offline quality gates: effective-LOC and cyclomatic/cognitive
-//! complexity over the production source set, plus the `cargo xtask lint` coordinator.
+//! The llxprt-code-rs offline quality and release gates: source analysis plus the
+//! coordinating lint, fixture, source-bundle, and release commands.
 //!
 //! The production set is exactly the root crate's `src/**/*.rs` (every library and binary
 //! source, including `src/bin/*`). Tests, `vendor/`, and the xtask itself live outside
@@ -9,6 +9,7 @@
 pub mod analyze;
 pub mod complexity;
 pub mod loc;
+pub mod release;
 
 pub use analyze::{find_production_sources, run_gate, Gate, Report, Violation};
 

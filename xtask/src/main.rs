@@ -1,6 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use xtask::release::{run_release_fixtures, run_release_gates, run_source_bundle};
 use xtask::{run_gate, Gate};
 
 fn main() -> ExitCode {
@@ -16,21 +17,31 @@ fn main() -> ExitCode {
 fn real_main() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or_else(usage)?;
-    if args.next().is_some() {
-        return Err(usage());
-    }
+    let remaining: Vec<String> = args.collect();
     let root = project_root()?;
     match command.as_str() {
-        "loc" => run_gate(&root, Gate::Loc),
-        "complexity" => run_gate(&root, Gate::Complexity),
-        "quality" => run_gate(&root, Gate::All),
-        "lint" => run_lint(&root),
+        "loc" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Loc)),
+        "complexity" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Complexity)),
+        "quality" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::All)),
+        "lint" => no_args(&remaining).and_then(|()| run_lint(&root)),
+        "release-gates" => no_args(&remaining).and_then(|()| run_release_gates(&root)),
+        "release-fixtures" => no_args(&remaining).and_then(|()| run_release_fixtures(&root)),
+        "source-bundle" => run_source_bundle(&root, &remaining),
         _ => Err(usage()),
     }
 }
 
+fn no_args(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        Ok(())
+    } else {
+        Err(usage())
+    }
+}
+
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity>".to_string()
+    "usage: cargo xtask <lint|quality|loc|complexity|release-gates|release-fixtures|source-bundle>"
+        .to_string()
 }
 
 fn project_root() -> Result<PathBuf, String> {
