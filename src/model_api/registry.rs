@@ -255,6 +255,7 @@ fn anthropic_model_settings(
         max_tokens: profile.ephemeral.max_output_tokens,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
+        top_k: profile.model_params.top_k,
         timeout: Some(timeout),
         ..Default::default()
     }
@@ -452,6 +453,21 @@ mod tests {
         assert_eq!(source.calls.load(Ordering::SeqCst), 0);
         assert_eq!(constructed.backend.request_calls(), 0);
         assert_eq!(constructed.secret_values, vec!["zai-test-key"]);
+    }
+
+    #[test]
+    fn anthropic_settings_forward_profile_top_k() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
+        ))
+        .unwrap();
+        let mut profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
+        profile.model_params.top_k = Some(37);
+        let timeout = std::time::Duration::from_secs(30);
+
+        let settings = anthropic_model_settings(&profile, timeout);
+
+        assert_eq!(settings.top_k, Some(37));
     }
 
     #[test]
