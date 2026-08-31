@@ -78,6 +78,46 @@ pub struct Args {
     /// profile's `maxToolCallsPerPrompt`; when omitted, the profile field (then 16) applies.
     #[arg(long, value_name = "N")]
     pub max_tool_calls: Option<i64>,
+
+    /// Wall-clock budget per prompt like `90s`, `30m`, `2h`; `0` disables.
+    /// Omitted means no time limit.
+    #[arg(long, value_name = "DURATION")]
+    pub turn_time: Option<String>,
+}
+
+/// Parse a `--turn-time` value: digits plus an `s`/`m`/`h` unit, or a bare
+/// `0` (any zero form disables the budget). Bare nonzero numbers, unknown
+/// units, and overflowing values are usage errors.
+pub(crate) fn parse_turn_time(raw: &str) -> Result<Option<std::time::Duration>, String> {
+    let raw = raw.trim();
+    let (digits, unit) = match raw.char_indices().rfind(|(_, c)| !c.is_ascii_digit()) {
+        Some((idx, c)) => (&raw[..idx], c),
+        None => (raw, '\0'),
+    };
+    let seconds_per_unit = match unit {
+        '\0' => {
+            if digits == "0" {
+                return Ok(None);
+            }
+            return Err(format!(
+                "--turn-time needs an s/m/h unit (got {raw:?}); pass 0 to disable"
+            ));
+        }
+        's' => 1u64,
+        'm' => 60,
+        'h' => 3600,
+        _ => return Err(format!("--turn-time unit must be s, m, or h (got {raw:?})")),
+    };
+    let Ok(count) = digits.parse::<u64>() else {
+        return Err(format!("--turn-time needs an integer count (got {raw:?})"));
+    };
+    let seconds = count
+        .checked_mul(seconds_per_unit)
+        .ok_or_else(|| format!("--turn-time {raw:?} overflows"))?;
+    if seconds == 0 {
+        return Ok(None);
+    }
+    Ok(Some(std::time::Duration::from_secs(seconds)))
 }
 
 /// Outcome of a successful invocation.
@@ -142,12 +182,18 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
         cli_max_tool_calls,
         profile.ephemeral.max_tool_calls_per_prompt,
     );
+    let turn_time = match &args.turn_time {
+        None => None,
+        Some(raw) => parse_turn_time(raw)
+            .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?,
+    };
     let mut agent = CodingAgent::new_with_backend(constructed.backend, &cwd, args.allow_shell)
         .map_err(|e| AppError::new(e.code, e.key, e.message))?
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
         .with_max_rounds(constructed.max_rounds)
-        .with_max_tool_calls(max_tool_calls);
+        .with_max_tool_calls(max_tool_calls)
+        .with_turn_time(turn_time);
     agent.prompt_notes = reason_note;
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|e| AppError::new(Code::Session, "session-store", e))?;
@@ -364,5 +410,37 @@ fn resolve_profile(args: &Args, config_root: &std::path::Path) -> Result<Profile
                 Err(e) => Err(AppError::new(Code::Config, "profile-load", e.to_string())),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod turn_time_tests {
+    use super::parse_turn_time;
+    use std::time::Duration;
+
+    #[test]
+    fn turn_time_accepts_unit_durations() {
+        assert_eq!(parse_turn_time("90s"), Ok(Some(Duration::from_secs(90))));
+        assert_eq!(parse_turn_time("30m"), Ok(Some(Duration::from_secs(1800))));
+        assert_eq!(parse_turn_time("2h"), Ok(Some(Duration::from_secs(7200))));
+    }
+
+    #[test]
+    fn turn_time_zero_and_absent_disable() {
+        assert_eq!(parse_turn_time("0"), Ok(None));
+        assert_eq!(parse_turn_time("0s"), Ok(None));
+        assert_eq!(parse_turn_time("0h"), Ok(None));
+    }
+
+    #[test]
+    fn turn_time_rejects_bad_grammar() {
+        for raw in ["30", "-5m", "m", "1.5h", "1d", "1x", "", "  "] {
+            assert!(parse_turn_time(raw).is_err(), "{raw:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn turn_time_rejects_overflow() {
+        assert!(parse_turn_time((u64::MAX.to_string() + "h").as_str()).is_err());
     }
 }

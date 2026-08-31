@@ -67,6 +67,10 @@ pub struct CodingAgent {
     /// `n` calls. Constructors start at the 16-call default; the CLI resolves
     /// CLI-over-profile and overrides via [`Self::with_max_tool_calls`].
     pub max_tool_calls: Option<usize>,
+
+    /// Wall-clock budget for one prompt turn. `None` (the default) means no
+    /// time limit; set from the CLI `--turn-time` flag.
+    turn_time_budget: Option<std::time::Duration>,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -99,6 +103,7 @@ struct AttemptState {
     current: LlmResult,
     ids: std::collections::HashSet<String>,
     usage: TurnUsage,
+    started: std::time::Instant,
 }
 
 impl CodingAgent {
@@ -130,6 +135,7 @@ impl CodingAgent {
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -156,6 +162,7 @@ impl CodingAgent {
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -178,6 +185,7 @@ impl CodingAgent {
             workspace,
             max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
+            turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -203,6 +211,12 @@ impl CodingAgent {
     /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
     pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
         self.max_tool_calls = max_tool_calls;
+        self
+    }
+
+    /// Override the wall-clock turn budget (`None` = no time limit).
+    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
+        self.turn_time_budget = budget;
         self
     }
 
@@ -331,6 +345,7 @@ impl CodingAgent {
             current,
             ids: std::collections::HashSet::new(),
             usage,
+            started: std::time::Instant::now(),
         })
     }
 
@@ -357,6 +372,7 @@ impl CodingAgent {
         attempt: &mut AttemptState,
     ) -> Result<(), AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
+        self.check_time_limit(store, reserved, &attempt.rounds, attempt.started.elapsed())?;
         let calls = validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell).map_err(
             |error| {
                 self.dead(
@@ -502,6 +518,34 @@ impl CodingAgent {
                 &format!(
                     "tool-call budget ({}) would be exceeded; reduce tool calls",
                     self.max_steps
+                ),
+                rounds,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Enforce the wall-clock turn budget at the top of every tool round,
+    /// alongside the round and tool-call limits, so a turn that outlives its
+    /// budget fails in the same envelope instead of hanging.
+    fn check_time_limit(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        rounds: &[RoundRecord],
+        elapsed: std::time::Duration,
+    ) -> Result<(), AgentError> {
+        let Some(budget) = self.turn_time_budget else {
+            return Ok(());
+        };
+        if elapsed >= budget {
+            return Err(self.dead(
+                store,
+                reserved,
+                "turn-time-exhausted",
+                &format!(
+                    "turn time budget ({}s) exceeded; raise --turn-time or pass 0 to disable",
+                    budget.as_secs()
                 ),
                 rounds,
             ));
