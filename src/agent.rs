@@ -62,7 +62,6 @@ pub struct CodingAgent {
     backend: std::sync::Arc<dyn ChatBackend>,
     cwd: std::path::PathBuf,
     workspace: crate::tools::WorkspaceCap,
-    max_steps: usize,
     /// The resolved per-prompt tool-call budget: `None` = unlimited, `Some(n)` =
     /// `n` calls. Constructors start at the 16-call default; the CLI resolves
     /// CLI-over-profile and overrides via [`Self::with_max_tool_calls`].
@@ -133,7 +132,6 @@ impl CodingAgent {
             backend: std::sync::Arc::new(adapter),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -160,7 +158,6 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd: cwd.to_path_buf(),
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -183,7 +180,6 @@ impl CodingAgent {
             backend: std::sync::Arc::from(backend),
             cwd,
             workspace,
-            max_steps: MAX_TOOL_CALLS_PER_TURN,
             max_tool_calls: Some(MAX_TOOL_CALLS_PER_TURN),
             turn_time_budget: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -307,6 +303,7 @@ impl CodingAgent {
             &self.cwd,
             note,
             self.allow_shell,
+            self.max_tool_calls,
         ))];
         for history in &reserved.history {
             requests.push(user_request(&history.prompt));
@@ -396,47 +393,75 @@ impl CodingAgent {
             assistant: attempt.current.text.clone(),
             calls: Vec::new(),
         };
-        for call in &calls {
-            let parsed = parse_object_args(call).map_err(|error| {
-                self.dead(
-                    store,
-                    reserved,
-                    "invalid-tool-call",
-                    &error,
-                    &attempt.rounds,
-                )
-            })?;
-            let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
-            if remaining_output == 0 {
-                return Err(self.dead(
-                    store,
-                    reserved,
-                    "limit",
-                    &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
-                    &attempt.rounds,
-                ));
-            }
-            let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-                &self.cwd,
-                &call.name,
-                parsed,
-                config,
-                remaining_output,
-            );
-            let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
-            let text = crate::redact::truncate_utf8(scrubbed, remaining_output);
-            attempt.usage.total_calls += 1;
-            attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-            attempt
-                .requests
-                .push(tool_return_request(&call.name, &call.id, ok, &text));
-            round.calls.push(tool_call_record(call, ok, text));
+        for (index, call) in calls.iter().enumerate() {
+            self.execute_one_call(config, attempt, &mut round, call, index, calls.len())
+                .map_err(|failure| match failure {
+                    ToolCallFailure::Invalid(error) => self.dead(
+                        store,
+                        reserved,
+                        "invalid-tool-call",
+                        &error,
+                        &attempt.rounds,
+                    ),
+                    ToolCallFailure::OutputCap => self.dead(
+                        store,
+                        reserved,
+                        "limit",
+                        &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
+                        &attempt.rounds,
+                    ),
+                })?;
         }
         attempt.rounds.push(round);
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         store
             .checkpoint(reserved, &attempt.rounds)
             .map_err(AgentError::from_store)
+    }
+
+    /// Execute one tool call of a round and record it. `index`/`total` decide
+    /// whether the budget notice rides on this result (last call of the round).
+    /// Failures carry their kind so the caller keeps the right error code.
+    fn execute_one_call(
+        &self,
+        config: &crate::tools::ToolConfig,
+        attempt: &mut AttemptState,
+        round: &mut RoundRecord,
+        call: &ToolCall,
+        index: usize,
+        total: usize,
+    ) -> Result<(), ToolCallFailure> {
+        let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
+        if remaining_output == 0 {
+            return Err(ToolCallFailure::OutputCap);
+        }
+        let parsed = parse_object_args(call).map_err(ToolCallFailure::Invalid)?;
+        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
+            &self.cwd,
+            &call.name,
+            parsed,
+            config,
+            remaining_output,
+        );
+        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
+        let text = crate::redact::truncate_utf8(scrubbed, remaining_output);
+        attempt.usage.total_calls += 1;
+        let text = if index + 1 == total {
+            let notice = budget_notice(self.max_tool_calls, attempt.usage.total_calls);
+            if notice.is_empty() {
+                text
+            } else {
+                format!("{text}\n\n{notice}")
+            }
+        } else {
+            text
+        };
+        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
+        attempt
+            .requests
+            .push(tool_return_request(&call.name, &call.id, ok, &text));
+        round.calls.push(tool_call_record(call, ok, text));
+        Ok(())
     }
 
     fn request_next_round(
@@ -510,15 +535,15 @@ impl CodingAgent {
         usage: &TurnUsage,
         next: usize,
     ) -> Result<(), AgentError> {
-        if usage.total_calls + next > self.max_steps {
+        let Some(max) = self.max_tool_calls else {
+            return Ok(());
+        };
+        if usage.total_calls + next > max {
             return Err(self.dead(
                 store,
                 reserved,
                 "budget-exhausted",
-                &format!(
-                    "tool-call budget ({}) would be exceeded; reduce tool calls",
-                    self.max_steps
-                ),
+                &format!("tool-call budget ({max}) would be exceeded; reduce tool calls"),
                 rounds,
             ));
         }
@@ -888,6 +913,28 @@ pub fn known_tool(name: &str, allow_shell: bool) -> bool {
         name,
         "read_file" | "write_file" | "replace" | "list_directory" | "search_file_content"
     ) || (name == "run_shell_command" && allow_shell)
+}
+
+/// The budget notice appended to the last tool result of a round so the model
+/// always knows what remains. `None` budget stays silent.
+/// Per-call failure kinds that keep the caller's error codes intact.
+enum ToolCallFailure {
+    Invalid(String),
+    OutputCap,
+}
+
+fn budget_notice(budget: Option<usize>, used: usize) -> String {
+    let Some(max) = budget else {
+        return String::new();
+    };
+    let left = max.saturating_sub(used);
+    if left == 0 {
+        format!("[budget: 0 of {max} tool calls left; reply with your final summary only]")
+    } else if left <= 3 {
+        format!("[budget: only {left} of {max} tool calls left; wrap up and produce your final summary]")
+    } else {
+        format!("[budget: {left} of {max} tool calls left]")
+    }
 }
 
 #[cfg(test)]

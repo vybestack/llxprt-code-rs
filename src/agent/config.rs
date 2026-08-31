@@ -32,7 +32,12 @@ pub fn prompt_digest(prompt: &str) -> String {
 }
 
 /// Build the coding-agent system prompt.
-pub fn coding_system_prompt(cwd: &std::path::Path, reasoning: &str, shell_on: bool) -> String {
+pub fn coding_system_prompt(
+    cwd: &std::path::Path,
+    reasoning: &str,
+    shell_on: bool,
+    tool_budget: Option<usize>,
+) -> String {
     let shell_note = if shell_on {
         "You may run shells and install nothing outside the workspace. Shell commands run with the general user's privileges and can execute arbitrary code, so keep every command confined to this project and never exfiltrate data."
     } else {
@@ -43,8 +48,14 @@ pub fn coding_system_prompt(cwd: &std::path::Path, reasoning: &str, shell_on: bo
     } else {
         format!("\nReasoning context: {reasoning}\n")
     };
+    let budget_note = match tool_budget {
+        Some(n) => format!(
+            "\nTool budget: at most {n} tool calls for this task. Every tool round reports what remains; when few remain, stop exploring and produce your final summary."
+        ),
+        None => "\nTool budget: no fixed tool-call limit this task (round and size caps still apply).".to_string(),
+    };
     format!(
-        "You are a coding agent working in {}.\n{shell_note}{reasoning_note}",
+        "You are a coding agent working in {}.\n{shell_note}{reasoning_note}{budget_note}",
         cwd.display()
     )
 }
