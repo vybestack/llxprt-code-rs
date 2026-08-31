@@ -16,7 +16,7 @@
 # The extraction must be exactly one real bundle/ directory; required files must be present
 # (including the vendored vendor/serdes-ai-models/Cargo.lock, which is part of
 # SERDES-AI-0.2.6.patch and is required for --locked direct provider tests); and the
-# standalone verification stops after structural, allow-list, and extraction equality checks;
+# standalone verification stops after structural, member-list, and extraction equality checks;
 # it never executes archive-controlled code. The builder's explicit local-source mode then runs
 # the xtask tests and quality limits, workspace test run, --release build, and direct vendored
 # provider suite with an external
@@ -173,15 +173,16 @@ for f in "${required[@]}"; do
   [[ -f "$f" && ! -L "$f" ]] || { echo "required regular file missing in extracted bundle: $f" >&2; exit 1; }
 done
 
-# The verifier's own checked source tree supplies the allow-list independently of the
-# archive-authored manifest. This rejects self-consistent archives that add or omit members.
+# The verifier's own checked source tree supplies the trusted member list
+# independently of the archive-authored manifest. This rejects self-consistent
+# archives that add or omit members.
 trusted="$stage/members.trusted"
 env -i LC_ALL=C PATH=/usr/bin:/bin /bin/bash \
   "$root/scripts/build-source-bundle.sh" --list > "$trusted"
 trusted_diff="$stage/trusted.diff"
 if ! diff -u "$trusted" "$manifest_rel" > "$trusted_diff"; then
   sed -n '1,200p' "$trusted_diff" >&2
-  echo "embedded manifest does not match the verifier's trusted source allow-list" >&2
+  echo "embedded manifest does not match the verifier's trusted source member list" >&2
   exit 1
 fi
 

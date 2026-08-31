@@ -1540,7 +1540,10 @@ def ignore(directory: str, names: list[str]) -> set[str]:
     relative = pathlib.Path(directory).relative_to(source)
     ignored = {name for name in names if name == "__pycache__" or name.endswith(".pyc")}
     if not relative.parts:
-        ignored.update(name for name in names if name in {".git", "target", "dist"})
+        # Root-level scratch trees are gitignored and never belong in the fixture; a
+        # stale one under tmp/ (prior suite runs redirect TMPDIR there) would otherwise
+        # be copied and even recurse into itself.
+        ignored.update(name for name in names if name in {".git", "target", "dist", "tmp"})
     return ignored
 
 
@@ -1567,8 +1570,9 @@ PY
     exit 1
   fi
 
-  # The issue plan is the one static plan input. Its parent directories and the
-  # repository's attribute policy must be explicit archive members.
+  # Ordinary committed tree changes ship as-is: the member set is the commit. The
+  # repository's attribute policy and the plan's parent directories must still be
+  # explicit archive members.
   tar -tzf "$tmp/clean-output/source.tar.gz" |
     sed -e 's|^\./||' -e 's|^bundle/||' > "$tmp/archive-members"
   for member in \
@@ -1586,9 +1590,25 @@ PY
   rm "$build_fixture/project-plans/issue1/PLAN.md"
   git -C "$build_fixture" add -u project-plans/issue1/PLAN.md
   git -C "$build_fixture" commit -q -m omitted-plan-fixture
-  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+  if ! PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
       "$tmp/omitted-plan.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    echo "source-bundle builder accepted omission of the required issue plan" >&2
+    echo "source-bundle builder rejected an ordinary committed deletion" >&2
+    exit 1
+  fi
+  if tar -tzf "$tmp/omitted-plan.tar.gz" | grep -Fq 'project-plans/issue1/PLAN.md'; then
+    echo "source bundle shipped a member deleted from the commit" >&2
+    exit 1
+  fi
+  git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
+
+  # Deleting a load-bearing member still fails the build: the bundle itself, the
+  # verifier, or the offline gates cannot work without it.
+  rm "$build_fixture/scripts/source-bundle-validate.py"
+  git -C "$build_fixture" add -u scripts/source-bundle-validate.py
+  git -C "$build_fixture" commit -q -m omitted-validator-fixture
+  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+      "$tmp/omitted-validator.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle builder accepted omission of a load-bearing member" >&2
     exit 1
   fi
   git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
@@ -1604,12 +1624,18 @@ PY
   fi
   git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"
 
+  # A new committed source file ships without touching any list: this is the
+  # regression test for the static allow-list maintenance trap (issue #12).
   printf '%s\n' 'unlisted issue plan' > "$build_fixture/project-plans/issue1/UNLISTED.md"
   git -C "$build_fixture" add project-plans/issue1/UNLISTED.md
   git -C "$build_fixture" commit -q -m unlisted-plan-fixture
-  if PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
+  if ! PATH="$tmp/pass-bin:$PATH" bash "$build_fixture/scripts/build-source-bundle.sh" \
       "$tmp/unlisted-plan.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    echo "source-bundle builder accepted an unlisted issue plan" >&2
+    echo "source-bundle builder rejected a new committed source file" >&2
+    exit 1
+  fi
+  if ! tar -tzf "$tmp/unlisted-plan.tar.gz" | grep -Fq 'project-plans/issue1/UNLISTED.md'; then
+    echo "source bundle omitted a committed member" >&2
     exit 1
   fi
   git -C "$build_fixture" reset -q --hard "$plan_fixture_commit"

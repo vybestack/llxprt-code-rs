@@ -4,40 +4,37 @@
 # Why a source bundle and not `cargo package`? The crate is publish=false and the
 # vendored patched serdes-ai path deps are required to build (see PATCHES.md), so
 # the release artifact is a clean committed source snapshot. This script archives
-# exactly one captured commit and requires it to match an explicit allow-list, then verifies it via
-# scripts/verify-source-bundle.sh in explicit local-source mode (which validates every member
-# with a robust Python 3 parser before extraction, asserts the single top-level "bundle/"
-# directory, checks the extraction against the trusted allow-list and embedded manifest in both
-# directions, then runs the offline test + release build from the unpublished candidate).
+# exactly one captured commit, so the member set IS the commit: every tracked file
+# ships and nothing else can. There is no static file list to keep in sync; instead
+# a deny policy rejects shapes a source bundle must never carry (generated paths,
+# logs, scratch, non-regular blob modes), a small load-bearing floor must be
+# present, and scripts/verify-source-inputs-git.sh proves the live tree matches the
+# commit. The bundle is then verified via scripts/verify-source-bundle.sh in
+# explicit local-source mode (which validates every member with a robust Python 3
+# parser before extraction, asserts the single top-level "bundle/" directory,
+# checks the extraction against the trusted member list and embedded manifest in
+# both directions, then runs the offline test + release build from the unpublished
+# candidate).
 #
 # The canonical manifest THIRD_PARTY_LICENSES/source-bundle.txt is generated into
 # the staged bundle (and is itself a member), so the checked source tree is never
-# mutated. The manifest lists every file and every parent/empty directory as one line
+# mutated. The manifest lists every file and every parent directory as one line
 # (directories end with "/"), ordered byte-deterministically with LC_ALL=C sort. It is
 # written with `sort` (never `sort -u`): a duplicate entry, if one ever leaked in,
 # would surface in the archive and be rejected by source-bundle-validate.py instead of
 # being silently collapsed. On GNU tar the archive is gzip -n byte-reproducible; on
 # BSD/macOS tar it is well-formed.
 #
-# Allows: crate files (Cargo.toml/Cargo.lock/LICENSE/README.md/PATCHES.md/.gitignore),
-# the whole src/, tests/, scripts/, docs/, provenance/, .github/, THIRD_PARTY_LICENSES/,
-# the checksum-pinned vendor-upstream/ crate archives, the complete checksum-locked
-# registry-vendor/ source closure, .cargo/config.toml, xtask sources, the retained 0.2.6 Serdes
-# crates' Cargo.toml/Cargo.toml.orig/README/src/Cargo.lock, and the complete pinned Responses
-# client subtree.
-# All retained vendor lockfiles are source-provenance inputs. The models lockfile is also required
-# for the --locked direct provider test (CARGO_TARGET_DIR=... cargo test --offline --locked
-# --manifest-path vendor/serdes-ai-models/Cargo.toml --features openai). The explicit allow-list is
-# asserted in both directions against the captured commit, so any other committed path fails the
-# build rather than being silently filtered. Retained `.cargo_vcs_info.json` files are provenance
-# inputs, not scratch files.
-# Excludes (and the build FAILS if one is found embedded where it would be listed):
-# .git at any depth, target/ or other cargo-vendor scratch (.cargo-ok, .rustc_info.json),
-# logs, .DS_Store.
-# Release inputs are regular files and directories only: symlinks, devices, FIFOs, and
-# sockets are rejected before anything is staged, so the archive can never carry a link or
-# special-file member. dist/ (the default output) is never a bundle member: it is not
-# on the allow-list, so the bundle can never contain itself.
+# Denies (the build FAILS if any tracked path matches): .git at any depth, target/
+# or other cargo-vendor scratch (.cargo-ok, .rustc_info.json), generated paths
+# (dist/, llxprt-parity-out/, __pycache__), logs, .DS_Store. The checksum-locked
+# registry-vendor/ closure is exempt from the directory and suffix rules because
+# legitimate crate sources can contain path-handling fixtures with those names; every
+# byte there is checked by scripts/verify-registry-vendor.py.
+# Release inputs are regular blobs only: committed symlinks, submodules, devices,
+# FIFOs, and sockets are rejected before anything is staged (the blob materializer
+# enforces the committed modes; the live-tree hygiene walk enforces the rest).
+# dist/ can never be a bundle member: it is not tracked.
 #
 # Python 3 is a required dependency: scripts/source-bundle-validate.py is the archive
 # validator and must be present in any release gate / CI image that runs this script.
@@ -49,79 +46,41 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 
-
-top_files=(
-  Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch
-  .gitignore .gitattributes project-plans/issue1/PLAN.md project-plans/issue3/plan.md
-)
-source_dirs=(
-  src tests scripts docs provenance .github THIRD_PARTY_LICENSES vendor-upstream
-  vendor/serdes-ai-responses
-)
-config_files=(.cargo/config.toml)
-xtask_files=(xtask/Cargo.toml xtask/Cargo.lock)
-vendor_crates=(
-  vendor/serdes-ai
-  vendor/serdes-ai-core vendor/serdes-ai-models vendor/serdes-ai-agent
-  vendor/serdes-ai-output vendor/serdes-ai-providers vendor/serdes-ai-retries
-  vendor/serdes-ai-streaming vendor/serdes-ai-tools vendor/serdes-ai-toolsets
-  vendor/serdes-ai-macros
-)
-
 # Generated member and content manifests, relative to the bundle root.
 manifest_rel='THIRD_PARTY_LICENSES/source-bundle.txt'
 digest_rel='THIRD_PARTY_LICENSES/source-bundle.sha256'
 
-# Emit one allow-listed first-party source tree while pruning every generated path that the build
-# rejects. Registry packages use a separate exact emitter because legitimate crate sources can
-# contain directories named target, dist, or tests for these path-handling cases.
-emit_tree() {
-  local tree="$1"
-  find "$tree" \( -name .git -o -name target -o -name dist -o \
-    -name llxprt-parity-out -o -name __pycache__ \) -prune -o -type d -print | sed 's#$#/#'
-  find "$tree" \( -name .git -o -name target -o -name dist -o \
-    -name llxprt-parity-out -o -name __pycache__ \) -prune -o -type f \
-    ! -name '*.log' ! -name '*.tmp' ! -name '*.temp' ! -name '.DS_Store' ! -name '*.pyc' \
-    ! -name '.cargo-ok' ! -name '.rustc_info.json' \
-    ! -path "$manifest_rel" ! -path "$digest_rel" -print
+commit="$(git -C "$root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || {
+  echo "a committed Git HEAD is required for source-bundle publication" >&2
+  exit 1
 }
 
-emit_registry_tree() {
-  find registry-vendor -type d -print | sed 's#$#/#'
-  find registry-vendor -type f -print
+tracked_members() {
+  git -C "$root" -c core.quotePath=false ls-tree -r --name-only "$commit"
 }
 
 # Emit the member lines (bundle-relative; directories end with "/") for exactly the
-# allow-listed paths, from the live tree. Ordered with LC_ALL=C sort so the generated
-# manifest is byte-deterministic, which keeps the GNU tar archive gzip -n reproducible.
+# captured commit plus the two generated manifests. Parent directories are derived
+# from the tracked file paths, so this list matches the embedded manifest by
+# construction. Ordered with LC_ALL=C sort so the generated manifest is
+# byte-deterministic, which keeps the GNU tar archive gzip -n reproducible.
 emit_manifest() {
   {
-    printf '%s\n' "${top_files[@]}"
-    printf '%s\n' 'project-plans/' 'project-plans/issue1/' 'project-plans/issue3/'
-    local d
-    for d in "${source_dirs[@]}"; do
-      emit_tree "$d"
-    done
-    emit_registry_tree
-    printf '%s\n' '.cargo/' "${config_files[@]}"
-    printf '%s\n' 'xtask/' "${xtask_files[@]}"
-    find xtask/src -type d -print | sed 's#$#/#'
-    find xtask/src -type f -print
-    printf '%s\n' 'vendor/'
-    local c name
-    for c in "${vendor_crates[@]}"; do
-      name="${c##*/}"
-      printf '%s\n' "vendor/$name/"
-      for m in Cargo.toml Cargo.toml.orig README.md .cargo_vcs_info.json; do
-        printf '%s\n' "vendor/$name/$m"
-      done
-      # Retain every upstream Cargo.lock so archive extraction plus the retained patch can
-      # reproduce the complete vendored trees byte-for-byte. The models lockfile is also used
-      # by the direct --locked provider test.
-      printf '%s\n' "vendor/$name/Cargo.lock"
-      find "$c/src" -type d -print | sed 's#$#/#'
-      find "$c/src" -type f -print
-    done
+    tracked_members | awk '
+      {
+        files[NR] = $0
+        n = split($0, seg, "/")
+        acc = ""
+        for (i = 1; i < n; i++) {
+          acc = acc seg[i] "/"
+          dirs[acc] = 1
+        }
+      }
+      END {
+        for (f = 1; f <= NR; f++) print files[f]
+        for (d in dirs) print d
+      }
+    '
     printf '%s\n' "$digest_rel" "$manifest_rel"
   } | LC_ALL=C sort
 }
@@ -199,10 +158,6 @@ if ! IFS= read -r -t 10 publisher_ready <&8 || [[ "$publisher_ready" != "READY" 
   exit 1
 fi
 
-commit="$(git -C "$root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || {
-  echo "a committed Git HEAD is required for source-bundle publication" >&2
-  exit 1
-}
 printf 'PREPARE\0' >&9
 publisher_ready=""
 if ! IFS= read -r -t 10 publisher_ready <&8 || [[ "$publisher_ready" != "PARENT_READY" ]]; then
@@ -214,60 +169,140 @@ exec 8>&-
 stage="$(mktemp -d "${TMPDIR:-/tmp}/llxprt-bundle-build.XXXXXX")"
 archive_tmp="$(mktemp "${TMPDIR:-/tmp}/.llxprt-source.XXXXXX")"
 
-# Presence guards: every allow-listed root must exist; if a forbidden path appears
-# inside a vendored crate it means the build input is dirty, so fail instead of
-# silently packaging the wrong tree.
-for f in "${top_files[@]}"; do
-  [[ -f "$f" && ! -L "$f" ]] || { echo "missing top-level file: $f" >&2; exit 1; }
-done
-for d in "${source_dirs[@]}" registry-vendor; do
-  [[ -d "$d" && ! -L "$d" ]] || { echo "missing source directory: $d" >&2; exit 1; }
-done
-python3 scripts/verify-registry-vendor.py
-for d in .cargo xtask xtask/src; do
-  [[ -d "$d" && ! -L "$d" ]] || { echo "missing or symlinked quality-gate directory: $d" >&2; exit 1; }
-done
-for f in "${config_files[@]}"; do
-  [[ -f "$f" && ! -L "$f" ]] || { echo "missing Cargo configuration file: $f" >&2; exit 1; }
-done
-for f in "${xtask_files[@]}"; do
-  [[ -f "$f" && ! -L "$f" ]] || { echo "missing xtask file: $f" >&2; exit 1; }
-done
-[[ -d xtask/src && ! -L xtask/src ]] || { echo "missing xtask source directory" >&2; exit 1; }
-for c in "${vendor_crates[@]}"; do
-  [[ -d "$c" && ! -L "$c" ]] || { echo "missing vendored crate: $c" >&2; exit 1; }
-  stray="$( { find "$c" -name .git -print; find "$c" -type d -name target -print; } )"
-  if [[ -n "$stray" ]]; then
-    echo "forbidden path inside a vendored crate: $stray" >&2
-    exit 1
-  fi
-  for m in Cargo.toml Cargo.toml.orig README.md .cargo_vcs_info.json; do
-    [[ -f "$c/$m" ]] || { echo "vendored crate missing $m: $c" >&2; exit 1; }
-  done
-  if [[ "$c" == vendor/serdes-ai-models ]]; then
-    [[ -f "$c/Cargo.lock" && ! -L "$c/Cargo.lock" ]] || {
-      echo "vendored crate missing Cargo.lock: $c" >&2; exit 1
+# Tracked-member policy. The member set is the commit itself, so these checks carry
+# the guarantees a static allow-list used to approximate: non-regular blob modes are
+# rejected, forbidden path shapes are rejected, a small load-bearing floor must be
+# present, and every vendored crate keeps its provenance members.
+tracked_list="$stage/tracked-members.txt"
+tracked_members > "$tracked_list"
+
+# Release inputs are regular blobs only: committed symlinks (mode 120000) and
+# submodules (mode 160000) can never be staged as source.
+nonregular="$(git -C "$root" ls-tree -r "$commit" |
+  awk -F'\t' '$1 !~ /^100(644|755) blob [0-9a-f]+$/ {print $2}')"
+if [[ -n "$nonregular" ]]; then
+  echo "non-regular tree entries are not permitted in source-bundle inputs:" >&2
+  printf '%s\n' "$nonregular" | sed -n '1,200p' >&2
+  exit 1
+fi
+
+# Forbidden path shapes. registry-vendor is exempt from the directory/suffix rules
+# (legitimate crate fixtures can carry those names) but not from scratch rejection.
+forbidden="$(awk '
+  /^registry-vendor\// { next }
+  {
+    n = split($0, seg, "/")
+    for (i = 1; i < n; i++) {
+      if (seg[i] == ".git" || seg[i] == "target" || seg[i] == "dist" ||
+          seg[i] == "llxprt-parity-out" || seg[i] == "__pycache__") {
+        print
+        next
+      }
     }
-  fi
-  [[ -d "$c/src" ]] || { echo "vendored crate missing src: $c" >&2; exit 1; }
+    last = seg[n]
+    if (last ~ /\.log$/ || last ~ /\.tmp$/ || last ~ /\.temp$/ || last ~ /\.pyc$/ ||
+        last == ".DS_Store" || last == ".cargo-ok" || last == ".rustc_info.json") {
+      print
+    }
+  }
+' "$tracked_list")"
+scratch="$(awk '
+  /^registry-vendor\// {
+    n = split($0, seg, "/")
+    if (seg[n] == ".cargo-ok" || seg[n] == ".rustc_info.json") print
+  }
+' "$tracked_list")"
+if [[ -n "$forbidden$scratch" ]]; then
+  echo "forbidden paths are not permitted in source-bundle inputs:" >&2
+  printf '%s\n' "$forbidden" "$scratch" | sed -n '1,200p' >&2
+  exit 1
+fi
+
+# Load-bearing floor: members whose absence breaks the bundle itself, the verifier,
+# or the offline gates. This list never needs extending for ordinary tree changes;
+# it only changes when a load-bearing path moves.
+floor_members=(
+  Cargo.toml Cargo.lock LICENSE README.md PATCHES.md .gitignore .gitattributes
+  .cargo/config.toml
+  scripts/build-source-bundle.sh scripts/verify-source-bundle.sh
+  scripts/source-bundle-validate.py
+  xtask/Cargo.toml xtask/Cargo.lock xtask/src/main.rs
+)
+for member in "${floor_members[@]}"; do
+  grep -Fqx "$member" "$tracked_list" || {
+    echo "source bundle is missing load-bearing member: $member" >&2
+    exit 1
+  }
 done
-included_tree_roots=("${source_dirs[@]}" registry-vendor xtask/src)
-pruned_tree_roots=("${source_dirs[@]}" xtask/src)
-for c in "${vendor_crates[@]}"; do
-  included_tree_roots+=("$c/src")
-  pruned_tree_roots+=("$c/src")
+for prefix in src/ registry-vendor/ THIRD_PARTY_LICENSES/; do
+  grep -q "^${prefix}" "$tracked_list" || {
+    echo "source bundle is missing load-bearing tree: $prefix" >&2
+    exit 1
+  }
 done
-scratch="$(find "${included_tree_roots[@]}" \
-  \( -name .cargo-ok -o -name .rustc_info.json \) -print)"
+grep -q '^SERDES-AI-.*\.patch$' "$tracked_list" || {
+  echo "source bundle is missing the SerdesAI patch input" >&2
+  exit 1
+}
+
+# Every vendored crate keeps its provenance members and at least one source file.
+# Retained lockfiles let archive extraction plus the retained patch reproduce the
+# vendored trees byte-for-byte, and the direct --locked provider tests resolve from
+# them. The crates.io provenance pair (Cargo.toml.orig + .cargo_vcs_info.json) is
+# required to be complete wherever either half appears: crates published through
+# crates.io carry both, while first-party path-dependency crates (the pinned
+# Responses client subtree) carry neither. The crate set itself is derived from
+# the tracked tree, not enumerated here.
+vendor_missing="$(awk '
+  /^vendor\// {
+    split($0, seg, "/")
+    if (seg[3] == "Cargo.toml") crates[seg[2]] = 1
+    if (seg[3] == "Cargo.toml.orig") origs[seg[2]] = 1
+    if (seg[3] == "Cargo.lock") locks[seg[2]] = 1
+    if (seg[3] == ".cargo_vcs_info.json") vcs[seg[2]] = 1
+    if (seg[3] == "src") srccrates[seg[2]] = 1
+  }
+  END {
+    for (c in crates) {
+      if (!(c in locks)) print "vendor/" c "/Cargo.lock"
+      if (!(c in srccrates)) print "vendor/" c "/src"
+      if ((c in origs) != (c in vcs)) print "vendor/" c "/Cargo.toml.orig+.cargo_vcs_info.json"
+    }
+  }
+' "$tracked_list")"
+if [[ -n "$vendor_missing" ]]; then
+  echo "vendored crates are missing provenance members:" >&2
+  printf '%s\n' "$vendor_missing" | sed -n '1,200p' >&2
+  exit 1
+fi
+python3 scripts/verify-registry-vendor.py
+
+# Live-tree hygiene: the staged bytes come from the commit, but a dirty input tree
+# still means a dirty release. Roots are the tracked top-level directories (minus
+# registry-vendor, which joins only the scratch walk), so untracked/ignored trees
+# such as target/ or tmp/ are never walked. Generated subtrees (.git, target,
+# dist, llxprt-parity-out, __pycache__) inside a tracked root are pruned exactly as
+# the member policy prunes them: tolerated as local build output, never shipped.
+# The load-bearing floor above guarantees the roots array is non-empty. This loop
+# is portable across bash 3.2 (macOS) and bash 5 (CI), unlike mapfile.
+hygiene_roots=()
+while IFS= read -r top; do
+  hygiene_roots+=("$top")
+done < <(awk -F/ 'NF > 1 && $1 != "registry-vendor" && !seen[$1]++ { print $1 }' "$tracked_list")
+scratch="$(find "${hygiene_roots[@]}" registry-vendor \
+  \( -name .git -o -name target -o -name dist -o \
+     -name llxprt-parity-out -o -name __pycache__ \) -prune -o \
+  -type f \( -name .cargo-ok -o -name .rustc_info.json \) -print)"
 if [[ -n "$scratch" ]]; then
   echo "cargo-vendor scratch files are not permitted in source-bundle inputs: $scratch" >&2
   exit 1
 fi
 
-
 # Release inputs are regular files and directories only. Symlinks complicate archive
 # review and can redirect staging reads outside this source tree, so reject them.
-links="$(find "${included_tree_roots[@]}" -type l -print)"
+links="$(find "${hygiene_roots[@]}" \
+  \( -name .git -o -name target -o -name dist -o \
+     -name llxprt-parity-out -o -name __pycache__ \) -prune -o -type l -print)"
 if [[ -n "$links" ]]; then
   echo "symlinks are not permitted in source-bundle inputs:" >&2
   echo "$links" >&2
@@ -276,7 +311,10 @@ fi
 
 # Devices, FIFOs, and sockets cannot be represented faithfully in a source archive and
 # are never valid source-bundle members. Only regular files and directories are staged.
-special="$(find "${included_tree_roots[@]}" \( -type b -o -type c -o -type p -o -type s \) -print)"
+special="$(find "${hygiene_roots[@]}" \
+  \( -name .git -o -name target -o -name dist -o \
+     -name llxprt-parity-out -o -name __pycache__ \) -prune -o \
+  \( -type b -o -type c -o -type p -o -type s \) -print)"
 if [[ -n "$special" ]]; then
   echo "special files (device/fifo/socket) are not permitted in source-bundle inputs:" >&2
   echo "$special" >&2
@@ -293,27 +331,23 @@ while IFS= read -r -d '' path; do
       exit 1
       ;;
   esac
-done < <(find "${included_tree_roots[@]}" -mindepth 1 -print0)
-for d in "${pruned_tree_roots[@]}"; do
-  bad="$( { find "$d" -name .git -print
-             find "$d" -type d \( -name target -o -name dist -o -name llxprt-parity-out -o -name __pycache__ \) -print
-             find "$d" -type f \( -name '*.log' -o -name '*.tmp' -o -name '*.temp' -o -name '*.pyc' -o -name '.DS_Store' \) -print
-           } )"
-  if [[ -n "$bad" ]]; then
-    echo "forbidden path present in source directory: $bad" >&2
-    exit 1
-  fi
-done
+done < <(find "${hygiene_roots[@]}" \
+  \( -name .git -o -name target -o -name dist -o \
+     -name llxprt-parity-out -o -name __pycache__ \) -prune -o -print0)
+bad="$( { find "${hygiene_roots[@]}" \
+           \( -name .git -o -name target -o -name dist -o \
+              -name llxprt-parity-out -o -name __pycache__ \) -prune -o \
+           -type f \( -name '*.log' -o -name '*.tmp' -o -name '*.temp' -o -name '*.pyc' -o -name '.DS_Store' \) -print
+         } )"
+if [[ -n "$bad" ]]; then
+  echo "forbidden path present in source directory: $bad" >&2
+  exit 1
+fi
 
-# Release inputs must be the clean committed snapshot exactly. This
-# rejects tracked Cargo/build shadows omitted by the allow-list and rejects untracked or ignored
-# files under included trees before the captured commit is archived.
-emit_manifest | while IFS= read -r member; do
-    if [[ "$member" != */ && "$member" != "$manifest_rel" && "$member" != "$digest_rel" ]]; then
-
-    printf '%s\n' "$member"
-  fi
-done | bash scripts/verify-source-inputs-git.sh "$root" "$commit"
+# Release inputs must be the clean committed snapshot exactly: no staged or unstaged
+# edits and no untracked files. The piped list is the commit's own tracked set, so the
+# checker's snapshot comparison doubles as a guard on this script's derivation.
+bash scripts/verify-source-inputs-git.sh "$root" "$commit" < "$tracked_list"
 
 # Stage every regular-file byte directly from the immutable commit verified above. Live-tree edits
 # after the cleanliness check cannot enter the candidate because no source byte is copied from a
@@ -348,7 +382,7 @@ PY
 
 
 # Canonical member manifest: generated from the immutable staged commit. It lists every
-# committed file and parent/empty directory plus itself, sorted byte-deterministically.
+# committed file and parent directory plus itself, sorted byte-deterministically.
 (
   cd "$bundle"
   {
