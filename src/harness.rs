@@ -151,6 +151,9 @@ pub struct OkEnvelope {
     pub replayed: bool,
     pub summary: String,
     pub tool_calls: u64,
+    /// Declared budget for the run; -1 = unlimited.
+    pub declared_tool_calls: i64,
+    pub budget_exhausted: bool,
     pub prompt_digest: String,
 }
 
@@ -572,10 +575,17 @@ fn validate_ok_fields(
     }
     let tool_calls =
         usize::try_from(env.tool_calls).map_err(|_| "tool_calls out of range".to_string())?;
-    if tool_calls > crate::agent::MAX_TOOL_CALLS_PER_TURN {
+    let declared = usize::try_from(env.declared_tool_calls).unwrap_or(usize::MAX);
+    if env.declared_tool_calls < -1 {
         return Err(format!(
-            "tool_calls {tool_calls} exceeds the per-turn budget {} of one attempt",
-            crate::agent::MAX_TOOL_CALLS_PER_TURN
+            "bad declared_tool_calls {}",
+            env.declared_tool_calls
+        ));
+    }
+    if tool_calls > declared || env.budget_exhausted && tool_calls != declared {
+        return Err(format!(
+            "tool_calls {tool_calls} disagrees with the declared budget {}",
+            env.declared_tool_calls
         ));
     }
     if result.exit != Some(0) {

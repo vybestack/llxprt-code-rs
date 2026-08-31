@@ -233,6 +233,12 @@ pub fn to_json(outcome: &Result<RunOutcome, AppError>) -> serde_json::Value {
             "status": o.run.status,
             "summary": o.run.summary,
             "tool_calls": o.run.tool_count,
+            "declared_tool_calls": o
+                .run
+                .declared_tool_calls
+                .and_then(|n| i64::try_from(n).ok())
+                .unwrap_or(-1),
+            "budget_exhausted": o.run.budget_exhausted,
             "prompt_digest": o.run.prompt_digest,
         }),
         Err(e) => serde_json::json!({

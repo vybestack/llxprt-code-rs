@@ -26,6 +26,7 @@ fn valid_state() -> SessionState {
                         args: "{}".to_string(),
                         ok: true,
                         result: String::new(),
+                        refused: false,
                     }],
                 },
                 RoundRecord {
@@ -100,7 +101,7 @@ fn unknown_tools_and_impossible_completed_transcripts_are_rejected() {
 }
 
 #[test]
-fn per_branch_call_round_and_transcript_caps_are_enforced() {
+fn refused_calls_never_count_as_executed() {
     let mut state = valid_state();
     let template = state.branches[0].rounds[0].calls[0].clone();
     state.branches[0].rounds[0].calls = (0..crate::agent::MAX_TOOL_CALLS_PER_TURN)
@@ -109,12 +110,15 @@ fn per_branch_call_round_and_transcript_caps_are_enforced() {
             ..template.clone()
         })
         .collect();
-    state.validate().unwrap();
     state.branches[0].rounds[0].calls.push(ToolCallRecord {
-        id: "call-over".into(),
+        id: "call-refused".into(),
+        refused: true,
         ..template.clone()
     });
-    assert!(corruption_message(&state).contains("too many tool calls"));
+    // Executed calls sit at the cap and the refusal rides on top: the store
+    // no longer enforces a call-count constant because budgets are declared
+    // per run, but refused records must never look like executed ones.
+    state.validate().unwrap();
 
     let mut state = valid_state();
     state.branches[0].lifecycle = Lifecycle::Failed;
@@ -128,6 +132,7 @@ fn per_branch_call_round_and_transcript_caps_are_enforced() {
                 name: "read_file".into(),
                 args: "{}".into(),
                 ok: false,
+                refused: false,
                 result: String::new(),
             }],
         })

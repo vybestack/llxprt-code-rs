@@ -7,6 +7,20 @@ pub(super) fn tool_call_record(call: &ToolCall, ok: bool, result: String) -> Too
         name: call.name.clone(),
         args: call.args_json.clone(),
         ok,
+        refused: false,
+        result,
+    }
+}
+
+/// A budget refusal: persisted for transcript fidelity, never counted
+/// as an executed tool call.
+pub(super) fn refused_call_record(call: &ToolCall, result: String) -> ToolCallRecord {
+    ToolCallRecord {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        args: call.args_json.clone(),
+        ok: false,
+        refused: true,
         result,
     }
 }
@@ -80,5 +94,57 @@ fn contains_secret(value: &str, secrets: &[String]) -> bool {
 impl super::CodingAgent {
     pub fn workspace_cap(&self) -> &crate::tools::WorkspaceCap {
         &self.workspace
+    }
+}
+
+/// How the turn tells the model what its tool-call budget looks like: the
+/// plain remaining count, a wrap-up nudge near the end, and a final-replies-only
+/// notice once nothing is left. An unlimited budget stays silent.
+pub(crate) fn budget_notice(budget: Option<usize>, used: usize) -> String {
+    let Some(max) = budget else {
+        return String::new();
+    };
+    let left = max.saturating_sub(used);
+    if left == 0 {
+        format!("[budget: 0 of {max} tool calls left; reply with your final summary only]")
+    } else if left <= 3 {
+        format!("[budget: only {left} of {max} tool calls left; wrap up and produce your final summary]")
+    } else {
+        format!("[budget: {left} of {max} tool calls left]")
+    }
+}
+
+/// Split off the tool calls that no longer fit the budget. Returns the
+/// refused tail; `fit` keeps only the executable prefix.
+pub(super) fn split_over_budget(
+    budget: Option<usize>,
+    usage: &super::TurnUsage,
+    fit: &mut Vec<crate::adapter::ToolCall>,
+) -> Vec<crate::adapter::ToolCall> {
+    let Some(max) = budget else {
+        return Vec::new();
+    };
+    let allowed = max.saturating_sub(usage.total_calls);
+    if allowed >= fit.len() {
+        return Vec::new();
+    }
+    fit.split_off(allowed)
+}
+
+/// Record a refusal for every over-budget call so the assistant's tool
+/// message stays protocol-valid and the model learns why nothing ran.
+pub(super) fn refuse_over_budget(
+    budget: Option<usize>,
+    attempt: &mut super::AttemptState,
+    round: &mut super::RoundRecord,
+    skipped: &[crate::adapter::ToolCall],
+) {
+    for call in skipped {
+        let notice = budget_notice(budget, attempt.usage.total_calls);
+        let text = format!("tool call refused: tool-call budget exhausted\n\n{notice}");
+        attempt.requests.push(super::tool_return_request(
+            &call.name, &call.id, false, &text,
+        ));
+        round.calls.push(refused_call_record(call, text));
     }
 }
