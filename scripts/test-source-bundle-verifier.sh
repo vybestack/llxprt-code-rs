@@ -541,8 +541,16 @@ published_one="$tmp/published-one.tar.gz"
 published_two="$tmp/published-two.tar.gz"
 if git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1 &&
     [[ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ]]; then
-  PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_one" >"$tmp/stdout" 2>"$tmp/stderr"
-  PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_two" >"$tmp/stdout" 2>"$tmp/stderr"
+  if ! PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_one" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "publication candidate one failed; captured builder output follows" >&2
+    cat "$tmp/stdout" "$tmp/stderr" >&2
+    exit 1
+  fi
+  if ! PATH="$tmp/pass-bin:$PATH" bash "$build" "$published_two" >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "publication candidate two failed; captured builder output follows" >&2
+    cat "$tmp/stdout" "$tmp/stderr" >&2
+    exit 1
+  fi
   if [[ ! -f "$published_one" || ! -f "$published_two" ]]; then
     echo "successful source-bundle verification did not publish its candidate" >&2
     exit 1

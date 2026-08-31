@@ -52,7 +52,7 @@ cd "$root"
 
 top_files=(
   Cargo.toml Cargo.lock LICENSE README.md PATCHES.md SERDES-AI-0.2.6.patch
-  .gitignore .gitattributes project-plans/issue1/PLAN.md
+  .gitignore .gitattributes project-plans/issue1/PLAN.md project-plans/issue3/plan.md
 )
 source_dirs=(
   src tests scripts docs provenance .github THIRD_PARTY_LICENSES vendor-upstream
@@ -97,7 +97,7 @@ emit_registry_tree() {
 emit_manifest() {
   {
     printf '%s\n' "${top_files[@]}"
-    printf '%s\n' 'project-plans/' 'project-plans/issue1/'
+    printf '%s\n' 'project-plans/' 'project-plans/issue1/' 'project-plans/issue3/'
     local d
     for d in "${source_dirs[@]}"; do
       emit_tree "$d"
