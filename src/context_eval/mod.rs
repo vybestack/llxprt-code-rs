@@ -459,13 +459,15 @@ fn save_turn_artifacts(out_dir: &Path, index: usize, result: &BbResult) -> Resul
     let stderr = bounded(result.stderr.as_slice());
     publish(&out_dir.join(format!("turn-{index:02}.stdout")), &stdout)?;
     publish(&out_dir.join(format!("turn-{index:02}.stderr")), &stderr)?;
+    let stdout_truncated = result.stdout_truncated || result.raw_stdout.len() > ARTIFACT_STREAM_CAP;
+    let stderr_truncated = result.stderr_truncated || result.stderr.len() > ARTIFACT_STREAM_CAP;
     publish(
         &out_dir.join(format!("turn-{index:02}.meta.json")),
         serde_json::to_vec(&json!({
             "status": result.status, "ok": result.ok, "exit": result.exit,
             "timed_out": result.timed_out, "error_code": result.error_code,
-            "stdout_truncated": result.stdout_truncated || result.raw_stdout.len() > ARTIFACT_STREAM_CAP,
-            "stderr_truncated": result.stderr_truncated || result.stderr.len() > ARTIFACT_STREAM_CAP,
+            "stdout_truncated": stdout_truncated,
+            "stderr_truncated": stderr_truncated,
         }))
         .map_err(|e| format!("encode meta: {e}"))?
         .as_slice(),

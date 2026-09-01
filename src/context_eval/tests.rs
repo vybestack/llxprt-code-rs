@@ -176,7 +176,8 @@ fn child_environment_paths_are_absolute() {
     // the child through LLXPRT_CONFIG_HOME and --cwd satisfy the CLI contract.
     let config_home = canon.join("run-1").join("config");
     let workspace = canon.join("run-1").join("ws");
-    assert!(config_home.is_absolute() && workspace.is_absolute());
+    assert!(config_home.is_absolute());
+    assert!(workspace.is_absolute());
 
     // TS isolated settings: same rule, derived from the same canonical root.
     let settings = canon.join("wall-large-tool-final-1").join("settings");
