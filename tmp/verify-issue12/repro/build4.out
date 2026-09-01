@@ -1,8 +1,0 @@
-registry source closure ok: 284 checksum-locked crates across 14 lockfiles
-materialized 15969 regular files from 3b60c8ab47abed46567e0aa244617880597e2ca8
-registry source closure ok: 284 checksum-locked crates across 14 lockfiles
-Serdes Responses Git snapshot evidence verified
-retained vendor feature surfaces compile and model tests pass
-bundle verify ok: single bundle/ top dir, exact member round-trip, tests and release build and direct provider tests pass
-built and verified /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tmp/verify-issue12/repro/out/source.tar.gz
-EXIT=0

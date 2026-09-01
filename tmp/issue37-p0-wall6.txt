@@ -1,2 +1,0 @@
-== context-eval wall-large-tool-final ==
-context-evals report: /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tmp/issue37-wall6/report-1788235033689141000.json

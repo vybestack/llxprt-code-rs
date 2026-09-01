@@ -1,2 +1,0 @@
-{"error":{"code":"profile-load","message":"profile resolution failed: profile \"/Users/acoliver/Library/Preferences/llxprt-code/profiles/crusoeglm.json\": 'top_p' must be a number"},"session_id":"glm-smoke","status":"error"}
-exit=3

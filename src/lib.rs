@@ -6,6 +6,7 @@ pub mod adapter;
 pub mod agent;
 pub mod cli;
 pub mod context_eval;
+pub mod context_kernel;
 pub mod envelope;
 pub mod grade;
 pub mod harness;
