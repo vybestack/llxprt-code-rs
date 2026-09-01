@@ -218,13 +218,16 @@ fn respond(
     if turn.index < turn.bulk.len() {
         if let Some((name, arg_key)) = tool {
             // The CLI's file tools open paths relative to --cwd and reject absolute
-            // paths, so bulk fixtures live inside the workspace and are addressed by
-            // their file name only.
-            let path = turn.bulk[turn.index % turn.bulk.len()]
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default()
-                .to_string();
+            // paths, so bulk fixtures live at <workspace>/bulk/ and must be addressed
+            // workspace-relative INCLUDING the bulk component: a bare file name would
+            // resolve against the workspace root and miss.
+            let path = format!(
+                "bulk/{}",
+                turn.bulk[turn.index % turn.bulk.len()]
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+            );
             let args = json!({ arg_key.clone(): path }).to_string();
             let message = json!({
                 "role": "assistant",
