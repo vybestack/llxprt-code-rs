@@ -239,20 +239,33 @@ fn adapter_command_construction_is_exact() {
             "2"
         ]
     );
-    let ts = runner::ts_args("hi", "s1");
+    let ts = runner::ts_args("hi", "http://127.0.0.1:9/v1", "ctxeval-fixture");
     assert_eq!(
         ts,
         vec![
+            "--provider",
+            "openai",
             "--preload",
             "./scripts/dev-env.ts",
             "packages/cli/index.ts",
             "--prompt",
             "hi",
-            "--session",
-            "s1",
             "--output-format",
-            "json"
+            "json",
+            "--quiet",
+            "--approval-mode",
+            "yolo",
+            "--baseurl",
+            "http://127.0.0.1:9/v1",
+            "--key",
+            "ctxeval-loopback-local-stub",
+            "--model",
+            "ctxeval-fixture",
         ]
+    );
+    assert!(
+        !ts.contains("--session"),
+        "the TS CLI has no --session flag"
     );
     assert!(runner::TS_ROOT_DEFAULT.contains("llxprt-code"));
 }

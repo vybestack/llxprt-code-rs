@@ -159,18 +159,31 @@ pub fn rust_args(
 /// Build the TypeScript reference adapter argv for one turn of a scenario.
 ///
 /// The sibling implementation is started through its Bun CLI with `--prompt` and JSON
-/// output; isolated settings arrive through the environment the adapter sets.
-pub fn ts_args(prompt: &str, session: &str) -> Vec<String> {
+/// output. Its CLI has no `--session` flag: the loopback endpoint, model, and a synthetic
+/// key arrive as flags (never a real credential), approvals are pre-granted so a
+/// non-interactive run cannot stall on a prompt, and isolated settings arrive through the
+/// environment the adapter sets. This adapter validates that a scenario exercises a real
+/// context wall; it is never an oracle.
+pub fn ts_args(prompt: &str, base_url: &str, model: &str) -> Vec<String> {
     vec![
+        "--provider".into(),
+        "openai".into(),
         "--preload".into(),
         "./scripts/dev-env.ts".into(),
         "packages/cli/index.ts".into(),
         "--prompt".into(),
         prompt.to_string(),
-        "--session".into(),
-        session.to_string(),
         "--output-format".into(),
         "json".into(),
+        "--quiet".into(),
+        "--approval-mode".into(),
+        "yolo".into(),
+        "--baseurl".into(),
+        base_url.to_string(),
+        "--key".into(),
+        "ctxeval-loopback-local-stub".into(),
+        "--model".into(),
+        model.to_string(),
     ]
 }
 

@@ -395,10 +395,7 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         turns_total: 1,
         ..Evidence::default()
     };
-    let args = runner::ts_args(
-        &scen.stimulus.prompt,
-        &format!("ctxeval-{}", harness::uniq()),
-    );
+    let args = runner::ts_args(&scen.stimulus.prompt, &url, &scen.profile.model);
     let outcome = process::run_cmd(CmdSpec {
         program: opts.ts_bin.clone(),
         args,
