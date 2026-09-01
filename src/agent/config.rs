@@ -67,6 +67,25 @@ pub fn round_limit_message(max_rounds: usize) -> String {
     format!("turn would exceed the {max_rounds} round cap; give a final summary instead")
 }
 
+impl super::CodingAgent {
+    /// Reason-effort (or other request-side) profile notes to append to the system
+    /// prompt. This is a text note about the author's intent; the transport never
+    /// forwards a reasoning field. The note is bounded (a profile value is capped at
+    /// [`crate::redact::MAX_PROMPT_NOTE_BYTES`] and the accumulated prompt text
+    /// carries its own documented cap in [`crate::redact::PROMPT_NOTE_CAP_MESSAGE`]).
+    pub fn prompt_reason_note(profile: &crate::profile::Profile) -> Option<String> {
+        let s = profile
+            .ephemeral
+            .prompt_notes
+            .get("reasoning:reasoning.effort")?;
+        let note = format!("reasoning effort requested by profile (prompt note only): {s}");
+        if note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
+            return Some(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
+        }
+        Some(note)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

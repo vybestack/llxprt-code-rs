@@ -256,6 +256,12 @@ pub use paths::is_safe_component;
 
 /// The on-disk session store. All state reads and writes happen under one exclusive lock
 /// and validate invariants every time.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StoreMetrics {
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+}
+
 pub struct SessionStore {
     pub session_dir: PathBuf,
     pub session_id: String,
@@ -263,6 +269,7 @@ pub struct SessionStore {
     file: std::fs::File,
     lock: Mutex<()>,
     cache: Mutex<Option<snapshot::LoadedStore>>,
+    operation_metrics: Mutex<StoreMetrics>,
 }
 
 fn now_secs() -> u64 {
@@ -483,6 +490,7 @@ impl SessionStore {
             file,
             lock: Mutex::new(()),
             cache: Mutex::new(None),
+            operation_metrics: Mutex::new(StoreMetrics::default()),
         })
     }
 
@@ -502,6 +510,28 @@ impl SessionStore {
     #[doc(hidden)]
     pub fn load_at(session: &SessionId, config_root: &Path) -> Result<SessionStore, StoreError> {
         Self::open_in(session, config_root)
+    }
+
+    fn add_profile_metrics(&self, input: u64, output: u64) {
+        if let Ok(mut metrics) = self.operation_metrics.lock() {
+            metrics.input_bytes = metrics.input_bytes.saturating_add(input);
+            metrics.output_bytes = metrics.output_bytes.saturating_add(output);
+        }
+    }
+
+    pub(crate) fn take_profile_metrics(&self) -> StoreMetrics {
+        self.operation_metrics
+            .lock()
+            .map(|mut metrics| std::mem::take(&mut *metrics))
+            .unwrap_or_default()
+    }
+
+    /// Number of branches in the current in-memory store cache, without extra disk work.
+    pub fn profile_branch_count(&self) -> Option<u64> {
+        let cache = self.cache.lock().ok()?;
+        cache
+            .as_ref()
+            .and_then(|loaded| u64::try_from(loaded.state.branches.len()).ok())
     }
 
     /// The configuration-root-derived path retained when this store was opened.
@@ -566,15 +596,15 @@ impl SessionStore {
             .cache
             .lock()
             .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
+        let before = cache.as_ref().map_or(0, |loaded| loaded.cursor.offset);
         match cache.as_mut() {
             Some(loaded) => snapshot::catch_up(&self.dir, loaded)?,
             None => *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?),
         }
-        Ok(cache
-            .as_ref()
-            .expect("session cache initialized")
-            .state
-            .clone())
+        let loaded = cache.as_ref().expect("session cache initialized");
+        let input = loaded.cursor.offset.saturating_sub(before);
+        self.add_profile_metrics(input, 0);
+        Ok(loaded.state.clone())
     }
 
     fn append_event(&self, event: log::Event) -> Result<(), StoreError> {
@@ -585,11 +615,11 @@ impl SessionStore {
         if cache.is_none() {
             *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?);
         }
-        snapshot::append(
-            &self.dir,
-            cache.as_mut().expect("session cache initialized"),
-            vec![event],
-        )
+        let loaded = cache.as_mut().expect("session cache initialized");
+        let before = loaded.cursor.offset;
+        snapshot::append(&self.dir, loaded, vec![event])?;
+        self.add_profile_metrics(0, loaded.cursor.offset.saturating_sub(before));
+        Ok(())
     }
 
     /// The chain of `start`'s ancestors from the root down to `start` (inclusive),

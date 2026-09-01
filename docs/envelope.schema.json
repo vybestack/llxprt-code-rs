@@ -10,6 +10,20 @@
         },
         "message": {
           "type": "string"
+        },
+        "session_status": {
+          "description": "Outcome of the agent/session independent of profile publication.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "description": "Profiling lifecycle stage; present only for `mem-profile` failures.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
