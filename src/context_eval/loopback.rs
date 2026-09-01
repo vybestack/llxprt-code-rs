@@ -53,12 +53,13 @@ struct Turn<'a> {
 
 impl Loopback {
     /// Start the scripted provider. `bulk` holds one expanded file per scripted round.
-    pub fn start(rounds: usize, bulk: Vec<PathBuf>, marker: &str, block_bytes: usize) -> Loopback {
+    pub fn start(rounds: usize, _bulk: Vec<PathBuf>, marker: &str, block_bytes: usize) -> Loopback {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let addr = listener.local_addr().expect("loopback addr");
         let shared = Arc::new(Mutex::new(Observations::default()));
         let stopped = Arc::new(AtomicBool::new(false));
         let bulk_slot = Arc::new(Mutex::new(Vec::new()));
+        let bulk_handle = bulk_slot.clone();
         let marker = marker.to_string();
         let state = shared.clone();
         let halt = stopped.clone();
@@ -74,7 +75,10 @@ impl Loopback {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let _ = stream.set_nonblocking(false);
-                        let bulk = bulk_slot.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                        let bulk = bulk_handle
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .clone();
                         serve(stream, served, &bulk, &marker, block_bytes, &state);
                         served += 1;
                     }
