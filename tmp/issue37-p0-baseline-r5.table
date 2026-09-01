@@ -1,0 +1,20 @@
+summary {"expected_red": 16, "harness_error": 0, "passed": 0, "total": 17, "unexpected_green": 0, "unexpected_red": 1}
+scenario                           verdict        reason            ok  wall   iso
+baseline-minimum-management-floor  unexpected-red-reason context-limit      0  True  True
+   failures: ['required context artifact absent: context/rewrite-journal.log', 'required terminal outcome absent: wrap_up', 'no turn completed successfully']
+baseline-status-quo-full-replay    expected-red   context-limit      0  True  True
+branch-readset-conflict            expected-red   context-limit      0  True  True
+budget-governor-progress           expected-red   context-limit      0  True  True
+cache-amortization                 expected-red   context-limit      0  True  True
+endurance-restart                  expected-red   context-limit      0  True  True
+fact-conflict-restart              expected-red   context-limit      0  True  True
+gate-recurrent-rooting             expected-red   context-limit      0  True  True
+ingress-secret-and-digest          expected-red   context-limit      0  True  True
+legality-pairing-and-quoting       expected-red   context-limit      0  True  True
+provider-crash-matrix              expected-red   context-limit      0  True  True
+quiesce-unwritable                 expected-red   context-limit      0  True  True
+security-authority-laundering      expected-red   context-limit      0  True  True
+terminal-reserve-wrap-up           expected-red   context-limit      0  True  True
+wall-followup-recovery             expected-red   context-limit      0  True  True
+wall-large-tool-final              expected-red   context-limit      0  True  True
+wall-mixed-lanes                   expected-red   context-limit      0  True  True

@@ -1,0 +1,94 @@
+{
+  "session_id": "05b7e10e-69c6-4278-8228-40ee2e07dd2b",
+  "response": "CTXEVAL final: CTXEVAL-FINAL-7f3a9c",
+  "stats": {
+    "models": {
+      "ctxeval-fixture": {
+        "api": {
+          "totalRequests": 9,
+          "totalErrors": 0,
+          "totalLatencyMs": 109.1716229999995
+        },
+        "tokens": {
+          "input": 0,
+          "prompt": 0,
+          "candidates": 17,
+          "total": 17,
+          "cached": 0,
+          "thoughts": 0,
+          "tool": 0
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 8,
+      "totalSuccess": 0,
+      "totalFail": 8,
+      "totalCancelled": 0,
+      "totalDurationMs": 0,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {
+        "ast_read_file": {
+          "count": 8,
+          "success": 0,
+          "fail": 8,
+          "cancelled": 0,
+          "durationMs": 0,
+          "decisions": {
+            "accept": 0,
+            "reject": 0,
+            "modify": 0,
+            "auto_accept": 0
+          }
+        }
+      }
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    },
+    "tokenTracking": {
+      "tokensPerMinute": 0,
+      "throttleWaitTimeMs": 0,
+      "timeToFirstToken": null,
+      "tokensPerSecond": 0,
+      "sessionTokenUsage": {
+        "input": 0,
+        "output": 0,
+        "cache": 0,
+        "tool": 0,
+        "thought": 0,
+        "total": 0
+      }
+    },
+    "timing": {
+      "completeTokensPerMinute": 0,
+      "outputGenerationTps": 0,
+      "effectiveInputTps": 0,
+      "uncachedInputTps": null,
+      "lastRequestTpm": 0,
+      "lastTtftMs": null,
+      "weightedAvgTtftMs": null,
+      "lastOutputGenerationTps": 0,
+      "lastEffectiveInputTps": 0,
+      "accumulatedApiTimeMs": 109.1716229999995,
+      "accumulatedToolTimeMs": 0,
+      "agentActiveTimeMs": 109.1716229999995,
+      "accumulatedWorkMs": 109.1716229999995
+    },
+    "cache": {
+      "hasReliableCacheData": false,
+      "hasReliableCacheReads": false,
+      "hasReliableCacheWrites": false,
+      "totalCacheReads": 0,
+      "totalCacheWrites": null,
+      "requestsWithCacheReads": 0,
+      "requestsWithCacheWrites": 0
+    }
+  }
+}

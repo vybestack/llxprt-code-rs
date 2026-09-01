@@ -1,0 +1,2 @@
+{"error":{"code":"model-config","message":"a plaintext http:// endpoint requires --allow-insecure-http; pass it explicitly to use a remote clear-text endpoint"},"session_id":"vast-smoke","status":"error"}
+exit=3

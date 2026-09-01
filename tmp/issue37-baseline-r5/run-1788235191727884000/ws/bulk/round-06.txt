@@ -1,0 +1,2202 @@
+ctxeval-6-0 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-1 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-2 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-3 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-4 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-5 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-6 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-7 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-8 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-9 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-10 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-11 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-12 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-13 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-14 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-15 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-16 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-17 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-18 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-19 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-20 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-21 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-22 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-23 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-24 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-25 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-26 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-27 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-28 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-29 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-30 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-31 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-32 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-33 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-34 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-35 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-36 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-37 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-38 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-39 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-40 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-41 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-42 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-43 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-44 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-45 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-46 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-47 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-48 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-49 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-50 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-51 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-52 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-53 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-54 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-55 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-56 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-57 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-58 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-59 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-60 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-61 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-62 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-63 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-64 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-65 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-66 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-67 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-68 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-69 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-70 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-71 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-72 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-73 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-74 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-75 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-76 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-77 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-78 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-79 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-80 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-81 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-82 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-83 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-84 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-85 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-86 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-87 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-88 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-89 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-90 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-91 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-92 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-93 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-94 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-95 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-96 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-97 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-98 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-99 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-100 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-101 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-102 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-103 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-104 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-105 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-106 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-107 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-108 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-109 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-110 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-111 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-112 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-113 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-114 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-115 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-116 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-117 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-118 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-119 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-120 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-121 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-122 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-123 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-124 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-125 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-126 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-127 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-128 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-129 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-130 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-131 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-132 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-133 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-134 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-135 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-136 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-137 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-138 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-139 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-140 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-141 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-142 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-143 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-144 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-145 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-146 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-147 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-148 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-149 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-150 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-151 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-152 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-153 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-154 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-155 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-156 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-157 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-158 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-159 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-160 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-161 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-162 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-163 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-164 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-165 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-166 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-167 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-168 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-169 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-170 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-171 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-172 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-173 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-174 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-175 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-176 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-177 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-178 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-179 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-180 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-181 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-182 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-183 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-184 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-185 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-186 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-187 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-188 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-189 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-190 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-191 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-192 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-193 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-194 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-195 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-196 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-197 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-198 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-199 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-200 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-201 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-202 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-203 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-204 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-205 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-206 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-207 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-208 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-209 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-210 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-211 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-212 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-213 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-214 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-215 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-216 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-217 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-218 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-219 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-220 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-221 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-222 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-223 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-224 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-225 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-226 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-227 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-228 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-229 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-230 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-231 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-232 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-233 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-234 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-235 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-236 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-237 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-238 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-239 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-240 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-241 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-242 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-243 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-244 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-245 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-246 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-247 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-248 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-249 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-250 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-251 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-252 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-253 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-254 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-255 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-256 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-257 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-258 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-259 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-260 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-261 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-262 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-263 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-264 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-265 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-266 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-267 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-268 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-269 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-270 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-271 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-272 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-273 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-274 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-275 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-276 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-277 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-278 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-279 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-280 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-281 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-282 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-283 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-284 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-285 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-286 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-287 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-288 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-289 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-290 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-291 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-292 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-293 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-294 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-295 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-296 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-297 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-298 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-299 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-300 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-301 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-302 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-303 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-304 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-305 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-306 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-307 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-308 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-309 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-310 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-311 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-312 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-313 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::credited(self.range()) }
+- failing test identity: CTXEVAL-FAILING-TEST-T7 lane_policy::tests::quoting
+- superseded exploration: CTXEVAL-SUPERSEDED-E9 (do not carry forward)
+
+ctxeval-6-314 # CTXEVAL-MIXED-LANES fixture
+- constraint: CTXEVAL-CONSTRAINT-K1 "never rewrite the ledger outside a transaction"
+- decision: CTXEVAL-DECISION-D2 "keep tool results claim-atomic"
+- source snippet: fn fold(&self) -> Fold { Fold::c

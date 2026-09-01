@@ -1,0 +1,7 @@
+Error when talking to openai API Full report available at: /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-client-error-Turn.run-sendMessageStream-2026-09-01T04-24-40-296Z.json
+{
+  "error": {
+    "type": "Error",
+    "message": "undefined is not a function"
+  }
+}

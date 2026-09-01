@@ -1,0 +1,14 @@
+registry source closure ok: 284 checksum-locked crates across 14 lockfiles
+--- /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-source-git.0XCgEY/tracked	2026-08-31 07:34:09
++++ /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-source-git.0XCgEY/expected	2026-08-31 07:34:09
+@@ -16,7 +16,6 @@
+ docs/profile-compatibility.md
+ docs/release-provenance.md
+ project-plans/issue1/PLAN.md
+-project-plans/issue3/plan.md
+ provenance/serdes-ai-0.2.6.json
+ provenance/serdes-ai-responses-git.json
+ provenance/source-object-policy.json
+source-bundle files do not exactly match committed snapshot 4be25abdfe6bfa1b793493425edbe2fdd60626c4
+source-bundle publisher interrupted by signal 15
+exit=1

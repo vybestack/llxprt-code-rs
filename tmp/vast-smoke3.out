@@ -1,0 +1,2 @@
+{"error":{"code":"model-config","message":"unsupported profile setting(s): ephemeralSettings.shell-replacement is a dsflash-only chat setting and requires modelParams.chat_template_kwargs"},"session_id":"vast-smoke3","status":"error"}
+exit=3

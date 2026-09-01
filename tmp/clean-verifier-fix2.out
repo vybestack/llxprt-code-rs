@@ -1,0 +1,3 @@
+output path contains a control character
+source-bundle adversarial verifier tests passed
+exit=0

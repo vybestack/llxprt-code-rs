@@ -172,14 +172,25 @@ fn run_context_evals(root: &Path, args: &[String]) -> Result<(), String> {
     run_command(
         root,
         "cargo",
-        &["build", "--offline", "--locked", "--bin", "llxprt-code-rs", "--bin", "llxprt-context-eval"],
+        &[
+            "build",
+            "--offline",
+            "--locked",
+            "--bin",
+            "llxprt-code-rs",
+            "--bin",
+            "llxprt-context-eval",
+        ],
     )?;
     let cli = root.join("target/debug/llxprt-code-rs");
     let driver = root.join("target/debug/llxprt-context-eval");
     let mut argv: Vec<String> = vec![
-        "--cli".into(), cli.display().to_string(),
-        "--runner".into(), runner.clone(),
-        "--out".into(), out,
+        "--cli".into(),
+        cli.display().to_string(),
+        "--runner".into(),
+        runner.clone(),
+        "--out".into(),
+        out,
     ];
     argv.extend(forward.into_iter().map(str::to_string));
     let printed: Vec<&str> = argv.iter().map(String::as_str).collect();

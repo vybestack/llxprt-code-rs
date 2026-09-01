@@ -1,0 +1,21 @@
+issue1: stream codex turns over sse without store or output caps
+
+The ChatGPT codex responses backend rejects the default HTTP turn shape
+outright (store must be false, stream must be true, max_output_tokens is
+unsupported), so the vendored responses client grows a codex_http mode:
+
+- build_request sends store:false, stream:true, omits max_output_tokens
+  even when settings carry one, never chains previous_response_id, and
+  never falls back to the string input shorthand; because nothing is
+  stored, every turn replays the full input list.
+- run_codex_http_turn drains the SSE stream through the existing
+  assembler and folds it to a response; the join result now propagates
+  the stream's ModelError instead of folding it into an empty turn.
+- ModelError Display for InvalidResponse and Network carries the detail
+  string so wire failures name the actual cause.
+- the host enables the mode for the codex provider and stops forwarding
+  max_tokens there; the output bound stays host-side.
+- offline wire tests pin the contract (per-turn body shape, full replay)
+  and the failure mode (a JSON 200 without SSE is an error).
+- SERDES-AI-0.2.6.patch regenerated; provenance/license pins and
+  PATCHES.md updated for Patch 10.

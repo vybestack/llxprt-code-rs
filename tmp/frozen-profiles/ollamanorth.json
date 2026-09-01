@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "provider": "LM Studio",
+  "model": "north-mini-code:latest",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "http://127.0.0.1:11434/v1/",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "reasoning.fieldName": "reasoning"
+  }
+}

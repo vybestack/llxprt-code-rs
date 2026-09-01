@@ -1,0 +1,2334 @@
+ctxeval-5-0 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-1 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-2 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-3 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-4 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-5 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-6 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-7 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-8 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-9 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-10 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-11 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-12 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-13 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-14 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-15 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-16 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-17 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-18 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-19 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-20 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-21 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-22 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-23 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-24 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-25 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-26 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-27 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-28 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-29 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-30 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-31 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-32 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-33 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-34 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-35 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-36 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-37 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-38 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-39 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-40 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-41 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-42 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-43 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-44 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-45 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-46 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-47 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-48 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-49 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-50 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-51 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-52 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-53 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-54 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-55 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-56 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-57 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-58 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-59 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-60 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-61 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-62 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-63 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-64 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-65 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-66 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-67 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-68 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-69 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-70 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-71 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-72 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-73 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-74 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-75 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-76 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-77 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-78 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-79 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-80 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-81 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-82 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-83 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-84 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-85 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-86 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-87 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-88 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-89 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-90 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-91 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-92 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-93 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-94 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-95 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-96 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-97 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-98 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-99 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-100 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-101 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-102 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-103 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-104 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-105 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-106 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-107 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-108 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-109 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-110 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-111 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-112 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-113 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-114 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-115 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-116 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-117 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-118 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-119 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-120 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-121 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-122 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-123 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-124 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-125 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-126 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-127 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-128 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-129 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-130 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-131 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-132 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-133 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-134 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-135 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-136 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-137 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-138 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-139 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-140 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-141 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-142 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-143 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-144 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-145 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-146 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-147 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-148 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-149 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-150 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-151 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-152 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-153 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-154 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-155 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-156 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-157 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-158 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-159 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-160 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-161 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-162 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-163 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-164 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-165 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-166 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-167 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-168 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-169 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-170 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-171 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-172 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-173 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-174 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-175 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-176 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-177 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-178 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-179 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-180 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-181 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-182 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-183 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-184 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-185 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-186 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-187 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-188 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-189 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-190 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-191 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-192 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-193 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-194 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-195 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-196 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-197 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-198 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-199 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-200 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-201 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-202 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-203 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-204 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-205 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-206 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-207 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-208 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-209 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-210 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-211 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-212 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-213 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-214 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-215 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-216 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-217 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-218 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-219 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-220 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-221 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-222 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-223 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-224 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-225 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-226 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-227 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-228 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-229 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-230 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-231 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-232 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-233 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-234 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-235 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-236 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-237 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-238 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-239 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-240 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-241 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-242 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-243 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-244 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-245 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-246 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-247 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-248 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-249 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-250 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-251 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-252 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-253 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-254 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-255 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-256 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-257 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-258 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-259 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-260 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-261 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-262 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-263 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-264 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-265 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-266 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-267 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-268 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-269 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-270 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-271 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-272 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-273 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-274 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-275 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-276 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-277 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-278 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-279 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-280 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-281 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-282 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-283 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-284 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-285 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-286 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-287 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-288 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-289 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-290 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-291 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-292 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-293 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-294 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-295 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-296 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-297 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-298 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-299 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-300 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-301 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-302 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-303 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-304 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-305 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-306 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-307 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-308 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-309 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-310 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-311 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-312 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-313 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-314 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-315 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-316 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-317 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-318 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-319 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-320 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-321 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-322 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-323 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-324 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-325 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-326 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-327 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-328 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-329 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-330 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-331 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-332 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-333 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-334 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-335 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-336 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-337 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-338 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-339 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-340 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-341 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-342 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-343 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-344 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-345 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-346 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-347 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-348 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-349 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-350 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-351 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-352 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-353 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-354 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-355 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-356 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-357 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-358 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-359 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-360 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-361 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-362 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-363 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-364 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-365 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-366 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-367 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-368 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-369 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-370 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-371 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-372 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-373 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-374 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-375 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-376 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-377 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-378 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-379 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-380 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-381 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-382 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-383 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-384 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-385 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-386 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-387 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-388 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-389 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-390 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-391 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-392 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-393 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-394 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-395 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-396 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-397 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-398 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-399 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-400 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-401 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-402 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-403 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-404 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-405 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-406 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-407 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-408 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-409 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-410 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-411 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-412 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-413 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-414 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-415 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-416 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-417 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-418 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-419 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-420 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-421 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-422 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-423 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-424 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-425 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-426 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-427 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-428 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-429 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-430 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-431 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-432 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-433 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-434 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-435 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-436 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-437 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-438 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-439 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-440 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-441 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-442 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-443 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-444 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-445 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-446 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-447 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-448 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-449 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-450 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-451 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-452 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-453 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-454 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-455 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-456 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-457 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-458 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-459 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-460 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-461 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-462 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-463 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-464 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-465 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.
+
+ctxeval-5-466 CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real

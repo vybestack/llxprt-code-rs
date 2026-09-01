@@ -1,0 +1,2 @@
+{"error":{"code":"profile-load","message":"profile resolution failed: profile \"/Users/acoliver/Library/Preferences/llxprt-code/profiles/zai.json\": unsupported provider \"anthropic\""},"session_id":"zai-smoke","status":"error"}
+exit=3

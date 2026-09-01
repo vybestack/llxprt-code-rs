@@ -1,0 +1,2 @@
+{"error":{"code":"model-config","message":"unsupported profile setting(s): ephemeralSettings.reasoning.enabled is a dsflash-only chat setting and requires modelParams.chat_template_kwargs"},"session_id":"vast-smoke2","status":"error"}
+exit=3

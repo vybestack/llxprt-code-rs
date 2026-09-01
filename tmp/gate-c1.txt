@@ -1,0 +1,6 @@
+    |
+807 |         let parsed = parse_profile_value(&profile(input.clone()), "grammar")
+    |                                                        ++++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `llxprt-code-rs` (lib test) due to 1 previous error

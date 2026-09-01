@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "provider": "anthropic",
+  "model": "claude-fable-5",
+  "modelParams": {
+    "maxOutputTokens": 60000
+  },
+  "ephemeralSettings": {
+    "base-url": "https://api.anthropic.com",
+    "reasoning.enabled": true,
+    "reasoning.effort": "xhigh",
+    "reasoning.adaptiveThinking": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "reasoning.summary": "auto",
+    "shell-replacement": true,
+    "context-limit": 300000,
+    "maxTurnsPerPrompt": -1,
+    "loopDetectionEnabled": false,
+    "emojifilter": "auto",
+    "tools.disabled": [
+      "google_web_fetch"
+    ],
+    "task-default-timeout-seconds": -1,
+    "task-max-timeout-seconds": -1
+  }
+}

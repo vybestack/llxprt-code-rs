@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "zai-org/GLM-5.2-TEE",
+  "modelParams": {
+    "top_p": 0.95,
+    "temperature": 1
+  },
+  "ephemeralSettings": {
+    "base-url": "https://llm.chutes.ai/v1",
+    "context-limit": 200000,
+    "maxOutputTokens": 40000,
+    "shell-replacement": true,
+    "streaming": "enabled",
+    "reasoning.enabled": true,
+    "reasoning.includeInContext": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.stripFromContext": "none",
+    "auth-key-name": "chutes"
+  }
+}
