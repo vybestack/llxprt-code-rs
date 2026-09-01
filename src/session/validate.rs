@@ -201,7 +201,7 @@ impl SessionState {
                         "terminal branch retains reservation lease fields",
                     ));
                 }
-                if !branch.owner.is_empty() || !branch.error.is_empty() {
+                if !branch.error.is_empty() {
                     return Err(branch_corrupt(
                         branch,
                         "completed lifecycle fields are inconsistent",
@@ -227,8 +227,7 @@ impl SessionState {
                         "terminal branch retains reservation lease fields",
                     ));
                 }
-                if !branch.owner.is_empty() || branch.error.is_empty() || !branch.summary.is_empty()
-                {
+                if branch.error.is_empty() || !branch.summary.is_empty() {
                     return Err(branch_corrupt(
                         branch,
                         "failed lifecycle fields are inconsistent",

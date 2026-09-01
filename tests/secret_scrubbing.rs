@@ -219,20 +219,23 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
         .path()
         .join("code-rs-sessions")
         .join(&session_id);
-    let mut slots = ["session.json", "session.alt.json"]
-        .into_iter()
-        .filter_map(|name| std::fs::read(session_dir.join(name)).ok())
-        .map(|bytes| {
-            assert_marker_absent_bytes(&bytes, marker_a.as_bytes(), "persisted session JSON");
-            assert_marker_absent_bytes(&bytes, marker_b.as_bytes(), "persisted session JSON");
-            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            let generation = value["store_generation"].as_u64().unwrap_or(0);
-            (generation, bytes)
+    let artifacts = std::fs::read_dir(&session_dir)
+        .unwrap()
+        .map(|entry| entry.expect("read persisted session directory entry"))
+        .filter(|entry| {
+            !entry
+                .file_type()
+                .expect("inspect session artifact")
+                .is_dir()
         })
+        .map(|entry| std::fs::read(entry.path()).expect("read persisted session artifact"))
         .collect::<Vec<_>>();
-    slots.sort_by_key(|(generation, _)| *generation);
-    let persisted = &slots.last().expect("a persisted session slot").1;
-    assert!(!contains_bytes(persisted, b"provider-reflected-secret"));
+    assert!(!artifacts.is_empty(), "persisted session artifacts");
+    for persisted in &artifacts {
+        assert_marker_absent_bytes(persisted, marker_a.as_bytes(), "persisted session artifact");
+        assert_marker_absent_bytes(persisted, marker_b.as_bytes(), "persisted session artifact");
+        assert!(!contains_bytes(persisted, b"provider-reflected-secret"));
+    }
     let stdout_str = String::from_utf8_lossy(&out.stdout);
     assert!(stdout_str.contains("Model HTTP error (status 400)"));
     assert!(!stdout_str.contains("provider returned an error response"));

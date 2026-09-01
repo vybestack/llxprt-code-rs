@@ -1,8 +1,8 @@
 //! Versioned session storage for the headless agent.
 //!
-//! Two generation-numbered state slots (`session.json` and `session.alt.json`) provide
-//! crash recovery without publishing through a replaceable temporary pathname. The newest valid
-//! slot holds `session_id`, the canonical pinned `cwd`, and an explicit list of `branches`. Each
+//! A framed append-only transaction log plus validated snapshots provides crash recovery and
+//! bounded replay. Legacy generation-numbered state slots are migrated atomically on first open.
+//! The materialized state holds `session_id`, the canonical pinned `cwd`, and an explicit list of `branches`. Each
 //! branch carries its own `branch_id`, parent lineage
 //! (parent `branch_id` + turn + attempt), a 1-based `turn`, an `attempt` id, the
 //! exact prompt and its FNV-1a digest, the owner token + lease timestamps of its
@@ -106,7 +106,7 @@ pub struct BranchRecord {
     /// Terminal error description (failed branches).
     #[serde(default)]
     pub error: String,
-    /// Unique owner token of the process holding the reservation.
+    /// Unique owner token of the process that most recently held the reservation.
     #[serde(default)]
     pub owner: String,
     /// Wall-clock unix seconds when the reservation was made; zero once the
@@ -153,7 +153,10 @@ impl SessionState {
     }
 }
 
+mod log;
+mod replay;
 mod reserve;
+mod snapshot;
 mod validate;
 
 /// A turn's history materialized for a model request: the completed turn's prompt, full
@@ -215,6 +218,8 @@ pub enum StoreError {
     LockTimeout,
     /// A state-slot update completed, but retained-directory durability was not confirmed.
     InstalledDurabilityUnknown,
+    /// The event is durable, but post-commit snapshot maintenance failed.
+    CommittedMaintenance(String),
 }
 
 impl std::fmt::Display for StoreError {
@@ -229,6 +234,9 @@ impl std::fmt::Display for StoreError {
             StoreError::LockTimeout => "session lock timed out; retry".to_string(),
             StoreError::InstalledDurabilityUnknown => {
                 "session state was installed but directory durability is unconfirmed".to_string()
+            }
+            StoreError::CommittedMaintenance(m) => {
+                format!("session event committed but maintenance failed: {m}")
             }
         };
         f.write_str(&crate::redact::scrub_and_bound_diagnostic(&rendered))
@@ -254,6 +262,7 @@ pub struct SessionStore {
     dir: openat::Dir,
     file: std::fs::File,
     lock: Mutex<()>,
+    cache: Mutex<Option<snapshot::LoadedStore>>,
 }
 
 fn now_secs() -> u64 {
@@ -369,7 +378,7 @@ fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError
     Ok(SlotRead::Valid(slot))
 }
 
-fn read_state_with_generation(
+fn read_legacy_state_with_generation(
     dir: &openat::Dir,
 ) -> Result<Option<(u64, SessionState)>, StoreError> {
     let primary = read_state_slot(dir, "session.json")?;
@@ -389,96 +398,26 @@ fn read_state_with_generation(
     Ok(Some((selected.store_generation, selected.state)))
 }
 
-fn read_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
-    Ok(read_state_with_generation(dir)?.map(|(_, state)| state))
+#[cfg(test)]
+fn read_state_with_generation(
+    dir: &openat::Dir,
+) -> Result<Option<(u64, SessionState)>, StoreError> {
+    read_legacy_state_with_generation(dir)
 }
 
-fn next_store_generation(current: Option<u64>) -> Result<u64, StoreError> {
-    match current {
-        Some(value) => value
-            .checked_add(1)
-            .ok_or_else(|| StoreError::Corrupt("session generation overflow".into())),
-        None => Ok(0),
-    }
+fn read_legacy_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
+    Ok(read_legacy_state_with_generation(dir)?.map(|(_, state)| state))
 }
 
 fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, StoreError> {
     use std::os::unix::fs::MetadataExt as _;
-
     let a = a
         .metadata()
-        .map_err(|_| StoreError::Io("inspect retained state failed".into()))?;
+        .map_err(|_| StoreError::Io("inspect retained artifact failed".into()))?;
     let b = b
         .metadata()
-        .map_err(|_| StoreError::Io("inspect installed state failed".into()))?;
+        .map_err(|_| StoreError::Io("inspect installed artifact failed".into()))?;
     Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
-}
-
-fn write_state_slot(dir: &openat::Dir, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
-    write_state_slot_inner(
-        dir,
-        name,
-        bytes,
-        || {},
-        |fd| {
-            if unsafe { libc::fsync(fd) } == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        },
-    )
-}
-
-fn write_state_slot_inner(
-    dir: &openat::Dir,
-    name: &str,
-    bytes: &[u8],
-    after_open: impl FnOnce(),
-    sync_directory: impl FnOnce(std::os::fd::RawFd) -> std::io::Result<()>,
-) -> Result<(), StoreError> {
-    use std::io::{Seek as _, Write as _};
-
-    if bytes.len() > MAX_SESSION_BYTES {
-        return Err(StoreError::Invalid(format!(
-            "session state exceeds the {MAX_SESSION_BYTES} byte cap"
-        )));
-    }
-    use std::os::fd::AsRawFd as _;
-
-    let mut f = open_regular_at(dir, name, libc::O_RDWR | libc::O_CREAT, 0o600)
-        .map_err(|_| StoreError::Io("open session state slot failed".into()))?;
-    after_open();
-    fchmod(f.as_raw_fd(), 0o600)?;
-    f.set_len(0)
-        .map_err(|_| StoreError::Io("truncate session state slot failed".into()))?;
-    f.seek(std::io::SeekFrom::Start(0))
-        .map_err(|_| StoreError::Io("seek session state slot failed".into()))?;
-    f.write_all(bytes)
-        .map_err(|_| StoreError::Io("write session state slot failed".into()))?;
-    f.sync_all()
-        .map_err(|_| StoreError::Io("sync session state slot failed".into()))?;
-    let installed = open_regular_at(dir, name, libc::O_RDONLY, 0)
-        .map_err(|_| StoreError::Io("verify session state slot failed".into()))?;
-    if !same_file_identity(&f, &installed)? {
-        let _ = f.set_len(0);
-        let _ = f.sync_all();
-        return Err(StoreError::Io(
-            "session state slot name was replaced".into(),
-        ));
-    }
-    let syncable_dir = dir
-        .open_file(".")
-        .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
-    sync_directory(syncable_dir.as_raw_fd()).map_err(|_| StoreError::InstalledDurabilityUnknown)?;
-    let installed = open_regular_at(dir, name, libc::O_RDONLY, 0)
-        .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
-    if !same_file_identity(&f, &installed)? {
-        let _ = f.set_len(0);
-        let _ = f.sync_all();
-        return Err(StoreError::InstalledDurabilityUnknown);
-    }
-    Ok(())
 }
 
 fn ensure_private_subdir(parent: &openat::Dir, name: &str) -> Result<openat::Dir, StoreError> {
@@ -543,6 +482,7 @@ impl SessionStore {
             dir: dir_cap,
             file,
             lock: Mutex::new(()),
+            cache: Mutex::new(None),
         })
     }
 
@@ -556,6 +496,12 @@ impl SessionStore {
         config_root: &crate::model_api::dependencies::ConfigHomeRoot,
     ) -> Result<SessionStore, StoreError> {
         Self::open_in(session, config_root.as_path())
+    }
+
+    /// Open a store under an explicit configuration directory.
+    #[doc(hidden)]
+    pub fn load_at(session: &SessionId, config_root: &Path) -> Result<SessionStore, StoreError> {
+        Self::open_in(session, config_root)
     }
 
     /// The configuration-root-derived path retained when this store was opened.
@@ -613,28 +559,37 @@ impl SessionStore {
         f()
     }
 
-    /// Read and validate the current state under the exclusive lock. A missing state
-    /// file is a fresh empty session; a present-but-corrupt file is an error.
+    /// Read and validate the current state under the exclusive file lock. The per-handle
+    /// cursor consumes only frames committed since the preceding operation.
     fn read(&self) -> Result<SessionState, StoreError> {
-        Ok(read_state(&self.dir)?.unwrap_or_else(|| SessionState::empty(&self.session_id)))
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
+        match cache.as_mut() {
+            Some(loaded) => snapshot::catch_up(&self.dir, loaded)?,
+            None => *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?),
+        }
+        Ok(cache
+            .as_ref()
+            .expect("session cache initialized")
+            .state
+            .clone())
     }
 
-    fn write(&self, state: &SessionState) -> Result<(), StoreError> {
-        state.validate()?;
-        let current = read_state_with_generation(&self.dir)?.map(|(generation, _)| generation);
-        let generation = next_store_generation(current)?;
-        let slot = StateSlot {
-            store_generation: generation,
-            state: state.clone(),
-        };
-        let bytes = serde_json::to_vec(&slot)
-            .map_err(|e| StoreError::Corrupt(format!("serialize: {e}")))?;
-        let name = if generation % 2 == 0 {
-            "session.json"
-        } else {
-            "session.alt.json"
-        };
-        write_state_slot(&self.dir, name, &bytes)
+    fn append_event(&self, event: log::Event) -> Result<(), StoreError> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
+        if cache.is_none() {
+            *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?);
+        }
+        snapshot::append(
+            &self.dir,
+            cache.as_mut().expect("session cache initialized"),
+            vec![event],
+        )
     }
 
     /// The chain of `start`'s ancestors from the root down to `start` (inclusive),
@@ -791,75 +746,43 @@ impl SessionStore {
         }
     }
 
-    /// Renew the lease of a live reservation under its owner token. `Stale` is returned
-    /// when the branch is gone, no longer pending, or owned by a different token. The caller
-    /// renews before/after every model request and at every checkpoint.
+    /// Renew the lease of a live reservation by appending one bounded transaction.
     pub fn renew_lease(&self, reserved: &ReservedRequest) -> Result<(), StoreError> {
         self.locked(|| {
-            let mut state = self.read()?;
-            let idx = state
-                .branches
-                .iter()
-                .position(|b| b.branch_id == reserved.branch_id)
-                .ok_or(StoreError::Stale)?;
-            let t = &mut state.branches[idx];
-            if t.lifecycle != Lifecycle::Pending || t.owner != reserved.owner {
-                return Err(StoreError::Stale);
-            }
-            if t.turn != reserved.turn || t.digest != crate::agent::prompt_digest(&reserved.prompt)
-            {
-                return Err(StoreError::Stale);
-            }
-            let now = now_secs();
-            // A lease that already expired is stale even if the owner token still matches: the
-            // branch may have been reclaimed. Renew it only while it is still ours and live.
-            if t.lease_expiry <= now {
-                return Err(StoreError::Stale);
-            }
-            t.lease_expiry = now.saturating_add(LEASE_SECONDS);
-            self.write(&state)
+            let state = self.read()?;
+            let branch = self.live_branch(&state, reserved)?;
+            let expiry = now_secs().saturating_add(LEASE_SECONDS);
+            self.append_event(log::Event::LeaseRenewed {
+                branch_id: branch.branch_id.clone(),
+                owner: reserved.owner.clone(),
+                lease_expiry: expiry,
+            })
         })
     }
 
-    /// Persist the current partial rounds without completing the attempt, so a crash
-    /// between model rounds cannot lose the transcript. The attempt stays `pending`. The
-    /// caller's owner token must still match.
+    /// Append the suffix of a partial transcript and renew its lease atomically.
+    /// Persisted rounds must be an exact prefix of `rounds`; divergence is invalid.
     pub fn checkpoint(
         &self,
         reserved: &ReservedRequest,
         rounds: &[RoundRecord],
     ) -> Result<(), StoreError> {
         self.locked(|| {
-            let mut state = self.read()?;
-            let idx = state
-                .branches
-                .iter()
-                .position(|b| b.branch_id == reserved.branch_id)
-                .ok_or(StoreError::Stale)?;
-            let t = &mut state.branches[idx];
-            if t.lifecycle != Lifecycle::Pending || t.owner != reserved.owner {
-                return Err(StoreError::Stale);
-            }
-            if t.turn != reserved.turn || t.digest != crate::agent::prompt_digest(&reserved.prompt)
-            {
-                return Err(StoreError::Stale);
-            }
-            let now = now_secs();
-            // A lease that already expired is stale even if the owner token still matches:
-            // the branch may have been reclaimed. Renew it only while it is still ours and
-            // live, so a checkpoint both persists the partial transcript and extends the
-            // lease under the same lock.
-            if t.lease_expiry <= now {
-                return Err(StoreError::Stale);
-            }
-            t.rounds = rounds.to_vec();
-            t.lease_expiry = now.saturating_add(LEASE_SECONDS);
-            self.write(&state)
+            let state = self.read()?;
+            let branch = self.live_branch(&state, reserved)?;
+            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            self.append_event(log::Event::Checkpoint {
+                branch_id: branch.branch_id.clone(),
+                owner: reserved.owner.clone(),
+                rounds: suffix.to_vec(),
+                lease_expiry: now_secs().saturating_add(LEASE_SECONDS),
+            })
         })
     }
 
-    /// Persist a completed branch (full assistant/tool history + summary) under the lock,
-    /// verifying the owner token.
+    /// Append only the final transcript suffix and complete the branch atomically.
+    /// Persisted rounds must be an exact prefix of `rounds`; divergence is invalid.
+    /// An idempotent retry of an already-completed branch requires the same recorded owner.
     pub fn finalize(
         &self,
         reserved: &ReservedRequest,
@@ -867,39 +790,37 @@ impl SessionStore {
         rounds: &[RoundRecord],
     ) -> Result<(), StoreError> {
         self.locked(|| {
-            let mut state = self.read()?;
-            let idx = state
-                .branches
-                .iter()
-                .position(|b| b.branch_id == reserved.branch_id)
-                .ok_or(StoreError::Stale)?;
-            let t = &mut state.branches[idx];
-            if t.lifecycle != Lifecycle::Pending || t.owner != reserved.owner {
-                return Err(StoreError::Stale);
+            let state = self.read()?;
+            let branch = self.branch_for_terminal(&state, reserved)?;
+            if branch.lifecycle == Lifecycle::Completed {
+                if branch.owner != reserved.owner {
+                    return Err(StoreError::Stale);
+                }
+                if branch.summary == summary && replay::rounds_equal(&branch.rounds, rounds)? {
+                    return Ok(());
+                }
+                return Err(StoreError::Invalid(
+                    "completed retry diverges from persisted branch".into(),
+                ));
             }
-            if t.turn != reserved.turn || t.digest != crate::agent::prompt_digest(&reserved.prompt)
-            {
-                return Err(StoreError::Stale);
+            if branch.lifecycle == Lifecycle::Failed {
+                return Err(StoreError::Invalid(
+                    "cannot complete a failed branch".into(),
+                ));
             }
-            let now = now_secs();
-            // A lease that is already at or past now is stale: the reservation may
-            // have been reclaimed, so the commit is rejected before any field is
-            // mutated. Renewal/checkpoint gate the same way, keeping an expired
-            // owner unable to finalize a branch another process took over.
-            if t.lease_expiry <= now {
-                return Err(StoreError::Stale);
-            }
-            t.rounds = rounds.to_vec();
-            t.summary = summary.to_string();
-            t.lifecycle = Lifecycle::Completed;
-            t.owner.clear();
-            t.reserved_at = 0;
-            t.lease_expiry = 0;
-            self.write(&state)
+            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            self.append_event(log::Event::BranchCompleted {
+                branch_id: branch.branch_id.clone(),
+                owner: reserved.owner.clone(),
+                rounds: suffix.to_vec(),
+                summary: summary.to_string(),
+            })
         })
     }
 
-    /// Persist a terminal failure on this reservation, verifying the owner token.
+    /// Append the uncheckpointed transcript suffix and fail the branch atomically.
+    /// Persisted rounds must be an exact prefix of `rounds`; divergence is invalid.
+    /// An idempotent retry of an already-failed branch requires the same recorded owner.
     pub fn fail(
         &self,
         reserved: &ReservedRequest,
@@ -907,35 +828,86 @@ impl SessionStore {
         rounds: &[RoundRecord],
     ) -> Result<(), StoreError> {
         self.locked(|| {
-            let mut state = self.read()?;
-            let idx = state
-                .branches
-                .iter()
-                .position(|b| b.branch_id == reserved.branch_id)
-                .ok_or(StoreError::Stale)?;
-            let t = &mut state.branches[idx];
-            if t.lifecycle != Lifecycle::Pending || t.owner != reserved.owner {
-                return Err(StoreError::Stale);
+            let state = self.read()?;
+            let branch = self.branch_for_terminal(&state, reserved)?;
+            if branch.lifecycle == Lifecycle::Failed {
+                if branch.owner != reserved.owner {
+                    return Err(StoreError::Stale);
+                }
+                if branch.error == error && replay::rounds_equal(&branch.rounds, rounds)? {
+                    return Ok(());
+                }
+                return Err(StoreError::Invalid(
+                    "failure retry diverges from persisted branch".into(),
+                ));
             }
-            if t.turn != reserved.turn || t.digest != crate::agent::prompt_digest(&reserved.prompt)
-            {
-                return Err(StoreError::Stale);
+            if branch.lifecycle == Lifecycle::Completed {
+                return Err(StoreError::Invalid("cannot fail a completed branch".into()));
             }
-            let now = now_secs();
-            // A lease that is already at or past now is stale: the reservation may
-            // have been reclaimed, so the failure is rejected before any field is
-            // mutated. Renewal/checkpoint gate the same way, keeping an expired
-            // owner unable to fail a branch another process took over.
-            if t.lease_expiry <= now {
-                return Err(StoreError::Stale);
-            }
-            t.rounds = rounds.to_vec();
-            t.error = error.to_string();
-            t.lifecycle = Lifecycle::Failed;
-            t.owner.clear();
-            t.reserved_at = 0;
-            t.lease_expiry = 0;
-            self.write(&state)
+            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            self.append_event(log::Event::BranchFailed {
+                branch_id: branch.branch_id.clone(),
+                owner: reserved.owner.clone(),
+                rounds: suffix.to_vec(),
+                error: error.to_string(),
+            })
+        })
+    }
+
+    fn live_branch<'a>(
+        &self,
+        state: &'a SessionState,
+        reserved: &ReservedRequest,
+    ) -> Result<&'a BranchRecord, StoreError> {
+        let branch = state
+            .branches
+            .iter()
+            .find(|branch| branch.branch_id == reserved.branch_id)
+            .ok_or(StoreError::Stale)?;
+        if branch.lifecycle != Lifecycle::Pending
+            || branch.owner != reserved.owner
+            || branch.turn != reserved.turn
+            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+            || branch.lease_expiry <= now_secs()
+        {
+            return Err(StoreError::Stale);
+        }
+        Ok(branch)
+    }
+
+    fn branch_for_terminal<'a>(
+        &self,
+        state: &'a SessionState,
+        reserved: &ReservedRequest,
+    ) -> Result<&'a BranchRecord, StoreError> {
+        let branch = state
+            .branches
+            .iter()
+            .find(|branch| branch.branch_id == reserved.branch_id)
+            .ok_or(StoreError::Stale)?;
+        if branch.turn != reserved.turn
+            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+        {
+            return Err(StoreError::Stale);
+        }
+        if branch.lifecycle == Lifecycle::Pending {
+            return self.live_branch(state, reserved);
+        }
+        Ok(branch)
+    }
+
+    /// Replace the materialized state through a fresh snapshot. This is a hidden test and
+    /// recovery hook; normal mutations always append transactions.
+    #[doc(hidden)]
+    pub fn replace_snapshot(&self, state: &SessionState) -> Result<(), StoreError> {
+        self.locked(|| {
+            let loaded = snapshot::replace_materialized(&self.dir, state)?;
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
+            *cache = Some(loaded);
+            Ok(())
         })
     }
 

@@ -261,16 +261,13 @@ impl SessionStore {
         let turn = record.turn;
         let attempt = record.attempt;
         let prior = self.prior_history(state, current, turn);
-        let record = &mut state.branches[existing];
-        record.owner = lease.owner.clone();
-        record.reserved_at = lease.now;
-        record.lease_expiry = lease.lease_end;
-        record.prompt = prompt.to_string();
-        record.digest = crate::agent::prompt_digest(prompt);
-        record.rounds.clear();
-        record.error.clear();
-        record.summary.clear();
-        self.write(state)?;
+        self.append_event(log::Event::BranchReclaimed {
+            branch_id: branch_id.clone(),
+            prompt: prompt.to_string(),
+            owner: lease.owner.clone(),
+            reserved_at: lease.now,
+            lease_expiry: lease.lease_end,
+        })?;
         Ok(ReservedRequest {
             branch_id,
             turn,
@@ -386,7 +383,7 @@ impl SessionStore {
             })
             .transpose()?
             .unwrap_or(1);
-        state.branches.push(BranchRecord {
+        let branch = BranchRecord {
             branch_id: branch_id.clone(),
             turn: input.target,
             attempt,
@@ -402,8 +399,15 @@ impl SessionStore {
             owner: input.lease.owner.clone(),
             reserved_at: input.lease.now,
             lease_expiry: input.lease.lease_end,
-        });
-        self.write(state)?;
+        };
+        state.branches.push(branch.clone());
+        self.append_event(log::Event::BranchReserved {
+            cwd: state.cwd.clone(),
+            cwd_dev: state.cwd_dev,
+            cwd_ino: state.cwd_ino,
+            branch,
+            next_branch_seq: seq,
+        })?;
         Ok(branch_id)
     }
 

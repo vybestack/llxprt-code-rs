@@ -165,7 +165,7 @@ fn no_tool_turn_persists_final_response_and_turn2_includes_prior() {
     assert_eq!(turn1.rounds[0].assistant, "T1 summary");
     assert!(turn1.rounds[0].calls.is_empty());
     assert_eq!(turn1.summary, "T1 summary");
-    assert!(turn1.owner.is_empty());
+    assert_eq!(turn1.owner, r1.owner);
 
     // Turn 2 materializes prior user prompt + final assistant response.
     let r2 = reserved(&st, None, None, "P2", &cwd).unwrap();
@@ -322,9 +322,9 @@ fn syntactic_and_semantic_corruption_is_an_error() {
     let st = store("s7");
     let _ = reserved(&st, None, None, "P1", &cwd).unwrap();
     // Syntactic corruption is an error, not a fallback.
-    let _ = std::fs::remove_file(st.session_dir.join("session.alt.json"));
-    std::fs::write(st.session_dir.join("session.json"), b"not json {").unwrap();
-    match st.start_request(None, None, "P1", &cwd) {
+    std::fs::write(st.session_dir.join("session.manifest.json"), b"not json {").unwrap();
+    let reopened = store("s7");
+    match reopened.start_request(None, None, "P1", &cwd) {
         Err(StoreError::Corrupt(_)) => {}
         other => panic!("expected Corrupt for garbage, got {other:?}"),
     }
@@ -334,18 +334,16 @@ fn syntactic_and_semantic_corruption_is_an_error() {
     let _ = reserved(&st3, None, None, "Q1", &cwd).unwrap();
     let base = shared_root();
     let dir = base.join("code-rs-sessions/s8");
-    let mut state = read_current_state(&dir);
-    if let Some(b) = state.branches.first_mut() {
-        b.digest = "deadbeef".into();
-    }
-    std::fs::remove_file(dir.join("session.alt.json")).ok();
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("session.manifest.json")).unwrap()).unwrap();
+    let segment = manifest["current"]["segment"].as_str().unwrap();
+    let path = dir.join(segment);
+    let mut bytes = std::fs::read(&path).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    std::fs::write(path, bytes).unwrap();
     let cw = cwd.clone();
-    match st3.start_request(None, None, "X", &cw) {
+    let reopened = store("s8");
+    match reopened.start_request(None, None, "X", &cw) {
         Err(StoreError::Corrupt(_)) => {}
         other => panic!("expected Corrupt for bad digest, got {other:?}"),
     }
@@ -484,12 +482,37 @@ fn secure_modes() {
         .mode()
         & 0o777;
     assert_eq!(m, 0o600, "lock file must be 0600");
-    let m = std::fs::metadata(st.session_dir.join("session.json"))
+    let artifacts = std::fs::read_dir(&st.session_dir)
         .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(m, 0o600, "state file must be 0600");
+        .map(|entry| entry.expect("read session artifact"))
+        .filter(|entry| entry.file_name() != ".lock")
+        .collect::<Vec<_>>();
+    assert!(
+        artifacts
+            .iter()
+            .any(|entry| entry.file_name() == "session.manifest.json"),
+        "manifest artifact exists"
+    );
+    assert!(
+        artifacts
+            .iter()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("snapshot-")),
+        "snapshot artifact exists"
+    );
+    assert!(
+        artifacts
+            .iter()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("segment-")),
+        "segment artifact exists"
+    );
+    for artifact in artifacts {
+        assert!(
+            artifact.file_type().unwrap().is_file(),
+            "persisted artifact must be a file"
+        );
+        let mode = artifact.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "persisted artifact must be 0600");
+    }
 }
 
 /// The session store caps oversized prompts instead of persisting them (the input limit).
@@ -929,6 +952,23 @@ fn checkpoint_extends_lease() {
     assert_eq!(b.owner, r.owner);
 }
 
+#[test]
+fn empty_suffix_checkpoint_extends_persisted_lease() {
+    let cwd = new_cwd();
+    let st = store("ckpt-empty");
+    let r = reserved(&st, None, None, "P1", &cwd).unwrap();
+    let before = on_disk_lease(&st, &r);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    st.checkpoint(&r, &[]).unwrap();
+
+    let after = on_disk_lease(&st, &r);
+    assert!(
+        after > before,
+        "empty checkpoint must renew the persisted lease"
+    );
+}
+
 /// The second model call of a tool round observes a freshly renewed lease after a
 /// simulated elapsed interval: the reserved lease is recorded, a whole second passes, and
 /// the turn's second pre-request renew extends it strictly (the agent renews right
@@ -1050,42 +1090,29 @@ fn branch_seq_overflow_is_a_typed_error() {
     assert_eq!(snap.branches.len(), 1, "no branch may be added on overflow");
 }
 
-fn current_slot(session_dir: &std::path::Path) -> (std::path::PathBuf, serde_json::Value) {
-    ["session.json", "session.alt.json"]
-        .into_iter()
-        .filter_map(|name| {
-            let path = session_dir.join(name);
-            let value: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-            let generation = value
-                .get("store_generation")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            Some((generation, path, value))
-        })
-        .max_by_key(|(generation, _, _)| *generation)
-        .map(|(_, path, value)| (path, value))
-        .expect("a valid session slot")
-}
-
 fn read_current_state(session_dir: &std::path::Path) -> SessionState {
-    let (_, value) = current_slot(session_dir);
-    serde_json::from_value(value.get("state").cloned().unwrap_or(value)).unwrap()
+    let id = session_dir.file_name().unwrap().to_str().unwrap();
+    SessionStore::load_at(&SessionId::parse(id).unwrap(), &shared_root())
+        .unwrap()
+        .snapshot()
+        .unwrap()
 }
 
 fn write_current_state(session_dir: &std::path::Path, state: &SessionState) {
-    let (path, mut envelope) = current_slot(session_dir);
-    if envelope.get("state").is_some() {
-        envelope["state"] = serde_json::to_value(state).unwrap();
-        std::fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
-    } else {
-        std::fs::write(path, serde_json::to_vec(state).unwrap()).unwrap();
-    }
+    let id = session_dir.file_name().unwrap().to_str().unwrap();
+    SessionStore::load_at(&SessionId::parse(id).unwrap(), &shared_root())
+        .unwrap()
+        .replace_snapshot(state)
+        .unwrap();
 }
 
 /// The current lease a reservation holds on disk.
 fn on_disk_lease(store: &SessionStore, r: &ReservedRequest) -> u64 {
-    read_current_state(&store.session_dir)
+    let id = SessionId::parse(&store.session_id).unwrap();
+    SessionStore::load_at(&id, &shared_root())
+        .unwrap()
+        .snapshot()
+        .unwrap()
         .branches
         .iter()
         .find(|b| b.branch_id == r.branch_id)

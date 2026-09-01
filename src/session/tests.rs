@@ -1,3 +1,72 @@
+#[cfg(test)]
+fn write_state_slot(dir: &openat::Dir, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
+    write_state_slot_inner(
+        dir,
+        name,
+        bytes,
+        || {},
+        |fd| {
+            if unsafe { libc::fsync(fd) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+    )
+}
+
+#[cfg(test)]
+fn write_state_slot_inner(
+    dir: &openat::Dir,
+    name: &str,
+    bytes: &[u8],
+    after_open: impl FnOnce(),
+    sync_directory: impl FnOnce(std::os::fd::RawFd) -> std::io::Result<()>,
+) -> Result<(), StoreError> {
+    use std::io::{Seek as _, Write as _};
+
+    if bytes.len() > MAX_SESSION_BYTES {
+        return Err(StoreError::Invalid(format!(
+            "session state exceeds the {MAX_SESSION_BYTES} byte cap"
+        )));
+    }
+    use std::os::fd::AsRawFd as _;
+
+    let mut f = open_regular_at(dir, name, libc::O_RDWR | libc::O_CREAT, 0o600)
+        .map_err(|_| StoreError::Io("open session state slot failed".into()))?;
+    after_open();
+    fchmod(f.as_raw_fd(), 0o600)?;
+    f.set_len(0)
+        .map_err(|_| StoreError::Io("truncate session state slot failed".into()))?;
+    f.seek(std::io::SeekFrom::Start(0))
+        .map_err(|_| StoreError::Io("seek session state slot failed".into()))?;
+    f.write_all(bytes)
+        .map_err(|_| StoreError::Io("write session state slot failed".into()))?;
+    f.sync_all()
+        .map_err(|_| StoreError::Io("sync session state slot failed".into()))?;
+    let installed = open_regular_at(dir, name, libc::O_RDONLY, 0)
+        .map_err(|_| StoreError::Io("verify session state slot failed".into()))?;
+    if !same_file_identity(&f, &installed)? {
+        let _ = f.set_len(0);
+        let _ = f.sync_all();
+        return Err(StoreError::Io(
+            "session state slot name was replaced".into(),
+        ));
+    }
+    let syncable_dir = dir
+        .open_file(".")
+        .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
+    sync_directory(syncable_dir.as_raw_fd()).map_err(|_| StoreError::InstalledDurabilityUnknown)?;
+    let installed = open_regular_at(dir, name, libc::O_RDONLY, 0)
+        .map_err(|_| StoreError::InstalledDurabilityUnknown)?;
+    if !same_file_identity(&f, &installed)? {
+        let _ = f.set_len(0);
+        let _ = f.sync_all();
+        return Err(StoreError::InstalledDurabilityUnknown);
+    }
+    Ok(())
+}
+
 use super::*;
 
 #[test]
@@ -79,6 +148,7 @@ fn session_lock_timeout_does_not_execute_or_mutate_and_later_recovers() {
         dir: openat::Dir::open(root.path()).unwrap(),
         file: contender,
         lock: Mutex::new(()),
+        cache: Mutex::new(None),
     };
     let mut holder = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
@@ -312,12 +382,19 @@ fn both_corrupt_slots_preserve_a_concrete_corruption_error() {
 
 #[test]
 fn generation_overflow_fails_before_selecting_a_slot() {
-    assert_eq!(next_store_generation(None).unwrap(), 0);
-    assert_eq!(next_store_generation(Some(41)).unwrap(), 42);
-    assert!(matches!(
-        next_store_generation(Some(u64::MAX)),
-        Err(StoreError::Corrupt(_))
-    ));
+    let root = tempfile::tempdir().unwrap();
+    let dir = openat::Dir::open(root.path()).unwrap();
+    let state = SessionState::empty("generation-overflow");
+    snapshot::test_initial_manifest(&dir, &state).unwrap();
+    let path = root.path().join("session.manifest.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    value["generation"] = serde_json::json!(u64::MAX);
+    std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+    let error = snapshot::test_initial_manifest(&dir, &state).unwrap_err();
+    assert!(matches!(error, StoreError::Corrupt(_)));
+    assert!(error.to_string().contains("generation overflow"));
 }
 
 #[test]
