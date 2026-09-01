@@ -44,6 +44,10 @@ name = "llxprt-context-eval"
 path = "src/bin/llxprt-context-eval.rs"
 
 [dependencies]
+# Phase 2 encrypted vault (issue #39): already in the locked tree; promoting the dev entry
+# adds no new package, only root membership in Cargo.lock.
+aes-gcm = "0.10"
+
 serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"] }
 serdes-ai-responses = { path = "vendor/serdes-ai-responses", version = "=0.3.0" }
 serde = { version = "1", features = ["derive"] }
@@ -75,7 +79,6 @@ sha2 = "0.10"
 # These crates are used only by the crate's own tests (no runtime code path). `aes-gcm`
 # supplies the dependency closure for the dynamically constructed offline encryption fixture.
 [dev-dependencies]
-aes-gcm = "0.10"
 tempfile = "3"
 jsonschema = { version = "=0.33.0", default-features = false }
 
