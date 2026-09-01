@@ -20,3 +20,6 @@ pub mod scopes;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod phase2_tests;
