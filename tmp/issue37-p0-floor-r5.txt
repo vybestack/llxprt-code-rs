@@ -1,2 +1,0 @@
-== context-eval baseline-minimum-management-floor ==
-context-evals report: /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tmp/issue37-floor-r5/report-1788235207492935000.json

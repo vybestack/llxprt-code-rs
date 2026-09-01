@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "provider": "google",
-  "model": "gemini-pro",
-  "modelParams": {},
-  "ephemeralSettings": {
-    "auth-keyfile": "/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-test-n66TFy/.keys/google-key"
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "provider": "anthropic",
-  "model": "claude-3-opus-20240229",
-  "modelParams": {},
-  "ephemeralSettings": {
-    "auth-keyfile": "/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-test-n66TFy/.keys/anthropic-key"
-  }
-}

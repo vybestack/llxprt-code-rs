@@ -1,3 +1,0 @@
-vendored crates are missing provenance members:
-vendor/serdes-ai-responses/.cargo_vcs_info.json
-source-bundle publisher interrupted by signal 15
