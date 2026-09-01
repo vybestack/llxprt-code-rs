@@ -257,22 +257,25 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     let out_dir = opts
         .out_root
         .join(format!("{}-{}", scen.id, harness::uniq()));
-    let (bulk, digests) = runner::expand_fixture(
-        &opts.fixtures_dir(),
-        &scen.wall.fixture,
-        scen.wall.tool_rounds,
-        scen.wall.tool_output_bytes,
-        &absolute_child(&out_dir, "bulk")?,
-    )?;
     let marker = scen
         .assertions
         .required_final_marker
         .clone()
         .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
     let rounds = scen.wall.tool_rounds as usize;
-    let server = Loopback::start(rounds, bulk, &marker, scen.wall.tool_output_bytes);
+    let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
     let url = server.base_url();
-    let prepared = runner::prepare(&opts.out_root, scen, &url, Vec::new(), digests.clone())?;
+    // Prepare the workspace first so the bulk fixtures expand INSIDE it: the CLI's file
+    // tools open paths relative to --cwd and reject absolute paths, so the loopback's
+    // scripted read_file calls only admit real bulk content when it lives there.
+    let prepared = runner::prepare(&opts.out_root, scen, &url, Vec::new(), Vec::new())?;
+    let (bulk, digests) = runner::expand_fixture(
+        &opts.fixtures_dir(),
+        &scen.wall.fixture,
+        scen.wall.tool_rounds,
+        scen.wall.tool_output_bytes,
+        &prepared.workspace.join("bulk"),
+    )?;
     let turns = drive_cli_turns(scen, opts, &prepared, &out_dir);
     let obs = server.snapshot();
     server.stop();
@@ -285,7 +288,8 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     let verdict = grader::verdict(scen, &graded);
     let isolation_ok = prepared.config_home.starts_with(&opts.out_root)
         && prepared.config_home.is_absolute()
-        && prepared.workspace.is_absolute();
+        && prepared.workspace.is_absolute()
+        && bulk.iter().all(|p| p.starts_with(&prepared.workspace));
     Ok((evidence, graded, verdict, digests, isolation_ok))
 }
 
