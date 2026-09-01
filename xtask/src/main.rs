@@ -25,9 +25,56 @@ fn real_main() -> Result<(), String> {
         "quality" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::All)),
         "lint" => no_args(&remaining).and_then(|()| run_lint(&root)),
         "release-gates" => no_args(&remaining).and_then(|()| run_release_gates(&root)),
+        "envelope-schema" => run_envelope_schema(&root, &remaining),
         "release-fixtures" => no_args(&remaining).and_then(|()| run_release_fixtures(&root)),
         "source-bundle" => run_source_bundle(&root, &remaining),
         _ => Err(usage()),
+    }
+}
+
+fn run_envelope_schema(root: &Path, args: &[String]) -> Result<(), String> {
+    let check = match args {
+        [] => false,
+        [arg] if arg == "--check" => true,
+        _ => return Err(usage()),
+    };
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--offline",
+            "--locked",
+            "--quiet",
+            "--example",
+            "envelope-schema",
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("run envelope schema example: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "envelope schema generation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let path = root.join("docs/envelope.schema.json");
+    if check {
+        check_schema_bytes(&path, &output.stdout)?;
+        println!("envelope schema is current");
+    } else {
+        std::fs::create_dir_all(root.join("docs")).map_err(|e| format!("create docs: {e}"))?;
+        std::fs::write(&path, output.stdout)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        println!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
+fn check_schema_bytes(path: &Path, generated: &[u8]) -> Result<(), String> {
+    let tracked = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    if tracked == generated {
+        Ok(())
+    } else {
+        Err("docs/envelope.schema.json is stale; run `cargo xtask envelope-schema`".into())
     }
 }
 
@@ -40,7 +87,7 @@ fn no_args(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity|release-gates|release-fixtures|source-bundle>"
+    "usage: cargo xtask <lint|quality|loc|complexity|envelope-schema [--check]|release-gates|release-fixtures|source-bundle>"
         .to_string()
 }
 
@@ -114,5 +161,23 @@ fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<(), String> 
         Ok(())
     } else {
         Err(format!("{program} {} failed with {status}", args.join(" ")))
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    #[test]
+    fn check_accepts_current_and_rejects_corrupt_without_rewriting() {
+        let path = std::env::temp_dir().join(format!(
+            "llxprt-envelope-schema-check-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"current\n").unwrap();
+        assert!(check_schema_bytes(&path, b"current\n").is_ok());
+        assert!(check_schema_bytes(&path, b"generated\n").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"current\n");
+        std::fs::remove_file(path).unwrap();
     }
 }

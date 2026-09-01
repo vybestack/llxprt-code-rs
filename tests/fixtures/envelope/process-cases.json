@@ -1,0 +1,7 @@
+[
+  {"case":"usage","expected_exit":2,"expected_status":"error"},
+  {"case":"config","expected_exit":3,"expected_status":"error"},
+  {"case":"session","expected_exit":4,"expected_status":"error"},
+  {"case":"model","expected_exit":5,"expected_status":"error"},
+  {"case":"turn","expected_exit":6,"expected_status":"error"}
+]

@@ -25,6 +25,7 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 | serdes-ai-responses            | 0.3.0    | runtime       | MIT       | vendored `vendor/serdes-ai-responses` |
 | serde                          | 1.0.229  | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | serde_json                     | 1.0.151  | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
+| schemars                       | 1.2.1    | runtime       | MIT       | registry (locked in `Cargo.lock`) |
 | regex-lite                     | 0.1.9     | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | tokio                         | 1.53.1     | runtime       | MIT              | registry (locked in `Cargo.lock`) |
 | clap                          | 4.6.6      | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
@@ -41,6 +42,7 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 | security-framework (macOS)    | 3.7.0      | runtime (macos-tgt) | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | aes-gcm                       | 0.10.3     | dev-only     | Apache-2.0 OR MIT | registry (locked in `Cargo.lock`) |
 | tempfile                      | 3.27.0     | dev-only     | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
+| jsonschema                    | 0.33.0     | dev-only     | MIT       | registry (locked in `Cargo.lock`) |
 
 `vendor/serdes-ai*` (runtime, `path`): serdes-ai-core, serdes-ai-models,
 serdes-ai-agent, serdes-ai-output, serdes-ai-providers, serdes-ai-retries,

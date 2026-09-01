@@ -159,7 +159,9 @@ Example success object:
 
 ```json
 {"session_id":"demo-1","session_dir":"…/code-rs-sessions/demo-1","turn":1,
- "status":"ok","summary":"…","tool_calls":7,"prompt_digest":"bfee86137d1c2b3e"}
+ "attempt":1,"branch_id":"b1","branch":false,"replayed":false,"status":"ok",
+ "summary":"…","tool_calls":7,"declared_tool_calls":16,"budget_exhausted":false,
+ "prompt_digest":"bfee86137d1c2b3e"}
 ```
 
 ## `--session` and `--turn` semantics (documented current behavior)
@@ -225,20 +227,37 @@ credential lookup or a request. Userinfo, query, and fragment are rejected. The 
 
 ## JSON output contract
 
-- Exactly **one** JSON object on stdout, both on success and on error, for every
-  invocation. stderr may carry logs; the parity harness and `cli_contract` tests assert
-  this.
-- Success: `session_id`, `session_dir`, `turn`, `attempt`, `branch_id`, `branch`,
-  `replayed`, `status: "ok"`, `summary`, `tool_calls` (int), `prompt_digest`.
-- Error: `session_id`, `status: "error"`, `error: {code, message}`, and a nonzero
-  exit (2 usage, 3 config, 4 session, 5 model, 6 turn).
-- `--help`/`--version` are the only stdout exceptions (Clap renders them and exits 0).
+The versioned [stdout envelope JSON Schema](docs/envelope.schema.json) publishes the
+**structural** serialized-output contract: required field names and JSON types, status
+discrimination, fixed-width integer bounds, safe session-component syntax, and rejection of
+unknown fields. The schema is generated from the same Rust types used by the CLI producer and
+the harness consumer.
+
+- **Structural:** Exactly **one** JSON object on stdout, both on success and on error, for every
+  invocation. stderr may carry logs; the parity harness and `cli_contract` tests assert this.
+- **Structural:** Success contains `session_id`, `session_dir`, `turn`, `attempt`, `branch_id`,
+  `branch`, `replayed`, `status: "ok"`, `summary`, `tool_calls` (int),
+  `declared_tool_calls` (`-1` means unlimited), `budget_exhausted`, and `prompt_digest`.
+- **Structural:** Error contains `session_id`, `status: "error"`, and
+  `error: {code, message}`.
+- **Process/semantic:** An error has a nonzero exit: 2 usage, 3 config, 4 session, 5 model,
+  or 6 turn. Success exits 0. The harness separately enforces session and turn identity,
+  1-based attempts, digest equality, and tool-budget relationships; these relational rules
+  are not claimed by the structural schema.
+- **Protocol exception:** `--help`/`--version` are the only stdout exceptions (Clap renders
+  them and exits 0).
 - A missing value for `-p` or an unknown flag is a usage error on the main CLI:
   strictly one JSON object and exit 2. Clap never prints raw help text for these.
   The main CLI has no scenario argument; `llxprt-parity` (a separate binary) is the
   command that takes `--scenarios` and treats an empty or unknown scenario allow-list as a
   usage error. Parity contract is covered under [Parity harness](#parity-harness); the
   JSON-on-stdout + nonzero-exit contract above applies to the main CLI.
+
+The schema `$id` is immutable and versioned (`v1`). Any newly emitted field is breaking for
+strict consumers and therefore requires a new artifact with a new `$id`; prior schema versions
+remain under `docs/`. The wire envelope intentionally has no version-discriminator field, so
+current wire bytes remain unchanged. The generation drift check proves code/artifact agreement,
+not compatibility between schema versions.
 
 `--param` is not a flag of this binary. Turn continues (a later turn without `--turn`,
 or `--turn N`) call the model again against the persisted session; `--branch BRANCH`

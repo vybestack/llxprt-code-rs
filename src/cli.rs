@@ -6,6 +6,7 @@
 //! JSON object.
 
 use crate::agent::CodingAgent;
+use crate::envelope::{Envelope, OkEnvelope};
 use crate::model::{ProfileResolver, ResolveOutcome};
 use crate::model_api::dependencies::RuntimeDependencies;
 use crate::model_api::registry::construct_backend;
@@ -219,49 +220,40 @@ pub fn run(args: Args) -> Result<RunOutcome, AppError> {
     })
 }
 
-/// Serialize an outcome to its exactly-one-JSON value.
-pub fn to_json(outcome: &Result<RunOutcome, AppError>) -> serde_json::Value {
+/// Construct a typed outcome envelope with the final session identity.
+///
+/// `error_session_id` supplies identity only when `outcome` is an error. For successful
+/// outcomes a debug-only assertion checks that it agrees with [`RunOutcome`]'s validated session.
+pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) -> Envelope {
     match outcome {
-        Ok(o) => serde_json::json!({
-            "session_id": o.session.id,
-            "session_dir": o.session_dir.display().to_string(),
-            "turn": o.run.turn,
-            "attempt": o.run.attempt,
-            "branch_id": o.run.branch_id,
-            "branch": o.run.branch,
-            "replayed": o.run.replayed,
-            "status": o.run.status,
-            "summary": o.run.summary,
-            "tool_calls": o.run.tool_count,
-            "declared_tool_calls": o
-                .run
-                .declared_tool_calls
-                .and_then(|n| i64::try_from(n).ok())
-                .unwrap_or(-1),
-            "budget_exhausted": o.run.budget_exhausted,
-            "prompt_digest": o.run.prompt_digest,
-        }),
-        Err(e) => serde_json::json!({
-            "session_id": "default",
-            "status": "error",
-            "error": { "code": e.key, "message": e.message },
-        }),
+        Ok(o) => {
+            debug_assert_eq!(error_session_id, o.session.id);
+            Envelope::Ok(OkEnvelope {
+                session_id: o.session.id.clone(),
+                session_dir: o.session_dir.display().to_string(),
+                turn: u64::from(o.run.turn),
+                attempt: u64::from(o.run.attempt),
+                branch_id: o.run.branch_id.clone(),
+                branch: o.run.branch,
+                replayed: o.run.replayed,
+                summary: o.run.summary.clone(),
+                tool_calls: u64::try_from(o.run.tool_count).unwrap_or(u64::MAX),
+                declared_tool_calls: o
+                    .run
+                    .declared_tool_calls
+                    .and_then(|n| i64::try_from(n).ok())
+                    .unwrap_or(-1),
+                budget_exhausted: o.run.budget_exhausted,
+                prompt_digest: o.run.prompt_digest.clone(),
+            })
+        }
+        Err(error) => Envelope::error(error_session_id, error.key, error.message.clone()),
     }
 }
 
-/// Fill the validated session id into an error payload so even failures identify their
-/// session without trusting argv order.
-pub fn with_session(value: serde_json::Value, id: &str) -> serde_json::Value {
-    let mut value = value;
-    if value.get("session_id").and_then(|s| s.as_str()) == Some("default") {
-        if let Some(obj) = value.as_object_mut() {
-            obj.insert(
-                "session_id".to_string(),
-                serde_json::Value::String(id.to_string()),
-            );
-        }
-    }
-    value
+/// Serialize the typed outcome through `Value` to preserve historical sorted-key bytes.
+pub fn json(outcome: &Result<RunOutcome, AppError>, session_id: &str) -> serde_json::Value {
+    envelope(outcome, session_id).to_value()
 }
 
 /// Exit code for an outcome.
@@ -269,15 +261,6 @@ pub fn exit_code(outcome: &Result<RunOutcome, AppError>) -> i32 {
     match outcome {
         Ok(_) => 0,
         Err(e) => e.code as i32,
-    }
-}
-
-/// Single JSON for an outcome; error payloads are filled with the session hint by the
-/// caller.
-pub fn json(outcome: &Result<RunOutcome, AppError>, session_hint: &str) -> serde_json::Value {
-    match outcome {
-        Ok(_) => to_json(outcome),
-        Err(_) => with_session(to_json(outcome), session_hint),
     }
 }
 
@@ -319,13 +302,11 @@ pub fn parse_args_fallback() -> Args {
             }
             let session = crate::cli::session_hint();
             let _ = e;
-            println!(
+            print!(
                 "{}",
-                serde_json::json!({
-                    "session_id": session,
-                    "status": "error",
-                    "error": { "code": "usage", "message": "invalid arguments" }
-                })
+                String::from_utf8_lossy(
+                    &Envelope::error(session, "usage", "invalid arguments").to_line()
+                )
             );
             std::process::exit(2);
         }

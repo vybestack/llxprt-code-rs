@@ -30,7 +30,6 @@ use save::ensure_artifact_subdir;
 pub use save::save_turn;
 
 use crate::process::{self, CmdOutcome, CmdSpec};
-use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -121,60 +120,7 @@ impl BbResult {
     }
 }
 
-/// The CLI's exactly-one-JSON-envelope shape, discriminated on `status` into a success
-/// or error envelope. Every status-specific struct is `#[serde(deny_unknown_fields)]`:
-/// a success carrying a field outside its contract (including an `error` object, an extra
-/// `exit`, or any typo) fails the typed parse, and so does an error carrying success
-/// fields. The `status` key selects the variant and is not a struct field.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum Envelope {
-    Ok(OkEnvelope),
-    Error(ErrorEnvelope),
-}
-
-/// The required success envelope. Every field listed in the contract is present: the exact
-/// session, a non-empty on-disk session dir, the expected turn, a 1-based attempt, a
-/// non-empty branch id, the branch/replayed flags, summary, the executed tool-call count,
-/// and the prompt digest. The `status` key selects this variant and is consumed by the tag;
-/// any other field (`error`, an extra `exit`, a typo) is rejected by
-/// `deny_unknown_fields`, so a success never carries an `error`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OkEnvelope {
-    pub session_id: String,
-    pub session_dir: String,
-    pub turn: u64,
-    pub attempt: u64,
-    pub branch_id: String,
-    pub branch: bool,
-    pub replayed: bool,
-    pub summary: String,
-    pub tool_calls: u64,
-    /// Declared budget for the run; -1 = unlimited.
-    pub declared_tool_calls: i64,
-    pub budget_exhausted: bool,
-    pub prompt_digest: String,
-}
-
-/// The required error envelope: the success-optional `session_id` and the error detail are
-/// permitted; the `status` key selects this variant and is consumed by the tag; success
-/// fields (turn, attempt, summary, tool_calls, ...) are rejected by
-/// `deny_unknown_fields`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ErrorEnvelope {
-    pub session_id: Option<String>,
-    pub error: EnvelopeError,
-}
-
-/// The error detail carried by an error envelope; no success field may be present.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnvelopeError {
-    pub code: String,
-    pub message: String,
-}
+pub use crate::envelope::{Envelope, ErrorEnvelope, OkEnvelope};
 
 /// One CLI invocation: argv pieces plus a fresh workspace dir, unique session id, and prompt.
 #[derive(Debug, Clone)]
@@ -606,9 +552,7 @@ fn validate_ok_fields(
 /// success field (the typed contract), and it must have exited nonzero.
 fn fill_error(result: &mut BbResult, env: &ErrorEnvelope) -> Result<(), String> {
     result.status = "error".to_string();
-    if let Some(id) = &env.session_id {
-        result.session_id = id.clone();
-    }
+    result.session_id = env.session_id.clone();
     result.error_code = env.error.code.clone();
     result.error_message = env.error.message.clone();
     // A failure must have exited nonzero (exit/status agreement).
