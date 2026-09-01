@@ -41,7 +41,9 @@ pub use request_budget::{
     PER_REQUEST_OVERHEAD_BYTES,
 };
 
+mod memory;
 mod request_budget;
+mod tool_round;
 
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
@@ -83,6 +85,7 @@ pub struct CodingAgent {
     pub prompt_notes: Option<String>,
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
+    profiler: Option<crate::memory_profile::Profiler>,
 }
 
 mod error;
@@ -150,6 +153,7 @@ impl CodingAgent {
             secrets: config.secret_values(),
             prompt_notes: None,
             context_limit: config.context_limit,
+            profiler: None,
         })
     }
 
@@ -176,6 +180,7 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            profiler: None,
         })
     }
 
@@ -198,6 +203,7 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            profiler: None,
         }
     }
 
@@ -227,6 +233,15 @@ impl CodingAgent {
         self
     }
 
+    /// Attach the optional process-memory event sink.
+    pub fn with_profiler(
+        mut self,
+        profiler: Option<crate::memory_profile::Profiler>,
+    ) -> CodingAgent {
+        self.profiler = profiler;
+        self
+    }
+
     /// Attach explicit secret values this agent must scrub from provider error text before
     /// any CLI output, stderr, or session persistence. The values live only on this agent; there
     /// is no process-global secret state, so nothing can leak across requests or tests.
@@ -251,14 +266,29 @@ impl CodingAgent {
         store
             .verify_workspace_identity(self.workspace.identity())
             .map_err(AgentError::from_store)?;
+        self.profile_store(store, "session_read", 0)?;
         if reserved.replay {
+            self.profile(
+                "replay_resolved",
+                crate::memory_profile::EventData {
+                    branch_count: Some(1),
+                    round_count: Some(reserved.rounds.len() as u64),
+                    ..Default::default()
+                },
+            )?;
             return Ok(self.replayed_run(reserved));
         }
-        store
-            .renew_lease(reserved)
-            .map_err(AgentError::from_store)?;
+        self.renew(store, reserved)?;
         self.validate_history_budget(store, reserved)?;
         let requests = self.materialize_requests(reserved);
+        self.profile(
+            "requests_materialized",
+            crate::memory_profile::EventData {
+                branch_count: Some(1),
+                round_count: Some(0),
+                ..Default::default()
+            },
+        )?;
         let tools = crate::tools::tool_specs(self.allow_shell);
         let config = self
             .tools_config(self.allow_shell)
@@ -343,8 +373,20 @@ impl CodingAgent {
         self.renew(store, reserved)?;
         self.check_request_budget(store, reserved, &requests, tools, &[])?;
         let current = self
-            .round(&requests, tools)
-            .map_err(|error| self.dead(store, reserved, "model", &error, &[]))?;
+            .profiled_round(
+                &requests,
+                tools,
+                "model_call_before",
+                "model_call_after",
+                1,
+                &TurnUsage {
+                    assistant_bytes: 0,
+                    args_bytes: 0,
+                    output_bytes: 0,
+                    total_calls: 0,
+                },
+            )
+            .map_err(|failure| self.round_failure(store, reserved, failure, &[]))?;
         self.renew(store, reserved)?;
         self.check_finish(store, reserved, &current, &[])?;
         let usage = TurnUsage {
@@ -382,66 +424,6 @@ impl CodingAgent {
             self.request_next_round(store, reserved, tools, attempt)?;
         }
         Ok(())
-    }
-
-    fn execute_tool_round(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        config: &crate::tools::ToolConfig,
-        attempt: &mut AttemptState,
-    ) -> Result<bool, AgentError> {
-        self.check_round_limit(store, reserved, &attempt.rounds)?;
-        self.check_time_limit(store, reserved, &attempt.rounds, attempt.started.elapsed())?;
-        let mut calls = validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell)
-            .map_err(|error| {
-                self.dead(
-                    store,
-                    reserved,
-                    "invalid-tool-call",
-                    &error,
-                    &attempt.rounds,
-                )
-            })?;
-        attempt.requests.push(assistant_request(&attempt.current));
-        // Enforce the tool-call budget by executing only what fits: the model
-        // gets explicit refusals for the rest, and the turn resolves through a
-        // forced summary instead of dying mid-work.
-        let skipped = split_over_budget(self.max_tool_calls, &attempt.usage, &mut calls);
-        let truncated = !skipped.is_empty();
-        if truncated {
-            attempt.budget_exhausted = true;
-        }
-        let mut round = RoundRecord {
-            assistant: attempt.current.text.clone(),
-            calls: Vec::new(),
-        };
-        for (index, call) in calls.iter().enumerate() {
-            self.execute_one_call(config, attempt, &mut round, call, index, calls.len())
-                .map_err(|failure| match failure {
-                    ToolCallFailure::Invalid(error) => self.dead(
-                        store,
-                        reserved,
-                        "invalid-tool-call",
-                        &error,
-                        &attempt.rounds,
-                    ),
-                    ToolCallFailure::OutputCap => self.dead(
-                        store,
-                        reserved,
-                        "limit",
-                        &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
-                        &attempt.rounds,
-                    ),
-                })?;
-        }
-        refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
-        attempt.rounds.push(round);
-        self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        store
-            .checkpoint(reserved, &attempt.rounds)
-            .map_err(AgentError::from_store)?;
-        Ok(truncated)
     }
 
     /// Execute one tool call of a round and record it. `index`/`total` decide
@@ -506,8 +488,15 @@ impl CodingAgent {
         self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
         self.renew(store, reserved)?;
         attempt.current = self
-            .round(&attempt.requests, tools)
-            .map_err(|error| self.dead(store, reserved, "model", &error, &attempt.rounds))?;
+            .profiled_round(
+                &attempt.requests,
+                tools,
+                "model_call_before",
+                "model_call_after",
+                attempt.rounds.len() + 1,
+                &attempt.usage,
+            )
+            .map_err(|failure| self.round_failure(store, reserved, failure, &attempt.rounds))?;
         self.renew(store, reserved)?;
         attempt.usage.assistant_bytes = attempt
             .usage
@@ -685,6 +674,8 @@ impl CodingAgent {
         store
             .finalize(reserved, &summary, &attempt.rounds)
             .map_err(AgentError::from_store)?;
+        self.update_profile_usage(&attempt.usage);
+        self.profile_store(store, "session_written", attempt.rounds.len())?;
         Ok(CompletedRun {
             turn: reserved.turn,
             attempt: reserved.attempt,
@@ -700,27 +691,13 @@ impl CodingAgent {
         })
     }
 
-    /// Reason-effort (or other request-side) profile notes to append to the system
-    /// prompt. This is a text note about the author's intent; the transport never
-    /// forwards a reasoning field. The note is bounded (a profile value is capped at
-    /// [`crate::redact::MAX_PROMPT_NOTE_BYTES`] and the accumulated prompt text
-    /// carries its own documented cap in [`crate::redact::PROMPT_NOTE_CAP_MESSAGE`]).
-    pub fn prompt_reason_note(profile: &crate::profile::Profile) -> Option<String> {
-        let s = profile
-            .ephemeral
-            .prompt_notes
-            .get("reasoning:reasoning.effort")?;
-        let note = format!("reasoning effort requested by profile (prompt note only): {s}");
-        if note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
-            return Some(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
-        }
-        Some(note)
-    }
-
     /// The `finished` round, e.g. the final summary request, is also a model request: renew
     /// around it too.
     fn renew(&self, store: &SessionStore, reserved: &ReservedRequest) -> Result<(), AgentError> {
-        store.renew_lease(reserved).map_err(AgentError::from_store)
+        store
+            .renew_lease(reserved)
+            .map_err(AgentError::from_store)?;
+        self.profile_store(store, "session_written", 0)
     }
 
     fn check_finish(
@@ -754,7 +731,13 @@ impl CodingAgent {
     ) -> AgentError {
         let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
         match store.fail(reserved, &bounded, rounds) {
-            Ok(()) => AgentError::new(crate::cli::Code::Model, key, bounded),
+            Ok(()) => {
+                let profile = self.profile_store(store, "session_written", rounds.len());
+                match profile {
+                    Ok(()) => AgentError::new(crate::cli::Code::Model, key, bounded),
+                    Err(profile_error) => profile_error,
+                }
+            }
             Err(pe) => AgentError::new(
                 crate::cli::Code::Session,
                 "session-persist",
@@ -829,9 +812,29 @@ impl CodingAgent {
         persisted_rounds: &[RoundRecord],
     ) -> Result<LlmResult, AgentError> {
         self.renew(store, reserved)?;
+        let usage = TurnUsage {
+            assistant_bytes: persisted_rounds
+                .iter()
+                .map(|round| round.assistant.len())
+                .sum(),
+            args_bytes: 0,
+            output_bytes: persisted_rounds
+                .iter()
+                .flat_map(|round| &round.calls)
+                .map(|call| call.result.len())
+                .sum(),
+            total_calls: persisted_rounds.iter().map(|round| round.calls.len()).sum(),
+        };
         let r = self
-            .round(requests, tools)
-            .map_err(|e| self.dead(store, reserved, "model", &e, persisted_rounds))?;
+            .profiled_round(
+                requests,
+                tools,
+                "forced_summary_before",
+                "forced_summary_after",
+                persisted_rounds.len() + 1,
+                &usage,
+            )
+            .map_err(|failure| self.round_failure(store, reserved, failure, persisted_rounds))?;
         self.renew(store, reserved)?;
         Ok(r)
     }
@@ -929,6 +932,11 @@ pub fn known_tool(name: &str, allow_shell: bool) -> bool {
 enum ToolCallFailure {
     Invalid(String),
     OutputCap,
+}
+
+enum RoundFailure {
+    Model(String),
+    Profiling(AgentError),
 }
 
 #[cfg(test)]

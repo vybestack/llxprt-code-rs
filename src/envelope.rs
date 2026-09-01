@@ -62,6 +62,12 @@ pub struct ErrorEnvelope {
 pub struct EnvelopeError {
     pub code: String,
     pub message: String,
+    /// Profiling lifecycle stage; present only for `mem-profile` failures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// Outcome of the agent/session independent of profile publication.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_status: Option<String>,
 }
 
 impl Envelope {
@@ -76,6 +82,26 @@ impl Envelope {
             error: EnvelopeError {
                 code: code.into(),
                 message: message.into(),
+                stage: None,
+                session_status: None,
+            },
+        })
+    }
+
+    /// Construct the profiling failure extension of the versioned error envelope.
+    pub fn profiling_error(
+        session_id: impl Into<String>,
+        message: impl Into<String>,
+        stage: impl Into<String>,
+        session_status: impl Into<String>,
+    ) -> Self {
+        Self::Error(ErrorEnvelope {
+            session_id: session_id.into(),
+            error: EnvelopeError {
+                code: "mem-profile".into(),
+                message: message.into(),
+                stage: Some(stage.into()),
+                session_status: Some(session_status.into()),
             },
         })
     }

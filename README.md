@@ -555,3 +555,32 @@ all pass.
 [`llxprt-parity`]: src/bin/llxprt-parity.rs
 [`crate::profile::std_profile_dir`]: src/profile.rs
 [ModelConfig]: src/model.rs
+
+## Memory profiling
+
+`--mem-profile PATH` is an opt-in, default-off mode that streams one JSON object per line to
+a create-only, mode-0600 file. It samples the `agent_process_rss` scope: current resident bytes
+and the process high-water mark. Linux reads `/proc/self/statm` (so a mounted, readable `/proc`
+is a runtime prerequisite); macOS reads `mach_task_basic_info`. `getrusage(RUSAGE_SELF)` supplies
+the peak, normalized from KiB on Linux and bytes on macOS.
+
+This scope excludes descendant processes (including shell tools), and RSS describes resident
+mappings rather than owned Rust heap; freed pages may remain resident. Samples describe the
+interval named by `observed_after`. Allocations made and freed between boundaries are invisible,
+and `ru_maxrss` cannot attribute an exact instant—continuous sampling would be needed for that.
+Model calls, tool executions, and forced summaries therefore have paired before/after boundaries.
+
+Events are ordered only by `seq`; timestamps are informational. An orderly run ends in
+`profile_complete`, including agent failures. A crash, OOM, or SIGKILL can leave prior complete
+lines; a missing terminal record means partial evidence. Sink, sampling, write, or sync failures
+produce the typed `mem-profile` stdout error and exit code **7** rather than silently succeeding.
+The profile is finalized before the one stdout envelope is printed, and a successful profile emits
+one payload-free summary line on stderr.
+
+Related telemetry quantities can be joined by `round_index` and `call_index`:
+
+| Memory profile field | Related telemetry quantity | Relationship |
+| --- | --- | --- |
+| `executed_tool_calls` | per-round call counts | Same calls, run total versus per-round count |
+| `model_reply_mapped_bytes` | reply token counts | Same reply, mapped bytes versus tokens |
+| `round_index`, `call_index` | round/call identifiers | Same identifiers |

@@ -17,6 +17,9 @@ use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
+mod run;
+pub use run::run_profiled;
+
 /// The maximum number of bytes read from stdin before the prompt is rejected. The cap is
 /// applied **while reading**, not after allocation.
 const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
@@ -29,6 +32,7 @@ pub enum Code {
     Session = 4,
     Model = 5,
     Turn = 6,
+    Profiling = 7,
 }
 
 /// CLI arguments. Doc comments surface in `--help`.
@@ -66,6 +70,10 @@ pub struct Args {
     /// Prompt. If omitted, read from stdin (entire input).
     #[arg(short, long)]
     pub prompt: Option<String>,
+
+    /// Stream phase-sampled process RSS events to a create-only JSONL file (default off).
+    #[arg(long, value_name = "PATH")]
+    pub mem_profile: Option<PathBuf>,
 
     /// Explicit opt-in to allow plaintext HTTP to a remote host (dsflash-mi300x style).
     #[arg(long)]
@@ -130,94 +138,19 @@ pub struct RunOutcome {
 
 /// Run the full workflow from parsed args.
 pub fn run(args: Args) -> Result<RunOutcome, AppError> {
-    let session_id =
-        SessionId::parse(&args.session).map_err(|m| AppError::new(Code::Usage, "session", m))?;
+    run_profiled(args, None)
+}
 
-    let prompt = match args.prompt.clone() {
-        Some(p) => p,
-        None => read_stdin_prompt()?,
-    };
-
-    let dependencies = RuntimeDependencies::production()
-        .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
-    let profile = resolve_profile(&args, dependencies.config_home().as_path())?;
-
-    let cwd = match &args.cwd {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .map_err(|e| AppError::new(Code::Usage, "cwd", format!("cannot resolve cwd: {e}")))?,
-    };
-    if !cwd.is_dir() {
-        return Err(AppError::new(
-            Code::Usage,
-            "cwd-not-dir",
-            format!("cwd is not a directory: {}", cwd.display()),
-        ));
+/// Record an optional memory-profile boundary.
+fn profile_event(
+    profiler: &Option<crate::memory_profile::Profiler>,
+    phase: &'static str,
+    data: crate::memory_profile::EventData,
+) -> Result<(), AppError> {
+    match profiler {
+        Some(profiler) => profiler.event(phase, data).map_err(AppError::profiling),
+        None => Ok(()),
     }
-    // Canonicalize now so the pinned path and every tool-resolved path agree.
-    let cwd = cwd.canonicalize().unwrap_or(cwd.clone());
-
-    let constructed = construct_backend(
-        &profile,
-        &session_id,
-        &dependencies,
-        args.profile_load.is_some(),
-        args.allow_insecure_http,
-    )
-    .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
-
-    // Construct the selected backend before session reservation. Credential failures and
-    // provider-specific configuration errors therefore cannot create session artifacts.
-    let reason_note = CodingAgent::prompt_reason_note(&profile);
-    let cli_max_tool_calls = match args.max_tool_calls {
-        None | Some(-1) | Some(1..=512) => args.max_tool_calls,
-        Some(n) => {
-            return Err(AppError::new(
-                Code::Usage,
-                "max-tool-calls",
-                format!("--max-tool-calls must be -1 or an integer from 1 through 512 (got {n})"),
-            ));
-        }
-    };
-    let max_tool_calls = crate::profile::resolve_max_tool_calls(
-        cli_max_tool_calls,
-        profile.ephemeral.max_tool_calls_per_prompt,
-    );
-    let turn_time = match &args.turn_time {
-        None => None,
-        Some(raw) => parse_turn_time(raw)
-            .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?,
-    };
-    let mut agent = CodingAgent::new_with_backend(constructed.backend, &cwd, args.allow_shell)
-        .map_err(|e| AppError::new(e.code, e.key, e.message))?
-        .with_secrets(constructed.secret_values)
-        .with_context_limit(constructed.context_limit)
-        .with_max_rounds(constructed.max_rounds)
-        .with_max_tool_calls(max_tool_calls)
-        .with_turn_time(turn_time);
-    agent.prompt_notes = reason_note;
-    let store = load_session_store_in(&session_id, dependencies.config_home())
-        .map_err(|e| AppError::new(Code::Session, "session-store", e))?;
-
-    let reserved = store
-        .start_request_with_workspace(
-            args.turn,
-            args.branch.as_deref(),
-            &prompt,
-            &cwd,
-            agent.workspace_cap(),
-        )
-        .map_err(|e| AppError::new(Code::Turn, "turn", e.to_string()))?;
-
-    let run = agent
-        .run(&store, &reserved)
-        .map_err(|e| AppError::new(e.code, e.key, e.message))?;
-
-    Ok(RunOutcome {
-        session: session_id,
-        session_dir: store.session_dir().to_path_buf(),
-        run,
-    })
 }
 
 /// Construct a typed outcome envelope with the final session identity.
@@ -247,6 +180,12 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 prompt_digest: o.run.prompt_digest.clone(),
             })
         }
+        Err(error) if error.code == Code::Profiling => Envelope::profiling_error(
+            error_session_id,
+            error.message.clone(),
+            error.profiling_stage.unwrap_or("sample"),
+            error.session_status.as_deref().unwrap_or("ok"),
+        ),
         Err(error) => Envelope::error(error_session_id, error.key, error.message.clone()),
     }
 }
@@ -318,6 +257,8 @@ pub struct AppError {
     pub code: Code,
     pub key: &'static str,
     pub message: String,
+    pub profiling_stage: Option<&'static str>,
+    pub session_status: Option<String>,
 }
 
 impl AppError {
@@ -331,6 +272,22 @@ impl AppError {
             code,
             key,
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
+            profiling_stage: None,
+            session_status: None,
+        }
+    }
+
+    pub fn profiling(error: crate::memory_profile::ProfilingError) -> Self {
+        Self::profiling_at(error.stage, error.message)
+    }
+
+    pub fn profiling_at(stage: &'static str, message: impl Into<String>) -> Self {
+        AppError {
+            code: Code::Profiling,
+            key: "mem-profile",
+            message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
+            profiling_stage: Some(stage),
+            session_status: Some("ok".into()),
         }
     }
 }

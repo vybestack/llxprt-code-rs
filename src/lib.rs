@@ -8,6 +8,7 @@ pub mod cli;
 pub mod envelope;
 pub mod grade;
 pub mod harness;
+pub mod memory_profile;
 pub mod model;
 mod model_api;
 pub mod process;
