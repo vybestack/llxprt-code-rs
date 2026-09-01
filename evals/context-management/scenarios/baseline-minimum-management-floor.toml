@@ -3,7 +3,10 @@ id = "baseline-minimum-management-floor"
 owner_phase = 4
 arm = "minimum-floor"
 expected_status = "red"
-expected_reason_class = "missing-evidence"
+# Phase 0: the floor does not exist yet, so this arm walls exactly like the
+# status-quo baseline. It may only turn green when Phase 4 supplies quotas, handle
+# admission, the store, and deterministic read-back.
+expected_reason_class = "context-limit"
 accept_any_reason = false
 
 [profile]
