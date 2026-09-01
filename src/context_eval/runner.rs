@@ -166,8 +166,6 @@ pub fn rust_args(
 /// context wall; it is never an oracle.
 pub fn ts_args(prompt: &str, base_url: &str, model: &str) -> Vec<String> {
     vec![
-        "--provider".into(),
-        "openai".into(),
         "--preload".into(),
         "./scripts/dev-env.ts".into(),
         "packages/cli/index.ts".into(),
@@ -180,6 +178,8 @@ pub fn ts_args(prompt: &str, base_url: &str, model: &str) -> Vec<String> {
         "yolo".into(),
         "--baseurl".into(),
         base_url.to_string(),
+        "--provider".into(),
+        "openai".into(),
         "--key".into(),
         "ctxeval-loopback-local-stub".into(),
         "--model".into(),

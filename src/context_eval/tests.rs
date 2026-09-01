@@ -243,8 +243,6 @@ fn adapter_command_construction_is_exact() {
     assert_eq!(
         ts,
         vec![
-            "--provider",
-            "openai",
             "--preload",
             "./scripts/dev-env.ts",
             "packages/cli/index.ts",
@@ -257,6 +255,8 @@ fn adapter_command_construction_is_exact() {
             "yolo",
             "--baseurl",
             "http://127.0.0.1:9/v1",
+            "--provider",
+            "openai",
             "--key",
             "ctxeval-loopback-local-stub",
             "--model",
@@ -264,7 +264,7 @@ fn adapter_command_construction_is_exact() {
         ]
     );
     assert!(
-        !ts.contains("--session"),
+        !ts.iter().any(|a| a == "--session"),
         "the TS CLI has no --session flag"
     );
     assert!(runner::TS_ROOT_DEFAULT.contains("llxprt-code"));
