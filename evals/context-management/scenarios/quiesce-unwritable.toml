@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-5 Continue working while the context store becomes unwritable; you must reach a named write-free quiesce, never a false committed terminal state."
 
 [wall]
-tool_rounds = 3
-tool_output_bytes = 20480
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-14 Alternate append-only work with prefix rewrites under unknown cache telemetry and account every rewrite in the journal."
 
 [wall]
-tool_rounds = 4
-tool_output_bytes = 20480
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

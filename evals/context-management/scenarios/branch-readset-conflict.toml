@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-12 Explore read-only, let the parent dependency mutate, then return: the result must arrive as an evidential suggestion with revalidation, never as current fact."
 
 [wall]
-tool_rounds = 2
-tool_output_bytes = 8192
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "branch-readset.md"
 
 [assertions]

@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-10 Run five compaction generations over the fixture. Retain the supported claim, reject the unsupported claim with a typed provenance or precision failure."
 
 [wall]
-tool_rounds = 5
-tool_output_bytes = 20480
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "unsupported-claim.md"
 
 [assertions]

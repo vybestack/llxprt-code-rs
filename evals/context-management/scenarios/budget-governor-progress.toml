@@ -18,7 +18,7 @@ prompt = "CTXEVAL-TASK-8 Sustain a high rate of large observations until it exce
 
 [wall]
 tool_rounds = 8
-tool_output_bytes = 24576
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

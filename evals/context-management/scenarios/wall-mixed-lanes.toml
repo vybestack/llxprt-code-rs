@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-3 Read the mixed-lanes fixture each round, then end with the exact final marker and the exact failing test identity."
 
 [wall]
-tool_rounds = 6
-tool_output_bytes = 20480
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "mixed-lanes.md"
 
 [assertions]

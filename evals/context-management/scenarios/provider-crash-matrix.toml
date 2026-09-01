@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-11 Survive a crash in the send interval and prove restart equivalence: identical materialized hash and no duplicated side effect."
 
 [wall]
-tool_rounds = 2
-tool_output_bytes = 8192
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

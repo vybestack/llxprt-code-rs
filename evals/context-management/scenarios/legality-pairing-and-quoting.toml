@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-6 Transcript contains an orphaned tool result (id call_orphan_1), an illegal placeholder in a protected region, and unquoted environment text. Enumerate every legality violation before any send."
 
 [wall]
-tool_rounds = 1
-tool_output_bytes = 8192
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

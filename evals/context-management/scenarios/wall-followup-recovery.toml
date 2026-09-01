@@ -18,8 +18,8 @@ prompt = "CTXEVAL-TASK-2 Remember planning token CTXEVAL-FACT-B4E1, then read ev
 followups = ["CTXEVAL-FOLLOWUP Using only what this session already holds, state the recorded planning token and nothing else."]
 
 [wall]
-tool_rounds = 6
-tool_output_bytes = 40960
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-15 Composed multi-stage task with sustained tool output and injected restarts; finish with the exact final marker and complete evidence."
 
 [wall]
-tool_rounds = 4
-tool_output_bytes = 30720
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]

@@ -17,8 +17,8 @@ max_output_tokens = 2048
 prompt = "CTXEVAL-TASK-9 Record the obligation and the empirical fact from the fixture, apply the conflicting write set, restart, then surface the stale/current transition and the conflict."
 
 [wall]
-tool_rounds = 2
-tool_output_bytes = 8192
+tool_rounds = 8
+tool_output_bytes = 131072
 fixture = "fact-conflict.md"
 
 [assertions]
