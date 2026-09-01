@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "provider": "gemini",
-  "model": "gemini-3-flash-preview",
-  "modelParams": {},
-  "ephemeralSettings": {}
-}

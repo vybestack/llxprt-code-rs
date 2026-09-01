@@ -1,3 +1,0 @@
-error: Cannot find module '@vybestack/llxprt-code-tools' from '/Users/acoliver/projects/llxprt/agent/main/llxprt-code/packages/core/src/index.ts'
-
-Bun v1.3.14 (macOS arm64)

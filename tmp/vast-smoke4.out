@@ -1,2 +1,0 @@
-{"error":{"code":"model-config","message":"unsupported profile setting(s): ephemeralSettings.stream-idle-timeout-ms is a dsflash-only chat setting and requires modelParams.chat_template_kwargs"},"session_id":"vast-smoke4","status":"error"}
-exit=3

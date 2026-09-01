@@ -1,2 +1,0 @@
-cargo-vendor scratch files are not permitted in source-bundle inputs: xtask/target/.rustc_info.json
-source-bundle publisher interrupted by signal 15

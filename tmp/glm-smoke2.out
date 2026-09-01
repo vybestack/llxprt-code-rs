@@ -1,2 +1,0 @@
-{"error":{"code":"model-config","message":"unsupported profile setting(s): auth-key-name is a named secure-store reference; this binary has no secure-store client"},"session_id":"glm-smoke2","status":"error"}
-exit=3

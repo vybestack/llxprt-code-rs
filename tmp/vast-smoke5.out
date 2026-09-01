@@ -1,2 +1,0 @@
-{"error":{"code":"model-config","message":"unsupported profile setting(s): maxTurnsPerPrompt, maxOutputTokens"},"session_id":"vast-smoke5","status":"error"}
-exit=3
