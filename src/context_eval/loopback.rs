@@ -38,6 +38,7 @@ pub struct Loopback {
     addr: SocketAddr,
     shared: Arc<Mutex<Observations>>,
     stopped: Arc<AtomicBool>,
+    bulk: Arc<Mutex<Vec<PathBuf>>>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -57,6 +58,7 @@ impl Loopback {
         let addr = listener.local_addr().expect("loopback addr");
         let shared = Arc::new(Mutex::new(Observations::default()));
         let stopped = Arc::new(AtomicBool::new(false));
+        let bulk_slot = Arc::new(Mutex::new(Vec::new()));
         let marker = marker.to_string();
         let state = shared.clone();
         let halt = stopped.clone();
@@ -72,6 +74,7 @@ impl Loopback {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let _ = stream.set_nonblocking(false);
+                        let bulk = bulk_slot.lock().unwrap_or_else(|p| p.into_inner()).clone();
                         serve(stream, served, &bulk, &marker, block_bytes, &state);
                         served += 1;
                     }
@@ -88,6 +91,14 @@ impl Loopback {
             stopped,
             handle: Some(handle),
         }
+    }
+
+    /// Hand the scripted rounds their bulk files after the workspace exists.
+    ///
+    /// The port must be bound before the profile is generated, but the bulk fixtures only
+    /// exist once the workspace is prepared, so the script is filled in afterwards.
+    pub fn set_bulk(&self, bulk: Vec<PathBuf>) {
+        *self.bulk.lock().unwrap_or_else(|p| p.into_inner()) = bulk;
     }
 
     /// Base URL the generated profile points at.

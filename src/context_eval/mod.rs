@@ -263,11 +263,10 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         .clone()
         .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
     let rounds = scen.wall.tool_rounds as usize;
+    // Bind the port first so the generated profile can point at it, but keep the script
+    // empty until the bulk fixtures exist inside the prepared workspace.
     let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
     let url = server.base_url();
-    // Prepare the workspace first so the bulk fixtures expand INSIDE it: the CLI's file
-    // tools open paths relative to --cwd and reject absolute paths, so the loopback's
-    // scripted read_file calls only admit real bulk content when it lives there.
     let prepared = runner::prepare(&opts.out_root, scen, &url, Vec::new(), Vec::new())?;
     let (bulk, digests) = runner::expand_fixture(
         &opts.fixtures_dir(),
@@ -276,6 +275,7 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         scen.wall.tool_output_bytes,
         &prepared.workspace.join("bulk"),
     )?;
+    server.set_bulk(bulk.clone());
     let turns = drive_cli_turns(scen, opts, &prepared, &out_dir);
     let obs = server.snapshot();
     server.stop();
