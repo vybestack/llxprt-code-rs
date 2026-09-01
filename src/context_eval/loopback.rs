@@ -89,6 +89,7 @@ impl Loopback {
             addr,
             shared,
             stopped,
+            bulk: bulk_slot,
             handle: Some(handle),
         }
     }
