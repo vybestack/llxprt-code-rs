@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "glm-5.2-ud-iq2-m",
+  "modelParams": {
+    "top_p": 0.95,
+    "temperature": 1,
+    "maxOutputTokens": 40000
+  },
+  "ephemeralSettings": {
+    "base-url": "https://chv6r7uv8ucay6-8000.proxy.runpod.net/v1",
+    "auth-keyfile": "/Users/acoliver/.keys/.glm52_runpod_key",
+    "context-limit": 262144,
+    "maxTurnsPerPrompt": -1,
+    "stream-idle-timeout-ms": 0,
+    "shell-replacement": true,
+    "streaming": "enabled",
+    "reasoning.enabled": true,
+    "reasoning.includeInContext": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.stripFromContext": "none",
+    "stream-first-response-timeout-ms": 0
+  }
+}

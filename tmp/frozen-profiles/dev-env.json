@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "test-model",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-test-TBAhDa/.keys/dev-env.key"
+  }
+}

@@ -1,0 +1,437 @@
++ set -euo pipefail
++ export PYTHONDONTWRITEBYTECODE=1
++ PYTHONDONTWRITEBYTECODE=1
++++ dirname scripts/test-source-bundle-verifier.sh
+++ cd scripts/..
+++ pwd -P
++ root=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs
++ verify=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh
++ build=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh
+++ mktemp -d /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.XXXXXX
++ tmp=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ marker=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566
++ source_link=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-link-64566
++ source_newline='/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-newline
+64566'
++ source_fifo=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-fifo-64566
++ source_scratch_dir=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566
++ source_scratch=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566/.cargo-ok
++ source_output_dir=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-dir-64566
++ source_tree_output=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-64566.tar.gz
++ cross_filesystem_output=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/dist/.bundle-verifier-cross-filesystem-64566
++ source_alias=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias
++ command -v python3
++ trap cleanup EXIT
++ python3 - /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj missing-models-lockfile.tar.gz
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/missing-models-lockfile.tar.gz
++ python3 - /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-validate.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/concatenated-gzip-expansion.tar.gz
++ grep -q 'expanded tar-stream.*cap' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-validate.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/unsorted-manifest.tar.gz
++ grep -q 'manifest entries are not byte-sorted' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/oversize-archive.tar.gz
++ grep -q 'compressed-size cap' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/absolute.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/aggregate-overflow.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/char.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/concatenated-gzip-expansion.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/control.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/directory-payload.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/duplicate-kind.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/duplicate.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fifo.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/hardlink.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/hidden-empty-dir.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/huge-manifest.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/manifest-duplicate-kind.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/missing-member.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/missing-models-lockfile.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/missing-parent.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/oversize-archive.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/oversize-member.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/symlink.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/traversal.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/unmanifested-dir.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/unmanifested-file.tar.gz
++ for archive in '"$tmp"/*.tar.gz'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/unsorted-manifest.tar.gz
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh --list
++ python3 - /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs
++ cd /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ BASH_ENV=Cargo.toml
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/bash-env-candidate.bundle
++ grep -q 'bundle content does not match' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ [[ -e /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566 ]]
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/valid-candidate.bundle
++ [[ -e /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566 ]]
++ [[ -L /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566 ]]
++ mkdir -p /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fail-bin
++ cat
++ chmod +x /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fail-bin/cargo
++ failed_new=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-new.tar.gz
++ PATH=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fail-bin:/Users/acoliver/.bun/bin:/Users/acoliver/.local/bin:/Users/acoliver/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pkg/env/active/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Users/acoliver/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:/Users/acoliver/.lmstudio/bin
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-new.tar.gz
++ [[ -e /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-new.tar.gz ]]
++ failed_existing=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-existing.tar.gz
++ printf '%s\n' 'existing artifact'
++ PATH=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fail-bin:/Users/acoliver/.bun/bin:/Users/acoliver/.local/bin:/Users/acoliver/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pkg/env/active/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Users/acoliver/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:/Users/acoliver/.lmstudio/bin
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-existing.tar.gz
+++ cat /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-existing.tar.gz
++ [[ existing artifact != \e\x\i\s\t\i\n\g\ \a\r\t\i\f\a\c\t ]]
++ failed_absent_parent=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-parent/nested/failed.tar.gz
++ PATH=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fail-bin:/Users/acoliver/.bun/bin:/Users/acoliver/.local/bin:/Users/acoliver/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pkg/env/active/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Users/acoliver/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:/Users/acoliver/.lmstudio/bin
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-parent/nested/failed.tar.gz
++ find /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/failed-parent -type f -print -quit
++ grep -q .
++ mkdir -p /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/pass-bin
++ cat
++ chmod +x /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/pass-bin/cargo
++ published_one=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/published-one.tar.gz
++ published_two=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/published-two.tar.gz
++ git -C /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs rev-parse --verify HEAD
+++ git -C /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs status --porcelain --untracked-files=all
++ [[ -z  M scripts/build-source-bundle.sh
+ M scripts/test-source-bundle-verifier.sh
+ M scripts/verify-source-bundle.sh
+?? tmp/build-bundle-manual.out
+?? tmp/bundle-verifier-test.out
+?? tmp/clean-gates.out
+?? tmp/clean-verifier-fix.out
+?? tmp/clean-verifier-fix2.out
+?? tmp/clean-verifier-only.out
+?? tmp/clean-verifier-x.out
+?? tmp/frozen-profiles/absolute-path.json
+?? tmp/frozen-profiles/anthropic-profile.json
+?? tmp/frozen-profiles/autokimi.json
+?? tmp/frozen-profiles/both-auth-methods.json
+?? tmp/frozen-profiles/chutesglm52.json
+?? tmp/frozen-profiles/chutesk2streaming.json
+?? tmp/frozen-profiles/crusoeglm.json
+?? tmp/frozen-profiles/decartglm.json
+?? tmp/frozen-profiles/deepseekchat.json
+?? tmp/frozen-profiles/deepseekreasoner.json
+?? tmp/frozen-profiles/dev-env.json
+?? tmp/frozen-profiles/dsflash-mi300x.json
+?? tmp/frozen-profiles/dsflash-mi300x.pre-explicit-high-20260824.json
+?? tmp/frozen-profiles/dsflash-mi300x.pre-repetition-detection-20260825.json
+?? tmp/frozen-profiles/dsflash.json
+?? tmp/frozen-profiles/fable.json
+?? tmp/frozen-profiles/fable5.json
+?? tmp/frozen-profiles/fireworkskimi.json
+?? tmp/frozen-profiles/fireworkskimioai.json
+?? tmp/frozen-profiles/flash3.json
+?? tmp/frozen-profiles/friendliglm.json
+?? tmp/frozen-profiles/geminimaria.json
+?? tmp/frozen-profiles/glm.json
+?? tmp/frozen-profiles/glm52-runpod.json
+?? tmp/frozen-profiles/glm52-vast.json
+?? tmp/frozen-profiles/glm52selfhost.json
+?? tmp/frozen-profiles/google-profile.json
+?? tmp/frozen-profiles/gpt56solhigh.json
+?? tmp/frozen-profiles/gptfirst.json
+?? tmp/frozen-profiles/home-path.json
+?? tmp/frozen-profiles/invalid-content-0.json
+?? tmp/frozen-profiles/invalid-content-1.json
+?? tmp/frozen-profiles/invalid-content-2.json
+?? tmp/frozen-profiles/invalid-content-3.json
+?? tmp/frozen-profiles/keyfile-test.json
+?? tmp/frozen-profiles/missing-keyfile.json
+?? tmp/frozen-profiles/nested-keyfile.json
+?? tmp/frozen-profiles/ollamaglm51.json
+?? tmp/frozen-profiles/ollamakimi.json
+?? tmp/frozen-profiles/ollamanorth.json
+?? tmp/frozen-profiles/ollamaqwen3coder.json
+?? tmp/frozen-profiles/openai-profile.json
+?? tmp/frozen-profiles/opus5.json
+?? tmp/frozen-profiles/opusfirst.json
+?? tmp/frozen-profiles/opusthinking.json
+?? tmp/frozen-profiles/opusthinkingbucketed.json
+?? tmp/frozen-profiles/ornith-lmstudio.json
+?? tmp/frozen-profiles/ornith-runpod.json
+?? tmp/frozen-profiles/parasailglm.json
+?? tmp/frozen-profiles/prod-env.json
+?? tmp/frozen-profiles/qwen38-mi300x.json
+?? tmp/frozen-profiles/qwen38.json
+?? tmp/frozen-profiles/simulation-test.json
+?? tmp/frozen-profiles/smol3-mlx-lmstudio.json
+?? tmp/frozen-profiles/smol3-mlx.json
+?? tmp/frozen-profiles/smol3.json
+?? tmp/frozen-profiles/stepfun-37.json
+?? tmp/frozen-profiles/test-env.json
+?? tmp/frozen-profiles/tilde-test.json
+?? tmp/frozen-profiles/update-test.json
+?? tmp/frozen-profiles/wrong-perms.json
+?? tmp/frozen-profiles/zai.json
+?? tmp/gate-c1.txt
+?? tmp/gates-budget-exhaust.txt
+?? tmp/gates-final.txt
+?? tmp/gates-final2.txt
+?? tmp/glm-smoke.err
+?? tmp/glm-smoke.out
+?? tmp/glm-smoke2.err
+?? tmp/glm-smoke2.out
+?? tmp/haiku2.err
+?? tmp/haiku2.out
+?? tmp/issue3-turn-pr.err
+?? tmp/issue3-turn-pr.out
+?? tmp/issue3-turn1.err
+?? tmp/issue3-turn1.out
+?? tmp/issue3-turn2.err
+?? tmp/issue3-turn2.out
+?? tmp/issue3-turn3.err
+?? tmp/issue3-turn3.out
+?? tmp/issue3-turn4.err
+?? tmp/issue3-turn4.out
+?? tmp/issue3-turn5.err
+?? tmp/issue3-turn5.out
+?? tmp/issue3b-turn1.err
+?? tmp/issue3b-turn1.out
+?? tmp/issue3b-turn2.err
+?? tmp/issue3b-turn2.out
+?? tmp/issue3c-turn1.err
+?? tmp/issue3c-turn1.out
+?? tmp/issue3d-turn1.err
+?? tmp/issue3d-turn1.out
+?? tmp/issue3e-turn1.err
+?? tmp/issue3e-turn1.out
+?? tmp/list-new.txt
+?? tmp/lmstudio-smoke.err
+?? tmp/lmstudio-smoke.out
+?? tmp/lmstudio-smoke2.err
+?? tmp/lmstudio-smoke2.out
+?? tmp/patch10/ci-vendored-models-clippy.out
+?? tmp/patch10/ci-vendored-models-clippy2.out
+?? tmp/patch10/ci-vendored-models-test.out
+?? tmp/patch10/ci-vendored-models-test2.out
+?? tmp/patch10/ci-vendored-responses-clippy.out
+?? tmp/patch10/ci-vendored-responses-clippy2.out
+?? tmp/patch10/ci-vendored-responses-test.out
+?? tmp/patch10/ci-vendored-responses-test2.out
+?? tmp/patch10/commit-msg.txt
+?? tmp/patch10/full-suite-ci-fix.out
+?? tmp/patch10/full-suite-eof.out
+?? tmp/patch10/full-suite-final.out
+?? tmp/patch10/full-suite-finishreason-2.out
+?? tmp/patch10/full-suite-finishreason.out
+?? tmp/patch10/full-suite-quality-fix.out
+?? tmp/patch10/full-suite-quality-fix2.out
+?? tmp/patch10/full-suite-run6.out
+?? tmp/patch10/full-suite.out
+?? tmp/patch10/lib-run8.out
+?? tmp/patch10/lic-ci-fix.out
+?? tmp/patch10/lic-ci-fix2.out
+?? tmp/patch10/lic-final.out
+?? tmp/patch10/licenses.out
+?? tmp/patch10/licenses2.out
+?? tmp/patch10/licenses3.out
+?? tmp/patch10/prov-ci-fix.out
+?? tmp/patch10/prov-ci-fix2.out
+?? tmp/patch10/prov-final.out
+?? tmp/patch10/provenance.out
+?? tmp/patch10/provenance2.out
+?? tmp/patch10/provenance3.out
+?? tmp/patch10/test-prov.out
+?? tmp/patch10/test-prov2.out
+?? tmp/patch10/test-prov3.out
+?? tmp/patch10/testprov-ci-fix.out
+?? tmp/patch10/testprov-ci-fix2.out
+?? tmp/patch10/testprov-final.out
+?? tmp/pongsol1.err
+?? tmp/pongsol1.out
+?? tmp/pr3-body.md
+?? tmp/release-workflow-test.out
+?? tmp/rv-recheck.txt
+?? tmp/vast-smoke.err
+?? tmp/vast-smoke.out
+?? tmp/vast-smoke2.err
+?? tmp/vast-smoke2.out
+?? tmp/vast-smoke3.err
+?? tmp/vast-smoke3.out
+?? tmp/vast-smoke4.err
+?? tmp/vast-smoke4.out
+?? tmp/vast-smoke5.err
+?? tmp/vast-smoke5.out
+?? tmp/vast-smoke6.err
+?? tmp/vast-smoke6.out
+?? tmp/verify-issue12/suite.out
+?? tmp/verify-issue12/suite2.out
+?? tmp/verify-issue12/suite2.trace
+?? tmp/verify-issue12/suite3.out
+?? tmp/verify-issue12/suite4.out
+?? tmp/verify-issue12/suite4.trace
+?? tmp/verify-issue12/tracked.txt
+?? tmp/zai-smoke.err
+?? tmp/zai-smoke.out
+?? tmp/zai-smoke2.err
+?? tmp/zai-smoke2.out
+?? tmp/zigcross/ar.sh
+?? tmp/zigcross/cc.sh ]]
++ git -C /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs rev-parse --verify HEAD
++ echo 'skipping successful builder publication checks for a dirty worktree'
+skipping successful builder publication checks for a dirty worktree
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-publish.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/dist/.bundle-verifier-cross-filesystem-64566
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-publish.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-publish.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-publish.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-publish.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj
++ ln -s /tmp /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-link-64566
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/symlink-source.tar.gz
++ rm -f /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-link-64566
++ printf 'hostile name\n'
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/newline-source.tar.gz
++ rm -f '/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-newline
+64566'
++ mkfifo /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-fifo-64566
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/fifo-source.tar.gz
++ rm -f /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-fifo-64566
++ mkdir /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566
++ touch /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566/.cargo-ok
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/scratch-source.tar.gz
++ rm -rf /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566
++ ln -s /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias
++ output_policy=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py
++ for denied_output in '"$root/src/.bundle-output-$$.tar.gz"' '"$source_alias/scripts/.bundle-output-$$.tar.gz"' '"$root/vendor/.bundle-output-$$.tar.gz"' '"$source_alias/.bundle-output-$$.tar.gz"' '"$source_alias/dist-other/.bundle-output-$$.tar.gz"'
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/src/.bundle-output-64566.tar.gz
++ for denied_output in '"$root/src/.bundle-output-$$.tar.gz"' '"$source_alias/scripts/.bundle-output-$$.tar.gz"' '"$root/vendor/.bundle-output-$$.tar.gz"' '"$source_alias/.bundle-output-$$.tar.gz"' '"$source_alias/dist-other/.bundle-output-$$.tar.gz"'
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/scripts/.bundle-output-64566.tar.gz
++ for denied_output in '"$root/src/.bundle-output-$$.tar.gz"' '"$source_alias/scripts/.bundle-output-$$.tar.gz"' '"$root/vendor/.bundle-output-$$.tar.gz"' '"$source_alias/.bundle-output-$$.tar.gz"' '"$source_alias/dist-other/.bundle-output-$$.tar.gz"'
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/vendor/.bundle-output-64566.tar.gz
++ for denied_output in '"$root/src/.bundle-output-$$.tar.gz"' '"$source_alias/scripts/.bundle-output-$$.tar.gz"' '"$root/vendor/.bundle-output-$$.tar.gz"' '"$source_alias/.bundle-output-$$.tar.gz"' '"$source_alias/dist-other/.bundle-output-$$.tar.gz"'
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/.bundle-output-64566.tar.gz
++ for denied_output in '"$root/src/.bundle-output-$$.tar.gz"' '"$source_alias/scripts/.bundle-output-$$.tar.gz"' '"$root/vendor/.bundle-output-$$.tar.gz"' '"$source_alias/.bundle-output-$$.tar.gz"' '"$source_alias/dist-other/.bundle-output-$$.tar.gz"'
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/dist-other/.bundle-output-64566.tar.gz
++ missing_in_tree=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/src/.bundle-output-missing-64566/bundle.tar.gz
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/src/.bundle-output-missing-64566/bundle.tar.gz
+++ dirname /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/src/.bundle-output-missing-64566/bundle.tar.gz
++ [[ -e /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/src/.bundle-output-missing-64566 ]]
+++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/dist/.bundle-output-64566.tar.gz
++ normalized_dist=/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/dist/.bundle-output-64566.tar.gz
++ [[ /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/dist/.bundle-output-64566.tar.gz != \/\U\s\e\r\s\/\a\c\o\l\i\v\e\r\/\p\r\o\j\e\c\t\s\/\l\l\x\p\r\t\/\a\g\e\n\t\/\m\a\i\n\/\l\l\x\p\r\t\-\c\o\d\e\-\r\s\/\d\i\s\t\/\.\b\u\n\d\l\e\-\o\u\t\p\u\t\-\6\4\5\6\6\.\t\a\r\.\g\z ]]
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/dist
++ policy_root=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root
++ physical_dist=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/physical-dist
++ mkdir /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/physical-dist
+++ cd /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/physical-dist
+++ pwd -P
++ physical_dist_real=/private/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-bundle-verifier.37nlmj/physical-dist
++ ln -s /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/physical-dist /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root/dist
+++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root/dist/bundle.tar.gz
++ normalized_symlinked_dist=/private/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-bundle-verifier.37nlmj/physical-dist/bundle.tar.gz
++ [[ /private/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-bundle-verifier.37nlmj/physical-dist/bundle.tar.gz != \/\p\r\i\v\a\t\e\/\v\a\r\/\f\o\l\d\e\r\s\/\q\d\/\9\6\2\l\h\r\j\j\0\2\3\2\r\j\y\k\g\g\3\l\g\m\r\w\0\0\0\0\g\n\/\T\/\l\l\x\p\r\t\-\b\u\n\d\l\e\-\v\e\r\i\f\i\e\r\.\3\7\n\l\m\j\/\p\h\y\s\i\c\a\l\-\d\i\s\t\/\b\u\n\d\l\e\.\t\a\r\.\g\z ]]
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/policy-root/dist
+++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/.bundle-output-64566.tar.gz
++ normalized_external=/private/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T/llxprt-bundle-verifier.37nlmj/.bundle-output-64566.tar.gz
++ case "$normalized_external" in
++ for control in ''\''
+'\''' ''\'''\''' ''\''	'\''' ''\'''\'''
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias '/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output
+suffix.tar.gz'
++ grep -q 'output path contains a control character' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ for control in ''\''
+'\''' ''\'''\''' ''\''	'\''' ''\'''\'''
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias $'/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output\rsuffix.tar.gz'
++ grep -q 'output path contains a control character' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ for control in ''\''
+'\''' ''\'''\''' ''\''	'\''' ''\'''\'''
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias '/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output	suffix.tar.gz'
++ grep -q 'output path contains a control character' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ for control in ''\''
+'\''' ''\'''\''' ''\''	'\''' ''\'''\'''
++ python3 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias $'/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output\177suffix.tar.gz'
++ grep -q 'output path contains a control character' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/source-bundle-output.py /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias
+output path contains a control character
++ bash /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/source-alias/scripts/.bundle-output-integrated-64566.tar.gz
++ grep -q 'output must be outside the source tree or a proper descendant of physical dist/' /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/stderr
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-64566.tar.gz
++ [[ -e /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-64566.tar.gz ]]
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-dir-64566/bundle.tar.gz
++ [[ -e /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-dir-64566 ]]
++ mkdir /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output-directory
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/output-directory
++ command -v git
++ git_fixture=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
++ git_tmp=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ mkdir -p /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs/src /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs/tests /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ printf '%s\n' tests/ignored.rs
++ printf '%s\n' 'fn main() {}'
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs init -q
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs config user.name 'Bundle Test'
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs config user.email bundle-test@example.invalid
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs add .gitignore src/main.rs
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs commit -q -m baseline
++ printf '%s\n' .gitignore src/main.rs
++ TMPDIR=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-inputs-git.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
+++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs rev-parse 'HEAD^{commit}'
++ captured_commit=93efe484fda6399b3b93584a41113d5034697772
++ printf '%s\n' 'mutated after validation'
++ mkdir /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-archive-extract
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs archive --format=tar 93efe484fda6399b3b93584a41113d5034697772
++ tar -xf - -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-archive-extract
+++ cat /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-archive-extract/src/main.rs
++ [[ fn main() {} != \f\n\ \m\a\i\n\(\)\ \{\} ]]
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs checkout -q -- src/main.rs
++ printf '%s\n' 'fn main() {}'
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs add build.rs
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs commit -q -m shadow
++ printf '%s\n' .gitignore src/main.rs
++ TMPDIR=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-inputs-git.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs reset -q --hard 'HEAD^'
++ printf '%s\n' 'ignored injection'
++ printf '%s\n' .gitignore src/main.rs tests/ignored.rs
++ TMPDIR=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-inputs-git.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
++ rm -f /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs/tests/ignored.rs
++ printf '%s\n' 'untracked test source'
++ printf '%s\n' .gitignore src/main.rs tests/untracked.rs
++ TMPDIR=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-inputs-git.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
++ rm -f /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs/tests/untracked.rs
++ printf '%s\n' 'untracked outside allow-list'
++ printf '%s\n' .gitignore src/main.rs
++ TMPDIR=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp
++ bash /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/verify-source-inputs-git.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs
++ rm -f /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-inputs/outside-allowlist
++ find /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/git-check-tmp -mindepth 1 -print -quit
++ grep -q .
++ build_fixture=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build
++ python3 - /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build init -q
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build config user.name 'Bundle Test'
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build config user.email bundle-test@example.invalid
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build add .
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build add -f registry-vendor
++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build commit -q -m snapshot
+++ git -C /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build check-attr text -- registry-vendor/core-foundation-0.10.1/Cargo.toml
++ vendor_attribute='registry-vendor/core-foundation-0.10.1/Cargo.toml: text: unset'
++ [[ registry-vendor/core-foundation-0.10.1/Cargo.toml: text: unset != *\:\ \t\e\x\t\:\ \u\n\s\e\t ]]
++ mkdir /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/clean-output
++ PATH=/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/pass-bin:/Users/acoliver/.bun/bin:/Users/acoliver/.local/bin:/Users/acoliver/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pkg/env/active/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Users/acoliver/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:/Users/acoliver/.lmstudio/bin
++ bash /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/committed-build/scripts/build-source-bundle.sh /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj/clean-output/source.tar.gz
++ cleanup
++ rm -rf /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.37nlmj /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier-outside-64566 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-link-64566 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-fifo-64566 '/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-newline
+64566' /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/tests/.bundle-verifier-scratch-64566 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-dir-64566 /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/scripts/.bundle-verifier-output-64566.tar.gz /Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs/dist/.bundle-verifier-cross-filesystem-64566

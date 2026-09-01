@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "provider": "anthropic",
+  "model": "claude-3",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "auth-keyfile": "~/.keys/home-key"
+  }
+}

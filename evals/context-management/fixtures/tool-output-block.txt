@@ -1,0 +1,4 @@
+CTXEVAL-BULK-BLOCK deterministic tool-output fixture
+Each expansion appends a unique per-round, per-block index line so no two admitted
+tool results are byte-identical. The context runtime must treat these as distinct
+real observations, not as deduplicatable noise.

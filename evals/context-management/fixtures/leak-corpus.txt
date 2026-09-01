@@ -1,0 +1,6 @@
+CTXEVAL-LEAK-CORPUS fixture (synthetic markers only, never real credentials)
+marker: CTXEVAL-SECRET-A1B2C3D4E5
+marker: CTXEVAL-TOKEN-F6G7H8I9J0
+exact error span: bytes 4096..4131 "unexpected trailing frame"
+unknown-shaped identifier: x-txn-9f31ac04be
+noise: fill line for the pre-entry filter to rank and drop 0000

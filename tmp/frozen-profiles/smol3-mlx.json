@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "smollm3-3b",
+  "modelParams": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "max_tokens": 1024
+  },
+  "ephemeralSettings": {
+    "base-url": "http://localhost:8000/v1",
+    "api-key": "not-needed",
+    "context-limit": 28000,
+    "maxOutputTokens": 4096
+  }
+}

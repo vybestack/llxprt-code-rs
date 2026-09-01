@@ -1,0 +1,5 @@
+upstream archive and Git-object evidence verified
+Serdes Responses Git snapshot evidence verified
+Only in /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-vendor-provenance.RmvMwe/vendor/serdes-ai-models: target
+Only in /var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-vendor-provenance.RmvMwe/vendor/serdes-ai-responses: target
+vendored SerdesAI tree differs from checksum-pinned archives plus patch

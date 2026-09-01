@@ -1,0 +1,2 @@
+{"error":{"code":"budget-exhausted","message":"tool-call budget (16) would be exceeded; reduce tool calls"},"session_id":"issue3-e","status":"error"}
+exit=5

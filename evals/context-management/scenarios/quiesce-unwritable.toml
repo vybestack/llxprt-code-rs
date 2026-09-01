@@ -1,0 +1,29 @@
+schema_version = 1
+id = "quiesce-unwritable"
+owner_phase = 2
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-5 Continue working while the context store becomes unwritable; you must reach a named write-free quiesce, never a false committed terminal state."
+
+[wall]
+tool_rounds = 8
+tool_output_bytes = 131072
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_outcomes = ["quiesce_unwritable"]
+required_context_artifacts = ["context/manifest.json"]
+
+[faults]
+injected = ["store-unwritable-after-round-1"]

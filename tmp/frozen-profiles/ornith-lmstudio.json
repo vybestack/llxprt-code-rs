@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "provider": "LM Studio",
+  "model": "ornith-1.0-35b",
+  "modelParams": {
+    "temperature": 0.7,
+    "top_p": 0.95
+  },
+  "ephemeralSettings": {
+    "base-url": "http://localhost:1234/v1/",
+    "context-limit": 262144,
+    "maxOutputTokens": 16384
+  }
+}

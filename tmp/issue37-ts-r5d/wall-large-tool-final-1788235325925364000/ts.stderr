@@ -1,0 +1,7 @@
+An unexpected critical error occurred:
+Error: [cli-runtime] Failed to resolve active provider: No active provider is configured.
+    at getActiveProviderOrThrow (/Users/acoliver/projects/llxprt/agent/main/llxprt-code/packages/providers/src/runtime/runtimeAccessors.ts:458:15)
+    at updateActiveProviderBaseUrl (/Users/acoliver/projects/llxprt/agent/main/llxprt-code/packages/providers/src/runtime/providerMutations.ts:344:30)
+    at applyBaseUrlOverride (/Users/acoliver/projects/llxprt/agent/main/llxprt-code/packages/providers/src/runtime/settingsResolver.ts:134:9)
+    at applyCliArgumentOverrides (/Users/acoliver/projects/llxprt/agent/main/llxprt-code/packages/providers/src/runtime/settingsResolver.ts:71:11)
+    at processTicksAndRejections (native:7:39)

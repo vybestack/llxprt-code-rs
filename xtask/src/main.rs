@@ -28,6 +28,7 @@ fn real_main() -> Result<(), String> {
         "envelope-schema" => run_envelope_schema(&root, &remaining),
         "release-fixtures" => no_args(&remaining).and_then(|()| run_release_fixtures(&root)),
         "source-bundle" => run_source_bundle(&root, &remaining),
+        "context-evals" => run_context_evals(&root, &remaining),
         _ => Err(usage()),
     }
 }
@@ -87,7 +88,7 @@ fn no_args(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity|envelope-schema [--check]|release-gates|release-fixtures|source-bundle>"
+    "usage: cargo xtask <lint|quality|loc|complexity|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
         .to_string()
 }
 
@@ -149,6 +150,60 @@ fn run_lint(root: &Path) -> Result<(), String> {
         ],
     )?;
     run_gate(root, Gate::All)
+}
+
+/// `cargo xtask context-evals`: build the acceptance target and the eval driver, then run
+/// the Phase 0 expected-red baseline. Passes `--runner`/`--scenarios`/`--out` through.
+fn run_context_evals(root: &Path, args: &[String]) -> Result<(), String> {
+    let mut forward: Vec<&str> = vec![];
+    let mut runner = "rust".to_string();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--runner" => {
+                index += 1;
+                runner = args.get(index).ok_or("--runner needs a value")?.clone();
+            }
+            other => forward.push(other),
+        }
+        index += 1;
+    }
+    let out = format!("tmp/issue37-context-evals/{runner}");
+    run_command(
+        root,
+        "cargo",
+        &[
+            "build",
+            "--offline",
+            "--locked",
+            "--bin",
+            "llxprt-code-rs",
+            "--bin",
+            "llxprt-context-eval",
+        ],
+    )?;
+    let cli = root.join("target/debug/llxprt-code-rs");
+    let driver = root.join("target/debug/llxprt-context-eval");
+    let mut argv: Vec<String> = vec![
+        "--cli".into(),
+        cli.display().to_string(),
+        "--runner".into(),
+        runner.clone(),
+        "--out".into(),
+        out,
+    ];
+    argv.extend(forward.into_iter().map(str::to_string));
+    let printed: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let status = Command::new(driver)
+        .args(&printed)
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("run llxprt-context-eval: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("context-evals failed with {status}"))
+    }
 }
 
 fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<(), String> {

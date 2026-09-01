@@ -1,0 +1,2734 @@
+ctxeval-7-0 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-1 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-2 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-3 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-4 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-5 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-6 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-7 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-8 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-9 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-10 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-11 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-12 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-13 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-14 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-15 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-16 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-17 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-18 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-19 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-20 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-21 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-22 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-23 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-24 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-25 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-26 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-27 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-28 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-29 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-30 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-31 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-32 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-33 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-34 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-35 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-36 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-37 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-38 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-39 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-40 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-41 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-42 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-43 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-44 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-45 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-46 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-47 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-48 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-49 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-50 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-51 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-52 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-53 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-54 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-55 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-56 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-57 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-58 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-59 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-60 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-61 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-62 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-63 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-64 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-65 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-66 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-67 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-68 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-69 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-70 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-71 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-72 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-73 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-74 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-75 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-76 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-77 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-78 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-79 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-80 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-81 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-82 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-83 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-84 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-85 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-86 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-87 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-88 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-89 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-90 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-91 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-92 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-93 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-94 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-95 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-96 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-97 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-98 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-99 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-100 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-101 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-102 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-103 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-104 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-105 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-106 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-107 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-108 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-109 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-110 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-111 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-112 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-113 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-114 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-115 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-116 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-117 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-118 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-119 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-120 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-121 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-122 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-123 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-124 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-125 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-126 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-127 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-128 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-129 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-130 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-131 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-132 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-133 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-134 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-135 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-136 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-137 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-138 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-139 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-140 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-141 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-142 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-143 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-144 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-145 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-146 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-147 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-148 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-149 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-150 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-151 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-152 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-153 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-154 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-155 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-156 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-157 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-158 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-159 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-160 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-161 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-162 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-163 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-164 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-165 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-166 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-167 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-168 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-169 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-170 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-171 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-172 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-173 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-174 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-175 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-176 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-177 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-178 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-179 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-180 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-181 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-182 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-183 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-184 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-185 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-186 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-187 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-188 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-189 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-190 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-191 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-192 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-193 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-194 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-195 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-196 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-197 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-198 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-199 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-200 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-201 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-202 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-203 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-204 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-205 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-206 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-207 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-208 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-209 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-210 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-211 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-212 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-213 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-214 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-215 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-216 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-217 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-218 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-219 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-220 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-221 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-222 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-223 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-224 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-225 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-226 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-227 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-228 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-229 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-230 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-231 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-232 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-233 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-234 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-235 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-236 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-237 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-238 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-239 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-240 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-241 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-242 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-243 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-244 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-245 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-246 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-247 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-248 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-249 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-250 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-251 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-252 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-253 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-254 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-255 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-256 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-257 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-258 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-259 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-260 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-261 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-262 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-263 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-264 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-265 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-266 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-267 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-268 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-269 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-270 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-271 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-272 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-273 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-274 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-275 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-276 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-277 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-278 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-279 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-280 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-281 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-282 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-283 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-284 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-285 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-286 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-287 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-288 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-289 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-290 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-291 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-292 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-293 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-294 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-295 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-296 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-297 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-298 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-299 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-300 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-301 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-302 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-303 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-304 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-305 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-306 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-307 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-308 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-309 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-310 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-311 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-312 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-313 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-314 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-315 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-316 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-317 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-318 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-319 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-320 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-321 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-322 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-323 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-324 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-325 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-326 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-327 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-328 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-329 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-330 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-331 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-332 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-333 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-334 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-335 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-336 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-337 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-338 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-339 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-340 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-341 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-342 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-343 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-344 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-345 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-346 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-347 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-348 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-349 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-350 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-351 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-352 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-353 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-354 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-355 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-356 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-357 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-358 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-359 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-360 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-361 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-362 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-363 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-364 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-365 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-366 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-367 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-368 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-369 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-370 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-371 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-372 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-373 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-374 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-375 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-376 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-377 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-378 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-379 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-380 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-381 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-382 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-383 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-384 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-385 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-386 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-387 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-388 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-389 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-390 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-391 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-392 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-393 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-394 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-395 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-396 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-397 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-398 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-399 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-400 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-401 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-402 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-403 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-404 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-405 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-406 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-407 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-408 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-409 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-410 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-411 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-412 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-413 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-414 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-415 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-416 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-417 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-418 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-419 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-420 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-421 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-422 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-423 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-424 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-425 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-426 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-427 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-428 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-429 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-430 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-431 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-432 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-433 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-434 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-435 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-436 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-437 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-438 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-439 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-440 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-441 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-442 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-443 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-444 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-445 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-446 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-447 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-448 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-449 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-450 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-451 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-452 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-453 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-454 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-455 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-456 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-457 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-458 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-459 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-460 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-461 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-462 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-463 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-464 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-465 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-466 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-467 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-468 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-469 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-470 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-471 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-472 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-473 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-474 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-475 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-476 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-477 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-478 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-479 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-480 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-481 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-482 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-483 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-484 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-485 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-486 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-487 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-488 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-489 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-490 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-491 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-492 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-493 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-494 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-495 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-496 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-497 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-498 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-499 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-500 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-501 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-502 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-503 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-504 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-505 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-506 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-507 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-508 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-509 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-510 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-511 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-512 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-513 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-514 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-515 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-516 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-517 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-518 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-519 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-520 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-521 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-522 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-523 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-524 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-525 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-526 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-527 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-528 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-529 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-530 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-531 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-532 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-533 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-534 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-535 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-536 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-537 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-538 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-539 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-540 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-541 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-542 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-543 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-544 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-545 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-546 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-547 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-548 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-549 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-550 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-551 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-552 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-553 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-554 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-555 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-556 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-557 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-558 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-559 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-560 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-561 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-562 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-563 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-564 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-565 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-566 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-567 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-568 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-569 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-570 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-571 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-572 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-573 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-574 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-575 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-576 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-577 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-578 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-579 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-580 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-581 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-582 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-583 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-584 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-585 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-586 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-587 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-588 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-589 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-590 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-591 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-592 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-593 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-594 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-595 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-596 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-597 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-598 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-599 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-600 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-601 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-602 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-603 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-604 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-605 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-606 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-607 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-608 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-609 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-610 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-611 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-612 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-613 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-614 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-615 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-616 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-617 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-618 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-619 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-620 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-621 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-622 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-623 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-624 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-625 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-626 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-627 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-628 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-629 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-630 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-631 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-632 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-633 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-634 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-635 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-636 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-637 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-638 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-639 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-640 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-641 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-642 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-643 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-644 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-645 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-646 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-647 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-648 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-649 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-650 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-651 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-652 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-653 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-654 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-655 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-656 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-657 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-658 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-659 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-660 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-661 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-662 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-663 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-664 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-665 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-666 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-667 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-668 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-669 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-670 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-671 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-672 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-673 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-674 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-675 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-676 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-677 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-678 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-679 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-680 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-681 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-682 CTXEVAL-GATE-CLAIM fixture
+supported: the wall was observed at the declared budget boundary.
+unsupported but plausible: "the provider confirmed the token count over the phone."
+
+ctxeval-7-683 CTXEVAL-GATE-CLAIM fixture
+suppo

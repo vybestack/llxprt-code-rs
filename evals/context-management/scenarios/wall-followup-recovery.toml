@@ -1,0 +1,27 @@
+schema_version = 1
+id = "wall-followup-recovery"
+owner_phase = 7
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "context-limit"
+accept_any_reason = false
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-2 Remember planning token CTXEVAL-FACT-B4E1, then read every bulk file, then end with the exact final marker."
+followups = ["CTXEVAL-FOLLOWUP Using only what this session already holds, state the recorded planning token and nothing else."]
+
+[wall]
+tool_rounds = 8
+tool_output_bytes = 131072
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_final_marker = "CTXEVAL-FINAL-7f3a9c"
+required_answer_tokens = ["CTXEVAL-FACT-B4E1"]

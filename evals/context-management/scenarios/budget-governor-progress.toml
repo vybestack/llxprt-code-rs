@@ -1,0 +1,26 @@
+schema_version = 1
+id = "budget-governor-progress"
+owner_phase = 4
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 12000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-8 Sustain a high rate of large observations until it exceeds measured reclamation throughput, then take the governed path: quota floor, decreasing macrosteps, disarm or quiesce."
+
+[wall]
+tool_rounds = 8
+tool_output_bytes = 131072
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_context_artifacts = ["context/rewrite-journal.log"]
+required_outcomes = ["disarm", "quiesce_unwritable", "wrap_up"]

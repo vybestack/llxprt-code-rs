@@ -1,0 +1,72 @@
+== checksum-locked registry source closure ==
+registry source closure ok: 284 checksum-locked crates across 14 lockfiles
+== fmt ==
+== xtask tests and lint ==
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling syn v2.0.119
+   Compiling xtask v0.1.0 (/Users/acoliver/projects/llxprt/agent/main/llxclean-verify/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.62s
+     Running unittests src/lib.rs (xtask/target/debug/deps/xtask-e3931a2870cf3dab)
+
+running 18 tests
+test analyze::tests::violations_are_sorted_by_path_line_and_metric ... ok
+test analyze::tests::exact_limits_pass_and_plus_one_fails_all_metrics ... ok
+test complexity::tests::empty_body_is_cyclic_1_cognitive_0 ... ok
+test loc::tests::rust_shebang_is_an_effective_line ... ok
+test complexity::tests::nested_function_is_its_own_unit_not_part_of_parent ... ok
+test loc::tests::blank_and_comment_lines_are_excluded ... ok
+test complexity::tests::if_elseif_nesting_and_booleans ... ok
+test complexity::tests::direct_recursion_adds_one_cognitive ... ok
+test complexity::tests::direct_method_recursion_forms_add_one_cognitive ... ok
+test analyze::tests::production_discovery_only_walks_src_and_parse_failures_are_fatal ... ok
+test loc::tests::raw_strings_macros_and_mixed_comments_count_code_lines ... ok
+test loc::tests::every_code_line_counts_once ... ok
+test complexity::tests::boolean_sequences_transitions ... ok
+test loc::tests::doc_comments_do_not_hide_code_or_explicit_attributes ... ok
+test complexity::tests::iflet_whilelet_and_recursive_chain_are_stable ... ok
+test loc::tests::nested_closure_and_signature_lines_count ... ok
+test complexity::tests::match_arms_loops_and_guard ... ok
+test analyze::tests::code_bearing_macros_fail_closed ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (xtask/target/debug/deps/xtask-6c5c44b1abe7efbb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests xtask
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking unicode-ident v1.0.24
+    Checking proc-macro2 v1.0.107
+    Checking quote v1.0.47
+    Checking syn v2.0.119
+    Checking xtask v0.1.0 (/Users/acoliver/projects/llxprt/agent/main/llxclean-verify/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.99s
+== production Rust LOC and complexity ==
+   Compiling xtask v0.1.0 (/Users/acoliver/projects/llxprt/agent/main/llxclean-verify/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running `xtask/target/debug/xtask quality`
+quality gate passed: 69 production Rust files
+== source and release publication adversarial cases ==
+source-object policy ok: public, no automatic expiry/deletion, digest-qualified release references
+OCI source publication tests passed: manifest/config/layer retrieval, collision, visibility, and digest failures
+scripts/release-gates.sh: line 48: 70188 Terminated: 15          bash scripts/test-source-bundle-verifier.sh
+Traceback (most recent call last):
+  File "<stdin>", line 191, in <module>
+  File "<stdin>", line 54, in make
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tarfile.py", line 1948, in open
+    return func(name, filemode, fileobj, **kwargs)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tarfile.py", line 2003, in gzopen
+    fileobj = GzipFile(name, mode + "b", compresslevel, fileobj)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/gzip.py", line 210, in __init__
+    fileobj = self.myfileobj = builtins.open(filename, mode or 'rb')
+                               ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/qd/962lhrjj0232rjykgg3lgmrw0000gn/T//llxprt-bundle-verifier.7j4yOw/oversize-archive.tar.gz'

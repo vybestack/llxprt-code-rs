@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "qwen38",
+  "modelParams": {
+    "temperature": 0.7,
+    "top_p": 0.8
+  },
+  "ephemeralSettings": {
+    "base-url": "http://23.183.40.76:8080/v1",
+    "auth-keyfile": "/Users/acoliver/.keys/.hotaisle_vllm_key",
+    "context-limit": 131072,
+    "maxOutputTokens": 16384,
+    "stream-idle-timeout-ms": 0,
+    "stream-first-response-timeout-ms": 900000,
+    "shell-replacement": true,
+    "emojifilter": "auto"
+  },
+  "name": "qwen38-mi300x"
+}

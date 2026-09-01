@@ -1,0 +1,1 @@
+{"ephemeralSettings":{"auth-key":"ctxeval-loopback-local-stub","base-url":"http://127.0.0.1:55417/v1","context-limit":20000,"maxOutputTokens":2048},"model":"ctxeval-fixture","modelParams":{"temperature":0.0},"provider":"openai","version":1}

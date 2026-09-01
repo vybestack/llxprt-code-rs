@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "provider": "LM Studio",
+  "model": "smollm3-3b",
+  "modelParams": {},
+  "ephemeralSettings": {
+    "base-url": "http://localhost:8000/v1/",
+    "context-limit": 28000,
+    "maxOutputTokens": 4096
+  }
+}

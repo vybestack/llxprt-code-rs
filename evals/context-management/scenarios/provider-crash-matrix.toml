@@ -1,0 +1,28 @@
+schema_version = 1
+id = "provider-crash-matrix"
+owner_phase = 7
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-11 Survive a crash in the send interval and prove restart equivalence: identical materialized hash and no duplicated side effect."
+
+[wall]
+tool_rounds = 8
+tool_output_bytes = 131072
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_context_artifacts = ["context/events.log"]
+
+[faults]
+injected = ["crash-at-send"]

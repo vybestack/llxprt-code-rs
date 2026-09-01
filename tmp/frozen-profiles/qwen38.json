@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "provider": "openai",
+  "model": "mlx-4bit",
+  "modelParams": {
+    "temperature": 0.7,
+    "top_p": 0.8
+  },
+  "ephemeralSettings": {
+    "auth-key-name": "synthetic1",
+    "base-url": "http://127.0.0.1:8308/v1",
+    "reasoning.enabled": true,
+    "reasoning.includeInResponse": true,
+    "reasoning.includeInContext": true,
+    "reasoning.stripFromContext": "none",
+    "reasoning.effort": "medium",
+    "context-limit": 262144,
+    "maxOutputTokens": 32768,
+    "stream-idle-timeout-ms": 0
+  }
+}
