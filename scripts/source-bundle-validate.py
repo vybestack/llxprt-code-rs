@@ -16,10 +16,10 @@ Exit codes:
   1  archive rejected
   2  usage error
 """
-import gzip
 import os
 import sys
 import tarfile
+import zlib
 
 # Hard caps so a hostile archive cannot force unbounded buffering of the embedded
 # manifest or an unbounded member count.
@@ -50,6 +50,60 @@ MANIFEST_REL = "THIRD_PARTY_LICENSES/source-bundle.txt"
 def fail(msg):
     print("source-bundle-validate: %s" % msg, file=sys.stderr)
     sys.exit(1)
+
+
+class CompleteGzipReader:
+    """Streaming gzip reader that validates every concatenated member explicitly.
+
+    gzip.GzipFile's handling of reads across a member boundary has varied with the
+    interpreter's buffered-I/O and zlib versions. Drive one zlib decompressor per
+    member here so reaching the tar end marker cannot make later gzip members
+    invisible to integrity and expanded-stream checks.
+    """
+
+    CHUNK_SIZE = 1024 * 1024
+
+    def __init__(self, source):
+        self.source = source
+        self.pending = b""
+        self.decompressor = None
+        self.members = 0
+        self.finished = False
+
+    def read(self, size=-1):
+        if self.finished or size == 0:
+            return b""
+        target = self.CHUNK_SIZE if size < 0 else min(size, self.CHUNK_SIZE)
+        output = bytearray()
+        while len(output) < target and not self.finished:
+            if self.decompressor is None:
+                if not self.pending:
+                    self.pending = self.source.read(self.CHUNK_SIZE)
+                if not self.pending:
+                    if self.members == 0:
+                        fail("archive has no gzip member")
+                    self.finished = True
+                    break
+                self.decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+
+            if not self.pending:
+                self.pending = self.source.read(self.CHUNK_SIZE)
+                if not self.pending:
+                    fail("archive has a truncated gzip member")
+            try:
+                chunk = self.decompressor.decompress(
+                    self.pending, target - len(output)
+                )
+            except zlib.error as exc:
+                fail("archive has an invalid gzip stream: %s" % exc)
+            output.extend(chunk)
+            if self.decompressor.eof:
+                self.pending = self.decompressor.unused_data
+                self.decompressor = None
+                self.members += 1
+            else:
+                self.pending = self.decompressor.unconsumed_tail
+        return bytes(output)
 
 
 class BoundedReader:
@@ -136,15 +190,12 @@ def main():
         )
 
     raw = None
-    compressed = None
     try:
         raw = open(sys.argv[1], "rb")
-        compressed = gzip.GzipFile(fileobj=raw)
+        compressed = CompleteGzipReader(raw)
         expanded = BoundedReader(compressed, MAX_EXPANDED_STREAM_BYTES)
         tf = tarfile.open(fileobj=expanded, mode="r|")
     except (OSError, tarfile.TarError) as exc:
-        if compressed is not None:
-            compressed.close()
         if raw is not None:
             raw.close()
         fail("cannot open archive as tar: %s" % exc)
@@ -158,7 +209,7 @@ def main():
     aggregate = 0
     manifest_blob = None
 
-    with raw, compressed, tf:
+    with raw, tf:
         for member in tf:
             count += 1
             if count > MAX_MEMBERS:

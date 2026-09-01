@@ -1595,7 +1595,8 @@ PY
     echo "source-bundle builder rejected an ordinary committed deletion" >&2
     exit 1
   fi
-  if tar -tzf "$tmp/omitted-plan.tar.gz" | grep -Fq 'project-plans/issue1/PLAN.md'; then
+  tar -tzf "$tmp/omitted-plan.tar.gz" > "$tmp/omitted-plan-members"
+  if grep -Fq 'project-plans/issue1/PLAN.md' "$tmp/omitted-plan-members"; then
     echo "source bundle shipped a member deleted from the commit" >&2
     exit 1
   fi
@@ -1634,7 +1635,8 @@ PY
     echo "source-bundle builder rejected a new committed source file" >&2
     exit 1
   fi
-  if ! tar -tzf "$tmp/unlisted-plan.tar.gz" | grep -Fq 'project-plans/issue1/UNLISTED.md'; then
+  tar -tzf "$tmp/unlisted-plan.tar.gz" > "$tmp/unlisted-plan-members"
+  if ! grep -Fq 'project-plans/issue1/UNLISTED.md' "$tmp/unlisted-plan-members"; then
     echo "source bundle omitted a committed member" >&2
     exit 1
   fi
