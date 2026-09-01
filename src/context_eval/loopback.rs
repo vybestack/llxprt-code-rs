@@ -322,19 +322,47 @@ fn emit(stream: &mut TcpStream, streamed: bool, payload: &Value, tool_call: bool
         let _ = write_response(stream, false, payload.to_string());
         return;
     }
+    // Headers go out alone and are flushed first: a streaming client must be able to
+    // observe `text/event-stream` before it starts iterating the body, and a hand-rolled
+    // socket would otherwise coalesce them into the first chunk frame.
     let _ = write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-store\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
     );
-    let message = payload["choices"][0]["message"].clone();
-    let delta = if tool_call {
-        json!({ "tool_calls": message["tool_calls"] })
+    let _ = stream.flush();
+    let choice = &payload["choices"][0];
+    let finish = choice["finish_reason"].as_str().unwrap_or("stop");
+    // Chat Completions streaming shape consumers accumulate on: a role-bearing first
+    // delta, then the payload's own content or tool_calls (each tool call indexed, since
+    // streamed tool calls are assembled by index), then an explicit terminal delta that
+    // carries the finish reason. `data: [DONE]` closes the event stream.
+    let mut deltas = vec![json!({ "role": "assistant", "content": Value::Null })];
+    if tool_call {
+        let calls: Vec<Value> = choice["message"]["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut call)| {
+                if let Some(object) = call.as_object_mut() {
+                    object.insert("index".to_string(), json!(i));
+                }
+                call
+            })
+            .collect();
+        deltas.push(json!({ "tool_calls": calls }));
     } else {
-        json!({ "content": message["content"] })
-    };
-    let chunk = json!({ "id": "ctxeval", "object": "chat.completion.chunk", "created": 0,
-        "model": "ctxeval-fixture", "choices": [{ "index": 0, "delta": delta }] });
-    write_chunk(stream, format!("data: {chunk}\n\n").as_bytes());
+        deltas.push(json!({ "content": choice["message"]["content"].clone() }));
+    }
+    deltas.push(json!({ "finish_reason": finish }));
+    for delta in deltas {
+        let chunk = json!({ "id": "ctxeval", "object": "chat.completion.chunk", "created": 0,
+            "model": "ctxeval-fixture", "system_fingerprint": "ctxeval",
+            "choices": [{ "index": 0, "delta": delta, "finish_reason": Value::Null }] });
+        write_chunk(stream, format!("data: {chunk}\n\n").as_bytes());
+        let _ = stream.flush();
+    }
     write_chunk(stream, b"data: [DONE]\n\n");
     write_chunk(stream, b"");
     let _ = stream.flush();

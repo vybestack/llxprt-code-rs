@@ -387,7 +387,13 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         .required_final_marker
         .clone()
         .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
-    let server = Loopback::start(bulk.len(), bulk, &marker, scen.wall.tool_output_bytes);
+    // `Loopback::start` only binds the port; the scripted rounds arrive through
+    // `set_bulk` once the fixtures exist, exactly as the Rust drive does. Without the
+    // hand-off the stub serves an empty script and answers every turn with the final
+    // marker, so no wall is ever exercised.
+    let rounds = bulk.len();
+    let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
+    server.set_bulk(bulk);
     let url = server.base_url();
     let settings = absolute_child(&out_dir, "settings")?;
     fs::create_dir_all(&settings).map_err(|e| format!("create settings: {e}"))?;
