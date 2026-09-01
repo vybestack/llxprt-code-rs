@@ -73,7 +73,7 @@ fn main() -> ExitCode {
     };
     match context_eval::run_all(&root, &options) {
         Ok((report, all_accepted)) => {
-            print!("{}", report);
+            print!("{report}");
             if all_accepted {
                 ExitCode::SUCCESS
             } else {
