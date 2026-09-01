@@ -356,9 +356,23 @@ fn evidence_from_results(results: &[BbResult]) -> Evidence {
             evidence.turns_ok += 1;
             evidence.last_ok_summary = result.summary.clone();
             evidence.last_ok_stdout = result.raw_stdout.clone();
+            if let Some(outcome) = declared_terminal_outcome(&result.raw_stdout) {
+                evidence.terminal_outcome = Some(outcome);
+            }
         }
     }
     evidence
+}
+
+/// Observe a terminal outcome the context runtime declared in its stdout summary JSON.
+///
+/// This is harness observation, never grading: a run that never declares an outcome yields
+/// `None`, and a declared-but-false outcome is still only a declaration. The grader keeps
+/// its own exact comparison, so nothing here can manufacture a `required_outcomes` pass.
+fn declared_terminal_outcome(stdout: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(stdout).ok()?;
+    let outcome = value.get("terminal_outcome")?.as_str()?;
+    (!outcome.is_empty()).then(|| outcome.to_string())
 }
 
 fn is_harness_error(result: &BbResult) -> bool {
