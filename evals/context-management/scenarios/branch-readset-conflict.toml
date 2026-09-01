@@ -1,0 +1,25 @@
+schema_version = 1
+id = "branch-readset-conflict"
+owner_phase = 8
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-12 Explore read-only, let the parent dependency mutate, then return: the result must arrive as an evidential suggestion with revalidation, never as current fact."
+
+[wall]
+tool_rounds = 2
+tool_output_bytes = 8192
+fixture = "branch-readset.md"
+
+[assertions]
+required_context_artifacts = ["context/events.log"]

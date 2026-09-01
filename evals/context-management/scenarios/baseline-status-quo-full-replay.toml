@@ -1,0 +1,25 @@
+schema_version = 1
+id = "baseline-status-quo-full-replay"
+owner_phase = 7
+arm = "status-quo"
+expected_status = "red"
+expected_reason_class = "context-limit"
+accept_any_reason = false
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-BASELINE Status-quo full-replay arm: read every bulk file, then end with the exact final marker."
+
+[wall]
+tool_rounds = 6
+tool_output_bytes = 40960
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_final_marker = "CTXEVAL-FINAL-7f3a9c"

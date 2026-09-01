@@ -1,0 +1,27 @@
+schema_version = 1
+id = "baseline-minimum-management-floor"
+owner_phase = 4
+arm = "minimum-floor"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = false
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-BASELINE Minimum-management-floor arm: admit large outputs as handles, read back on demand, then end with the exact final marker."
+
+[wall]
+tool_rounds = 6
+tool_output_bytes = 40960
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_final_marker = "CTXEVAL-FINAL-7f3a9c"
+required_context_artifacts = ["context/rewrite-journal.log"]
+required_outcomes = ["wrap_up"]

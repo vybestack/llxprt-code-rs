@@ -1,0 +1,29 @@
+schema_version = 1
+id = "fact-conflict-restart"
+owner_phase = 5
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-9 Record the obligation and the empirical fact from the fixture, apply the conflicting write set, restart, then surface the stale/current transition and the conflict."
+
+[wall]
+tool_rounds = 2
+tool_output_bytes = 8192
+fixture = "fact-conflict.md"
+
+[assertions]
+required_context_artifacts = ["context/events.log"]
+required_answer_tokens = ["CTXEVAL-OBLIGATION-O3"]
+
+[faults]
+injected = ["restart-after-round-2"]

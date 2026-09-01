@@ -1,0 +1,25 @@
+schema_version = 1
+id = "legality-pairing-and-quoting"
+owner_phase = 1
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-6 Transcript contains an orphaned tool result (id call_orphan_1), an illegal placeholder in a protected region, and unquoted environment text. Enumerate every legality violation before any send."
+
+[wall]
+tool_rounds = 1
+tool_output_bytes = 8192
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_context_artifacts = ["context/legality.json"]

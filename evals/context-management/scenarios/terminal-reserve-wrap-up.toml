@@ -1,0 +1,27 @@
+schema_version = 1
+id = "terminal-reserve-wrap-up"
+owner_phase = 4
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-4 Fill protected and ordinary regions until normal continuation is infeasible, then declare wrap-up and emit the final report."
+
+[wall]
+tool_rounds = 6
+tool_output_bytes = 40960
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_final_marker = "CTXEVAL-FINAL-7f3a9c"
+required_context_artifacts = ["context/checkpoints", "context/events.log"]
+required_outcomes = ["wrap_up"]

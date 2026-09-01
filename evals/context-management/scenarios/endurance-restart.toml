@@ -1,0 +1,29 @@
+schema_version = 1
+id = "endurance-restart"
+owner_phase = 9
+arm = "feature"
+expected_status = "red"
+expected_reason_class = "missing-evidence"
+accept_any_reason = true
+
+[profile]
+name = "ctxeval-loopback"
+provider = "openai"
+model = "ctxeval-fixture"
+context_limit_tokens = 20000
+max_output_tokens = 2048
+
+[stimulus]
+prompt = "CTXEVAL-TASK-15 Composed multi-stage task with sustained tool output and injected restarts; finish with the exact final marker and complete evidence."
+
+[wall]
+tool_rounds = 4
+tool_output_bytes = 30720
+fixture = "tool-output-block.txt"
+
+[assertions]
+required_final_marker = "CTXEVAL-FINAL-7f3a9c"
+required_context_artifacts = ["context/events.log"]
+
+[faults]
+injected = ["restart-after-round-2"]
