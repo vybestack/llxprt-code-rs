@@ -39,6 +39,10 @@ path = "src/lib.rs"
 name = "llxprt-parity"
 path = "src/bin/llxprt-parity.rs"
 
+[[bin]]
+name = "llxprt-context-eval"
+path = "src/bin/llxprt-context-eval.rs"
+
 [dependencies]
 serdes-ai = { path = "vendor/serdes-ai", version = "=0.2.6", default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"] }
 serdes-ai-responses = { path = "vendor/serdes-ai-responses", version = "=0.3.0" }
