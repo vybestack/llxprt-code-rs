@@ -89,10 +89,10 @@ impl FilterRules {
     pub fn is_relaxation_of(&self, update: &FilterRules) -> bool {
         update.size_floor >= self.size_floor
             && update.unknown_bound >= self.unknown_bound
-            && update
+            && self
                 .verbatim_tools
                 .iter()
-                .all(|tool| self.verbatim_tools.contains(tool))
+                .all(|tool| update.verbatim_tools.contains(tool))
     }
 }
 
@@ -187,10 +187,10 @@ impl FilterRegistry {
         if update.version <= current.version {
             return Ok(current.version);
         }
-        if !update
+        if !current
             .labels
             .iter()
-            .all(|label| current.labels.contains(label))
+            .all(|label| update.labels.contains(label))
         {
             return Err(RejectedUpdate::TighteningRequiresOffline {
                 from: current.version,
@@ -210,16 +210,34 @@ impl FilterRegistry {
         if total >= rules.size_floor {
             return RuleVerdict::PassVerbatim;
         }
+        use crate::context_ingress::segment::StructuralClass;
         let has_exact = segments.iter().any(|segment| {
             matches!(
                 segment.class,
-                crate::context_ingress::segment::StructuralClass::ExactSpan
-                    | crate::context_ingress::segment::StructuralClass::Identifier
+                StructuralClass::ExactSpan | StructuralClass::Identifier
             )
         });
         if has_exact {
             return RuleVerdict::Digest;
         }
+        // Ranked, compressible content is kept in ranked form rather than dropped.
+        let has_ranked = segments.iter().any(|segment| {
+            matches!(
+                segment.class,
+                StructuralClass::Code | StructuralClass::TestLog
+            )
+        });
+        if has_ranked {
+            return RuleVerdict::Digest;
+        }
+        // Recognized bulk noise is droppable at any size.
+        let has_noise = segments
+            .iter()
+            .any(|segment| matches!(segment.class, StructuralClass::Noise));
+        if has_noise {
+            return RuleVerdict::DropBulk;
+        }
+        // Unusual, unknown-shaped spans below the bound route verbatim: fail safe.
         if total < rules.unknown_bound {
             return RuleVerdict::PassVerbatim;
         }

@@ -149,9 +149,9 @@ fn volatile_capture_crash_is_a_declared_loss_and_leaves_no_trace() {
             b"un-redacted CTXEVAL-SECRET-A1B2C3D4E5",
         )
         .unwrap();
-    assert_eq!(buffer.declared_loss(), CaptureLoss::VolatileBytes(39));
+    assert_eq!(buffer.declared_loss(), CaptureLoss::VolatileBytes(37));
     let lost = buffer.simulate_crash();
-    assert_eq!(lost, 39);
+    assert_eq!(lost, 37);
     assert!(buffer.is_empty());
     assert_eq!(buffer.declared_loss(), CaptureLoss::Empty);
     let mut sink = MemSink::normal();
@@ -263,7 +263,7 @@ fn filter_digests_exact_ranked_and_noise_with_handles_and_versions() {
     let digest = registry.digest(
         "read",
         "raw-handle-1",
-        vec![0..bytes.len() as u64],
+        std::iter::once(0..bytes.len() as u64).collect(),
         &bytes,
         &segments,
     );

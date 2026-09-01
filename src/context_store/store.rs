@@ -197,11 +197,17 @@ impl ContextStore {
         &self,
         checkpoint: Checkpoint,
     ) -> Vec<crate::context_store::spine::SpineRecord> {
+        // Records replay under the canonical positional names a fresh load
+        // reconstructs, so a replayed tail is comparable across processes.
         self.spine
             .records()
             .iter()
+            .enumerate()
             .skip(checkpoint.applied as usize)
-            .cloned()
+            .map(|(index, record)| crate::context_store::spine::SpineRecord {
+                handle: format!("sanitized-{index}"),
+                ..record.clone()
+            })
             .collect()
     }
 

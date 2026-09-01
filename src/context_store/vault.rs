@@ -49,8 +49,9 @@ impl Vault {
         let slot = self.next;
         self.next += 1;
         let handle = format!("vault-{reason}-{slot}");
-        let slot_bytes = slot.to_le_bytes();
-        let nonce = Nonce::from_slice(&slot_bytes);
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..8].copy_from_slice(&slot.to_le_bytes());
+        let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = self
             .cipher
             .encrypt(

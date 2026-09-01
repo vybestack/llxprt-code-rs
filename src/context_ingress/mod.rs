@@ -14,4 +14,5 @@ pub mod launder;
 pub mod redactor;
 pub mod segment;
 
+#[cfg(test)]
 mod tests;

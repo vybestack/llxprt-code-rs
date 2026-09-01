@@ -8,4 +8,5 @@ pub mod spine;
 pub mod store;
 pub mod vault;
 
+#[cfg(test)]
 mod tests;
