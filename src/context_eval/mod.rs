@@ -57,6 +57,7 @@ impl RunnerKind {
 }
 
 /// One harness drive.
+#[derive(Clone)]
 pub struct Options {
     pub eval_root: PathBuf,
     pub out_root: PathBuf,
@@ -76,6 +77,44 @@ impl Options {
     /// Fixture directory under one eval root.
     pub fn fixtures_dir(&self) -> PathBuf {
         self.eval_root.join("fixtures")
+    }
+}
+
+/// Resolve the out root to an absolute, existing directory.
+///
+/// Every path handed to a child process (config home, generated profile, workspace,
+/// bulk fixtures, isolated settings) is derived from this absolute form, because the CLI
+/// contract requires `LLXPRT_CONFIG_HOME` to name a nonempty absolute directory and a
+/// relative `--out` would otherwise leak a relative path into the child environment.
+/// Artifacts stay repository-local: only the representation becomes absolute.
+fn absolute_out_root(root: &Path) -> Result<PathBuf, String> {
+    fs::create_dir_all(root).map_err(|e| format!("create out root {}: {e}", root.display()))?;
+    let absolute = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("current dir: {e}"))?
+            .join(root)
+    };
+    absolute
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {e}", absolute.display()))
+}
+
+/// Build an absolute child path under an absolute parent.
+///
+/// This is the invariant every child-facing path must satisfy: a relative parent here
+/// means the out root was never canonicalized, which is a harness bug rather than a
+/// scenario result.
+fn absolute_child(parent: &Path, name: &str) -> Result<PathBuf, String> {
+    let child = parent.join(name);
+    if child.is_absolute() {
+        Ok(child)
+    } else {
+        Err(format!(
+            "harness path bug: {} is not absolute (out root was not canonicalized)",
+            child.display()
+        ))
     }
 }
 
@@ -100,6 +139,10 @@ pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String
 
 /// Run every selected scenario and return `(report, all_accepted)`.
 pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
+    let opts = &Options {
+        out_root: absolute_out_root(&opts.out_root)?,
+        ..opts.clone()
+    };
     fs::create_dir_all(&opts.out_root).map_err(|e| format!("create out root: {e}"))?;
     let scenarios = load_scenarios(opts)?;
     let revision = git_revision(root);
@@ -219,7 +262,7 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         &scen.wall.fixture,
         scen.wall.tool_rounds,
         scen.wall.tool_output_bytes,
-        &out_dir.join("bulk"),
+        &absolute_child(&out_dir, "bulk")?,
     )?;
     let marker = scen
         .assertions
@@ -240,7 +283,9 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     evidence.session_dir = session_dir(&prepared);
     let graded = grader::grade(scen, &evidence);
     let verdict = grader::verdict(scen, &graded);
-    let isolation_ok = prepared.config_home.starts_with(&opts.out_root);
+    let isolation_ok = prepared.config_home.starts_with(&opts.out_root)
+        && prepared.config_home.is_absolute()
+        && prepared.workspace.is_absolute();
     Ok((evidence, graded, verdict, digests, isolation_ok))
 }
 
@@ -340,7 +385,7 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
     let server = Loopback::start(bulk.len(), bulk, &marker, scen.wall.tool_output_bytes);
     let url = server.base_url();
-    let settings = out_dir.join("settings");
+    let settings = absolute_child(&out_dir, "settings")?;
     fs::create_dir_all(&settings).map_err(|e| format!("create settings: {e}"))?;
     let mut evidence = Evidence {
         turns_total: 1,

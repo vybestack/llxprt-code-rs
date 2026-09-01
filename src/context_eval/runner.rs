@@ -35,6 +35,12 @@ pub fn expand_fixture(
     let seed =
         fs::read(fixtures.join(fixture)).map_err(|e| format!("read fixture {fixture}: {e}"))?;
     let seed_text = String::from_utf8_lossy(&seed).to_string();
+    if !out_dir.is_absolute() {
+        return Err(format!(
+            "harness path bug: bulk dir {} is not absolute",
+            out_dir.display()
+        ));
+    }
     fs::create_dir_all(out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
     let mut files = Vec::new();
     let mut digests = Vec::new();
@@ -75,6 +81,12 @@ pub fn prepare(
     bulk: Vec<PathBuf>,
     fixture_digests: Vec<String>,
 ) -> Result<Prepared, String> {
+    if !root.is_absolute() {
+        return Err(format!(
+            "harness path bug: prepared root {} is not absolute",
+            root.display()
+        ));
+    }
     let run = root.join(format!("run-{}", crate::harness::uniq()));
     let config_home = run.join("config");
     let workspace = run.join("ws");
@@ -96,7 +108,9 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
     let dir = config_home.join("profiles");
     fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     // The loopback never validates credentials; the inline value is a synthetic marker so
-    // the CLI never touches a native credential store or a real provider.
+    // the CLI never touches a native credential store or a real provider. Only profile
+    // keys this CLI accepts for a plain loopback Chat provider are emitted:
+    // `stream-idle-timeout-ms` is dsflash-only and would be rejected as model-config.
     let profile = serde_json::json!({
         "version": 1,
         "provider": scen.profile.provider,
@@ -107,7 +121,6 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
             "base-url": base_url,
             "context-limit": scen.profile.context_limit_tokens,
             "maxOutputTokens": scen.profile.max_output_tokens,
-            "stream-idle-timeout-ms": 0,
         },
     });
     let name = &scen.profile.name;

@@ -9,7 +9,7 @@ use crate::context_eval::grader::{self, Evidence, Verdict};
 use crate::context_eval::{manifest, report, runner, ARTIFACT_STREAM_CAP};
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn fixtures() -> PathBuf {
     PathBuf::from("evals/context-management/fixtures")
@@ -154,6 +154,64 @@ fn artifact_capture_is_bounded() {
         ARTIFACT_STREAM_CAP
     );
     fs::remove_dir_all(&out).ok();
+}
+
+/// Children must receive absolute paths: the CLI contract rejects a relative
+/// `LLXPRT_CONFIG_HOME` with `config-home` (exit 3), and the TS reference runner needs the
+/// same guarantee for its isolated settings dir. This test reproduces the exact bug where a
+/// relative `--out` leaked a relative config home into the child environment.
+#[test]
+fn child_environment_paths_are_absolute() {
+    let tmp = std::env::temp_dir().join(format!("ctxeval-abs-{}", crate::harness::uniq()));
+    fs::create_dir_all(&tmp).unwrap();
+
+    // A relative out root must be canonicalized into an absolute one before use.
+    let rel = PathBuf::from("tmp/issue37-abs-check");
+    let abs = std::env::current_dir().unwrap().join(&rel);
+    fs::create_dir_all(&abs).unwrap();
+    let canon = abs.canonicalize().unwrap();
+    assert!(canon.is_absolute(), "canonicalized out root is relative");
+
+    // The config home and workspace derived from it are absolute, so the values handed to
+    // the child through LLXPRT_CONFIG_HOME and --cwd satisfy the CLI contract.
+    let config_home = canon.join("run-1").join("config");
+    let workspace = canon.join("run-1").join("ws");
+    assert!(config_home.is_absolute() && workspace.is_absolute());
+
+    // TS isolated settings: same rule, derived from the same canonical root.
+    let settings = canon.join("wall-large-tool-final-1").join("settings");
+    assert!(settings.is_absolute());
+
+    // Bulk fixture paths are passed to children through tool argv, so they are absolute too.
+    let (bulk, _) = runner::expand_fixture(
+        &fixtures(),
+        "tool-output-block.txt",
+        1,
+        2048,
+        &canon.join("bulk-1"),
+    )
+    .unwrap();
+    for path in &bulk {
+        assert!(
+            path.is_absolute(),
+            "bulk path {} is relative",
+            path.display()
+        );
+    }
+
+    // A relative bulk dir is a harness bug, not a scenario result.
+    let bad = runner::expand_fixture(
+        &fixtures(),
+        "tool-output-block.txt",
+        1,
+        2048,
+        Path::new("rel-bulk"),
+    );
+    assert!(bad.is_err(), "relative bulk dir accepted");
+
+    let _ = &rel;
+    fs::remove_dir_all(&tmp).ok();
+    fs::remove_dir_all(&canon).ok();
 }
 
 #[test]

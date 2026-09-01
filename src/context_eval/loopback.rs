@@ -61,13 +61,25 @@ impl Loopback {
         let state = shared.clone();
         let halt = stopped.clone();
         let handle = std::thread::spawn(move || {
+            // Non-blocking accept plus a flag poll: `stop()` sets the flag and joins, so a
+            // parked accept() that never observes the flag would hang the whole drive.
+            listener
+                .set_nonblocking(true)
+                .expect("loopback listener nonblocking");
             let budget = rounds + 4;
-            for (index, stream) in listener.incoming().take(budget).enumerate() {
-                if halt.load(Ordering::SeqCst) {
-                    break;
+            let mut served = 0usize;
+            while served < budget && !halt.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        serve(stream, served, &bulk, &marker, block_bytes, &state);
+                        served += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(_) => break,
                 }
-                let Ok(stream) = stream else { continue };
-                serve(stream, index, &bulk, &marker, block_bytes, &state);
             }
         });
         Loopback {
