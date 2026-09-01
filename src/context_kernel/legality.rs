@@ -1,8 +1,9 @@
 //! Table-driven legality gate over typed state and a render contract.
 //!
-//! Every check is a row in [`RULES`] so the gate is exhaustive by construction and
-//! new predicates are added as new rows, never as scattered conditionals. A check
-//! returns the violated predicate as text so a rejected send is explainable.
+//! Every check is a row in the `RULES` table so the gate is exhaustive by
+//! construction and new predicates are added as new rows, never as scattered
+//! conditionals. A check returns the violated predicate as text so a rejected
+//! send is explainable.
 
 use crate::context_kernel::canonical::Sink;
 use crate::context_kernel::ir::Region;
