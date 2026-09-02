@@ -65,7 +65,7 @@ impl CodingAgent {
                 },
             )?;
             let output_before = attempt.usage.output_bytes;
-            self.execute_one_call(config, attempt, round, call, index, calls.len())
+            self.execute_one_call(config, store, attempt, round, call, (index, calls.len()))
                 .map_err(|failure| self.tool_failure(store, reserved, failure, &attempt.rounds))?;
             self.update_profile_usage(&attempt.usage);
             self.profile(

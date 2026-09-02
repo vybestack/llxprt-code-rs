@@ -358,78 +358,126 @@ fn write_artifact(dir: &openat::Dir, root: &Path, name: &str, bytes: &[u8]) -> R
         .map_err(|error| format!("publish context artifact {name} failed: {error}"))
 }
 
-/// Replaces every bulk tool result with a deterministic digest record after moving the
-/// full bytes through the fail-closed ingress transaction into the spine and the vault.
+/// Keeps the preserved-span window bounded across pre-entry compaction calls.
+fn trim_preserved(state: &mut ContextState) {
+    let drop = state.preserved.len().saturating_sub(PRESERVED_SPAN_LIMIT);
+    state.preserved.drain(..drop);
+}
+
+/// Builds the compact CTXDIGEST record for one bulk tool result, moving the full bytes
+/// through the fail-closed ingress transaction into the spine and the vault.
 ///
 /// The record is a pure function of `(tool name, result bytes)`: the handle is a content
 /// digest, never a vault slot handle, so a later re-derivation of the same call produces
 /// byte-identical records and replay comparisons stay exact.
-fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> Result<(), String> {
+fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<String, String> {
     use crate::context_ingress::capture::CaptureSource;
     use crate::context_ingress::ingress::IngressTxn;
+    state
+        .store
+        .begin_state_advancing_turn()
+        .map_err(|blocked| match blocked {
+            crate::context_store::store::StoreBlocked::Mode { mode } => {
+                format!("store mode {mode} refused the turn")
+            }
+        })?;
+    let handle = format!(
+        "content-{:016x}",
+        crate::context_kernel::canonical::digest(bytes)
+    );
+    let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
+    txn.capture(CaptureSource::ToolResult, bytes)
+        .map_err(|error| ingress_error(&error))?;
+    let records = txn
+        .commit(&mut state.store)
+        .map_err(|error| ingress_error(&error))?;
+    let segments = records
+        .first()
+        .ok_or_else(|| "ingress committed no records".to_string())?
+        .segments
+        .clone();
+    let range = state
+        .store
+        .sanitized_append(&handle, bytes)
+        .map_err(|error| context_store_error(&error))?;
+    state
+        .store
+        .vault_put(bytes, "tool-result")
+        .map_err(|error| context_store_error(&error))?;
+    let digest = state
+        .filters
+        .digest(tool, &handle, vec![range], bytes, &segments);
+    Ok(digest_record(state, tool, bytes, &handle, &digest))
+}
+
+/// The same record shape computed entirely in memory: no store, no vault, no artifacts.
+///
+/// Used when the store refuses the write, so a bulk result still never rides the request
+/// list as raw bytes even though nothing was committed.
+fn memory_digest(state: &mut ContextState, tool: &str, bytes: &[u8]) -> String {
+    let handle = format!(
+        "content-{:016x}",
+        crate::context_kernel::canonical::digest(bytes)
+    );
+    let digest = state.filters.digest(tool, &handle, Vec::new(), bytes, &[]);
+    digest_record(state, tool, bytes, &handle, &digest)
+}
+
+/// Renders one CTXDIGEST v1 record and folds its preserved spans into the manifest state.
+fn digest_record(
+    state: &mut ContextState,
+    tool: &str,
+    bytes: &[u8],
+    handle: &str,
+    digest: &crate::context_ingress::filter::Digest,
+) -> String {
+    let mut record = format!(
+        "CTXDIGEST v1 tool={tool} bytes={} class={} rule={} vocab={} handle={handle}\n",
+        bytes.len(),
+        digest.class.name(),
+        digest.rule_version,
+        digest.vocabulary_version,
+    );
+    for span in &digest.preserved {
+        record.push_str(&String::from_utf8_lossy(&bytes[span.span.clone()]));
+        record.push('\n');
+    }
+    if !digest.summary.is_empty() {
+        state
+            .preserved
+            .push(String::from_utf8_lossy(&digest.summary).into_owned());
+    }
+    record
+}
+
+/// Lock-poisoned fallback: a pure in-memory record with no shared state touched at all.
+fn memory_quiesce_record(tool: &str, result: &str) -> String {
+    let mut state = ContextState {
+        store: crate::context_store::store::ContextStore::open(&context_vault_key("unavailable")),
+        filters: crate::context_ingress::filter::FilterRegistry::new(),
+        quiesce: Some("quiesce_unwritable".to_string()),
+        detail: Some("context store lock poisoned".to_string()),
+        preserved: Vec::new(),
+    };
+    memory_digest(&mut state, tool, result.as_bytes())
+}
+
+/// Replaces every bulk tool result with a deterministic digest record after moving the
+/// full bytes through the fail-closed ingress transaction into the spine and the vault.
+///
+/// Results already compacted pre-entry are below the bulk threshold and are skipped, so
+/// the checkpoint seam never digests the same bytes twice.
+fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> Result<(), String> {
     for round in rounds.iter_mut() {
         for call in round.calls.iter_mut() {
             let bytes = call.result.as_bytes();
             if bytes.len() <= BULK_RESULT_BYTES {
                 continue;
             }
-            state
-                .store
-                .begin_state_advancing_turn()
-                .map_err(|blocked| match blocked {
-                    crate::context_store::store::StoreBlocked::Mode { mode } => {
-                        format!("store mode {mode} refused the turn")
-                    }
-                })?;
-            let handle = format!(
-                "content-{:016x}",
-                crate::context_kernel::canonical::digest(bytes)
-            );
-            let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
-            txn.capture(CaptureSource::ToolResult, bytes)
-                .map_err(|error| ingress_error(&error))?;
-            let records = txn
-                .commit(&mut state.store)
-                .map_err(|error| ingress_error(&error))?;
-            let segments = records
-                .first()
-                .ok_or_else(|| "ingress committed no records".to_string())?
-                .segments
-                .clone();
-            let range = state
-                .store
-                .sanitized_append(&handle, bytes)
-                .map_err(|error| context_store_error(&error))?;
-            state
-                .store
-                .vault_put(bytes, "tool-result")
-                .map_err(|error| context_store_error(&error))?;
-            let digest = state
-                .filters
-                .digest(&call.name, &handle, vec![range], bytes, &segments);
-            let mut record = format!(
-                "CTXDIGEST v1 tool={} bytes={} class={} rule={} vocab={} handle={}\n",
-                call.name,
-                bytes.len(),
-                digest.class.name(),
-                digest.rule_version,
-                digest.vocabulary_version,
-                handle
-            );
-            for span in &digest.preserved {
-                record.push_str(&String::from_utf8_lossy(&bytes[span.span.clone()]));
-                record.push('\n');
-            }
-            if !digest.summary.is_empty() {
-                state
-                    .preserved
-                    .push(String::from_utf8_lossy(&digest.summary).into_owned());
-            }
-            call.result = record;
+            call.result = ingest_bulk(state, &call.name, bytes)?;
         }
     }
-    let drop = state.preserved.len().saturating_sub(PRESERVED_SPAN_LIMIT);
-    state.preserved.drain(..drop);
+    trim_preserved(state);
     Ok(())
 }
 
@@ -1084,6 +1132,70 @@ impl SessionStore {
             self.record_quiesce_manifest(state);
         }
         Ok(transformed)
+    }
+
+    /// Compacts one tool result before it is recorded into the round.
+    ///
+    /// Bulk results are digested here, ahead of the request list, so the request that
+    /// carries the result to the provider stays small and the pre-send wall guard never
+    /// sees raw bulk bytes. Results below the bulk threshold are returned unchanged and
+    /// touch no store state.
+    ///
+    /// A store or artifact failure never fails the turn: the record is still compact
+    /// (computed in memory), the run is marked quiesce, and the marker is persisted
+    /// best-effort where it stays readable when only `context/` is unwritable.
+    pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
+        if result.len() <= BULK_RESULT_BYTES {
+            return result.to_string();
+        }
+        let Ok(mut guard) = self.context.lock() else {
+            return memory_quiesce_record(tool, result);
+        };
+        if guard.is_none() {
+            let key = context_vault_key(&self.session_id);
+            *guard = Some(ContextState {
+                store: crate::context_store::store::ContextStore::open(&key),
+                filters: crate::context_ingress::filter::FilterRegistry::new(),
+                quiesce: None,
+                detail: None,
+                preserved: Vec::new(),
+            });
+        }
+        let Some(state) = guard.as_mut() else {
+            return memory_quiesce_record(tool, result);
+        };
+        let record = match ingest_bulk(state, tool, result.as_bytes()) {
+            Ok(record) => record,
+            Err(reason) => {
+                state.quiesce = Some("quiesce_unwritable".to_string());
+                state.detail = Some(reason);
+                memory_digest(state, tool, result.as_bytes())
+            }
+        };
+        if let Err(reason) = self.persist_context(state) {
+            state.quiesce = Some("quiesce_unwritable".to_string());
+            state.detail = Some(reason);
+            self.record_quiesce_manifest(state);
+            self.record_quiesce_fallback(state);
+        }
+        trim_preserved(state);
+        record
+    }
+
+    /// Best-effort quiesce marker beside the session, readable when only `context/` was
+    /// made unwritable. Same shape as `context/manifest.json`, so the envelope re-read
+    /// parses either location.
+    fn record_quiesce_fallback(&self, state: &ContextState) {
+        let manifest = ContextManifest {
+            mode: state.store.mode().name(),
+            quiesce: state.quiesce.as_deref(),
+            detail: state.detail.as_deref(),
+            preserved: &state.preserved,
+        };
+        let Ok(bytes) = serde_json::to_vec(&manifest) else {
+            return;
+        };
+        let _ = std::fs::write(self.session_dir.join("context-quiesce.json"), &bytes);
     }
 
     /// Opens (or creates) the private `context` subdirectory of the session.

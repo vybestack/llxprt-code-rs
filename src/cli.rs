@@ -168,7 +168,11 @@ fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
         terminal_outcome: None,
         preserved: Vec::new(),
     };
-    let Ok(raw) = std::fs::read_to_string(session_dir.join("context").join("manifest.json")) else {
+    // The store also drops a best-effort marker beside the session when only
+    // `context/` is unwritable, so both readable locations are consulted.
+    let raw = std::fs::read_to_string(session_dir.join("context").join("manifest.json"))
+        .or_else(|_| std::fs::read_to_string(session_dir.join("context-quiesce.json")));
+    let Ok(raw) = raw else {
         return declared;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
