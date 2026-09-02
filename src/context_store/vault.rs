@@ -6,6 +6,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
+use serde::Serialize;
 use std::collections::HashMap;
 
 /// Vault key material (32 bytes for AES-256-GCM).
@@ -114,4 +115,59 @@ impl Vault {
             .filter(|slot| matches!(slot, Slot::Live { .. }))
             .count()
     }
+
+    /// Deterministic, serde-ready snapshot of the vault state for durable artifacts.
+    ///
+    /// Slots are sorted by handle (hash-map iteration order is random) and byte fields
+    /// are hex-encoded, so the same vault state always serializes to the same bytes.
+    pub fn snapshot(&self) -> VaultSnapshot {
+        let mut slots = Vec::with_capacity(self.slots.len());
+        for (handle, slot) in &self.slots {
+            let snapshot = match slot {
+                Slot::Live { nonce, ciphertext } => VaultSlotSnapshot {
+                    handle: handle.clone(),
+                    nonce: hex(nonce),
+                    ciphertext: hex(ciphertext),
+                    erased: false,
+                },
+                Slot::Tombstone => VaultSlotSnapshot {
+                    handle: handle.clone(),
+                    nonce: String::new(),
+                    ciphertext: String::new(),
+                    erased: true,
+                },
+            };
+            slots.push(snapshot);
+        }
+        slots.sort_by(|left, right| left.handle.cmp(&right.handle));
+        VaultSnapshot {
+            next: self.next,
+            slots,
+        }
+    }
+}
+
+/// One serialized vault slot: ciphertext plus nonce, or a tombstone.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct VaultSlotSnapshot {
+    pub handle: String,
+    pub nonce: String,
+    pub ciphertext: String,
+    pub erased: bool,
+}
+
+/// Deterministic serialized vault state, including the slot counter.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct VaultSnapshot {
+    pub next: u64,
+    pub slots: Vec<VaultSlotSnapshot>,
+}
+
+/// Lowercase hex encoding without an external codec dependency.
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }

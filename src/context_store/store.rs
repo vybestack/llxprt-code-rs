@@ -227,4 +227,36 @@ impl ContextStore {
     pub fn recovered_tail_records(&self) -> usize {
         self.spine.recovered_tail_records()
     }
+
+    /// Deterministic serialized vault state for durable artifacts.
+    pub fn vault_snapshot(&self) -> crate::context_store::vault::VaultSnapshot {
+        self.vault.snapshot()
+    }
+}
+
+/// Stable textual refusal used at the ingress seam.
+fn store_refusal(error: &StoreError) -> String {
+    match error {
+        StoreError::Spine(_) => "spine refused the sanitized append".to_string(),
+        StoreError::Vault(_) => "vault refused the quarantined write".to_string(),
+        StoreError::Blocked(_) => "store mode refused the write".to_string(),
+    }
+}
+
+impl crate::context_ingress::ingress::IngressSink for ContextStore {
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<Range<u64>, String> {
+        let handle = format!(
+            "ingress-{:016x}",
+            crate::context_kernel::canonical::digest(bytes)
+        );
+        ContextStore::sanitized_append(self, &handle, bytes).map_err(|error| store_refusal(&error))
+    }
+
+    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
+        ContextStore::vault_put(self, raw, reason).map_err(|error| store_refusal(&error))
+    }
+
+    fn mode(&self) -> &'static str {
+        self.mode().name()
+    }
 }
