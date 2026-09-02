@@ -10,9 +10,6 @@
 use super::budget::{self, Budget};
 use super::operation;
 
-/// Minimum potential a reclamation row must free (`bar > 0`, safety-invariant).
-pub const RECLAMATION_BAR: u64 = 8;
-
 /// Fenced epoch; monotonic, single writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Epoch(pub u64);
@@ -49,10 +46,11 @@ impl TxnState {
     /// Only forward, adjacent steps are legal; abort is reachable from any
     /// non-terminal state.
     pub fn can_transition(self, to: TxnState) -> bool {
+        let terminal = self == TxnState::Committed || self == TxnState::Aborted;
         if to == TxnState::Aborted {
-            return !matches!(self, TxnState::Committed | TxnState::Aborted);
+            return !terminal;
         }
-        !matches!(self, TxnState::Committed | TxnState::Aborted) && to.index() == self.index() + 1
+        !terminal && to.index() == self.index() + 1
     }
 }
 
@@ -142,7 +140,7 @@ impl Executor {
         if operation::find(op).is_none() {
             return Err(ExecutorError::CapabilityNotLanded { op });
         }
-        if !matches!(self.state, TxnState::Proposed | TxnState::Committed) {
+        if self.state != TxnState::Proposed && self.state != TxnState::Committed {
             return Err(ExecutorError::IllegalTransition {
                 from: self.state,
                 to: TxnState::Proposed,
@@ -198,7 +196,7 @@ impl Executor {
         }
         let txn = self.current.clone().expect("txn present after propose");
         let row = operation::find(txn.op).expect("registered");
-        if row.reclamation && !budget::net_reclaim_ok(phi_pre, phi_post, RECLAMATION_BAR) {
+        if row.reclamation && !budget::net_reclaim_ok(phi_pre, phi_post, row.bar) {
             return Err(ExecutorError::PreconditionFailed {
                 which: "reclamation-bar",
             });

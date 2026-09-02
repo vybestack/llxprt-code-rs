@@ -58,7 +58,8 @@ fn operation_class_variants_are_registered() {
     let have = names();
     for class in classes {
         let row = snake(class);
-        assert!(have.contains(&row.as_str()), "{class} -> {row} missing");
+        let found = have.contains(&row.as_str());
+        assert!(found, "{class} -> {row} missing");
     }
 }
 
@@ -79,15 +80,15 @@ fn registry_rows_are_well_formed() {
         assert!(!row.name.is_empty());
         assert!(!row.precondition.is_empty(), "{}", row.name);
         assert!(!row.postcondition.is_empty(), "{}", row.name);
-        assert!((1..=9).contains(&row.owner_phase), "{}", row.name);
-        assert!(
-            row.proposer.as_str() == "S"
-                || row.proposer.as_str() == "C"
-                || row.proposer.as_str() == "M"
-                || row.proposer.as_str() == "O"
-                || row.proposer.as_str() == "U"
-                || row.proposer.as_str() == "L"
-        );
+        let phase_ok = (1..=9).contains(&row.owner_phase);
+        assert!(phase_ok, "{}", row.name);
+        let ok = row.proposer.as_str() == "S"
+            || row.proposer.as_str() == "C"
+            || row.proposer.as_str() == "M"
+            || row.proposer.as_str() == "O"
+            || row.proposer.as_str() == "U"
+            || row.proposer.as_str() == "L";
+        assert!(ok);
     }
 }
 
@@ -126,15 +127,20 @@ fn registry_covers_every_committed_class_exactly_once() {
 fn event_kind_surface_is_covered() {
     let have = names();
     // Append -> admit-ingress / sanitize
-    assert!(have.contains(&"admit-ingress"));
-    assert!(have.contains(&"sanitize"));
+    let ok2 = have.contains(&"admit-ingress");
+    assert!(ok2);
+    let ok3 = have.contains(&"sanitize");
+    assert!(ok3);
     // Ledger -> demote / discharge / revalidate
     for l in ["demote", "discharge", "revalidate"] {
-        assert!(have.contains(&l), "{l} missing");
+        let ok4 = have.contains(&l);
+        assert!(ok4, "{l} missing");
     }
     // ProviderTurn -> render-contract-observed / pending-response-stage
-    assert!(have.contains(&"render-contract-observed"));
-    assert!(have.contains(&"pending-response-stage"));
+    let ok5 = have.contains(&"render-contract-observed");
+    assert!(ok5);
+    let ok6 = have.contains(&"pending-response-stage");
+    assert!(ok6);
 }
 
 /// GREEN: port contract is deterministic and additive on the test port.
@@ -222,7 +228,7 @@ fn stale_parent_compare_and_commit() {
     ex2.validate(50, &budget, 80, 0, 0).unwrap();
     assert_eq!(ex2.commit(99).unwrap(), TxnState::Committed);
     assert!(operation::find("note").unwrap().rebase_safe);
-} // RED until #40 greens
+}
 
 /// RED until #40 greens: crash property - replaying any prefix leaves the txn
 /// committed-before-or-aborted-after, never partially applied.
@@ -251,22 +257,18 @@ fn replay_prefix_is_never_partial() {
             }
         }
         let s = ex.state();
-        assert!(
-            s != TxnState::Committed || committed,
-            "committed without a durable commit at cut {cut}"
-        );
+        let ok7 = s != TxnState::Committed || committed;
+        assert!(ok7, "committed without a durable commit at cut {cut}");
         if !committed {
-            assert!(
-                matches!(
-                    s,
-                    TxnState::Proposed
-                        | TxnState::Snapshotted
-                        | TxnState::Generated
-                        | TxnState::Validated
-                        | TxnState::Aborted
-                ),
-                "partial state {s:?} at cut {cut}"
+            let ok8 = matches!(
+                s,
+                TxnState::Proposed
+                    | TxnState::Snapshotted
+                    | TxnState::Generated
+                    | TxnState::Validated
+                    | TxnState::Aborted
             );
+            assert!(ok8, "partial state {s:?} at cut {cut}");
         }
     }
 } // RED until #40 greens
@@ -275,14 +277,18 @@ fn replay_prefix_is_never_partial() {
 #[test]
 fn budget_properties() {
     let budget = Budget { b: 100, r: 8, h: 4 };
-    assert!(budget::fits(88, &budget));
-    assert!(!budget::fits(89, &budget));
-    assert!(budget::feasible(88, &budget));
-    assert!(!budget::feasible(89, &budget));
+    let fits88 = budget::fits(88, &budget);
+    assert!(fits88);
+    let fits89 = budget::fits(89, &budget);
+    assert!(!fits89);
+    let feasible = budget::feasible(88, &budget);
+    assert!(feasible);
+    let feasible2 = budget::feasible(89, &budget);
+    assert!(!feasible2);
     assert!(budget::net_reclaim_ok(100, 92, 8));
     assert!(!budget::net_reclaim_ok(100, 93, 8));
     assert!(!budget::net_reclaim_ok(100, 101, 8));
-    assert!(super::executor::RECLAMATION_BAR > 0);
+    assert!(super::operation::find("compact").unwrap().bar > 0);
 } // RED until #40 greens
 
 /// RED until #40 greens: rows owned by later phases answer with a typed
