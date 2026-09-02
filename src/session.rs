@@ -280,6 +280,12 @@ const BULK_RESULT_BYTES: usize = 1024;
 const INGRESS_WORK_BUDGET: usize = 1 << 20;
 /// Preserved spans retained for the envelope summary, newest last.
 const PRESERVED_SPAN_LIMIT: usize = 64;
+/// Preserved spans the compact CTXDIGEST record itself may carry. The full span set still
+/// persists in `context/manifest.json`, so the record only needs enough to identify the
+/// preserved evidence while staying far below the pre-send request budget.
+const DIGEST_SPAN_LIMIT: usize = 4;
+/// Byte budget for the preserved-span block of one compact CTXDIGEST record.
+const DIGEST_SPAN_BYTES: usize = 1024;
 
 /// Lazily opened phase-2 context store with its filter registry and quiesce state.
 struct ContextState {
@@ -438,9 +444,28 @@ fn digest_record(
         digest.rule_version,
         digest.vocabulary_version,
     );
-    for span in &digest.preserved {
-        record.push_str(&String::from_utf8_lossy(&bytes[span.span.clone()]));
+    // Bounded span block: a pure function of the digest and the bytes, so re-derivation
+    // (checkpoint vs finalize) still renders byte-identical records. The first spans are
+    // kept whole until the byte budget cuts a span, which keeps every carried span exact
+    // (never a partial line) while the full set stays durable in `context/manifest.json`.
+    let mut budget = DIGEST_SPAN_BYTES;
+    let mut carried = 0usize;
+    for span in digest.preserved.iter() {
+        if carried >= DIGEST_SPAN_LIMIT {
+            break;
+        }
+        let text = String::from_utf8_lossy(&bytes[span.span.clone()]).into_owned();
+        if carried > 0 && text.len() > budget {
+            break;
+        }
+        budget = budget.saturating_sub(text.len());
+        carried += 1;
+        record.push_str(&text);
         record.push('\n');
+    }
+    let elided = digest.preserved.len().saturating_sub(carried);
+    if elided > 0 {
+        record.push_str(&format!("preserved_spans_elided={elided}\n"));
     }
     if !digest.summary.is_empty() {
         state
