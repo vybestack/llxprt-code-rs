@@ -147,6 +147,25 @@ fn agent(backend: Box<dyn ChatBackend>, cwd: &Path) -> CodingAgent {
     CodingAgent::with_backend(backend, cwd.to_path_buf(), false)
 }
 
+/// The `content-…` handle carried by a compact `CTXDIGEST` record.
+fn digest_handle(record: &str) -> &str {
+    let header = record
+        .lines()
+        .next()
+        .expect("digest record carries a header line");
+    let at = header
+        .find("handle=")
+        .expect("digest record carries a content handle")
+        + "handle=".len();
+    &header[at..]
+}
+
+/// Reads one published `context/` artifact of a session.
+fn context_artifact(st: &SessionStore, name: &str) -> Vec<u8> {
+    std::fs::read(st.session_dir.join("context").join(name))
+        .unwrap_or_else(|error| panic!("read context artifact {name} failed: {error}"))
+}
+
 #[test]
 fn no_tool_turn_persists_final_response_and_turn2_includes_prior() {
     let cwd = new_cwd();
@@ -699,17 +718,23 @@ fn first_turn_tiny_context_makes_zero_model_calls() {
     assert_eq!(snap.branches[0].lifecycle, Lifecycle::Failed);
 }
 
-/// A later round whose materialized request would exceed the context budget stops the turn
-/// before the next model call: the overflowing request is never sent.
+/// A later round whose raw tool output would blow the context budget no longer stops the
+/// attempt: bulk results are digested pre-entry, so the replayed request carries a compact
+/// CTXDIGEST record instead of the payload, and the full bytes move to the spine and vault.
 #[test]
 fn later_round_context_overflow_stops_before_next_call() {
     let cwd = new_cwd();
     let st = store("sctx2");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     // The first request (system + prompt + tool schemas) fits a 600 KiB budget; its
-    // read_file round materializes ~1 MiB of tool output into the next request, which the
-    // budget refuses before another model call.
-    std::fs::write(cwd.join("big.txt"), "y".repeat(1024 * 1024)).unwrap();
+    // read_file round would materialize ~1 MiB of raw tool output into the next request.
+    // Compacting that result pre-entry keeps the next request inside the budget, so the
+    // attempt completes instead of being refused by the context limit.
+    let payload_len = 1024 * 1024;
+    // read_file frames the window as "[0..N of N bytes]\n" before the content, so the
+    // digested result is the payload plus that header; the digest reports the framed size.
+    let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
+    std::fs::write(cwd.join("big.txt"), "y".repeat(payload_len)).unwrap();
     let round = LlmResult {
         text: "reading".to_string(),
         calls: vec![ToolCall {
@@ -724,14 +749,44 @@ fn later_round_context_overflow_stops_before_next_call() {
         &cwd,
     )
     .with_context_limit(Some(200_000));
-    let e = a
-        .run(&st, &r)
-        .expect_err("the materialized overflow must stop the attempt");
-    assert_eq!(e.key, "context-limit");
-    assert_eq!(
-        a.model_calls(),
-        1,
-        "the overflow stops before the next request"
+    let run = a.run(&st, &r).expect("the digested replay fits the budget");
+    assert_eq!(run.status, "ok", "the attempt completes");
+    assert_eq!(run.tool_count, 1);
+    assert!(!run.budget_exhausted, "nothing was cut short");
+    assert_eq!(a.model_calls(), 2, "the follow-up request is still sent");
+
+    // The bulk content was contained rather than replayed raw.
+    let snapshot = st.snapshot().unwrap();
+    let branch = snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == r.branch_id)
+        .unwrap();
+    let retained = &branch.rounds[0].calls[0].result;
+    assert!(
+        retained.starts_with("CTXDIGEST v1 tool=read_file "),
+        "the bulk result is retained as a digest record: {retained}"
+    );
+    assert!(
+        retained.contains(&format!("bytes={framed_len}")),
+        "the record still reports the full payload size: {retained}"
+    );
+    assert!(
+        retained.len() < 4096,
+        "the retained record stays bounded: {retained}"
+    );
+    let handle = digest_handle(retained);
+    assert!(
+        handle.starts_with("content-") && handle.len() == "content-".len() + 16,
+        "the record carries a content digest handle, not a vault slot: {handle}"
+    );
+    assert!(
+        context_artifact(&st, "sanitized").len() >= payload_len,
+        "the sanitized spine holds the payload bytes"
+    );
+    assert!(
+        context_artifact(&st, "vault").len() >= payload_len,
+        "the vault holds the full payload bytes"
     );
 }
 
@@ -803,14 +858,20 @@ fn aggregate_args_across_rounds_rejected() {
     assert!(!cwd.join("args-b.txt").exists());
 }
 
-/// Tool outputs consume one shared turn budget. Later calls receive only the remaining bytes, so
-/// neither the next model request nor the persisted round can contain an oversized aggregate.
+/// Tool outputs consume one shared turn budget. Later calls receive only the remaining bytes,
+/// so neither the next model request nor the persisted round can contain an oversized
+/// aggregate. Bulk results are then compacted pre-entry: the persisted round holds one
+/// bounded CTXDIGEST record per call while the full bytes live in the vault.
 #[test]
 fn multiple_tool_calls_share_remaining_output_budget() {
     use llxprt_code_rs::agent::MAX_TURN_OUTPUT_BYTES;
 
     let cwd = new_cwd();
-    std::fs::write(cwd.join("megabyte.txt"), "z".repeat(1024 * 1024)).unwrap();
+    let payload_len = 1024 * 1024;
+    // read_file frames the window as "[0..N of N bytes]\n" before the content, so the
+    // digested result is the payload plus that header; the digest reports the framed size.
+    let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
+    std::fs::write(cwd.join("megabyte.txt"), "z".repeat(payload_len)).unwrap();
     let st = store("sagg-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let calls = (0..16)
@@ -837,17 +898,56 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         .iter()
         .find(|branch| branch.branch_id == reserved.branch_id)
         .unwrap();
-    let output_bytes: usize = branch.rounds[0]
-        .calls
-        .iter()
-        .map(|call| call.result.len())
-        .sum();
-    assert_eq!(output_bytes, MAX_TURN_OUTPUT_BYTES);
-    assert_eq!(branch.rounds[0].calls.len(), 16);
+    let retained_calls = &branch.rounds[0].calls;
+    assert_eq!(retained_calls.len(), 16, "every call is retained");
+    for call in retained_calls {
+        assert!(
+            call.result.starts_with("CTXDIGEST v1 tool=read_file "),
+            "each bulk result is retained as a digest record: {}",
+            call.result
+        );
+    }
+    assert!(
+        retained_calls[0]
+            .result
+            .contains(&format!("bytes={framed_len}")),
+        "the record reports the payload the shared budget left for one call: {}",
+        retained_calls[0].result
+    );
+    assert!(
+        retained_calls
+            .iter()
+            .all(|call| call.result == retained_calls[0].result),
+        "identical clipped outputs render identical digest records"
+    );
+    let output_bytes: usize = retained_calls.iter().map(|call| call.result.len()).sum();
+    assert_eq!(
+        output_bytes, 1632,
+        "16 bounded digest records are retained, not 16 MiB of raw output"
+    );
+    assert!(
+        output_bytes < MAX_TURN_OUTPUT_BYTES,
+        "the retained aggregate stays inside the shared output budget"
+    );
+    let handle = digest_handle(&retained_calls[0].result);
+    assert!(
+        handle.starts_with("content-") && handle.len() == "content-".len() + 16,
+        "the record carries a content digest handle, not a vault slot: {handle}"
+    );
+    assert!(
+        context_artifact(&st, "sanitized").len() >= payload_len,
+        "the sanitized spine holds the payload bytes"
+    );
+    assert!(
+        context_artifact(&st, "vault").len() >= payload_len,
+        "the vault holds the full payload bytes"
+    );
 }
 
-/// A single search that could render more than the whole turn budget is clipped before it reaches
-/// the next model request or the persisted session record.
+/// A single search that could render more than the whole turn budget is clipped to that
+/// budget and then compacted to one bounded CTXDIGEST record before it reaches the next
+/// model request or the persisted session record; the clipped bytes go to the spine and
+/// vault.
 #[test]
 fn oversized_search_output_is_bounded_before_retention() {
     use llxprt_code_rs::agent::MAX_TURN_OUTPUT_BYTES;
@@ -882,7 +982,33 @@ fn oversized_search_output_is_bounded_before_retention() {
         .find(|branch| branch.branch_id == reserved.branch_id)
         .unwrap();
     let retained = &branch.rounds[0].calls[0].result;
-    assert_eq!(retained.len(), MAX_TURN_OUTPUT_BYTES);
+    assert!(
+        retained.starts_with("CTXDIGEST v1 tool=search_file_content "),
+        "the oversized result is retained as a digest record: {retained}"
+    );
+    assert!(
+        retained.contains(&format!("bytes={MAX_TURN_OUTPUT_BYTES}")),
+        "the record reports the clipped size the budget allowed: {retained}"
+    );
+    assert_eq!(
+        retained.len(),
+        113,
+        "one bounded digest record is retained: {retained}"
+    );
+    assert!(retained.len() < MAX_TURN_OUTPUT_BYTES);
+    let handle = digest_handle(retained);
+    assert!(
+        handle.starts_with("content-") && handle.len() == "content-".len() + 16,
+        "the record carries a content digest handle, not a vault slot: {handle}"
+    );
+    assert!(
+        context_artifact(&st, "sanitized").len() >= MAX_TURN_OUTPUT_BYTES,
+        "the sanitized spine holds the payload bytes"
+    );
+    assert!(
+        context_artifact(&st, "vault").len() >= MAX_TURN_OUTPUT_BYTES,
+        "the vault holds the full payload bytes"
+    );
 }
 
 /// A request timeout at or above the lease minus the safety margin is refused up front: a
