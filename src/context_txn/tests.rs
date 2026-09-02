@@ -3,7 +3,7 @@
 //! the green turn must satisfy (red now).
 
 use super::budget::{self, AccountingPort, Budget};
-use super::executor::{Epoch, Executor, ExecutorError, TxnState};
+use super::executor::{Epoch, Executor, ExecutorError, FencingClock, TxnState};
 use super::operation::{self, Proposer};
 
 /// Deterministic, additive, conservative test port.
@@ -151,7 +151,7 @@ fn accounting_port_is_deterministic_and_additive() {
     assert_eq!(port.bound(7, 40) + port.bound(7, 60), port.bound(7, 100));
 }
 
-/// RED until #40 greens: each legal step advances the state machine.
+/// each legal step advances the state machine.
 #[test]
 fn legal_steps_advance() {
     let mut ex = Executor::new(Epoch(1));
@@ -166,9 +166,8 @@ fn legal_steps_advance() {
     assert_eq!(ex.state(), TxnState::Validated);
     assert_eq!(ex.commit(txn.parent_version).unwrap(), TxnState::Committed);
     assert_eq!(ex.state(), TxnState::Committed);
-} // RED until #40 greens
-
-/// RED until #40 greens: skipping states is rejected.
+}
+/// skipping states is rejected.
 #[test]
 fn skipped_states_are_illegal() {
     let mut ex = Executor::new(Epoch(1));
@@ -183,9 +182,8 @@ fn skipped_states_are_illegal() {
             to: TxnState::Validated
         }
     );
-} // RED until #40 greens
-
-/// RED until #40 greens: abort is legal from any live state, terminal states
+}
+/// abort is legal from any live state, terminal states
 /// are terminal.
 #[test]
 fn abort_is_legal_and_terminals_are_final() {
@@ -199,9 +197,8 @@ fn abort_is_legal_and_terminals_are_final() {
             to: TxnState::Committed
         })
     );
-} // RED until #40 greens
-
-/// RED until #40 greens: compare-and-commit - non-rebase-safe rows abort on
+}
+/// compare-and-commit - non-rebase-safe rows abort on
 /// parent mismatch, rebase-safe rows re-apply.
 #[test]
 fn stale_parent_compare_and_commit() {
@@ -230,7 +227,7 @@ fn stale_parent_compare_and_commit() {
     assert!(operation::find("note").unwrap().rebase_safe);
 }
 
-/// RED until #40 greens: crash property - replaying any prefix leaves the txn
+/// crash property - replaying any prefix leaves the txn
 /// committed-before-or-aborted-after, never partially applied.
 #[test]
 fn replay_prefix_is_never_partial() {
@@ -271,9 +268,8 @@ fn replay_prefix_is_never_partial() {
             assert!(ok8, "partial state {s:?} at cut {cut}");
         }
     }
-} // RED until #40 greens
-
-/// RED until #40 greens: budget properties.
+}
+/// budget properties.
 #[test]
 fn budget_properties() {
     let budget = Budget { b: 100, r: 8, h: 4 };
@@ -289,9 +285,8 @@ fn budget_properties() {
     assert!(!budget::net_reclaim_ok(100, 93, 8));
     assert!(!budget::net_reclaim_ok(100, 101, 8));
     assert!(super::operation::find("compact").unwrap().bar > 0);
-} // RED until #40 greens
-
-/// RED until #40 greens: rows owned by later phases answer with a typed
+}
+/// rows owned by later phases answer with a typed
 /// capability_not_landed verdict, never a silent omission.
 #[test]
 fn later_phase_rows_answer_capability_not_landed() {
@@ -304,9 +299,8 @@ fn later_phase_rows_answer_capability_not_landed() {
             other => panic!("{name} should not land yet: {other:?}"),
         }
     }
-} // RED until #40 greens
-
-/// RED until #40 greens: unknown rows are rejected at propose.
+}
+/// unknown rows are rejected at propose.
 #[test]
 fn unknown_rows_are_rejected() {
     let mut ex = Executor::new(Epoch(5));
@@ -314,8 +308,7 @@ fn unknown_rows_are_rejected() {
         ex.propose("no-such-op", 1),
         Err(ExecutorError::CapabilityNotLanded { op: "no-such-op" })
     );
-} // RED until #40 greens
-
+}
 /// GREEN: proposer letters round-trip.
 #[test]
 fn proposer_letters_round_trip() {
@@ -324,4 +317,87 @@ fn proposer_letters_round_trip() {
     assert_eq!(Proposer::M.as_str(), "M");
     assert_eq!(Proposer::O.as_str(), "O");
     assert_eq!(Proposer::L.as_str(), "L");
+}
+
+/// Fencing: a newer lease epoch fences older executors out at commit.
+#[test]
+fn newer_lease_fences_older_executor() {
+    let clock = FencingClock::new();
+    let e1 = clock.acquire();
+    let mut ex1 = Executor::new(e1);
+    ex1.propose("note", 5).unwrap();
+    ex1.snapshot().unwrap();
+    ex1.generate().unwrap();
+    let budget = Budget { b: 100, r: 8, h: 4 };
+    ex1.validate(50, &budget, 80, 0, 0).unwrap();
+    clock.acquire();
+    match ex1.commit_fenced(5, &clock) {
+        Err(ExecutorError::Fenced { held: 2, mine: 1 }) => {}
+        other => panic!("expected Fenced {{held: 3, mine: 1}}, got {other:?}"),
+    }
+    assert_eq!(ex1.state(), TxnState::Aborted);
+
+    let mut ex2 = Executor::new(clock.acquire());
+    ex2.propose("note", 5).unwrap();
+    ex2.snapshot().unwrap();
+    ex2.generate().unwrap();
+    ex2.validate(50, &budget, 80, 0, 0).unwrap();
+    let done = ex2.commit_fenced(5, &clock);
+    assert_eq!(done.unwrap(), TxnState::Committed);
+}
+
+/// Authority non-increase: proposer or named authority may act; others denied.
+#[test]
+fn authority_non_increase() {
+    let mut ex = Executor::new(Epoch(9));
+    let as_m = ex.propose_as("note", 1, Proposer::M);
+    assert!(as_m.is_ok());
+    let as_c = ex.propose_as("note", 1, Proposer::C);
+    assert!(as_c.is_ok());
+    let denied = ex.propose_as("note", 1, Proposer::S);
+    match denied {
+        Err(ExecutorError::AuthorityDenied {
+            op: "note",
+            by: Proposer::S,
+        }) => {}
+        other => panic!("expected AuthorityDenied, got {other:?}"),
+    }
+}
+
+/// Issue DoD: the registry must cover every row of the design's tab:ops.
+#[test]
+fn registry_covers_design_table_rows() {
+    let tex = include_str!("../../design-docs/context-management/design.tex");
+    let have = names();
+    let mut table_rows = 0;
+    // Row coverage is defined by the tab:ops longtable only. Split the
+    // document on table starts, keep the first table whose body (the part
+    // before \end{longtable}) carries the tab:ops label, and parse just its
+    // rows: prose and unrelated tables must never inflate the count.
+    let block = tex
+        .split("\\begin{longtable}")
+        .skip(1)
+        .filter_map(|table| table.split_once("\\end{longtable}"))
+        .map(|(body, _)| body)
+        .find(|body| body.contains("\\label{tab:ops}"))
+        .unwrap_or("");
+    for line in block.lines() {
+        let trimmed = line.trim();
+        let split = trimmed.split_once(" & ");
+        let pair = match split {
+            Some(p) => p,
+            None => continue,
+        };
+        let (name, rest) = pair;
+        let body = name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-');
+        let is_row = !name.is_empty() && body && !rest.starts_with('}');
+        if !is_row {
+            continue;
+        }
+        table_rows += 1;
+        let found = have.contains(&name);
+        assert!(found, "design row {name} missing from registry");
+    }
+    assert!(table_rows >= 55);
+    assert!(table_rows <= 70, "parsed {table_rows} rows - over-matched");
 }

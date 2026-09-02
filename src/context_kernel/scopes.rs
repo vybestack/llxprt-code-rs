@@ -13,7 +13,7 @@ pub enum ScopeState {
     Open,
     /// Closed by an admitted harness scope event.
     ClosedByEvent,
-    /// Closed by the declare-boundary operation.
+    /// Closed by the scope-close-by-declaration operation.
     ClosedByDeclaration,
 }
 

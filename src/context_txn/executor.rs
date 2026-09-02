@@ -8,11 +8,42 @@
 //! enforced *centrally* here, for every row.
 
 use super::budget::{self, Budget};
-use super::operation;
+use super::operation::{self, Proposer};
 
 /// Fenced epoch; monotonic, single writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Epoch(pub u64);
+
+/// Monotonic fencing clock backing lease acquisition (design S8.3).
+pub struct FencingClock {
+    latest: std::cell::Cell<u64>,
+}
+
+impl FencingClock {
+    pub fn new() -> Self {
+        FencingClock {
+            latest: std::cell::Cell::new(0),
+        }
+    }
+
+    /// Acquire the next lease epoch; strictly monotonic.
+    pub fn acquire(&self) -> Epoch {
+        let e = self.latest.get() + 1;
+        self.latest.set(e);
+        Epoch(e)
+    }
+
+    /// Highest lease ever issued.
+    pub fn latest(&self) -> u64 {
+        self.latest.get()
+    }
+}
+
+impl Default for FencingClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Transaction lifecycle states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +117,15 @@ pub enum ExecutorError {
     CapabilityNotLanded { op: &'static str },
     /// A universal precondition failed; `which` names it.
     PreconditionFailed { which: &'static str },
+    /// A newer lease exists; this executor's epoch is fenced out.
+    Fenced {
+        /// Epoch currently held.
+        held: u64,
+        /// Our fenced-out epoch.
+        mine: u64,
+    },
+    /// Acting principal exceeds the row's registered authority.
+    AuthorityDenied { op: &'static str, by: Proposer },
     /// Non-rebase-safe row asked to re-apply.
     NotRebaseSafe,
 }
@@ -228,6 +268,43 @@ impl Executor {
         }
         self.state = TxnState::Committed;
         Ok(TxnState::Committed)
+    }
+
+    /// Fenced compare-and-commit: a newer lease epoch fences us out
+    /// before the parent check runs (design S8.3).
+    pub fn commit_fenced(
+        &mut self,
+        actual_parent: u64,
+        clock: &FencingClock,
+    ) -> Result<TxnState, ExecutorError> {
+        if clock.latest() > self.epoch.0 {
+            self.aborted = true;
+            self.state = TxnState::Aborted;
+            return Err(ExecutorError::Fenced {
+                held: clock.latest(),
+                mine: self.epoch.0,
+            });
+        }
+        self.commit(actual_parent)
+    }
+
+    /// Authority non-increase: the acting principal must be the row's
+    /// proposer or the named higher authority (tab:ops authority column).
+    pub fn propose_as(
+        &mut self,
+        op: &'static str,
+        parent_version: u64,
+        by: Proposer,
+    ) -> Result<Txn, ExecutorError> {
+        let row = match operation::find(op) {
+            Some(row) => row,
+            None => return Err(ExecutorError::CapabilityNotLanded { op }),
+        };
+        let sanctioned = by == row.proposer || row.authority == Some(by);
+        if !sanctioned {
+            return Err(ExecutorError::AuthorityDenied { op, by });
+        }
+        self.propose(op, parent_version)
     }
 
     /// Abort the current transaction.
