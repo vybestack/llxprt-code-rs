@@ -306,7 +306,11 @@ fn drive_cli_turns(
 ) -> Result<(Evidence, Vec<BbResult>), String> {
     std::env::set_var("LLXPRT_CODE_RS_BIN", &opts.cli);
     std::env::set_var("LLXPRT_CONFIG_HOME", &prepared.config_home);
-    let mut _fault_guard = StoreUnwritableGuard::new(scen, prepared);
+    // The store fault is scoped by scenario id, never by turn index: this scenario is one
+    // invocation, so any turn-anchored chmod would only ever fire after the run that
+    // should have observed it had already completed.
+    let fault_guard = StoreUnwritableGuard::new(scen, prepared);
+    let _fault_thread = fault_guard.as_ref().map(StoreUnwritableInjection::start);
     let mut state = ContinuationState::default();
     let mut results = Vec::new();
     for (index, prompt) in scen.prompts().iter().enumerate() {
@@ -330,71 +334,127 @@ fn drive_cli_turns(
         if !results.last().map(|r| r.ok).unwrap_or(false) {
             break;
         }
-        _fault_guard.inject_after_round(index);
     }
+    drop(_fault_thread);
     Ok((evidence_from_results(&results), results))
 }
 
-/// Makes the session `context/` directory unwritable for the remainder of a scenario.
-///
-/// `Drop` restores `0o700` so early `break` paths still leave a clean tree behind.
-struct StoreUnwritableGuard<'a> {
-    scen: &'a Scenario,
-    prepared: &'a runner::Prepared,
-    active: bool,
-}
-
+/// Fault key declared by a scenario that wants the store to become unwritable mid-run.
 const STORE_UNWRITABLE_FAULT: &str = "store-unwritable-after-round-1";
 
-impl<'a> StoreUnwritableGuard<'a> {
-    fn new(scen: &'a Scenario, prepared: &'a runner::Prepared) -> Self {
-        Self {
-            scen,
-            prepared,
-            active: false,
-        }
-    }
+/// One scenario's session `context/` directory, resolved from the harness-owned config
+/// home so the fault can only ever land inside a run this harness created.
+struct StoreUnwritableGuard<'a> {
+    dir: &'a Path,
+    session: &'a str,
+}
 
-    /// Applies the fault once the indexed round has completed successfully.
-    fn inject_after_round(&mut self, index: usize) {
-        let wanted = self
-            .scen
+impl<'a> StoreUnwritableGuard<'a> {
+    /// Whether this scenario asked for the unwritable-store fault at all.
+    fn new(scen: &'a Scenario, prepared: &'a runner::Prepared) -> Option<Self> {
+        let wanted = scen
             .faults
             .injected
             .iter()
             .any(|f| f == STORE_UNWRITABLE_FAULT);
-        if index != 0 || self.active || !wanted {
-            return;
+        if !wanted {
+            return None;
         }
-        let dir = self
-            .prepared
-            .config_home
+        Some(Self {
+            dir: &prepared.config_home,
+            session: &prepared.session,
+        })
+    }
+}
+
+/// Mid-invocation fault injection for the unwritable-store scenario.
+///
+/// This scenario is driven as ONE CLI invocation, so no turn boundary exists for a chmod
+/// to land on: a turn-anchored fault fires only after the invocation that should have
+/// observed it already finished. A side thread instead polls for the first appearance of
+/// `context/manifest.json` and then makes the directory and every file in it unwritable
+/// (`0o500` / `0o400`), so the store's own later writes actually fail with EACCES rather
+/// than succeeding through an already-open handle.
+struct StoreUnwritableInjection {
+    handle: Option<std::thread::JoinHandle<()>>,
+    context: PathBuf,
+}
+
+impl StoreUnwritableInjection {
+    /// Polls for the first store artifact, applies the fault, and reports it on stderr.
+    fn start(guard: &StoreUnwritableGuard<'_>) -> Self {
+        let context = guard
+            .dir
             .join("code-rs-sessions")
-            .join(&self.prepared.session)
+            .join(guard.session)
             .join("context");
-        if !dir.is_dir() {
-            return;
-        }
-        let perms = std::fs::Permissions::from_mode(0o500);
-        if std::fs::set_permissions(&dir, perms).is_ok() {
-            self.active = true;
+        let handle = std::thread::spawn({
+            let context = context.clone();
+            move || inject_unwritable(context)
+        });
+        Self {
+            handle: Some(handle),
+            context,
         }
     }
 }
 
-impl Drop for StoreUnwritableGuard<'_> {
+impl Drop for StoreUnwritableInjection {
     fn drop(&mut self) {
-        if !self.active {
-            return;
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
-        let dir = self
-            .prepared
-            .config_home
-            .join("code-rs-sessions")
-            .join(&self.prepared.session)
-            .join("context");
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        // The fault must never outlive this scenario's own drive: restore the modes the
+        // store expects (`0o700` dir / `0o600` files) so later phases read a usable store.
+        restore_writable(&self.context);
     }
+}
+
+/// Deadline for the store's first write: bounded, so a dead run cannot hang the drive.
+const FAULT_POLL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Poll interval while waiting for the store's first artifact to appear.
+const FAULT_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+/// Waits for `context/manifest.json`, then makes `context/` and its files unwritable.
+///
+/// Returns once the fault is applied (or the deadline passes, which the scenario's own
+/// verdict reports as missing evidence).
+fn inject_unwritable(context: PathBuf) {
+    let manifest = context.join("manifest.json");
+    let deadline = std::time::Instant::now() + FAULT_POLL_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if manifest.is_file() {
+            break;
+        }
+        std::thread::sleep(FAULT_POLL_INTERVAL);
+    }
+    if !manifest.is_file() {
+        return;
+    }
+    // File modes first: a read-only directory alone does not stop a write that re-opens
+    // an existing `0o600` file with O_TRUNC through an open directory handle.
+    if let Ok(entries) = fs::read_dir(&context) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o400));
+            }
+        }
+    }
+    if fs::set_permissions(&context, std::fs::Permissions::from_mode(0o500)).is_ok() {
+        harness::eprint_status("context-evals fault: session context store made unwritable");
+    }
+}
+
+/// Restores the session `context/` tree so later phases read a clean, usable store.
+fn restore_writable(context: &Path) {
+    if let Ok(entries) = fs::read_dir(context) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    let _ = fs::set_permissions(context, std::fs::Permissions::from_mode(0o700));
 }
 
 fn session_dir(prepared: &runner::Prepared) -> Option<PathBuf> {
