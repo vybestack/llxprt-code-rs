@@ -44,6 +44,7 @@ pub use request_budget::{
 mod memory;
 mod request_budget;
 mod tool_round;
+pub use self::tool_round::parse_object_args;
 
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
@@ -872,23 +873,6 @@ impl CodingAgent {
                 allow_shell: shell_on,
             },
         })
-    }
-}
-
-/// Parse a tool call's argument JSON strictly: it must be a JSON object. A malformed raw
-/// argument (which the vendored transport preserves verbatim) fails here, so it can never become a
-/// successful `{}` round.
-pub fn parse_object_args(call: &ToolCall) -> Result<JsonValue, String> {
-    match serde_json::from_str::<JsonValue>(&call.args_json) {
-        Ok(v) if v.is_object() => Ok(v),
-        Ok(_) => Err(format!(
-            "tool call {}: arguments must be a JSON object",
-            call.name
-        )),
-        Err(e) => Err(format!(
-            "tool call {}: invalid argument JSON: {e}",
-            call.name
-        )),
     }
 }
 
