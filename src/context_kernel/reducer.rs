@@ -19,6 +19,12 @@ use crate::context_kernel::scopes::{ScopeError, ScopeId, ScopeRegistry};
 pub const IDLENESS_WINDOW: u64 = 32;
 /// State version of a freshly initialized log, and the baseline registry version.
 pub const INITIAL_VERSION: u64 = 1;
+/// Highest filter-rule registry version the reducer resolves.
+pub const FILTER_RULE_LATEST_VERSION: u64 = 1;
+/// Highest vocabulary registry version the reducer resolves.
+pub const VOCABULARY_LATEST_VERSION: u64 = 1;
+/// Highest store-mode code the store defines: 1 normal, 2 read-only, 3 unavailable.
+pub const STORE_MODE_UNAVAILABLE: u64 = 3;
 
 /// Errors raised while folding events.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -40,6 +46,23 @@ pub enum ReducerError {
         claimed_parent: u64,
         /// Version the state actually holds.
         actual: u64,
+    },
+    /// A Phase 2 row whose executor lands in a later phase; the commit is refused.
+    OperationNotLanded {
+        /// Stable name of the refused row.
+        operation: &'static str,
+    },
+    /// A registry row named a version this build cannot resolve.
+    UnsupportedVersion {
+        /// Version carried by the operation.
+        requested: u64,
+        /// Highest version this build resolves.
+        latest: u64,
+    },
+    /// A store-mode row named a mode the store does not define.
+    UnknownStoreMode {
+        /// Mode code carried by the operation.
+        found: u64,
     },
     /// An event was written under a different context-store version.
     StoreVersion {
@@ -71,6 +94,14 @@ pub struct TypedState {
     pub pins: Vec<ItemId>,
     /// Quoting convention applied to verbatim lanes.
     pub quoting_convention: QuotingConvention,
+    /// Committed filter-rule registry version.
+    pub filter_rule_version: u64,
+    /// Committed vocabulary registry version.
+    pub vocabulary_version: u64,
+    /// Store mode code: 1 normal, 2 read-only, 3 unavailable.
+    pub store_mode: u64,
+    /// Whether the store quiesced against an unwritable mode.
+    pub quiesced: bool,
     /// Next free offset on the store spine.
     next_offset: u64,
     /// Identities of events already folded, for deduplication.
@@ -91,6 +122,10 @@ impl TypedState {
             selected_store_version: None,
             pins: Vec::new(),
             quoting_convention: QuotingConvention::Fenced,
+            filter_rule_version: FILTER_RULE_LATEST_VERSION,
+            vocabulary_version: VOCABULARY_LATEST_VERSION,
+            store_mode: 1,
+            quiesced: false,
             next_offset: 0,
             applied: Vec::new(),
         };
@@ -120,6 +155,10 @@ impl TypedState {
         self.scope_registry.encode(sink);
         self.lane_policy_registry.encode(sink);
         sink.tag(self.quoting_convention.name());
+        sink.int(self.filter_rule_version);
+        sink.int(self.vocabulary_version);
+        sink.int(self.store_mode);
+        sink.tag(if self.quiesced { "quiesced" } else { "live" });
         match self.selected_store_version {
             Some(version) => sink.int(version),
             None => sink.int(0),
@@ -266,7 +305,90 @@ fn apply_operation(
             state.selected_store_version = Some(subject);
             state.store_version = subject;
         }
+        OperationClass::AdmitIngress => admit_ingress(state, event, subject, argument)?,
+        OperationClass::Sanitize | OperationClass::Import | OperationClass::IndexRebuild => {
+            return Err(not_landed(class));
+        }
+        OperationClass::Redact => redact_item(state, subject)?,
+        OperationClass::RuleUpdate => commit_registry(
+            state,
+            subject,
+            argument,
+            FILTER_RULE_LATEST_VERSION,
+            |state: &mut TypedState| &mut state.filter_rule_version,
+        )?,
+        OperationClass::VocabularyUpdate => commit_registry(
+            state,
+            subject,
+            argument,
+            VOCABULARY_LATEST_VERSION,
+            |state: &mut TypedState| &mut state.vocabulary_version,
+        )?,
+        OperationClass::StoreMode => commit_store_mode(state, subject)?,
+        OperationClass::QuiesceUnwritable => state.quiesced = true,
     }
+    Ok(())
+}
+
+/// Admits an ingress transaction: the argument is the sanitized byte length, the
+/// subject is the scope the payload was ingested into.
+fn admit_ingress(
+    state: &mut TypedState,
+    event: &RecordedEvent,
+    subject: u64,
+    argument: u64,
+) -> Result<(), ReducerError> {
+    state.next_offset += argument;
+    attribute(state, subject, event.sequence)
+}
+
+/// Moves an item to the vault side: unplaced and unpinned, byte provenance kept.
+fn redact_item(state: &mut TypedState, subject: u64) -> Result<(), ReducerError> {
+    state.pins.retain(|pin| pin.value() != subject);
+    state
+        .conversation_ir
+        .unplace(ItemId::new(subject))
+        .map_err(ReducerError::Ir)
+}
+
+/// Typed refusal for a row whose executor lands in a later phase.
+fn not_landed(class: &OperationClass) -> ReducerError {
+    ReducerError::OperationNotLanded {
+        operation: class.name(),
+    }
+}
+
+/// Commits a registry-version row by compare-and-commit on the parent version.
+fn commit_registry(
+    state: &mut TypedState,
+    subject: u64,
+    argument: u64,
+    latest: u64,
+    committed: fn(&mut TypedState) -> &mut u64,
+) -> Result<(), ReducerError> {
+    if argument != state.version {
+        return Err(ReducerError::VersionConflict {
+            claimed_parent: argument,
+            actual: state.version,
+        });
+    }
+    if subject == 0 || subject > latest {
+        return Err(ReducerError::UnsupportedVersion {
+            requested: subject,
+            latest,
+        });
+    }
+    *committed(state) = subject;
+    state.version = subject;
+    Ok(())
+}
+
+/// Commits a store-mode row; the mode code must be one the store defines.
+fn commit_store_mode(state: &mut TypedState, subject: u64) -> Result<(), ReducerError> {
+    if !(1..=STORE_MODE_UNAVAILABLE).contains(&subject) {
+        return Err(ReducerError::UnknownStoreMode { found: subject });
+    }
+    state.store_mode = subject;
     Ok(())
 }
 

@@ -40,7 +40,7 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 | sha2                          | 0.10.9      | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | libc (Unix)                   | 0.2.189    | runtime (unix-tgt) | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | security-framework (macOS)    | 3.7.0      | runtime (macos-tgt) | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
-| aes-gcm                       | 0.10.3     | dev-only     | Apache-2.0 OR MIT | registry (locked in `Cargo.lock`) |
+| aes-gcm                       | 0.10.3     | runtime      | Apache-2.0 OR MIT | registry (locked in `Cargo.lock`) |
 | tempfile                      | 3.27.0     | dev-only     | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | jsonschema                    | 0.33.0     | dev-only     | MIT       | registry (locked in `Cargo.lock`) |
 

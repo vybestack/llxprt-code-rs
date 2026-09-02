@@ -44,6 +44,9 @@ pub struct OkEnvelope {
     pub declared_tool_calls: i64,
     pub budget_exhausted: bool,
     pub prompt_digest: String,
+    /// Terminal context-store outcome declared by the runtime, when one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_outcome: Option<String>,
 }
 
 /// The required error envelope.

@@ -153,6 +153,60 @@ fn profile_event(
     }
 }
 
+/// Durable context facts re-read from the session directory after the run.
+struct ContextDeclaration {
+    terminal_outcome: Option<String>,
+    preserved: Vec<String>,
+}
+
+/// Best-effort re-read of `context/manifest.json`, published by the session store.
+///
+/// The agent owns the run; the envelope only reports what the store already committed,
+/// so a missing or unreadable manifest changes nothing about the reported outcome.
+fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
+    let mut declared = ContextDeclaration {
+        terminal_outcome: None,
+        preserved: Vec::new(),
+    };
+    // Both readable locations are consulted independently: the manifest keeps
+    // supplying `preserved`, while the best-effort marker the store drops beside
+    // the session when only `context/` is unwritable wins for `quiesce`.
+    let manifest = std::fs::read_to_string(session_dir.join("context").join("manifest.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let marker = std::fs::read_to_string(session_dir.join("context-quiesce.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    if let Some(value) = &marker {
+        if let Some(outcome) = value.get("quiesce").and_then(serde_json::Value::as_str) {
+            if !outcome.is_empty() {
+                declared.terminal_outcome = Some(outcome.to_string());
+            }
+        }
+    }
+    // Without a marker the manifest's own quiesce verdict still counts.
+    if declared.terminal_outcome.is_none() {
+        if let Some(value) = &manifest {
+            if let Some(outcome) = value.get("quiesce").and_then(serde_json::Value::as_str) {
+                if !outcome.is_empty() {
+                    declared.terminal_outcome = Some(outcome.to_string());
+                }
+            }
+        }
+    }
+    let preserved_from = manifest.as_ref().or(marker.as_ref());
+    if let Some(value) = preserved_from {
+        if let Some(spans) = value.get("preserved").and_then(serde_json::Value::as_array) {
+            declared.preserved = spans
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect();
+        }
+    }
+    declared
+}
+
 /// Construct a typed outcome envelope with the final session identity.
 ///
 /// `error_session_id` supplies identity only when `outcome` is an error. For successful
@@ -161,6 +215,13 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
     match outcome {
         Ok(o) => {
             debug_assert_eq!(error_session_id, o.session.id);
+            let declared = context_declaration(&o.session_dir);
+            let summary = if declared.preserved.is_empty() {
+                o.run.summary.clone()
+            } else {
+                let spans = declared.preserved.join(" / ");
+                format!("{} | preserved: {spans}", o.run.summary)
+            };
             Envelope::Ok(OkEnvelope {
                 session_id: o.session.id.clone(),
                 session_dir: o.session_dir.display().to_string(),
@@ -169,7 +230,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 branch_id: o.run.branch_id.clone(),
                 branch: o.run.branch,
                 replayed: o.run.replayed,
-                summary: o.run.summary.clone(),
+                summary,
                 tool_calls: u64::try_from(o.run.tool_count).unwrap_or(u64::MAX),
                 declared_tool_calls: o
                     .run
@@ -178,6 +239,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                     .unwrap_or(-1),
                 budget_exhausted: o.run.budget_exhausted,
                 prompt_digest: o.run.prompt_digest.clone(),
+                terminal_outcome: declared.terminal_outcome,
             })
         }
         Err(error) if error.code == Code::Profiling => Envelope::profiling_error(

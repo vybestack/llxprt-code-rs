@@ -82,6 +82,13 @@
         "summary": {
           "type": "string"
         },
+        "terminal_outcome": {
+          "description": "Terminal context-store outcome declared by the runtime, when one exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tool_calls": {
           "format": "uint64",
           "minimum": 0,

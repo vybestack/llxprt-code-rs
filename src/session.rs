@@ -265,11 +265,12 @@ pub(crate) struct StoreMetrics {
 pub struct SessionStore {
     pub session_dir: PathBuf,
     pub session_id: String,
-    dir: openat::Dir,
+    pub(crate) dir: openat::Dir,
     file: std::fs::File,
     lock: Mutex<()>,
     cache: Mutex<Option<snapshot::LoadedStore>>,
     operation_metrics: Mutex<StoreMetrics>,
+    pub(crate) context: Mutex<Option<crate::context_persist::ContextState>>,
 }
 
 fn now_secs() -> u64 {
@@ -298,7 +299,7 @@ fn fchmod(fd: std::os::fd::RawFd, mode: libc::mode_t) -> Result<(), StoreError> 
     Ok(())
 }
 
-fn open_regular_at(
+pub(crate) fn open_regular_at(
     dir: &openat::Dir,
     name: &str,
     flags: libc::c_int,
@@ -427,7 +428,10 @@ fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, Stor
     Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
 }
 
-fn ensure_private_subdir(parent: &openat::Dir, name: &str) -> Result<openat::Dir, StoreError> {
+pub(crate) fn ensure_private_subdir(
+    parent: &openat::Dir,
+    name: &str,
+) -> Result<openat::Dir, StoreError> {
     if parent.sub_dir(name).is_err() {
         match parent.create_dir(name, 0o700) {
             Ok(()) => {}
@@ -491,6 +495,7 @@ impl SessionStore {
             lock: Mutex::new(()),
             cache: Mutex::new(None),
             operation_metrics: Mutex::new(StoreMetrics::default()),
+            context: Mutex::new(None),
         })
     }
 
@@ -800,7 +805,8 @@ impl SessionStore {
         self.locked(|| {
             let state = self.read()?;
             let branch = self.live_branch(&state, reserved)?;
-            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            let rounds = self.context_exchange(rounds)?;
+            let suffix = replay::suffix(&branch.rounds, &rounds)?;
             self.append_event(log::Event::Checkpoint {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
@@ -822,11 +828,12 @@ impl SessionStore {
         self.locked(|| {
             let state = self.read()?;
             let branch = self.branch_for_terminal(&state, reserved)?;
+            let rounds = self.context_exchange(rounds)?;
             if branch.lifecycle == Lifecycle::Completed {
                 if branch.owner != reserved.owner {
                     return Err(StoreError::Stale);
                 }
-                if branch.summary == summary && replay::rounds_equal(&branch.rounds, rounds)? {
+                if branch.summary == summary && replay::rounds_equal(&branch.rounds, &rounds)? {
                     return Ok(());
                 }
                 return Err(StoreError::Invalid(
@@ -838,7 +845,7 @@ impl SessionStore {
                     "cannot complete a failed branch".into(),
                 ));
             }
-            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            let suffix = replay::suffix(&branch.rounds, &rounds)?;
             self.append_event(log::Event::BranchCompleted {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
@@ -860,11 +867,12 @@ impl SessionStore {
         self.locked(|| {
             let state = self.read()?;
             let branch = self.branch_for_terminal(&state, reserved)?;
+            let rounds = self.context_exchange(rounds)?;
             if branch.lifecycle == Lifecycle::Failed {
                 if branch.owner != reserved.owner {
                     return Err(StoreError::Stale);
                 }
-                if branch.error == error && replay::rounds_equal(&branch.rounds, rounds)? {
+                if branch.error == error && replay::rounds_equal(&branch.rounds, &rounds)? {
                     return Ok(());
                 }
                 return Err(StoreError::Invalid(
@@ -874,7 +882,7 @@ impl SessionStore {
             if branch.lifecycle == Lifecycle::Completed {
                 return Err(StoreError::Invalid("cannot fail a completed branch".into()));
             }
-            let suffix = replay::suffix(&branch.rounds, rounds)?;
+            let suffix = replay::suffix(&branch.rounds, &rounds)?;
             self.append_event(log::Event::BranchFailed {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
@@ -882,6 +890,17 @@ impl SessionStore {
                 error: error.to_string(),
             })
         })
+    }
+
+    /// Digests bulk tool results and persists the phase-2 context artifacts,
+    /// returning the transcript the session log should store.
+    fn context_exchange(&self, rounds: &[RoundRecord]) -> Result<Vec<RoundRecord>, StoreError> {
+        crate::context_persist::context_exchange(self, rounds)
+    }
+
+    /// Compacts one tool result before it is recorded into the round.
+    pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
+        crate::context_persist::compact_tool_result(self, tool, result)
     }
 
     fn live_branch<'a>(

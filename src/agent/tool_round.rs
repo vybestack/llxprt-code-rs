@@ -65,7 +65,7 @@ impl CodingAgent {
                 },
             )?;
             let output_before = attempt.usage.output_bytes;
-            self.execute_one_call(config, attempt, round, call, index, calls.len())
+            self.execute_one_call(config, store, attempt, round, call, (index, calls.len()))
                 .map_err(|failure| self.tool_failure(store, reserved, failure, &attempt.rounds))?;
             self.update_profile_usage(&attempt.usage);
             self.profile(
@@ -102,5 +102,22 @@ impl CodingAgent {
                 rounds,
             ),
         }
+    }
+}
+
+/// Parse a tool call's argument JSON strictly: it must be a JSON object. A malformed raw
+/// argument (which the vendored transport preserves verbatim) fails here, so it can never become a
+/// successful `{}` round.
+pub fn parse_object_args(call: &ToolCall) -> Result<JsonValue, String> {
+    match serde_json::from_str::<JsonValue>(&call.args_json) {
+        Ok(v) if v.is_object() => Ok(v),
+        Ok(_) => Err(format!(
+            "tool call {}: arguments must be a JSON object",
+            call.name
+        )),
+        Err(e) => Err(format!(
+            "tool call {}: invalid argument JSON: {e}",
+            call.name
+        )),
     }
 }

@@ -27,6 +27,7 @@ use loopback::Loopback;
 use manifest::Scenario;
 use serde_json::{json, Value};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -305,6 +306,11 @@ fn drive_cli_turns(
 ) -> Result<(Evidence, Vec<BbResult>), String> {
     std::env::set_var("LLXPRT_CODE_RS_BIN", &opts.cli);
     std::env::set_var("LLXPRT_CONFIG_HOME", &prepared.config_home);
+    // The store fault is scoped by scenario id, never by turn index: this scenario is one
+    // invocation, so any turn-anchored chmod would only ever fire after the run that
+    // should have observed it had already completed.
+    let fault_guard = StoreUnwritableGuard::new(scen, prepared);
+    let _fault_thread = fault_guard.as_ref().map(StoreUnwritableInjection::start);
     let mut state = ContinuationState::default();
     let mut results = Vec::new();
     for (index, prompt) in scen.prompts().iter().enumerate() {
@@ -329,7 +335,126 @@ fn drive_cli_turns(
             break;
         }
     }
+    drop(_fault_thread);
     Ok((evidence_from_results(&results), results))
+}
+
+/// Fault key declared by a scenario that wants the store to become unwritable mid-run.
+const STORE_UNWRITABLE_FAULT: &str = "store-unwritable-after-round-1";
+
+/// One scenario's session `context/` directory, resolved from the harness-owned config
+/// home so the fault can only ever land inside a run this harness created.
+struct StoreUnwritableGuard<'a> {
+    dir: &'a Path,
+    session: &'a str,
+}
+
+impl<'a> StoreUnwritableGuard<'a> {
+    /// Whether this scenario asked for the unwritable-store fault at all.
+    fn new(scen: &'a Scenario, prepared: &'a runner::Prepared) -> Option<Self> {
+        let wanted = scen
+            .faults
+            .injected
+            .iter()
+            .any(|f| f == STORE_UNWRITABLE_FAULT);
+        if !wanted {
+            return None;
+        }
+        Some(Self {
+            dir: &prepared.config_home,
+            session: &prepared.session,
+        })
+    }
+}
+
+/// Mid-invocation fault injection for the unwritable-store scenario.
+///
+/// This scenario is driven as ONE CLI invocation, so no turn boundary exists for a chmod
+/// to land on: a turn-anchored fault fires only after the invocation that should have
+/// observed it already finished. A side thread instead polls for the first appearance of
+/// `context/manifest.json` and then makes the directory and every file in it unwritable
+/// (`0o500` / `0o400`), so the store's own later writes actually fail with EACCES rather
+/// than succeeding through an already-open handle.
+struct StoreUnwritableInjection {
+    handle: Option<std::thread::JoinHandle<()>>,
+    context: PathBuf,
+}
+
+impl StoreUnwritableInjection {
+    /// Polls for the first store artifact, applies the fault, and reports it on stderr.
+    fn start(guard: &StoreUnwritableGuard<'_>) -> Self {
+        let context = guard
+            .dir
+            .join("code-rs-sessions")
+            .join(guard.session)
+            .join("context");
+        let handle = std::thread::spawn({
+            let context = context.clone();
+            move || inject_unwritable(context)
+        });
+        Self {
+            handle: Some(handle),
+            context,
+        }
+    }
+}
+
+impl Drop for StoreUnwritableInjection {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        // The fault must never outlive this scenario's own drive: restore the modes the
+        // store expects (`0o700` dir / `0o600` files) so later phases read a usable store.
+        restore_writable(&self.context);
+    }
+}
+
+/// Deadline for the store's first write: bounded, so a dead run cannot hang the drive.
+const FAULT_POLL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Poll interval while waiting for the store's first artifact to appear.
+const FAULT_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+/// Waits for `context/manifest.json`, then makes `context/` and its files unwritable.
+///
+/// Returns once the fault is applied (or the deadline passes, which the scenario's own
+/// verdict reports as missing evidence).
+fn inject_unwritable(context: PathBuf) {
+    let manifest = context.join("manifest.json");
+    let deadline = std::time::Instant::now() + FAULT_POLL_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if manifest.is_file() {
+            break;
+        }
+        std::thread::sleep(FAULT_POLL_INTERVAL);
+    }
+    if !manifest.is_file() {
+        return;
+    }
+    // File modes first: a read-only directory alone does not stop a write that re-opens
+    // an existing `0o600` file with O_TRUNC through an open directory handle.
+    if let Ok(entries) = fs::read_dir(&context) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o400));
+            }
+        }
+    }
+    if fs::set_permissions(&context, std::fs::Permissions::from_mode(0o500)).is_ok() {
+        harness::eprint_status("context-evals fault: session context store made unwritable");
+    }
+}
+
+/// Restores the session `context/` tree so later phases read a clean, usable store.
+fn restore_writable(context: &Path) {
+    if let Ok(entries) = fs::read_dir(context) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    let _ = fs::set_permissions(context, std::fs::Permissions::from_mode(0o700));
 }
 
 fn session_dir(prepared: &runner::Prepared) -> Option<PathBuf> {
@@ -356,9 +481,23 @@ fn evidence_from_results(results: &[BbResult]) -> Evidence {
             evidence.turns_ok += 1;
             evidence.last_ok_summary = result.summary.clone();
             evidence.last_ok_stdout = result.raw_stdout.clone();
+            if let Some(outcome) = declared_terminal_outcome(&result.raw_stdout) {
+                evidence.terminal_outcome = Some(outcome);
+            }
         }
     }
     evidence
+}
+
+/// Observe a terminal outcome the context runtime declared in its stdout summary JSON.
+///
+/// This is harness observation, never grading: a run that never declares an outcome yields
+/// `None`, and a declared-but-false outcome is still only a declaration. The grader keeps
+/// its own exact comparison, so nothing here can manufacture a `required_outcomes` pass.
+fn declared_terminal_outcome(stdout: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(stdout).ok()?;
+    let outcome = value.get("terminal_outcome")?.as_str()?;
+    (!outcome.is_empty()).then(|| outcome.to_string())
 }
 
 fn is_harness_error(result: &BbResult) -> bool {

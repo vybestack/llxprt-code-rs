@@ -90,6 +90,24 @@ pub enum OperationClass {
     LanePolicyUpdate,
     /// Context-store migration selection.
     MigrationSelect,
+    /// Ingress transaction admitted a sanitized payload into a scope.
+    AdmitIngress,
+    /// In-place spine rewrite of a captured item.
+    Sanitize,
+    /// Item plaintext moved to the vault; only a reference remains.
+    Redact,
+    /// External bytes imported into the store spine.
+    Import,
+    /// Filter-rule registry version change.
+    RuleUpdate,
+    /// Vocabulary registry version change.
+    VocabularyUpdate,
+    /// Retrieval index rebuilt from the spine.
+    IndexRebuild,
+    /// Store mode change.
+    StoreMode,
+    /// Store quiesced against an unwritable mode.
+    QuiesceUnwritable,
 }
 
 impl OperationClass {
@@ -106,6 +124,15 @@ impl OperationClass {
             OperationClass::Unpin => "unpin",
             OperationClass::LanePolicyUpdate => "lane-policy-update",
             OperationClass::MigrationSelect => "migration-select",
+            OperationClass::AdmitIngress => "admit-ingress",
+            OperationClass::Sanitize => "sanitize",
+            OperationClass::Redact => "redact",
+            OperationClass::Import => "import",
+            OperationClass::RuleUpdate => "rule-update",
+            OperationClass::VocabularyUpdate => "vocabulary-update",
+            OperationClass::IndexRebuild => "index-rebuild",
+            OperationClass::StoreMode => "store-mode",
+            OperationClass::QuiesceUnwritable => "quiesce-unwritable",
         }
     }
 }

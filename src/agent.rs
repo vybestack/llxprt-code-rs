@@ -44,6 +44,7 @@ pub use request_budget::{
 mod memory;
 mod request_budget;
 mod tool_round;
+pub use self::tool_round::parse_object_args;
 
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
@@ -432,12 +433,16 @@ impl CodingAgent {
     fn execute_one_call(
         &self,
         config: &crate::tools::ToolConfig,
+        store: &SessionStore,
         attempt: &mut AttemptState,
         round: &mut RoundRecord,
         call: &ToolCall,
-        index: usize,
-        total: usize,
+        position: (usize, usize),
     ) -> Result<(), ToolCallFailure> {
+        // `position` is `(index, total)` packed into one argument so the call site and
+        // the signature stay inside clippy's argument budget now that the session store
+        // handle is threaded in for pre-entry compaction.
+        let (index, total) = position;
         let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
         if remaining_output == 0 {
             return Err(ToolCallFailure::OutputCap);
@@ -470,6 +475,10 @@ impl CodingAgent {
         } else {
             format!("{text}\n\n{notice}")
         };
+        // Pre-entry compaction (#39): a bulk tool result is digested before it joins the
+        // request list and the round, so neither the next provider request nor the
+        // checkpointed transcript ever carries raw bulk bytes.
+        let text = store.compact_tool_result(&call.name, &text);
         attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
         attempt
             .requests
@@ -864,23 +873,6 @@ impl CodingAgent {
                 allow_shell: shell_on,
             },
         })
-    }
-}
-
-/// Parse a tool call's argument JSON strictly: it must be a JSON object. A malformed raw
-/// argument (which the vendored transport preserves verbatim) fails here, so it can never become a
-/// successful `{}` round.
-pub fn parse_object_args(call: &ToolCall) -> Result<JsonValue, String> {
-    match serde_json::from_str::<JsonValue>(&call.args_json) {
-        Ok(v) if v.is_object() => Ok(v),
-        Ok(_) => Err(format!(
-            "tool call {}: arguments must be a JSON object",
-            call.name
-        )),
-        Err(e) => Err(format!(
-            "tool call {}: invalid argument JSON: {e}",
-            call.name
-        )),
     }
 }
 
