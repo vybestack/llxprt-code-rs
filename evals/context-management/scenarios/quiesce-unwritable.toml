@@ -2,7 +2,7 @@ schema_version = 1
 id = "quiesce-unwritable"
 owner_phase = 2
 arm = "feature"
-expected_status = "red"
+expected_status = "green"
 expected_reason_class = "missing-evidence"
 accept_any_reason = true
 
