@@ -168,27 +168,41 @@ fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
         terminal_outcome: None,
         preserved: Vec::new(),
     };
-    // The store also drops a best-effort marker beside the session when only
-    // `context/` is unwritable, so both readable locations are consulted.
-    let raw = std::fs::read_to_string(session_dir.join("context").join("manifest.json"))
-        .or_else(|_| std::fs::read_to_string(session_dir.join("context-quiesce.json")));
-    let Ok(raw) = raw else {
-        return declared;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return declared;
-    };
-    if let Some(outcome) = value.get("quiesce").and_then(serde_json::Value::as_str) {
-        if !outcome.is_empty() {
-            declared.terminal_outcome = Some(outcome.to_string());
+    // Both readable locations are consulted independently: the manifest keeps
+    // supplying `preserved`, while the best-effort marker the store drops beside
+    // the session when only `context/` is unwritable wins for `quiesce`.
+    let manifest = std::fs::read_to_string(session_dir.join("context").join("manifest.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let marker = std::fs::read_to_string(session_dir.join("context-quiesce.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    if let Some(value) = &marker {
+        if let Some(outcome) = value.get("quiesce").and_then(serde_json::Value::as_str) {
+            if !outcome.is_empty() {
+                declared.terminal_outcome = Some(outcome.to_string());
+            }
         }
     }
-    if let Some(spans) = value.get("preserved").and_then(serde_json::Value::as_array) {
-        declared.preserved = spans
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_string)
-            .collect();
+    // Without a marker the manifest's own quiesce verdict still counts.
+    if declared.terminal_outcome.is_none() {
+        if let Some(value) = &manifest {
+            if let Some(outcome) = value.get("quiesce").and_then(serde_json::Value::as_str) {
+                if !outcome.is_empty() {
+                    declared.terminal_outcome = Some(outcome.to_string());
+                }
+            }
+        }
+    }
+    let preserved_from = manifest.as_ref().or(marker.as_ref());
+    if let Some(value) = preserved_from {
+        if let Some(spans) = value.get("preserved").and_then(serde_json::Value::as_array) {
+            declared.preserved = spans
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect();
+        }
     }
     declared
 }
