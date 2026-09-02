@@ -27,6 +27,7 @@ use loopback::Loopback;
 use manifest::Scenario;
 use serde_json::{json, Value};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -305,6 +306,7 @@ fn drive_cli_turns(
 ) -> Result<(Evidence, Vec<BbResult>), String> {
     std::env::set_var("LLXPRT_CODE_RS_BIN", &opts.cli);
     std::env::set_var("LLXPRT_CONFIG_HOME", &prepared.config_home);
+    let mut _fault_guard = StoreUnwritableGuard::new(scen, prepared);
     let mut state = ContinuationState::default();
     let mut results = Vec::new();
     for (index, prompt) in scen.prompts().iter().enumerate() {
@@ -328,8 +330,71 @@ fn drive_cli_turns(
         if !results.last().map(|r| r.ok).unwrap_or(false) {
             break;
         }
+        _fault_guard.inject_after_round(index);
     }
     Ok((evidence_from_results(&results), results))
+}
+
+/// Makes the session `context/` directory unwritable for the remainder of a scenario.
+///
+/// `Drop` restores `0o700` so early `break` paths still leave a clean tree behind.
+struct StoreUnwritableGuard<'a> {
+    scen: &'a Scenario,
+    prepared: &'a runner::Prepared,
+    active: bool,
+}
+
+const STORE_UNWRITABLE_FAULT: &str = "store-unwritable-after-round-1";
+
+impl<'a> StoreUnwritableGuard<'a> {
+    fn new(scen: &'a Scenario, prepared: &'a runner::Prepared) -> Self {
+        Self {
+            scen,
+            prepared,
+            active: false,
+        }
+    }
+
+    /// Applies the fault once the indexed round has completed successfully.
+    fn inject_after_round(&mut self, index: usize) {
+        let wanted = self
+            .scen
+            .faults
+            .injected
+            .iter()
+            .any(|f| f == STORE_UNWRITABLE_FAULT);
+        if index != 0 || self.active || !wanted {
+            return;
+        }
+        let dir = self
+            .prepared
+            .config_home
+            .join("code-rs-sessions")
+            .join(&self.prepared.session)
+            .join("context");
+        if !dir.is_dir() {
+            return;
+        }
+        let perms = std::fs::Permissions::from_mode(0o500);
+        if std::fs::set_permissions(&dir, perms).is_ok() {
+            self.active = true;
+        }
+    }
+}
+
+impl Drop for StoreUnwritableGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let dir = self
+            .prepared
+            .config_home
+            .join("code-rs-sessions")
+            .join(&self.prepared.session)
+            .join("context");
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
 }
 
 fn session_dir(prepared: &runner::Prepared) -> Option<PathBuf> {
