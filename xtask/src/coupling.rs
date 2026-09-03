@@ -506,16 +506,14 @@ fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     struct Fixture(PathBuf);
 
     impl Fixture {
         fn new() -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+            let unique = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
             let root =
                 env::temp_dir().join(format!("llxprt-coupling-{}-{unique}", std::process::id()));
             fs::create_dir_all(root.join("src")).unwrap();
