@@ -275,6 +275,9 @@ fn session_hint_from(args: impl IntoIterator<Item = std::ffi::OsString>) -> Stri
     let mut i = 0;
     while i < args.len() {
         let raw = args[i].to_string_lossy();
+        if raw == "--" {
+            break;
+        }
         if let Some(value) = raw.strip_prefix("--session=") {
             if crate::session::is_safe_component(value) {
                 return value.to_string();

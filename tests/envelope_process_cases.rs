@@ -276,10 +276,10 @@ fn hostile_usage_session_still_emits_a_schema_valid_envelope() {
 }
 
 #[test]
-fn omitted_session_with_end_of_options_keeps_generated_identity_in_usage_envelope() {
+fn omitted_session_with_end_of_options_keeps_generated_identity_in_error_envelope() {
     let root = tempfile::tempdir().unwrap();
     let output = invoke(root.path(), &["--"]);
-    assert_error(&output, 2);
+    assert_error(&output, Code::Config as i32);
     let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let session_id = envelope["session_id"].as_str().unwrap();
     assert!(llxprt_code_rs::session::SessionId::parse(session_id).is_ok());
