@@ -1,6 +1,5 @@
-//! Rewrite journal: threshold economics, flush epochs, forced flush, reporting.
+//! Rewrite journal, amortization gates, flush epochs, and conditional cache reports.
 
-/// One rewrite journal record.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RewriteEntry {
     pub tokens_reclaimed: u64,
@@ -26,7 +25,6 @@ impl RewriteEntry {
     }
 }
 
-/// Rewrite economics.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CacheConfig {
     pub amortization_bar: u64,
@@ -42,37 +40,31 @@ impl Default for CacheConfig {
     }
 }
 
-/// Reported cache behavior.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct CacheReport {
     pub hits: u64,
     pub events: u64,
+    pub armed_hits: u64,
+    pub armed_events: u64,
+    pub disarmed_hits: u64,
+    pub disarmed_events: u64,
+    pub rewrite_events: u64,
     pub invalidation_total: u64,
+    pub known_cost_events: u64,
     pub unknown_cost_events: u64,
     pub threshold_passes: u64,
     pub threshold_denials: u64,
+    pub armed_threshold_passes: u64,
+    pub disarmed_threshold_passes: u64,
     pub forced_flushes: u64,
     pub armed_rewrites: u64,
-    pub hit_rate: f64,
+    pub disarmed_rewrites: u64,
+    pub hit_rate: Option<f64>,
+    pub armed_hit_rate: Option<f64>,
+    pub disarmed_hit_rate: Option<f64>,
+    pub invalidation_cost_per_event: Option<f64>,
 }
 
-impl Default for CacheReport {
-    fn default() -> Self {
-        Self {
-            hits: 0,
-            events: 0,
-            invalidation_total: 0,
-            unknown_cost_events: 0,
-            threshold_passes: 0,
-            threshold_denials: 0,
-            forced_flushes: 0,
-            armed_rewrites: 0,
-            hit_rate: 0.0,
-        }
-    }
-}
-
-/// Rewrite journal with amortization-aware admission.
 #[derive(Debug)]
 pub struct RewriteJournal {
     config: CacheConfig,
@@ -83,6 +75,7 @@ pub struct RewriteJournal {
 
 impl RewriteJournal {
     pub fn new(config: CacheConfig) -> Self {
+        assert!(config.flush_epoch > 0, "flush epoch must be positive");
         Self {
             config,
             entries: Vec::new(),
@@ -94,28 +87,56 @@ impl RewriteJournal {
     pub fn config(&self) -> &CacheConfig {
         &self.config
     }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
-
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-
-    /// Record a rewrite that happened (journal accounting).
-    pub fn record(&mut self, entry: RewriteEntry) {
-        self.report.events += 1;
-        if let Some(cost) = entry.invalidation_cost {
-            self.report.invalidation_total += cost;
-        } else {
-            self.report.unknown_cost_events += 1;
-        }
-        self.entries.push(entry);
+    pub fn entries(&self) -> &[RewriteEntry] {
+        &self.entries
     }
 
-    /// Rewrite is allowed when expected benefit >= invalidation cost +
-    /// amortization bar. Armed pressure suspends economics entirely.
+    pub fn observe_access(&mut self, hit: bool, armed: bool) {
+        self.report.events = self.report.events.saturating_add(1);
+        if hit {
+            self.report.hits = self.report.hits.saturating_add(1);
+        }
+        if armed {
+            self.report.armed_events = self.report.armed_events.saturating_add(1);
+            if hit {
+                self.report.armed_hits = self.report.armed_hits.saturating_add(1);
+            }
+        } else {
+            self.report.disarmed_events = self.report.disarmed_events.saturating_add(1);
+            if hit {
+                self.report.disarmed_hits = self.report.disarmed_hits.saturating_add(1);
+            }
+        }
+        self.refresh_report();
+    }
+
+    pub fn record(&mut self, entry: RewriteEntry) {
+        self.report.rewrite_events = self.report.rewrite_events.saturating_add(1);
+        match entry.invalidation_cost {
+            Some(cost) => {
+                self.report.invalidation_total =
+                    self.report.invalidation_total.saturating_add(cost);
+                self.report.known_cost_events = self.report.known_cost_events.saturating_add(1);
+            }
+            None => {
+                self.report.unknown_cost_events = self.report.unknown_cost_events.saturating_add(1)
+            }
+        }
+        if entry.amortized {
+            self.report.disarmed_rewrites = self.report.disarmed_rewrites.saturating_add(1);
+        } else {
+            self.report.armed_rewrites = self.report.armed_rewrites.saturating_add(1);
+        }
+        self.entries.push(entry);
+        self.refresh_report();
+    }
+
     pub fn should_rewrite(
         &mut self,
         expected_benefit: u64,
@@ -127,27 +148,27 @@ impl RewriteJournal {
                 expected_benefit >= cost.saturating_add(self.config.amortization_bar)
             });
         if allowed {
-            self.report.threshold_passes += 1;
+            self.report.threshold_passes = self.report.threshold_passes.saturating_add(1);
+            if armed {
+                self.report.armed_threshold_passes =
+                    self.report.armed_threshold_passes.saturating_add(1);
+            } else {
+                self.report.disarmed_threshold_passes =
+                    self.report.disarmed_threshold_passes.saturating_add(1);
+            }
         } else {
-            self.report.threshold_denials += 1;
-        }
-        if armed {
-            self.report.armed_rewrites += 1;
+            self.report.threshold_denials = self.report.threshold_denials.saturating_add(1);
         }
         allowed
     }
 
-    /// Epoch-batched note flush.
     pub fn should_flush(&self) -> bool {
         self.noted.len() >= self.config.flush_epoch
     }
-
-    /// Note an entry for a later epoch batch.
     pub fn note(&mut self, entry: RewriteEntry) {
         self.noted.push(entry);
     }
 
-    /// Forced flush before a lossy operation touching a noted source.
     pub fn force_flush(
         &mut self,
         source: u64,
@@ -155,20 +176,34 @@ impl RewriteJournal {
         wall_elapsed_us: u64,
     ) -> Vec<RewriteEntry> {
         let _ = source;
-        self.report.forced_flushes += 1;
-        if armed {
-            self.report.armed_rewrites += 1;
-        }
+        self.report.forced_flushes = self.report.forced_flushes.saturating_add(1);
         let mut drained = std::mem::take(&mut self.noted);
-        for entry in drained.iter_mut() {
-            entry.amortized = false;
+        for entry in &mut drained {
+            entry.amortized = !armed;
             entry.wall_elapsed_us = wall_elapsed_us;
+            self.record(*entry);
         }
-        self.entries.extend_from_slice(&drained);
         drained
     }
 
     pub fn report(&self) -> &CacheReport {
         &self.report
     }
+
+    fn refresh_report(&mut self) {
+        self.report.hit_rate = ratio(self.report.hits, self.report.events);
+        self.report.armed_hit_rate = ratio(self.report.armed_hits, self.report.armed_events);
+        self.report.disarmed_hit_rate =
+            ratio(self.report.disarmed_hits, self.report.disarmed_events);
+        self.report.invalidation_cost_per_event =
+            if self.report.rewrite_events == 0 || self.report.unknown_cost_events > 0 {
+                None
+            } else {
+                ratio(self.report.invalidation_total, self.report.rewrite_events)
+            };
+    }
+}
+
+fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }

@@ -9,8 +9,8 @@ use crate::context_policy::monitor::{MonitorSignal, RuntimeMonitor};
 use crate::context_policy::params::{all, lookup, ParameterClass, PARAMETERS};
 use crate::context_policy::pressure::{Pressure, SafetyTier, Thresholds};
 use crate::context_policy::progress::{
-    lexicographically_decreases, next_action, terminal_reserve, Macrostep, ProgressState,
-    TerminalOutcome,
+    lexicographically_decreases, next_action, terminal_reserve,
+    verify_adversarial_reachable_states, Macrostep, ProgressState, TerminalOutcome,
 };
 use crate::context_policy::queue::{
     find_admissible, ClassedQueues, OperationClass, Proposal, QueueClass, QueueConfig, SemanticKey,
@@ -121,25 +121,35 @@ fn governor_quota_forces_handle() {
 fn governor_violation_tightens_floor_then_quiesces() {
     let cfg = GovernorConfig::new(1000, 1000, 1.0, 100);
     let mut gov = Governor::new(cfg);
-    let admitted = gov.admit(1, 1000, 1);
-    let was_admitted = matches!(admitted, Admission::Admit);
-    assert!(was_admitted);
-
+    assert!(matches!(gov.admit(1, 1000, 1), Admission::Admit));
     gov.observe_reclaim(100, 1);
-    let quota_after_violation = gov.state().quota;
-    let tightened = quota_after_violation < 1000;
-    assert!(tightened);
-    let not_yet_at_floor = gov.state().quota > 100;
-    assert!(not_yet_at_floor);
+    assert!(!gov.finish_window(1));
+    assert!(gov.state().quota < 1000);
+    assert!(!gov.state().quiescing);
 
-    gov.observe_reclaim(100, 1);
-    let at_floor = gov.state().at_floor;
-    assert!(at_floor);
-    let quiescing = gov.state().quiescing;
-    assert!(quiescing);
-    let next = gov.admit(1, 1, 1);
-    let quiesced = matches!(next, Admission::Quiesce);
-    assert!(quiesced);
+    for window in 2..=32 {
+        gov.begin_turn();
+        let quota = gov.state().quota;
+        assert!(matches!(gov.admit(1, quota, window), Admission::Admit));
+        gov.observe_reclaim(1, window);
+        assert!(!gov.finish_window(window));
+        if gov.state().quiescing {
+            break;
+        }
+    }
+    assert!(gov.state().at_floor);
+    assert!(gov.state().quiescing);
+    assert!(matches!(gov.admit(1, 1, 33), Admission::Quiesce));
+}
+
+#[test]
+fn governor_turn_ceiling_resets_without_resetting_window_quota() {
+    let mut gov = Governor::new(GovernorConfig::new(100, 60, 1.0, 10));
+    assert!(matches!(gov.admit(1, 60, 1), Admission::Admit));
+    assert!(matches!(gov.admit(2, 1, 1), Admission::Handle));
+    gov.begin_turn();
+    assert!(matches!(gov.admit(1, 40, 1), Admission::Admit));
+    assert!(matches!(gov.admit(1, 1, 1), Admission::Handle));
 }
 
 #[test]
@@ -306,6 +316,14 @@ fn cache_forced_flush_and_armed_suspension() {
     assert!(timed);
     let forced = journal.report().forced_flushes == 1;
     assert!(forced);
+    journal.observe_access(true, true);
+    journal.observe_access(false, false);
+    assert_eq!(journal.report().hit_rate, Some(0.5));
+    assert_eq!(journal.report().armed_hit_rate, Some(1.0));
+    assert_eq!(journal.report().disarmed_hit_rate, Some(0.0));
+    assert_eq!(journal.report().invalidation_cost_per_event, Some(6.5));
+    journal.record(RewriteEntry::new(1, None, 11));
+    assert_eq!(journal.report().invalidation_cost_per_event, None);
 }
 
 #[test]
@@ -469,4 +487,14 @@ fn terminal_reserve_wrap_up_is_feasible() {
 
     let exact = terminal_reserve(5, 5);
     assert!(exact);
+}
+
+#[test]
+fn adversarial_reachable_states_terminate_without_wall_or_armed_noop() {
+    let report = verify_adversarial_reachable_states(6, 6, 16);
+    assert_eq!(report.reachable_states, 128 * 7 * 7);
+    assert_eq!(report.out_of_branch_wall_hits, 0);
+    assert_eq!(report.armed_noops, 0);
+    assert_eq!(report.unterminated_episodes, 0);
+    assert!(report.max_macrosteps <= 16);
 }
