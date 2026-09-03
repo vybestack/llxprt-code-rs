@@ -429,15 +429,6 @@ impl ModelConfig {
             ));
         }
 
-        // Structural dsflash selection (class 4): a marker without the
-        // `chat_template_kwargs` discriminator names its lexicographically first
-        // normalized path in the fixed diagnostic.
-        if let Some(marker) = &profile.chat_missing_discriminator {
-            return Err(ModelError::UnsupportedSetting(format!(
-                "{marker} is a dsflash-only chat setting and requires modelParams.chat_template_kwargs"
-            )));
-        }
-
         // Target settings (class 6): unsupported keys, non-`auto`/`openai` tool
         // formats, and a dsflash variant selected on an OpenAI Vercel Chat target.
         let unsupported: Vec<String> = profile

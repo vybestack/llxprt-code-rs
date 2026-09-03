@@ -67,10 +67,6 @@ pub struct Profile {
     pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
     pub(crate) openai_responses_settings:
         Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
-    /// Chat targets only: a dsflash marker is present without the
-    /// `modelParams.chat_template_kwargs` discriminator; the fixed class-4
-    /// diagnostic is deferred so endpoint and credential-policy classes run first.
-    pub(crate) chat_missing_discriminator: Option<String>,
 }
 
 /// Model sampling parameters (the fields the transport can honor) plus keys we know we
@@ -81,6 +77,10 @@ pub struct ModelParams {
     pub top_p: Option<f64>,
     pub top_k: Option<u64>,
     pub seed: Option<u64>,
+    /// The max-output family declared inside `modelParams`: an alias of the
+    /// `ephemeralSettings` max-output spellings, folded into the single resolved
+    /// cap by the Chat parse (disagreeing values reject).
+    pub max_output_tokens: Option<u64>,
     /// The structural dsflash discriminator: a bounded kwargs object. Presence
     /// selects the dsflash Chat settings variant regardless of the profile name.
     pub chat_template_kwargs: Option<ChatTemplateKwargsSpec>,
@@ -302,6 +302,8 @@ pub struct EphemeralSettings {
     pub max_turns_per_prompt: Option<i64>,
     /// `ephemeralSettings.maxToolCallsPerPrompt`: `-1` = unlimited, else `1..=512`.
     pub max_tool_calls_per_prompt: MaxToolCalls,
+    /// `ephemeralSettings.loopDetectionEnabled`: accepted exact metadata; this
+    /// runtime's loop detection is not configurable from a profile.
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
@@ -314,6 +316,10 @@ pub struct EphemeralSettings {
     pub prompt_notes: BTreeMap<String, String>,
     /// Unsupported keys that would change output if ignored.
     pub unsupported: Vec<String>,
+    /// `ephemeralSettings.streaming`: the sibling enum value, accepted as inert
+    /// metadata. This runtime always sends non-streaming Chat Completions, so the
+    /// value is never forwarded and never selects a transport mode.
+    pub streaming: Option<String>,
     /// Validated `tools.disabled` entries (deprecated `disabled-tools` alias merged).
     /// Registered Rust tools never appear here (the parser rejects them); the names
     /// that remain refer to host-side tools this runtime does not register.
@@ -322,8 +328,8 @@ pub struct EphemeralSettings {
     /// credential-policy rejection (class 3) so endpoint validation (class 2)
     /// reports first.
     pub auth_key_name: bool,
-    /// Dsflash marker fields, structurally typed: presence makes the profile a
-    /// dsflash candidate regardless of its name.
+    /// Ordinary sibling Chat settings, structurally typed: recorded as inert
+    /// host-side values regardless of the profile name.
     pub shell_replacement: Option<bool>,
     pub stream_idle_timeout_ms: Option<u64>,
     pub reasoning_enabled: Option<bool>,
@@ -355,6 +361,7 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)
+            .field("streaming", &self.streaming)
             .field("disabled_tools", &self.disabled_tools)
             .field("auth_key_name", &self.auth_key_name)
             .field("shell_replacement", &self.shell_replacement)
@@ -470,40 +477,27 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let (
-        ephemeral,
-        model_params,
-        codex_settings,
-        openai_responses_settings,
-        chat_missing_discriminator,
-    ) = if provider_id == crate::model_api::target::ProviderId::Codex {
-        let parsed = codex::parse(obj, name, model.clone())?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            Some(parsed.draft),
-            None,
-            None,
-        )
-    } else if target.api == crate::model_api::target::ModelApi::Responses {
-        let parsed = openai_responses::parse(obj, name)?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            None,
-            Some(parsed.draft),
-            None,
-        )
-    } else {
-        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
-        (
-            ephemeral,
-            model_params,
-            None,
-            None,
-            chat_missing_discriminator,
-        )
-    };
+    let (ephemeral, model_params, codex_settings, openai_responses_settings) =
+        if provider_id == crate::model_api::target::ProviderId::Codex {
+            let parsed = codex::parse(obj, name, model.clone())?;
+            (
+                parsed.ephemeral,
+                parsed.model_params,
+                Some(parsed.draft),
+                None,
+            )
+        } else if target.api == crate::model_api::target::ModelApi::Responses {
+            let parsed = openai_responses::parse(obj, name)?;
+            (
+                parsed.ephemeral,
+                parsed.model_params,
+                None,
+                Some(parsed.draft),
+            )
+        } else {
+            let (ephemeral, model_params) = parse_chat(obj, name)?;
+            (ephemeral, model_params, None, None)
+        };
 
     Ok(Profile {
         name: name.to_string(),
@@ -514,45 +508,35 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         target,
         codex_settings,
         openai_responses_settings,
-        chat_missing_discriminator,
     })
 }
 
 /// Chat-target parse: the shared syntax layer plus the structural dsflash variant
 /// selection. Markers are typed fields; `modelParams.chat_template_kwargs` is the
-/// discriminator. Markers without a discriminator defer the fixed class-4
-/// diagnostic (`chat_missing_discriminator`); the variant never depends on the
-/// profile name.
+/// discriminator; the variant never depends on the profile name. The Standard
+/// variant accepts the same ordinary sibling settings as inert host-side no-ops,
+/// so a marker alone never selects a variant and never blocks a profile.
 fn parse_chat(
     obj: &serde_json::Map<String, serde_json::Value>,
     name: &str,
-) -> Result<(EphemeralSettings, ModelParams, Option<String>), String> {
+) -> Result<(EphemeralSettings, ModelParams), String> {
     let mut ephemeral = parse_ephemeral(obj, name)?;
     let mut model_params = parse_model_params(obj, name)?;
     let discriminator = model_params.chat_template_kwargs.is_some();
 
-    let mut markers: Vec<&'static str> = Vec::new();
-    if ephemeral.shell_replacement.is_some() {
-        markers.push("ephemeralSettings.shell-replacement");
+    // The max-output family is one common setting: a `modelParams` spelling and an
+    // `ephemeralSettings` spelling must agree, and either one alone applies.
+    if let Some(value) = model_params.max_output_tokens.take() {
+        match ephemeral.max_output_tokens {
+            None => ephemeral.max_output_tokens = Some(value),
+            Some(existing) if existing == value => {}
+            Some(_) => {
+                return Err(format!(
+                    "profile {name:?}: max-output aliases must have equal values"
+                ));
+            }
+        }
     }
-    if ephemeral.stream_idle_timeout_ms.is_some() {
-        markers.push("ephemeralSettings.stream-idle-timeout-ms");
-    }
-    if ephemeral.reasoning_enabled.is_some() {
-        markers.push("ephemeralSettings.reasoning.enabled");
-    }
-    if ephemeral.reasoning_include_in_response.is_some() {
-        markers.push("ephemeralSettings.reasoning.includeInResponse");
-    }
-    if ephemeral.reasoning_include_in_context.is_some() {
-        markers.push("ephemeralSettings.reasoning.includeInContext");
-    }
-    if ephemeral.reasoning_strip_from_context_none {
-        markers.push("ephemeralSettings.reasoning.stripFromContext");
-    }
-    markers.sort_unstable();
-    let chat_missing_discriminator =
-        (!discriminator && !markers.is_empty()).then(|| markers[0].to_string());
 
     if discriminator {
         // Dsflash variant: the ephemeral effort must be one of the six wire values
@@ -587,7 +571,7 @@ fn parse_chat(
         ephemeral.prompt_notes.remove("reasoning:reasoning.effort");
     }
 
-    Ok((ephemeral, model_params, chat_missing_discriminator))
+    Ok((ephemeral, model_params))
 }
 
 fn parse_ephemeral(
@@ -642,6 +626,27 @@ fn parse_ephemeral_primary(
     match key {
         "maxOutput" | "max-output" | "maxOutputTokens" => {
             settings.max_output_tokens = Some(nonnegative()?);
+        }
+        "maxTurnsPerPrompt" => {
+            let n = value.as_i64().ok_or_else(|| {
+                format!("profile {name:?}: 'maxTurnsPerPrompt' must be an integer")
+            })?;
+            if n != -1 && n < 1 {
+                return Err(format!(
+                    "profile {name:?}: 'maxTurnsPerPrompt' must be -1 (unlimited) or a positive integer"
+                ));
+            }
+            settings.max_turns_per_prompt = Some(n);
+        }
+        "loopDetectionEnabled" => {
+            settings.loop_detection_enabled = Some(bool_value(value, name, key)?);
+        }
+        "streaming" => {
+            let note = required_string(value, name, key)?;
+            if !note.is_empty() && note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
+                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
+            }
+            settings.streaming = Some(note.to_string());
         }
         "maxToolCallsPerPrompt" => {
             settings.max_tool_calls_per_prompt = MaxToolCalls::parse(value, name)?;
@@ -714,9 +719,9 @@ fn parse_ephemeral_credentials(
     Ok(true)
 }
 
-/// The dsflash marker set: structurally typed presence, never name-gated. Each
-/// marker records its typed value; `from_profile_in` later requires the
-/// `modelParams.chat_template_kwargs` discriminator when any marker is present.
+/// The ordinary sibling Chat settings: structurally typed presence, never
+/// name-gated. Each records its typed value as a host-side no-op; only the
+/// `modelParams.chat_template_kwargs` discriminator selects the dsflash variant.
 fn parse_dsflash_marker(
     settings: &mut EphemeralSettings,
     key: &str,
@@ -898,6 +903,15 @@ fn parse_model_params(
                     .as_f64()
                     .ok_or_else(|| format!("profile {name:?}: '{k}' must be a number"))?;
                 m.top_p = Some(f);
+            }
+            // The max-output family in `modelParams` aliases the `ephemeralSettings`
+            // max-output spellings (one common setting); `parse_chat` folds it into
+            // the single resolved cap and rejects disagreeing spellings.
+            "maxOutputTokens" | "max-output" | "maxOutput" | "max_output_tokens"
+            | "max-output-tokens" | "maxTokens" | "max_tokens" | "max-tokens" => {
+                m.max_output_tokens = Some(nonneg_u64(v).ok_or_else(|| {
+                    format!("profile {name:?}: '{k}' must be a non-negative integer")
+                })?);
             }
             // `top_k` is intentionally NOT an accepted setting: the OpenAI Chat Completions
             // transport cannot serialize it, so it is rejected as unsupported (listed in

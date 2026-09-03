@@ -257,6 +257,7 @@ fn unknown_output_setting_fails() {
             top_p: None,
             top_k: None,
             seed: None,
+            max_output_tokens: None,
             chat_template_kwargs: None,
             unsupported: vec!["stop".into()],
         },
@@ -333,9 +334,7 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
     });
     assert_eq!(
         load_err(&marker_and_unsupported, "ordering", false),
-        "unsupported profile setting(s): \
-             ephemeralSettings.shell-replacement is a dsflash-only chat setting and \
-             requires modelParams.chat_template_kwargs"
+        "unsupported profile setting(s): maxRetrywait"
     );
 }
 
@@ -469,8 +468,9 @@ fn friendliglm_ladder_first_failures_in_order() {
         )
     );
 
-    // Rung 3: drop auth-key-name; the unsupported model parameters are now
-    // the first failure, in source order.
+    // Rung 3: drop auth-key-name; the unsupported model parameter is now the
+    // first failure (`max_tokens` is the accepted max-output alias, not an
+    // unsupported key).
     let mut rung3 = rung2.clone();
     rung3["ephemeralSettings"]
         .as_object_mut()
@@ -485,22 +485,15 @@ fn friendliglm_ladder_first_failures_in_order() {
     )
     .unwrap_err()
     .to_string();
-    assert_eq!(
-        err,
-        "unsupported profile setting(s): max_tokens, parse_reasoning"
-    );
+    assert_eq!(err, "unsupported profile setting(s): parse_reasoning");
 
-    // Rung 4: drop both unsupported model parameters; the dsflash
+    // Rung 4: drop the unsupported model parameter; the dsflash
     // discriminator survives and the config resolves with an inline key.
     let mut rung4 = rung3.clone();
     rung4["modelParams"]
         .as_object_mut()
         .unwrap()
         .remove("parse_reasoning");
-    rung4["modelParams"]
-        .as_object_mut()
-        .unwrap()
-        .remove("max_tokens");
     rung4["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
     let profile = parse_profile_value(&rung4, "friendliglm").unwrap();
     let config = crate::model::ModelConfig::from_profile_in(
@@ -510,6 +503,9 @@ fn friendliglm_ladder_first_failures_in_order() {
         std::path::Path::new("."),
     )
     .expect("the accepted rung builds a dsflash config");
+    // The accepted rung carries the single resolved max-output cap: the
+    // `modelParams.max_tokens` spelling folds into `max_output_tokens`.
+    assert_eq!(config.max_output_tokens, Some(32_000));
     let kwargs = config
         .model_params
         .as_ref()
@@ -518,10 +514,115 @@ fn friendliglm_ladder_first_failures_in_order() {
     assert!(kwargs.enable_thinking);
 }
 
+/// Issue 7: the ordinary TS profile settings are accepted on a plain
+/// chat-completions target. Each one is typed exactly as the sibling registry
+/// declares it, applied as a host-side no-op where this runtime has no matching
+/// knob, and never forwarded to the transport.
+#[test]
+fn ordinary_chat_settings_are_accepted_as_no_ops() {
+    // The installed `glm52-vast.json` is the reported reproduction: provider
+    // `openai`, a plain chat target, and every issue-7 key present at once.
+    let glm52_vast: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/profiles/glm52-vast.json"
+    ))
+    .unwrap();
+    let mut with_inline_key = glm52_vast.clone();
+    with_inline_key["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
+    with_inline_key["ephemeralSettings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("auth-keyfile");
+    let profile = parse_profile_value(&with_inline_key, "glm52-vast")
+        .unwrap_or_else(|error| panic!("the installed shape must parse: {error}"));
+    let config = crate::model::ModelConfig::from_profile_in(
+        &profile,
+        false,
+        true,
+        std::path::Path::new("."),
+    )
+    .unwrap_or_else(|error| panic!("the installed shape must build: {error}"));
+    assert_eq!(config.max_output_tokens, Some(60_000));
+    assert!(config
+        .model_params
+        .as_ref()
+        .unwrap()
+        .chat_template_kwargs
+        .is_none());
+}
+
+/// Issue 7: the same ordinary key set resolves on an ordinary https chat
+/// target. Only the sampling values and the single max-output cap reach the
+/// wire, and the two max-output spellings must agree.
+#[test]
+fn ordinary_chat_settings_resolve_on_a_plain_https_target() {
+    let ordinary = serde_json::json!({
+        "provider": "openai",
+        "model": "m",
+        "modelParams": {
+            "top_p": 0.95,
+            "temperature": 1,
+            "maxOutputTokens": 60000
+        },
+        "ephemeralSettings": {
+            "base-url": "https://api.example.com/v1",
+            "auth-key": "k",
+            "context-limit": 200000,
+            "maxTurnsPerPrompt": -1,
+            "loopDetectionEnabled": false,
+            "stream-idle-timeout-ms": 0,
+            "stream-first-response-timeout-ms": 0,
+            "shell-replacement": true,
+            "streaming": "enabled",
+            "reasoning.enabled": true,
+            "reasoning.includeInContext": true,
+            "reasoning.includeInResponse": true,
+            "reasoning.stripFromContext": "none"
+        }
+    });
+    let profile = parse_profile_value(&ordinary, "ordinary").unwrap();
+    assert!(profile.ephemeral.unsupported.is_empty());
+    assert!(profile.model_params.unsupported.is_empty());
+    assert_eq!(profile.ephemeral.max_turns_per_prompt, Some(-1));
+    assert_eq!(profile.ephemeral.streaming.as_deref(), Some("enabled"));
+    assert_eq!(profile.ephemeral.loop_detection_enabled, Some(false));
+    let config = crate::model::ModelConfig::from_profile_in(
+        &profile,
+        false,
+        false,
+        std::path::Path::new("."),
+    )
+    .unwrap();
+    // The max-output family is one common setting: either container alone applies
+    // and the resolved config carries it once. The fold writes the `modelParams`
+    // spelling into the ephemeral cap, so the ephemeral field is `Some` after
+    // parsing even when the profile declared it only under `modelParams`.
+    assert_eq!(profile.ephemeral.max_output_tokens, Some(60_000));
+    assert_eq!(config.max_output_tokens, Some(60_000));
+
+    // A disagreeing pair of max-output spellings still rejects.
+    let mut disagree = ordinary.clone();
+    disagree["ephemeralSettings"]["maxOutputTokens"] = serde_json::json!(1000);
+    assert_eq!(
+        parse_profile_value(&disagree, "ordinary").unwrap_err(),
+        "profile \"ordinary\": max-output aliases must have equal values"
+    );
+
+    // Nothing from the ordinary set reaches the wire beyond the sampling values
+    // and the single max-output cap the transport can apply.
+    let settings = crate::model::SerdeAiSettings {
+        timeout: config.timeout,
+        max_tokens: config.max_output_tokens,
+        model_params: config.model_params.as_ref(),
+    }
+    .into_model_settings();
+    assert_eq!(settings.max_tokens, Some(60_000));
+    assert_eq!(settings.temperature, Some(1.0));
+    assert_eq!(settings.top_p, Some(0.95));
+}
+
 /// First-failure rows for the remaining marker-bearing installed profiles:
-/// qwen38 (named reference first), qwen38-mi300x and ornith-runpod (marker
-/// diagnostics), and chutesk2streaming (marker diagnostic before its
-/// unsupported `streaming` key).
+/// qwen38 (named secure-store reference first) and chutesk2streaming (the
+/// installed `reasoning.stripFromContext` value is its first failure).
 #[test]
 fn marker_profiles_fail_on_their_first_structural_cause() {
     let qwen38: serde_json::Value =
@@ -534,29 +635,47 @@ fn marker_profiles_fail_on_their_first_structural_cause() {
         )
     );
 
+    // qwen38-mi300x carries the ordinary set on a plaintext remote endpoint; with
+    // the opt-in it resolves, and no dsflash discriminator is required.
     let mi300x: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/qwen38-mi300x.json"
     ))
     .unwrap();
-    // The fixture endpoint is plaintext http on a remote host; the flag is the
-    // production knob for that and must not reorder the classes.
-    assert_eq!(
-        load_err(&mi300x, "qwen38-mi300x", true),
-        "unsupported profile setting(s): \
-         ephemeralSettings.shell-replacement is a dsflash-only chat setting and \
-         requires modelParams.chat_template_kwargs"
-    );
+    let mut with_inline_key = mi300x.clone();
+    with_inline_key["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
+    with_inline_key["ephemeralSettings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("auth-keyfile");
+    let profile = parse_profile_value(&with_inline_key, "qwen38-mi300x").unwrap();
+    let config = crate::model::ModelConfig::from_profile_in(
+        &profile,
+        false,
+        true,
+        std::path::Path::new("."),
+    )
+    .unwrap_or_else(|error| panic!("the ordinary settings must resolve: {error}"));
+    assert_eq!(config.max_output_tokens, Some(16_384));
 
     let ornith: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/ornith-runpod.json"
     ))
     .unwrap();
-    assert_eq!(
-        load_err(&ornith, "ornith-runpod", false),
-        "unsupported profile setting(s): \
-         ephemeralSettings.stream-idle-timeout-ms is a dsflash-only chat setting and \
-         requires modelParams.chat_template_kwargs"
-    );
+    let mut ornith_key = ornith.clone();
+    ornith_key["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
+    ornith_key["ephemeralSettings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("auth-keyfile");
+    let profile = parse_profile_value(&ornith_key, "ornith-runpod").unwrap();
+    let config = crate::model::ModelConfig::from_profile_in(
+        &profile,
+        false,
+        false,
+        std::path::Path::new("."),
+    )
+    .unwrap_or_else(|error| panic!("stream-idle-timeout-ms alone must resolve: {error}"));
+    assert_eq!(config.max_output_tokens, Some(8_192));
 
     let chutes: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/chutesk2streaming.json"
@@ -570,24 +689,18 @@ fn marker_profiles_fail_on_their_first_structural_cause() {
         "profile \"chutesk2streaming\": 'reasoning.stripFromContext' must be exactly \"none\""
     );
 
-    // Normalizing that one value plus adding the discriminator makes the
-    // typed markers fine; the unsupported `streaming` key is then the
-    // (class 6) first failure.
-    let mut with_discriminator = chutes.clone();
-    with_discriminator["ephemeralSettings"]["reasoning.stripFromContext"] =
-        serde_json::json!("none");
-    with_discriminator["modelParams"]["chat_template_kwargs"] =
-        serde_json::json!({"enable_thinking": true});
-    let profile = parse_profile_value(&with_discriminator, "chutesk2streaming").unwrap();
-    let err = crate::model::ModelConfig::from_profile_in(
-        &profile,
-        false,
-        false,
-        std::path::Path::new("."),
-    )
-    .unwrap_err()
-    .to_string();
-    assert_eq!(err, "unsupported profile setting(s): streaming");
+    // Normalizing that one value makes the profile acceptable end to end: the
+    // `streaming` key is inert metadata and no discriminator is required.
+    let mut normalized = chutes.clone();
+    normalized["ephemeralSettings"]["reasoning.stripFromContext"] = serde_json::json!("none");
+    normalized["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
+    normalized["ephemeralSettings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("auth-keyfile");
+    let profile = parse_profile_value(&normalized, "chutesk2streaming").unwrap();
+    crate::model::ModelConfig::from_profile_in(&profile, false, false, std::path::Path::new("."))
+        .unwrap_or_else(|error| panic!("the normalized shape must build: {error}"));
 }
 
 /// The dsflash fixture is accepted end to end (typed markers, agreed effort,
@@ -604,7 +717,6 @@ fn dsflash_fixture_is_accepted_and_rename_invariant() {
     for name in ["dsflash-mi300x", "renamed-profile"] {
         let profile =
             parse_profile_value(&with_inline_key, name).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(profile.chat_missing_discriminator.is_none(), "{name}");
         assert!(profile.ephemeral.unsupported.is_empty(), "{name}");
         assert!(profile.model_params.unsupported.is_empty(), "{name}");
         let config = crate::model::ModelConfig::from_profile_in(

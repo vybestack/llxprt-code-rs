@@ -400,12 +400,50 @@ fn reasoning_effort_enforces_prompt_note_cap() {
     assert_eq!(error, crate::redact::PROMPT_NOTE_CAP_MESSAGE);
 }
 
+/// The ordinary sibling settings parse as inert Standard Chat fields: each is
+/// typed exactly as the sibling registry declares it and none reaches the wire.
+fn assert_ordinary_chat_settings_are_inert(name: &str, profile: &crate::profile::Profile) {
+    assert!(
+        profile.model_params.chat_template_kwargs.is_none(),
+        "{name}: no discriminator means the Standard variant"
+    );
+    assert!(profile.ephemeral.unsupported.is_empty(), "{name}");
+    assert!(profile.ephemeral.shell_replacement.is_some(), "{name}");
+    assert_eq!(profile.ephemeral.stream_idle_timeout_ms, Some(0), "{name}");
+    assert_eq!(profile.ephemeral.reasoning_enabled, Some(true), "{name}");
+    assert_eq!(
+        profile.ephemeral.reasoning_include_in_response,
+        Some(true),
+        "{name}"
+    );
+    assert_eq!(
+        profile.ephemeral.reasoning_include_in_context,
+        Some(true),
+        "{name}"
+    );
+    assert!(
+        profile.ephemeral.reasoning_strip_from_context_none,
+        "{name}"
+    );
+    assert_eq!(
+        profile.ephemeral.streaming.as_deref(),
+        Some("enabled"),
+        "{name}"
+    );
+    assert_eq!(profile.ephemeral.max_turns_per_prompt, Some(-1), "{name}");
+    assert_eq!(
+        profile.ephemeral.loop_detection_enabled,
+        Some(false),
+        "{name}"
+    );
+}
+
 #[test]
 fn dsflash_variant_is_structural_and_names_never_select() {
-    // Markers without the discriminator parse under ANY name (typed fields) and
-    // defer the fixed class-4 diagnostic naming the lexicographically first
-    // normalized marker path.
-    for name in ["dsflash-mi300x", "ordinary-profile", "qwen38"] {
+    // Markers without the discriminator parse under ANY name as Standard Chat
+    // inert host-side settings; nothing defers a diagnostic and nothing is
+    // forwarded. These are exactly the ordinary sibling keys issue 7 names.
+    for name in ["dsflash-mi300x", "ordinary-profile", "qwen38", "glm52-vast"] {
         let profile = parse_profile_value(
             &json!({
                 "provider": "openai",
@@ -416,22 +454,20 @@ fn dsflash_variant_is_structural_and_names_never_select() {
                     "reasoning.enabled": true,
                     "reasoning.includeInResponse": true,
                     "reasoning.includeInContext": true,
-                    "reasoning.stripFromContext": "none"
+                    "reasoning.stripFromContext": "none",
+                    "streaming": "enabled",
+                    "maxTurnsPerPrompt": -1,
+                    "loopDetectionEnabled": false
                 }
             }),
             name,
         )
         .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(
-            profile.chat_missing_discriminator.as_deref(),
-            Some("ephemeralSettings.reasoning.enabled"),
-            "{name}: lexicographically first marker"
-        );
-        assert!(profile.model_params.chat_template_kwargs.is_none());
+        assert_ordinary_chat_settings_are_inert(name, &profile);
     }
 
     // The discriminator selects the dsflash variant under any name: parse
-    // succeeds, the marker diagnostic is gone, and the typed fields survive.
+    // succeeds and the typed fields survive.
     for name in ["dsflash-mi300x", "renamed-profile"] {
         let profile = parse_profile_value(
             &json!({
@@ -443,7 +479,6 @@ fn dsflash_variant_is_structural_and_names_never_select() {
             name,
         )
         .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert!(profile.chat_missing_discriminator.is_none(), "{name}");
         let kwargs = profile
             .model_params
             .chat_template_kwargs
@@ -463,7 +498,6 @@ fn dsflash_variant_is_structural_and_names_never_select() {
         "plain-name",
     )
     .unwrap();
-    assert!(kwargs_only.chat_missing_discriminator.is_none());
     assert!(kwargs_only
         .model_params
         .chat_template_kwargs
