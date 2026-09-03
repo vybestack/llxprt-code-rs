@@ -12,6 +12,7 @@ mod anthropic;
 mod codex;
 mod openai_responses;
 mod parsing;
+mod provider_settings;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -446,65 +447,6 @@ fn validate_model_name(model: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-struct ParsedProviderSettings {
-    ephemeral: EphemeralSettings,
-    model_params: ModelParams,
-    anthropic_settings: Option<crate::model_api::settings::AnthropicSettingsDraft>,
-    codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
-    openai_responses_settings: Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
-    chat_missing_discriminator: Option<String>,
-}
-
-fn parse_provider_settings(
-    obj: &serde_json::Map<String, serde_json::Value>,
-    name: &str,
-    model: &str,
-    provider_id: crate::model_api::target::ProviderId,
-    target: &crate::model_api::target::ModelTarget,
-) -> Result<ParsedProviderSettings, String> {
-    if provider_id == crate::model_api::target::ProviderId::Codex {
-        let parsed = codex::parse(obj, name, model.to_string())?;
-        Ok(ParsedProviderSettings {
-            ephemeral: parsed.ephemeral,
-            model_params: parsed.model_params,
-            anthropic_settings: None,
-            codex_settings: Some(parsed.draft),
-            openai_responses_settings: None,
-            chat_missing_discriminator: None,
-        })
-    } else if provider_id == crate::model_api::target::ProviderId::Anthropic {
-        let parsed = anthropic::parse(obj, name)?;
-        Ok(ParsedProviderSettings {
-            ephemeral: parsed.ephemeral,
-            model_params: parsed.model_params,
-            anthropic_settings: Some(parsed.draft),
-            codex_settings: None,
-            openai_responses_settings: None,
-            chat_missing_discriminator: None,
-        })
-    } else if target.api == crate::model_api::target::ModelApi::Responses {
-        let parsed = openai_responses::parse(obj, name)?;
-        Ok(ParsedProviderSettings {
-            ephemeral: parsed.ephemeral,
-            model_params: parsed.model_params,
-            anthropic_settings: None,
-            codex_settings: None,
-            openai_responses_settings: Some(parsed.draft),
-            chat_missing_discriminator: None,
-        })
-    } else {
-        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
-        Ok(ParsedProviderSettings {
-            ephemeral,
-            model_params,
-            anthropic_settings: None,
-            codex_settings: None,
-            openai_responses_settings: None,
-            chat_missing_discriminator,
-        })
-    }
-}
-
 pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Profile, String> {
     let obj = value
         .as_object()
@@ -531,14 +473,14 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let ParsedProviderSettings {
+    let provider_settings::ParsedProviderSettings {
         ephemeral,
         model_params,
         anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
-    } = parse_provider_settings(obj, name, &model, provider_id, &target)?;
+    } = provider_settings::parse(obj, name, &model, provider_id, &target)?;
 
     Ok(Profile {
         name: name.to_string(),
