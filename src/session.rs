@@ -36,10 +36,6 @@ const SESSION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Poll interval while waiting for a contended session lock.
 const SESSION_LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
 
-use aes_gcm::{
-    aead::{AeadCore as _, OsRng},
-    Aes256Gcm,
-};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -284,17 +280,8 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn random_token_hex() -> String {
-    format!(
-        "{:032x}",
-        Aes256Gcm::generate_nonce(&mut OsRng)
-            .iter()
-            .fold(0_u128, |n, b| (n << 8) | u128::from(*b))
-    )
-}
-
 fn new_owner() -> String {
-    format!("{}-{}", std::process::id(), random_token_hex())
+    format!("{}-{}", std::process::id(), paths::random_token_hex())
 }
 
 fn fchmod(fd: std::os::fd::RawFd, mode: libc::mode_t) -> Result<(), StoreError> {
@@ -463,7 +450,7 @@ impl SessionId {
     /// Generate a collision-resistant identifier using OS-backed randomness.
     pub fn fresh() -> Self {
         Self {
-            id: format!("session-{}", random_token_hex()),
+            id: format!("session-{}", paths::random_token_hex()),
         }
     }
 

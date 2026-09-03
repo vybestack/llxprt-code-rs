@@ -6,7 +6,23 @@
 //! production path still resolves the environment exactly as before, and no runner injects a
 //! root.
 
+use aes_gcm::{
+    aead::{AeadCore as _, OsRng},
+    Aes256Gcm,
+};
 use std::path::PathBuf;
+
+/// Generates an OS-random token encoded as lowercase hexadecimal.
+pub(super) fn random_token_hex() -> String {
+    use std::fmt::Write as _;
+
+    Aes256Gcm::generate_nonce(&mut OsRng)
+        .iter()
+        .fold(String::with_capacity(24), |mut hex, byte| {
+            write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+            hex
+        })
+}
 
 /// The configuration-root-derived sessions directory.
 ///
