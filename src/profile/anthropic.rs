@@ -1,10 +1,11 @@
-use super::{parse_ephemeral, parse_model_params, EphemeralSettings, ModelParams};
+use super::{parse_chat, EphemeralSettings, ModelParams};
 use crate::model_api::settings::{AnthropicSettingsDraft, PromptCaching};
 
 #[derive(Debug)]
 pub(super) struct Parsed {
     pub(super) ephemeral: EphemeralSettings,
     pub(super) model_params: ModelParams,
+    pub(super) chat_missing_discriminator: Option<String>,
     pub(super) draft: AnthropicSettingsDraft,
 }
 
@@ -15,17 +16,16 @@ pub(super) fn parse(
     let mut cleaned = obj.clone();
     let mut ephemeral = match cleaned.get("ephemeralSettings") {
         None => serde_json::Map::new(),
-        Some(value) => value
-            .as_object()
-            .cloned()
-            .ok_or_else(|| format!("profile {name}: 'ephemeralSettings' must be a JSON object"))?,
+        Some(value) => value.as_object().cloned().ok_or_else(|| {
+            format!("profile {name:?}: 'ephemeralSettings' must be a JSON object")
+        })?,
     };
     let prompt_caching = match ephemeral.remove("prompt-caching") {
         None => PromptCaching::Cached,
         Some(serde_json::Value::String(value)) if value == "off" => PromptCaching::Off,
         Some(_) => {
             return Err(format!(
-                "profile {name}: 'ephemeralSettings.prompt-caching' must be 'off'"
+                "profile {name:?}: 'ephemeralSettings.prompt-caching' must be 'off'"
             ))
         }
     };
@@ -35,9 +35,11 @@ pub(super) fn parse(
             serde_json::Value::Object(ephemeral),
         );
     }
+    let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(&cleaned, name)?;
     Ok(Parsed {
-        ephemeral: parse_ephemeral(&cleaned, name)?,
-        model_params: parse_model_params(&cleaned, name)?,
+        ephemeral,
+        model_params,
+        chat_missing_discriminator,
         draft: AnthropicSettingsDraft { prompt_caching },
     })
 }
@@ -77,6 +79,26 @@ mod issue81_parser_tests {
             "unexpected resolution error: {error}"
         );
     }
+
+    #[test]
+    fn anthropic_profile_resolution_preserves_dsflash_marker() {
+        let json = r#"{
+            "provider": "anthropic",
+            "model": "claude-loopback",
+            "ephemeralSettings": {
+                "base-url": "http://127.0.0.1:1",
+                "auth-key": "loopback-key",
+                "shell-replacement": true
+            }
+        }"#;
+
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let profile = parse_profile_value(&value, "anthropic-marker").unwrap();
+        assert_eq!(
+            profile.chat_missing_discriminator.as_deref(),
+            Some("ephemeralSettings.shell-replacement")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -109,7 +131,43 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            "profile a: 'ephemeralSettings.prompt-caching' must be 'off'"
+            "profile \"a\": 'ephemeralSettings.prompt-caching' must be 'off'"
+        );
+    }
+
+    #[test]
+    fn preserves_dsflash_marker_without_discriminator() {
+        let parsed = parse(
+            json!({"ephemeralSettings":{"shell-replacement":true}})
+                .as_object()
+                .unwrap(),
+            "anthropic-marker",
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.chat_missing_discriminator.as_deref(),
+            Some("ephemeralSettings.shell-replacement")
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_dsflash_reasoning_effort() {
+        let error = parse(
+            json!({
+                "ephemeralSettings": {"reasoning.effort": "low"},
+                "modelParams": {"chat_template_kwargs": {
+                    "enable_thinking": true,
+                    "reasoning_effort": "high"
+                }}
+            })
+            .as_object()
+            .unwrap(),
+            "anthropic-conflict",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "profile \"anthropic-conflict\": 'reasoning.effort' must agree with 'chat_template_kwargs.reasoning_effort'"
         );
     }
 }

@@ -38,7 +38,7 @@ pub(super) fn parse(
             anthropic_settings: Some(parsed.draft),
             codex_settings: None,
             openai_responses_settings: None,
-            chat_missing_discriminator: None,
+            chat_missing_discriminator: parsed.chat_missing_discriminator,
         })
     } else if target.api == ModelApi::Responses {
         let parsed = openai_responses::parse(obj, name)?;
