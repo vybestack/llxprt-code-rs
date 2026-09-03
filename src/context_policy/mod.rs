@@ -14,6 +14,7 @@ pub mod params;
 pub mod pressure;
 pub mod progress;
 pub mod queue;
+pub mod runtime;
 
 #[cfg(test)]
 mod tests;

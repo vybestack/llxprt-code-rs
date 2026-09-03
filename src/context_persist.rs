@@ -3,6 +3,7 @@
 //! `session.rs`; the session store keeps one-line wrappers at the old call sites.
 
 use std::path::Path;
+use std::time::Instant;
 
 use serde::Serialize;
 
@@ -31,6 +32,7 @@ pub(crate) struct ContextState {
     pub(crate) quiesce: Option<String>,
     pub(crate) detail: Option<String>,
     pub(crate) preserved: Vec<String>,
+    pub(crate) policy: crate::context_policy::runtime::ProposalOnlyController,
 }
 
 /// Durable context-store facts the CLI envelope re-reads after the run.
@@ -39,6 +41,7 @@ struct ContextManifest<'a> {
     mode: &'a str,
     pub(crate) quiesce: Option<&'a str>,
     pub(crate) detail: Option<&'a str>,
+    pub(crate) terminal_outcome: Option<&'a str>,
     pub(crate) preserved: &'a [String],
 }
 
@@ -53,6 +56,17 @@ fn context_vault_key(session_id: &str) -> crate::context_store::vault::VaultKey 
         chunk.copy_from_slice(&bytes[..chunk.len()]);
     }
     crate::context_store::vault::VaultKey::from(key)
+}
+
+fn new_context_state(session_id: &str) -> ContextState {
+    ContextState {
+        store: crate::context_store::store::ContextStore::open(&context_vault_key(session_id)),
+        filters: crate::context_ingress::filter::FilterRegistry::new(),
+        quiesce: None,
+        detail: None,
+        preserved: Vec::new(),
+        policy: crate::context_policy::runtime::ProposalOnlyController::default(),
+    }
 }
 
 /// Stable textual refusal for the external context store seam.
@@ -116,6 +130,11 @@ fn trim_preserved(state: &mut ContextState) {
 fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<String, String> {
     use crate::context_ingress::capture::CaptureSource;
     use crate::context_ingress::ingress::IngressTxn;
+    let started = Instant::now();
+    let proposal = state.policy.propose_bulk(tool, bytes);
+    if proposal.admission == crate::context_policy::governor::Admission::Quiesce {
+        return Err("policy governor quiesced before bulk admission".to_string());
+    }
     state
         .store
         .begin_state_advancing_turn()
@@ -150,7 +169,12 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
     let digest = state
         .filters
         .digest(tool, &handle, vec![range], bytes, &segments);
-    Ok(digest_record(state, tool, bytes, &handle, &digest))
+    let record = digest_record(state, tool, bytes, &handle, &digest);
+    let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
+    state
+        .policy
+        .complete_bulk(proposal, bytes, record.len(), elapsed);
+    Ok(record)
 }
 
 /// The same record shape computed entirely in memory: no store, no vault, no artifacts.
@@ -214,13 +238,9 @@ fn digest_record(
 
 /// Lock-poisoned fallback: a pure in-memory record with no shared state touched at all.
 fn memory_quiesce_record(tool: &str, result: &str) -> String {
-    let mut state = ContextState {
-        store: crate::context_store::store::ContextStore::open(&context_vault_key("unavailable")),
-        filters: crate::context_ingress::filter::FilterRegistry::new(),
-        quiesce: Some("quiesce_unwritable".to_string()),
-        detail: Some("context store lock poisoned".to_string()),
-        preserved: Vec::new(),
-    };
+    let mut state = new_context_state("unavailable");
+    state.quiesce = Some("quiesce_unwritable".to_string());
+    state.detail = Some("context store lock poisoned".to_string());
     memory_digest(&mut state, tool, result.as_bytes())
 }
 
@@ -258,14 +278,7 @@ pub(crate) fn context_exchange(
         .lock()
         .map_err(|_| StoreError::Lock("context store lock poisoned".into()))?;
     if guard.is_none() {
-        let key = context_vault_key(&store.session_id);
-        *guard = Some(ContextState {
-            store: crate::context_store::store::ContextStore::open(&key),
-            filters: crate::context_ingress::filter::FilterRegistry::new(),
-            quiesce: None,
-            detail: None,
-            preserved: Vec::new(),
-        });
+        *guard = Some(new_context_state(&store.session_id));
     }
     let state = guard
         .as_mut()
@@ -301,14 +314,7 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
         return memory_quiesce_record(tool, result);
     };
     if guard.is_none() {
-        let key = context_vault_key(&store.session_id);
-        *guard = Some(ContextState {
-            store: crate::context_store::store::ContextStore::open(&key),
-            filters: crate::context_ingress::filter::FilterRegistry::new(),
-            quiesce: None,
-            detail: None,
-            preserved: Vec::new(),
-        });
+        *guard = Some(new_context_state(&store.session_id));
     }
     let Some(state) = guard.as_mut() else {
         return memory_quiesce_record(tool, result);
@@ -331,6 +337,28 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
     record
 }
 
+/// Bounded deterministic range read-back for the minimum management floor.
+pub fn read_context_page(
+    store: &SessionStore,
+    range: std::ops::Range<u64>,
+    limit: usize,
+) -> Result<crate::context_store::spine::Page, String> {
+    if limit == 0 {
+        return Err("context read limit must be positive".to_string());
+    }
+    let guard = store
+        .context
+        .lock()
+        .map_err(|_| "context store lock poisoned".to_string())?;
+    let state = guard
+        .as_ref()
+        .ok_or_else(|| "context store is not initialized".to_string())?;
+    state
+        .store
+        .read_page(range, limit)
+        .map_err(|error| context_store_error(&error))
+}
+
 /// Best-effort quiesce marker beside the session, readable when only `context/` was
 /// made unwritable. Same shape as `context/manifest.json`, so the envelope re-read
 /// parses either location.
@@ -339,6 +367,7 @@ pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {
@@ -367,10 +396,61 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
     let vault = serde_json::to_vec(&state.store.vault_snapshot())
         .map_err(|error| format!("encode vault snapshot failed: {error}"))?;
     write_artifact(&dir, &root, "vault", &vault)?;
+    let events = state
+        .policy
+        .events()
+        .iter()
+        .map(|event| serde_json::to_string(event).expect("policy event serializes"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    write_artifact(&dir, &root, "events.log", events.as_bytes())?;
+    let checkpoints = state
+        .policy
+        .events()
+        .iter()
+        .map(|event| event.logical_time.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    write_artifact(&dir, &root, "checkpoints", checkpoints.as_bytes())?;
+    let mut journal = String::new();
+    for entry in state.policy.journal().entries() {
+        let line = serde_json::json!({
+            "source": entry.source,
+            "tokens_reclaimed": entry.tokens_reclaimed,
+            "invalidation_cost": entry.invalidation_cost,
+            "logical_time": entry.logical_time,
+            "wall_elapsed_us": entry.wall_elapsed_us,
+            "amortized": entry.amortized,
+        });
+        journal.push_str(&line.to_string());
+        journal.push('\n');
+    }
+    let report = state.policy.cache_report();
+    journal.push_str(
+        &serde_json::json!({
+            "report": {
+                "hit_rate": report.hit_rate,
+                "armed_hit_rate": report.armed_hit_rate,
+                "disarmed_hit_rate": report.disarmed_hit_rate,
+                "invalidation_cost_per_event": report.invalidation_cost_per_event,
+                "known_invalidation_cost_events": report.known_cost_events,
+                "unknown_invalidation_cost_events": report.unknown_cost_events,
+                "threshold_passes": report.threshold_passes,
+                "threshold_denials": report.threshold_denials,
+                "armed_rewrites": report.armed_rewrites,
+                "disarmed_rewrites": report.disarmed_rewrites,
+                "forced_flushes": report.forced_flushes,
+            }
+        })
+        .to_string(),
+    );
+    journal.push('\n');
+    write_artifact(&dir, &root, "rewrite-journal.log", journal.as_bytes())?;
     let manifest = ContextManifest {
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
     let bytes = serde_json::to_vec(&manifest)
@@ -385,6 +465,7 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {
