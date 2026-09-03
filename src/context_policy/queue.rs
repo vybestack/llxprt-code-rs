@@ -1,14 +1,12 @@
-//! Classed proposal queues for the Phase-4 policy plane.
+//! Classed, deterministic proposal queues for the Phase-4 policy plane.
 //!
-//! Policy is proposal-only: nothing here mutates store or executor state.
-//! Queues are classed (Safety, Ingress, Model, Controller, Monitor) with
-//! reserved service shares so every nonempty class receives its reserved share
-//! over a service cycle. Safety preempts, service is deterministic (and thus
-//! loggable), dedup is semantic, and reproposal is monotonic and bounded.
+//! Policy is proposal-only: this module never mutates store or executor state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// Service classes in fixed order.
+use crate::context_txn::operation::{self, Operation};
+
+/// Service classes in fixed preemption order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum QueueClass {
     Safety,
@@ -19,25 +17,19 @@ pub enum QueueClass {
 }
 
 impl QueueClass {
-    /// Fixed class order (deterministic service and logging).
-    pub fn all() -> [QueueClass; 5] {
+    pub const fn all() -> [QueueClass; 5] {
         [
-            QueueClass::Safety,
-            QueueClass::Ingress,
-            QueueClass::Model,
-            QueueClass::Controller,
-            QueueClass::Monitor,
+            Self::Safety,
+            Self::Ingress,
+            Self::Model,
+            Self::Controller,
+            Self::Monitor,
         ]
     }
 
-    fn default_share(self) -> usize {
-        match self {
-            QueueClass::Safety => 1,
-            QueueClass::Ingress => 1,
-            QueueClass::Model => 1,
-            QueueClass::Controller => 1,
-            QueueClass::Monitor => 1,
-        }
+    const fn default_share(self) -> usize {
+        let _ = self;
+        1
     }
 }
 
@@ -49,43 +41,60 @@ pub struct SourceRange {
 }
 
 impl SourceRange {
-    pub fn new(start: u64, len: u32) -> Self {
+    pub const fn new(start: u64, len: u32) -> Self {
         Self { start, len }
     }
 }
 
-/// Semantic dedup key: operation class + source ranges + source version.
-///
-/// Never includes caller identity: two callers proposing the same semantic
-/// operation on the same source version are the same proposal.
+/// Validated identity of an operation in the closed transaction registry.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct OperationClass(u8);
+
+impl OperationClass {
+    pub fn from_name(name: &str) -> Option<Self> {
+        operation::registry()
+            .iter()
+            .position(|row| row.name == name)
+            .and_then(|index| u8::try_from(index).ok())
+            .map(Self)
+    }
+
+    pub fn name(self) -> &'static str {
+        operation::registry()[usize::from(self.0)].name
+    }
+}
+
+/// Semantic identity is independent of queue service class and caller identity.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct SemanticKey {
-    pub class: QueueClass,
+    pub operation: OperationClass,
     pub ranges: Vec<SourceRange>,
     pub source_version: u64,
 }
 
 impl SemanticKey {
-    pub fn new(class: QueueClass, ranges: Vec<SourceRange>, source_version: u64) -> Self {
+    pub fn new(operation: OperationClass, ranges: Vec<SourceRange>, source_version: u64) -> Self {
         Self {
-            class,
+            operation,
             ranges,
             source_version,
         }
     }
 }
 
-/// A queued proposal. Priority is advisory only and never part of identity.
+/// A proposal plus its deterministic service class.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Proposal {
+    pub service_class: QueueClass,
     pub key: SemanticKey,
     pub priority: u8,
     pub tokens: u64,
 }
 
 impl Proposal {
-    pub fn new(key: SemanticKey, tokens: u64) -> Self {
+    pub fn new(service_class: QueueClass, key: SemanticKey, tokens: u64) -> Self {
         Self {
+            service_class,
             key,
             priority: 0,
             tokens,
@@ -93,7 +102,7 @@ impl Proposal {
     }
 }
 
-/// Queue tuning: reserved shares per class, service cycle size, retry bound.
+/// Reserved shares per service cycle and the reproposal bound.
 #[derive(Clone, Debug)]
 pub struct QueueConfig {
     pub cycle_slots: usize,
@@ -103,10 +112,10 @@ pub struct QueueConfig {
 
 impl Default for QueueConfig {
     fn default() -> Self {
-        let mut shares = BTreeMap::new();
-        for class in QueueClass::all() {
-            shares.insert(class, class.default_share());
-        }
+        let shares = QueueClass::all()
+            .into_iter()
+            .map(|class| (class, class.default_share()))
+            .collect();
         Self {
             cycle_slots: 5,
             max_retries: 4,
@@ -115,85 +124,49 @@ impl Default for QueueConfig {
     }
 }
 
-/// Closed, ordered view of the operation registry used by `find_admissible`.
-///
-/// The registry itself is owned by `context_txn::operation`; this snapshot
-/// preserves its closed order for the deterministic bounded admissibility
-/// search without reaching into that module.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct RegistryEntry {
-    pub name: &'static str,
-    pub admissible: bool,
-}
-
-impl RegistryEntry {
-    pub const fn new(name: &'static str, admissible: bool) -> Self {
-        Self { name, admissible }
-    }
-}
-
-/// Ordered registry snapshot (closed set, fixed order).
-pub const REGISTRY: [RegistryEntry; 24] = [
-    RegistryEntry::new("noop", false),
-    RegistryEntry::new("snapshot", true),
-    RegistryEntry::new("append", true),
-    RegistryEntry::new("prepend", true),
-    RegistryEntry::new("replace_range", true),
-    RegistryEntry::new("erase_range", false),
-    RegistryEntry::new("insert_placeholder", true),
-    RegistryEntry::new("collapse_placeholder", true),
-    RegistryEntry::new("fold_away_ephemeral", true),
-    RegistryEntry::new("fold", true),
-    RegistryEntry::new("compact", true),
-    RegistryEntry::new("condense", true),
-    RegistryEntry::new("digest_span", false),
-    RegistryEntry::new("reread_span", true),
-    RegistryEntry::new("reacquire_span", true),
-    RegistryEntry::new("annotate", true),
-    RegistryEntry::new("pin", false),
-    RegistryEntry::new("unpin", true),
-    RegistryEntry::new("validate", true),
-    RegistryEntry::new("reorder", false),
-    RegistryEntry::new("handoff", true),
-    RegistryEntry::new("wrap_up", true),
-    RegistryEntry::new("quiesce", true),
-    RegistryEntry::new("terminal", false),
-];
-
-/// Deterministic bounded admissibility search over a caller-supplied view.
-///
-/// Scans in registry order and stops after `budget` inspected rows.
-pub fn find_admissible_in(entries: &[RegistryEntry], budget: usize) -> Option<RegistryEntry> {
-    entries
+/// Search the actual closed transaction registry in its declared order.
+pub fn find_admissible(
+    budget: usize,
+    mut admissible: impl FnMut(&Operation) -> bool,
+) -> Option<&'static Operation> {
+    operation::registry()
         .iter()
         .take(budget)
-        .copied()
-        .find(|entry| entry.admissible)
+        .find(|row| admissible(row))
 }
 
-/// Deterministic bounded admissibility search over the closed registry view.
-pub fn find_admissible(budget: usize) -> Option<RegistryEntry> {
-    find_admissible_in(&REGISTRY, budget)
-}
-
-/// Classed proposal queues with reserved service shares.
+/// Classed proposal queues with semantic dedup and bounded reproposal.
 #[derive(Debug)]
 pub struct ClassedQueues {
     config: QueueConfig,
-    queues: BTreeMap<QueueClass, Vec<Proposal>>,
+    queues: BTreeMap<QueueClass, VecDeque<Proposal>>,
+    pending: BTreeSet<SemanticKey>,
     retries: BTreeMap<SemanticKey, u32>,
     served: BTreeMap<SemanticKey, u32>,
 }
 
 impl ClassedQueues {
     pub fn new(config: QueueConfig) -> Self {
-        let mut queues = BTreeMap::new();
-        for class in QueueClass::all() {
-            queues.insert(class, Vec::new());
-        }
+        let all_shares_present = QueueClass::all()
+            .into_iter()
+            .all(|class| config.shares.contains_key(&class));
+        assert!(
+            all_shares_present,
+            "every queue class needs a reserved share"
+        );
+        let reserved: usize = config.shares.values().copied().sum();
+        assert!(
+            reserved <= config.cycle_slots,
+            "reserved shares exceed cycle slots"
+        );
+        let queues = QueueClass::all()
+            .into_iter()
+            .map(|class| (class, VecDeque::new()))
+            .collect();
         Self {
             config,
             queues,
+            pending: BTreeSet::new(),
             retries: BTreeMap::new(),
             served: BTreeMap::new(),
         }
@@ -204,81 +177,87 @@ impl ClassedQueues {
     }
 
     pub fn len(&self, class: QueueClass) -> usize {
-        self.queues.get(&class).map(|q| q.len()).unwrap_or(0)
+        self.queues.get(&class).map(VecDeque::len).unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.queues.values().all(|q| q.is_empty())
+        self.pending.is_empty()
     }
 
-    /// Submit a proposal. Returns `true` when newly queued, `false` when the
-    /// proposal is a semantic duplicate (retry accounting still advances).
+    /// Insert a new semantic proposal. A pending or previously served key is a duplicate.
     pub fn submit(&mut self, proposal: Proposal) -> bool {
-        if let Some(count) = self.retries.get_mut(&proposal.key) {
-            *count = (*count).saturating_add(1).min(self.config.max_retries);
+        if self.retries.contains_key(&proposal.key) {
             return false;
         }
         self.retries.insert(proposal.key.clone(), 0);
+        self.pending.insert(proposal.key.clone());
         self.queues
-            .entry(proposal.key.class)
-            .or_default()
-            .push(proposal);
+            .get_mut(&proposal.service_class)
+            .expect("validated queue configuration contains every class")
+            .push_back(proposal);
         true
     }
 
-    /// Service one cycle: deterministic, share-respecting, safety preempting.
+    /// Requeue a served proposal while its monotonic retry budget remains.
+    pub fn repropose(&mut self, proposal: Proposal) -> bool {
+        if self.pending.contains(&proposal.key) {
+            return false;
+        }
+        let Some(retries) = self.retries.get_mut(&proposal.key) else {
+            return false;
+        };
+        if *retries >= self.config.max_retries {
+            return false;
+        }
+        *retries = retries.saturating_add(1);
+        self.pending.insert(proposal.key.clone());
+        self.queues
+            .get_mut(&proposal.service_class)
+            .expect("validated queue configuration contains every class")
+            .push_back(proposal);
+        true
+    }
+
+    /// Service reserved shares first, then fill deterministically in preemption order.
     pub fn service_cycle(&mut self) -> Vec<Proposal> {
         let mut out = Vec::new();
-        let slots = self.config.cycle_slots;
         for pass in 0..2 {
             for class in QueueClass::all() {
-                let remaining = slots.saturating_sub(out.len());
+                let remaining = self.config.cycle_slots.saturating_sub(out.len());
                 let limit = if pass == 0 {
-                    (self.config.shares[&class]).min(remaining)
+                    self.config.shares[&class].min(remaining)
                 } else {
                     remaining
                 };
-                let mut popped = Vec::new();
-                if let Some(queue) = self.queues.get_mut(&class) {
-                    while popped.len() < limit {
-                        match queue.pop_front() {
-                            Some(proposal) => popped.push(proposal),
-                            None => break,
-                        }
-                    }
+                let queue = self
+                    .queues
+                    .get_mut(&class)
+                    .expect("validated queue configuration contains every class");
+                for _ in 0..limit {
+                    let Some(proposal) = queue.pop_front() else {
+                        break;
+                    };
+                    self.pending.remove(&proposal.key);
+                    let served = self.served.entry(proposal.key.clone()).or_insert(0);
+                    *served = served.saturating_add(1);
+                    out.push(proposal);
                 }
-                for p in popped {
-                    let counter = self.served.entry(p.key.clone()).or_insert(0);
-                    *counter = counter.saturating_add(1);
-                    out.push(p);
-                }
-                if out.len() >= slots {
+                if out.len() == self.config.cycle_slots {
                     break;
                 }
             }
-            if out.len() >= slots {
+            if out.len() == self.config.cycle_slots {
                 break;
             }
         }
         out
     }
 
-    /// Monotonic, bounded reproposal counter for a semantic key.
     pub fn retries_for(&self, key: &SemanticKey) -> u32 {
         self.retries.get(key).copied().unwrap_or(0)
     }
-}
 
-trait PopFront<T> {
-    fn pop_front(&mut self) -> Option<T>;
-}
-
-impl<T> PopFront<T> for Vec<T> {
-    fn pop_front(&mut self) -> Option<T> {
-        if self.is_empty() {
-            None
-        } else {
-            Some(self.remove(0))
-        }
+    pub fn served_for(&self, key: &SemanticKey) -> u32 {
+        self.served.get(key).copied().unwrap_or(0)
     }
 }

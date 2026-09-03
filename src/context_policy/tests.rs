@@ -13,20 +13,27 @@ use crate::context_policy::progress::{
     TerminalOutcome,
 };
 use crate::context_policy::queue::{
-    find_admissible, find_admissible_in, ClassedQueues, Proposal, QueueClass, QueueConfig,
-    SemanticKey, SourceRange, REGISTRY,
+    find_admissible, ClassedQueues, OperationClass, Proposal, QueueClass, QueueConfig, SemanticKey,
+    SourceRange,
 };
 
 fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
-fn key(class: QueueClass, start: u64, version: u64) -> SemanticKey {
-    SemanticKey::new(class, vec![SourceRange::new(start, 8)], version)
+fn key(operation: &'static str, start: u64, version: u64) -> SemanticKey {
+    let operation = OperationClass::from_name(operation).expect("test operation is registered");
+    SemanticKey::new(operation, vec![SourceRange::new(start, 8)], version)
 }
 
-fn proposal(class: QueueClass, start: u64, version: u64, tokens: u64) -> Proposal {
-    Proposal::new(key(class, start, version), tokens)
+fn proposal(
+    class: QueueClass,
+    operation: &'static str,
+    start: u64,
+    version: u64,
+    tokens: u64,
+) -> Proposal {
+    Proposal::new(class, key(operation, start, version), tokens)
 }
 
 fn queues() -> ClassedQueues {
@@ -37,16 +44,16 @@ fn queues() -> ClassedQueues {
 fn queue_reserved_shares_prevent_monitor_starvation() {
     let mut q = queues();
     for i in 0..8u64 {
-        let accepted = q.submit(proposal(QueueClass::Model, 100 + i, 1, 64));
+        let accepted = q.submit(proposal(QueueClass::Model, "fold", 100 + i, 1, 64));
         assert!(accepted);
     }
-    let monitor_accepted = q.submit(proposal(QueueClass::Monitor, 900, 1, 16));
+    let monitor_accepted = q.submit(proposal(QueueClass::Monitor, "rule-update", 900, 1, 16));
     assert!(monitor_accepted);
 
     let serviced = q.service_cycle();
     let saw_monitor = serviced
         .iter()
-        .any(|p| matches!(p.key.class, QueueClass::Monitor));
+        .any(|p| matches!(p.service_class, QueueClass::Monitor));
     let nonempty = !serviced.is_empty();
     assert!(nonempty);
     assert!(saw_monitor);
@@ -55,47 +62,42 @@ fn queue_reserved_shares_prevent_monitor_starvation() {
 #[test]
 fn semantic_dedup_and_bounded_reposal() {
     let mut q = queues();
-    let first = q.submit(proposal(QueueClass::Model, 10, 3, 32));
-    assert!(first);
-    let dup = q.submit(proposal(QueueClass::Model, 10, 3, 32));
-    assert!(!dup);
+    let original = proposal(QueueClass::Model, "fold", 10, 3, 32);
+    assert!(q.submit(original.clone()));
+    assert!(!q.submit(original.clone()));
 
-    // Same ranges under a different operation class is a different semantic key.
-    let other_class = q.submit(proposal(QueueClass::Controller, 10, 3, 32));
-    assert!(other_class);
-    // Same ranges at a newer source version is a different semantic key.
-    let new_version = q.submit(proposal(QueueClass::Model, 10, 4, 32));
-    assert!(new_version);
+    let other_operation = proposal(QueueClass::Model, "compact", 10, 3, 32);
+    assert!(q.submit(other_operation));
+    let other_service_class = proposal(QueueClass::Controller, "fold", 10, 3, 32);
+    assert!(!q.submit(other_service_class));
+    let newer_source = proposal(QueueClass::Model, "fold", 10, 4, 32);
+    assert!(q.submit(newer_source));
 
-    // Caller identity never participates in the key.
-    let retries_after_dup = q.retries_for(&key(QueueClass::Model, 10, 3));
-    let advanced = retries_after_dup >= 1;
-    assert!(advanced);
+    let serviced = q.service_cycle();
+    let original_served = serviced.iter().any(|item| item.key == original.key);
+    assert!(original_served);
     let bound = QueueConfig::default().max_retries;
-    let within_bound = retries_after_dup <= bound;
-    assert!(within_bound);
+    for _ in 0..bound {
+        assert!(q.repropose(original.clone()));
+        let cycle = q.service_cycle();
+        assert!(!cycle.is_empty());
+    }
+    assert!(!q.repropose(original.clone()));
+    assert_eq!(q.retries_for(&original.key), bound);
 }
 
 #[test]
 fn find_admissible_is_registry_ordered_and_bounded() {
-    let first_admissible = find_admissible(REGISTRY.len());
-    let name_ok = match first_admissible {
-        Some(entry) => entry.name == "snapshot",
-        None => false,
+    let registry = crate::context_txn::operation::registry();
+    assert_eq!(registry[0].name, "admit-ingress");
+    let admissible = |row: &crate::context_txn::operation::Operation| {
+        matches!(row.name, "placeholder-collapse" | "drop-with-handle")
     };
-    assert!(name_ok);
-
-    let first_row = REGISTRY[0];
-    let first_row_ok = first_row.name == "noop";
-    assert!(first_row_ok);
-
-    let bounded = find_admissible_in(&REGISTRY[..1], 1);
-    let none_when_bounded_out = bounded.is_none();
-    assert!(none_when_bounded_out);
-
-    let zero_budget = find_admissible(0);
-    let none_on_zero = zero_budget.is_none();
-    assert!(none_on_zero);
+    let first = find_admissible(registry.len(), admissible);
+    assert_eq!(first.map(|row| row.name), Some("placeholder-collapse"));
+    let before_reclamation = find_admissible(13, admissible);
+    assert!(before_reclamation.is_none());
+    assert!(find_admissible(0, |_| true).is_none());
 }
 
 #[test]
@@ -355,6 +357,49 @@ fn parameters_are_total_and_classed_once() {
     assert!(no_aliases);
     let complete = names.len() == expected.len();
     assert!(complete);
+
+    let expected_classes = [
+        ParameterClass::SafetyInvariant,
+        ParameterClass::SafetyInvariant,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::Calibrated,
+        ParameterClass::OperatorEnvelope,
+        ParameterClass::SafetyInvariant,
+        ParameterClass::OperatorEnvelope,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::OperatorEnvelope,
+        ParameterClass::ProfileTunable,
+        ParameterClass::OperatorEnvelope,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::Calibrated,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+        ParameterClass::SafetyInvariant,
+        ParameterClass::ProfileTunable,
+        ParameterClass::ProfileTunable,
+    ];
+    assert_eq!(all().len(), expected_classes.len());
+    for (parameter, expected_class) in all().iter().zip(expected_classes) {
+        assert_eq!(
+            parameter.class, expected_class,
+            "wrong class for {}",
+            parameter.name
+        );
+    }
+    assert!(!crate::context_policy::params::calibratable_while_armed(
+        "governor.per_window_quota"
+    ));
+    assert!(crate::context_policy::params::calibratable_while_armed(
+        "pressure.arm"
+    ));
 
     let classes: Vec<ParameterClass> = all().iter().map(|p| p.class).collect();
     let has_safety = classes

@@ -9,7 +9,7 @@ pub enum ParameterClass {
     OperatorEnvelope,
 }
 
-/// Registry rows: every named Phase-4 parameter is assigned exactly once.
+/// One uniquely classed Phase-4 parameter.
 #[derive(Clone, Copy, Debug)]
 pub struct Parameter {
     pub name: &'static str,
@@ -27,7 +27,6 @@ impl Parameter {
     }
 }
 
-/// The Phase-4 parameter table.
 pub const PARAMETERS: [Parameter; 26] = [
     Parameter::new(
         "safety.classification_floor",
@@ -39,12 +38,12 @@ pub const PARAMETERS: [Parameter; 26] = [
         ParameterClass::SafetyInvariant,
         1.0,
     ),
-    Parameter::new("queue.cycle_slots", ParameterClass::SafetyInvariant, 5.0),
-    Parameter::new("queue.monitor_share", ParameterClass::SafetyInvariant, 1.0),
-    Parameter::new("queue.max_retries", ParameterClass::Calibrated, 4.0),
+    Parameter::new("queue.cycle_slots", ParameterClass::ProfileTunable, 5.0),
+    Parameter::new("queue.monitor_share", ParameterClass::ProfileTunable, 1.0),
+    Parameter::new("queue.max_retries", ParameterClass::ProfileTunable, 4.0),
     Parameter::new(
         "governor.per_window_quota",
-        ParameterClass::OperatorEnvelope,
+        ParameterClass::Calibrated,
         4096.0,
     ),
     Parameter::new(
@@ -52,35 +51,47 @@ pub const PARAMETERS: [Parameter; 26] = [
         ParameterClass::OperatorEnvelope,
         1024.0,
     ),
-    Parameter::new("governor.alpha", ParameterClass::Calibrated, 0.5),
+    Parameter::new("governor.alpha", ParameterClass::SafetyInvariant, 0.5),
     Parameter::new(
         "governor.quota_floor",
         ParameterClass::OperatorEnvelope,
         64.0,
     ),
-    Parameter::new("pressure.arm", ParameterClass::Calibrated, 0.80),
-    Parameter::new("pressure.disarm", ParameterClass::Calibrated, 0.70),
-    Parameter::new("pressure.target", ParameterClass::Calibrated, 0.60),
+    Parameter::new("pressure.arm", ParameterClass::ProfileTunable, 0.80),
+    Parameter::new("pressure.disarm", ParameterClass::ProfileTunable, 0.70),
+    Parameter::new("pressure.target", ParameterClass::ProfileTunable, 0.60),
     Parameter::new(
         "pressure.minimum_floor",
         ParameterClass::OperatorEnvelope,
         0.0,
     ),
-    Parameter::new("ladder.amortization_bar", ParameterClass::Calibrated, 100.0),
+    Parameter::new(
+        "ladder.amortization_bar",
+        ParameterClass::ProfileTunable,
+        100.0,
+    ),
     Parameter::new(
         "ladder.escalation_bound",
-        ParameterClass::SafetyInvariant,
+        ParameterClass::OperatorEnvelope,
         6.0,
     ),
-    Parameter::new("ladder.confidence_floor", ParameterClass::Calibrated, 0.5),
-    Parameter::new("monitor.sticky_cap", ParameterClass::SafetyInvariant, 8.0),
+    Parameter::new(
+        "ladder.confidence_floor",
+        ParameterClass::ProfileTunable,
+        0.5,
+    ),
+    Parameter::new("monitor.sticky_cap", ParameterClass::ProfileTunable, 8.0),
     Parameter::new(
         "monitor.relaxation_windows",
-        ParameterClass::SafetyInvariant,
+        ParameterClass::ProfileTunable,
         1.0,
     ),
-    Parameter::new("cache.amortization_bar", ParameterClass::Calibrated, 100.0),
-    Parameter::new("cache.flush_epoch", ParameterClass::Calibrated, 4.0),
+    Parameter::new(
+        "cache.amortization_bar",
+        ParameterClass::ProfileTunable,
+        100.0,
+    ),
+    Parameter::new("cache.flush_epoch", ParameterClass::ProfileTunable, 4.0),
     Parameter::new(
         "cache.invalidation_penalty",
         ParameterClass::Calibrated,
@@ -105,20 +116,17 @@ pub const PARAMETERS: [Parameter; 26] = [
     Parameter::new("profile.log_verbosity", ParameterClass::ProfileTunable, 1.0),
 ];
 
-/// Total lookup by exact name.
 pub fn lookup(name: &str) -> Option<Parameter> {
-    PARAMETERS.iter().copied().find(|p| p.name == name)
+    PARAMETERS
+        .iter()
+        .copied()
+        .find(|parameter| parameter.name == name)
 }
 
-/// All Phase-4 parameters in registry order.
 pub fn all() -> &'static [Parameter] {
     &PARAMETERS
 }
 
-/// Calibrated parameters may not be updated while armed.
 pub fn calibratable_while_armed(name: &str) -> bool {
-    match lookup(name) {
-        Some(p) => !matches!(p.class, ParameterClass::Calibrated),
-        None => false,
-    }
+    lookup(name).is_some_and(|parameter| !matches!(parameter.class, ParameterClass::Calibrated))
 }
