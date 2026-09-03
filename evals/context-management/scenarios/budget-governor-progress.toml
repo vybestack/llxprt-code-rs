@@ -2,7 +2,7 @@ schema_version = 1
 id = "budget-governor-progress"
 owner_phase = 4
 arm = "feature"
-expected_status = "red"
+expected_status = "green"
 expected_reason_class = "missing-evidence"
 accept_any_reason = true
 
