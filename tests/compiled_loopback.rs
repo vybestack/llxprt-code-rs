@@ -10,7 +10,7 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
@@ -256,7 +256,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
     const MAX_HEADER_BYTES: usize = 64 * 1024;
     const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
 
-    let mut reader = std::io::BufReader::new(stream);
+    let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut request = Vec::new();
     let mut content_length = 0usize;
     loop {
@@ -298,6 +298,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
     let header_len = request.len();
     request.resize(header_len + content_length, 0);
     reader.read_exact(&mut request[header_len..])?;
+    drop(reader);
     Ok(request)
 }
 
@@ -939,6 +940,115 @@ fn openai_responses_replays_function_history_to_final_completion() {
         .to_string()
         .contains("loopback complete"));
 }
+
+fn spawn_anthropic_request_server() -> (
+    String,
+    std::sync::mpsc::Receiver<Value>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind Anthropic server");
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "timed out waiting for Anthropic request"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept Anthropic request: {error}"),
+            }
+        };
+        let request = read_http_request(&mut stream).expect("read Anthropic request");
+        assert!(request.starts_with(b"POST /v1/messages HTTP/1.1\r\n"));
+        let body_start = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("request header terminator")
+            + 4;
+        sender
+            .send(serde_json::from_slice(&request[body_start..]).expect("Anthropic JSON request"))
+            .unwrap();
+
+        let body = r#"{"id":"msg-loopback","type":"message","role":"assistant","content":[{"type":"text","text":"loopback complete"}],"model":"claude-loopback","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    });
+    (format!("http://{address}"), receiver, thread)
+}
+
+fn has_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key(key) || object.values().any(|value| has_key(value, key))
+        }
+        Value::Array(array) => array.iter().any(|value| has_key(value, key)),
+        _ => false,
+    }
+}
+
+#[test]
+fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
+    for (name, prompt_caching) in [("default", None), ("disabled", Some("off"))] {
+        let workspace = tempfile::tempdir().unwrap();
+        let profiles = workspace.path().join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let (base_url, request_rx, server) = spawn_anthropic_request_server();
+        let mut ephemeral = serde_json::json!({ "base-url": base_url });
+        if let Some(setting) = prompt_caching {
+            ephemeral["prompt-caching"] = Value::String(setting.to_owned());
+        }
+        let profile = serde_json::json!({
+            "provider": "anthropic",
+            "model": "claude-loopback",
+            "auth-key": "loopback-key",
+            "ephemeralSettings": ephemeral,
+        });
+        std::fs::write(
+            profiles.join(format!("{name}.json")),
+            serde_json::to_vec_pretty(&profile).unwrap(),
+        )
+        .unwrap();
+
+        let output = bin()
+            .env("LLXPRT_CONFIG_HOME", workspace.path())
+            .arg("--profile")
+            .arg(name)
+            .arg("-p")
+            .arg("Reply with loopback complete")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name} process failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive Anthropic request");
+        server.join().unwrap();
+
+        if prompt_caching.is_none() {
+            assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
+        } else {
+            assert!(!has_key(&request, "cache_control"), "request: {request}");
+        }
+    }
+}
+
 /// Whether `needle` appears anywhere inside `haystack`.
 fn contains(h: &[u8], needle: &[u8]) -> bool {
     h.windows(needle.len()).any(|w| w == needle)

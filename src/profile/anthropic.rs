@@ -43,6 +43,43 @@ pub(super) fn parse(
 }
 
 #[cfg(test)]
+mod issue81_parser_tests {
+    use crate::profile::parse_profile_value;
+
+    #[test]
+    fn openai_profile_resolution_rejects_anthropic_prompt_caching_setting() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-loopback",
+            "ephemeralSettings": {
+                "base-url": "http://127.0.0.1:1",
+                "auth-key": "loopback-key",
+                "prompt-caching": "off"
+            }
+        }"#;
+
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let profile = parse_profile_value(&value, "ordinary-openai").unwrap();
+        assert!(profile
+            .ephemeral
+            .unsupported
+            .iter()
+            .any(|setting| setting == "prompt-caching"));
+
+        let config_root = tempfile::tempdir().unwrap();
+        let error =
+            crate::model::ModelConfig::from_profile_in(profile, None, true, config_root.path())
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported profile setting(s): prompt-caching"),
+            "unexpected resolution error: {error}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
