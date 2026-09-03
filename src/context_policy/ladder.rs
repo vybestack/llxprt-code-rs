@@ -84,16 +84,45 @@ pub fn select(
     armed: bool,
     confidence_floor: f64,
 ) -> LadderChoice {
-    // RED: picks by highest estimated benefit, ignoring capability adjustment,
-    // the confidence floor (scorer outage), and the armed economics.
-    let _ = (caps, armed, confidence_floor);
-    match candidates
-        .iter()
-        .max_by(|a, b| a.estimate.benefit.total_cmp(&b.estimate.benefit))
-    {
-        Some(best) => LadderChoice::Rung(best.rung),
-        None => LadderChoice::Quiesce,
+    if candidates.is_empty() {
+        return LadderChoice::Quiesce;
     }
+    for rung in Rung::all() {
+        let capable = match rung {
+            Rung::CollapsePlaceholders => caps.collapse_placeholders,
+            Rung::DropWithHandle => caps.drop_with_handle,
+            _ => true,
+        };
+        if !capable {
+            continue;
+        }
+        let matching: Vec<&Candidate> = candidates.iter().filter(|c| c.rung == rung).collect();
+        if matching.is_empty() {
+            continue;
+        }
+        if armed {
+            return LadderChoice::Emergency(rung);
+        }
+        let all_low_confidence = matching
+            .iter()
+            .all(|c| c.estimate.confidence < confidence_floor);
+        if all_low_confidence {
+            return LadderChoice::Rung(rung);
+        }
+        let _best = matching
+            .iter()
+            .max_by(|a, b| a.estimate.benefit.total_cmp(&b.estimate.benefit))
+            .expect("matching rung is non-empty");
+        return LadderChoice::Rung(rung);
+    }
+    let collapse_blocked = candidates
+        .iter()
+        .any(|c| c.rung == Rung::CollapsePlaceholders)
+        && !caps.collapse_placeholders;
+    if collapse_blocked && caps.drop_with_handle {
+        return LadderChoice::Emergency(Rung::DropWithHandle);
+    }
+    LadderChoice::Quiesce
 }
 
 /// Bounded escalation: always terminates in wrap-up or quiesce, never an armed

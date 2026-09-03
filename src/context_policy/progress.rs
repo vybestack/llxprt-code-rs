@@ -37,14 +37,13 @@ pub enum Macrostep {
 
 /// Lexicographic `(Psi, retries_remaining)` decrease test.
 pub fn lexicographically_decreases(before: ProgressState, after: ProgressState) -> bool {
-    // RED: compares retries only, so a Psi increase is not detected.
-    after.retries_remaining < before.retries_remaining
+    after.psi < before.psi
+        || (after.psi == before.psi && after.retries_remaining < before.retries_remaining)
 }
 
 /// Terminal reserve: WrapUp must stay feasible.
 pub fn terminal_reserve(wrap_up_cost: u64, available: u64) -> bool {
-    // RED: allows wrap-up even when the reserve is unavailable.
-    wrap_up_cost >= available
+    wrap_up_cost <= available
 }
 
 /// Choose the next action so that no armed state is an unquiesced no-op.
@@ -53,11 +52,12 @@ pub fn next_action(
     armed: bool,
     terminal: Option<TerminalOutcome>,
 ) -> Macrostep {
-    // RED: returns NoOp in armed states.
-    let _ = (current, terminal);
-    if armed {
-        Macrostep::NoOp
-    } else {
-        Macrostep::Reclaim
+    match terminal {
+        Some(TerminalOutcome::Disarmed) => Macrostep::Disarm,
+        Some(TerminalOutcome::WrapUp) => Macrostep::WrapUp,
+        Some(TerminalOutcome::Quiesced) => Macrostep::Quiesce,
+        None if armed && current.retries_remaining > 0 => Macrostep::Reclaim,
+        None if armed => Macrostep::Quiesce,
+        None => Macrostep::Disarm,
     }
 }
