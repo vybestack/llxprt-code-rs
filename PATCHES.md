@@ -207,6 +207,23 @@ provider and stops forwarding `max_tokens` for it. The wire contract is pinned o
 shape and full replay) and `codex_http_rejects_non_sse_success_body` (a JSON 200 without SSE is an
 error, not an empty turn).
 
+## Patch 11 - reqwest timeout diagnostics carry no fabricated duration
+(`vendor/serdes-ai-models/src/error.rs`, `ModelError::Timeout` + `From<reqwest::Error>`)
+
+`From<reqwest::Error>` previously mapped every reqwest timeout to
+`ModelError::Timeout(Duration::from_secs(30))` under a "Default timeout" comment. That default was
+never the configured one: a host request timeout such as the 900-second `stream-first-response-timeout-ms`
+value still fired, but the diagnostic read "Model request timed out after 30s", misdirecting
+operators. reqwest exposes `is_timeout()` only and carries no elapsed duration, so the variant
+drops the payload and the fixed `Display` reports `Model request timed out` with no number; the
+configured request timeout stays the single source of truth in the host configuration.
+`is_retryable` and `retry_after` keep their existing timeout behavior, and the retry-policy
+`RetryOn` matching only drops the now-absent payload. The mapping is pinned by the vendored
+`reqwest_timeouts_do_not_report_a_fabricated_duration` regression (a silent loopback server and
+two distinct configured timeouts must both yield the same value-free sentence) and the host
+`tests/provider.rs` `timed_out_transport_reports_no_duration` regression (the real adapter with a
+150 ms request timeout against a silent loopback provider).
+
 ## Tests
 
 Both the patched behavior and the rest of the transport are exercised by the host tests
