@@ -8,6 +8,7 @@
 //! must be JSON objects when present, and every known field must have the right scalar
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
+mod anthropic;
 mod codex;
 mod openai_responses;
 mod parsing;
@@ -64,6 +65,7 @@ pub struct Profile {
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
     pub(crate) target: crate::model_api::target::ModelTarget,
+    pub(crate) anthropic_settings: Option<crate::model_api::settings::AnthropicSettingsDraft>,
     pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
     pub(crate) openai_responses_settings:
         Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
@@ -473,6 +475,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
     let (
         ephemeral,
         model_params,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
@@ -481,7 +484,18 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         (
             parsed.ephemeral,
             parsed.model_params,
+            None,
             Some(parsed.draft),
+            None,
+            None,
+        )
+    } else if provider_id == crate::model_api::target::ProviderId::Anthropic {
+        let parsed = anthropic::parse(obj, name)?;
+        (
+            parsed.ephemeral,
+            parsed.model_params,
+            Some(parsed.draft),
+            None,
             None,
             None,
         )
@@ -491,6 +505,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
             parsed.ephemeral,
             parsed.model_params,
             None,
+            None,
             Some(parsed.draft),
             None,
         )
@@ -499,6 +514,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         (
             ephemeral,
             model_params,
+            None,
             None,
             None,
             chat_missing_discriminator,
@@ -512,6 +528,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model_params,
         ephemeral,
         target,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
