@@ -8,5 +8,5 @@ profile	model_api	73
 session	agent	70
 session	model_api	71
 tools	agent	70
-context_kernel	context_store	66
-context_persist	session	66
+context_kernel	context_store	86
+session	context_persist	86

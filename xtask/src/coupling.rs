@@ -118,14 +118,54 @@ fn analyze(source: &Path) -> Result<Graph, String> {
 }
 
 fn declared_modules(source: &str) -> BTreeSet<String> {
-    let tokens = identifiers(&production_text(source));
+    let source = production_text(source);
+    let bytes = source.as_bytes();
     let mut result = BTreeSet::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if token == "mod" && index + 1 < tokens.len() {
-            result.insert(tokens[index + 1].clone());
+    let mut delimiters = Vec::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' | b'(' | b'[' => {
+                delimiters.push(bytes[index]);
+                index += 1;
+            }
+            b'}' | b')' | b']' => {
+                delimiters.pop();
+                index += 1;
+            }
+            byte if is_identifier_start(byte) => {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && is_identifier_continue(bytes[index]) {
+                    index += 1;
+                }
+                if delimiters.is_empty() && &source[start..index] == "mod" {
+                    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                        index += 1;
+                    }
+                    let name_start = index;
+                    if index < bytes.len() && is_identifier_start(bytes[index]) {
+                        index += 1;
+                        while index < bytes.len() && is_identifier_continue(bytes[index]) {
+                            index += 1;
+                        }
+                        result.insert(source[name_start..index].to_owned());
+                    }
+                }
+            }
+            _ => index += 1,
         }
     }
     result
+}
+
+fn is_identifier_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn is_identifier_continue(byte: u8) -> bool {
+    is_identifier_start(byte) || byte.is_ascii_digit()
 }
 
 fn module_files(source: &Path, module: &str) -> Result<Vec<PathBuf>, String> {
@@ -421,7 +461,7 @@ fn report(
     );
     println!("module dependencies:");
     for module in &graph.modules {
-        let dependencies = adjacent[module].iter().cloned().collect::<Vec<_>>();
+        let dependencies = adjacent[module].to_vec();
         println!(
             "  {module}: {}",
             if dependencies.is_empty() {
@@ -499,14 +539,29 @@ mod tests {
 
     #[test]
     fn discovers_public_and_private_top_level_modules() {
-        let source = "pub mod alpha;\nmod private;\npub(crate) mod scoped;\npub mod nested {}\n";
+        let source = r#"
+            pub mod alpha;
+            mod private;
+            pub(crate) mod crate_visible;
+            pub mod inline {
+                pub(crate) mod scoped {}
+            }
+            fn function() { mod local {} }
+            macro_rules! declarations { () => { mod generated {} } }
+            const TEXT: &str = "mod in_a_string;";
+            // mod in_a_comment;
+            #[cfg(test)]
+            mod tests_only;
+        "#;
+        let modules = declared_modules(source);
         assert_eq!(
-            declared_modules(source),
-            ["alpha", "nested", "private", "scoped"]
+            modules,
+            ["alpha", "crate_visible", "inline", "private"]
                 .into_iter()
                 .map(str::to_owned)
                 .collect()
         );
+        assert!(!declared_modules(source).contains("scoped"));
     }
 
     #[test]
