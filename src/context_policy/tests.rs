@@ -3,10 +3,12 @@
 use crate::context_policy::cache::{CacheConfig, RewriteEntry, RewriteJournal};
 use crate::context_policy::governor::{Admission, Governor, GovernorConfig};
 use crate::context_policy::ladder::{
-    escalate, select, Candidate, Capabilities, LadderChoice, Rung,
+    escalate, operation, select, select_candidate, Candidate, Capabilities, LadderChoice, Rung,
 };
 use crate::context_policy::monitor::{MonitorSignal, RuntimeMonitor};
-use crate::context_policy::params::{all, lookup, ParameterClass, PARAMETERS};
+use crate::context_policy::params::{
+    all, lookup, ParameterClass, ParameterRegistry, UpdateAuthority, UpdateError, PARAMETERS,
+};
 use crate::context_policy::pressure::{Pressure, SafetyTier, Thresholds};
 use crate::context_policy::progress::{
     lexicographically_decreases, next_action, terminal_reserve,
@@ -188,12 +190,12 @@ fn ladder_fixed_order_and_capability_adjustment() {
         drop_with_handle: true,
     };
     let only_collapse = [Candidate::new(Rung::CollapsePlaceholders, 500.0, 0.9)];
-    let chosen = select(&only_collapse, &caps_off, false, 0.5);
+    let chosen = select(&only_collapse, &caps_off, true, 0.5);
     let avoided = !matches!(chosen, LadderChoice::Rung(Rung::CollapsePlaceholders));
     assert!(avoided);
 
     let caps_on = Capabilities::default();
-    let allowed = select(&only_collapse, &caps_on, false, 0.5);
+    let allowed = select(&only_collapse, &caps_on, true, 0.5);
     let permitted = matches!(allowed, LadderChoice::Rung(Rung::CollapsePlaceholders));
     assert!(permitted);
 
@@ -219,11 +221,11 @@ fn scorer_outage_uses_deterministic_emergency_set() {
         Candidate::new(Rung::FoldAwayEphemeral, 1.0, 0.05),
     ];
     let chosen = select(&candidates, &caps, false, 0.5);
-    let fell_back = matches!(chosen, LadderChoice::Rung(Rung::FoldAwayEphemeral));
+    let fell_back = matches!(chosen, LadderChoice::Emergency(Rung::FoldAwayEphemeral));
     assert!(fell_back);
 
     let empty = Vec::new();
-    let nothing = select(&empty, &caps, true, 0.5);
+    let nothing = select(&empty, &caps, false, 0.5);
     let terminal = matches!(nothing, LadderChoice::Quiesce);
     assert!(terminal);
 }
@@ -231,25 +233,27 @@ fn scorer_outage_uses_deterministic_emergency_set() {
 #[test]
 fn monitor_sticky_caps_freeze_and_relax_only_disarmed() {
     let mut m = RuntimeMonitor::new(2);
-    m.observe(MonitorSignal::Thrash, true);
-    m.observe(MonitorSignal::Thrash, true);
-    m.observe(MonitorSignal::Thrash, true);
+    m.observe(MonitorSignal::Thrash);
+    m.observe(MonitorSignal::Thrash);
+    m.observe(MonitorSignal::Thrash);
     let capped = m.counter(MonitorSignal::Thrash);
     let at_cap = capped == 2;
     assert!(at_cap);
 
     m.fail();
     let frozen_before = m.counter(MonitorSignal::Reacquisition);
-    m.observe(MonitorSignal::Reacquisition, true);
+    m.observe(MonitorSignal::Reacquisition);
     let frozen_after = m.counter(MonitorSignal::Reacquisition);
     let froze = frozen_before == frozen_after;
     assert!(froze);
 
-    let early = m.proposals(0);
+    m.begin_window(true);
+    let early = m.proposals();
     let early_relaxation = early.iter().any(|p| p.relax_filter);
     assert!(!early_relaxation);
 
-    let late = m.proposals(1);
+    m.begin_window(false);
+    let late = m.proposals();
     let late_relaxation = late.iter().any(|p| p.relax_filter);
     assert!(late_relaxation);
 }
@@ -298,12 +302,12 @@ fn cache_forced_flush_and_armed_suspension() {
     let armed_rewrite = journal.should_rewrite(10, Some(5000), true);
     assert!(armed_rewrite);
 
-    journal.note(RewriteEntry::new(50, Some(5), 7));
+    journal.note(RewriteEntry::new(3, 50, Some(5), 7));
     let early_flush = journal.should_flush();
     assert!(!early_flush);
-    journal.note(RewriteEntry::new(60, Some(6), 8));
-    journal.note(RewriteEntry::new(70, Some(7), 9));
-    journal.note(RewriteEntry::new(80, Some(8), 10));
+    journal.note(RewriteEntry::new(3, 60, Some(6), 8));
+    journal.note(RewriteEntry::new(3, 70, Some(7), 9));
+    journal.note(RewriteEntry::new(3, 80, Some(8), 10));
     let epoch_ready = journal.should_flush();
     assert!(epoch_ready);
 
@@ -322,7 +326,7 @@ fn cache_forced_flush_and_armed_suspension() {
     assert_eq!(journal.report().armed_hit_rate, Some(1.0));
     assert_eq!(journal.report().disarmed_hit_rate, Some(0.0));
     assert_eq!(journal.report().invalidation_cost_per_event, Some(6.5));
-    journal.record(RewriteEntry::new(1, None, 11));
+    journal.record(RewriteEntry::new(3, 1, None, 11));
     assert_eq!(journal.report().invalidation_cost_per_event, None);
 }
 
@@ -497,4 +501,78 @@ fn adversarial_reachable_states_terminate_without_wall_or_armed_noop() {
     assert_eq!(report.armed_noops, 0);
     assert_eq!(report.unterminated_episodes, 0);
     assert!(report.max_macrosteps <= 16);
+}
+
+#[test]
+fn estimator_reorders_only_inside_one_rung_and_emergency_is_registered() {
+    let candidates = [
+        Candidate::new(Rung::Fold, 10.0, 0.9),
+        Candidate::new(Rung::Fold, 30.0, 0.9),
+        Candidate::new(Rung::Compact, 900.0, 0.9),
+    ];
+    let selection = select_candidate(&candidates, &Capabilities::default(), true, 0.5);
+    assert_eq!(selection.choice, LadderChoice::Rung(Rung::Fold));
+    assert_eq!(selection.candidate_index, Some(1));
+    let emergency = select_candidate(&candidates, &Capabilities::default(), false, 0.5);
+    assert_eq!(emergency.choice, LadderChoice::Emergency(Rung::Fold));
+    let registered = operation(emergency.choice).and_then(crate::context_txn::operation::find);
+    assert!(registered.is_some());
+}
+
+#[test]
+fn parameter_mutations_are_authorized_logged_and_armed_safe() {
+    let mut registry = ParameterRegistry::default();
+    assert_eq!(
+        ParameterRegistry::class_of("unknown.parameter"),
+        ParameterClass::SafetyInvariant
+    );
+    let safety = registry.update("governor.alpha", 0.4, 1, UpdateAuthority::Operator, false);
+    assert_eq!(safety, Err(UpdateError::SafetyInvariant));
+    let wrong = registry.update("pressure.arm", 0.9, 1, UpdateAuthority::Operator, false);
+    assert_eq!(wrong, Err(UpdateError::WrongAuthority));
+    let blocked = registry.update(
+        "cache.invalidation_penalty",
+        20.0,
+        1,
+        UpdateAuthority::CalibrationTxn,
+        true,
+    );
+    assert_eq!(blocked, Err(UpdateError::ArmedCalibration));
+    registry
+        .update(
+            "cache.invalidation_penalty",
+            20.0,
+            1,
+            UpdateAuthority::CalibrationTxn,
+            false,
+        )
+        .unwrap();
+    registry
+        .update(
+            "governor.per_turn_ceiling",
+            2048.0,
+            2,
+            UpdateAuthority::Operator,
+            true,
+        )
+        .unwrap();
+    assert_eq!(registry.updates().len(), 2);
+    assert_eq!(registry.value("cache.invalidation_penalty"), Some(20.0));
+}
+
+#[test]
+fn source_scoped_forced_flush_leaves_other_notes_pending() {
+    let mut journal = RewriteJournal::new(CacheConfig {
+        amortization_bar: 1,
+        flush_epoch: 2,
+    });
+    journal.note(RewriteEntry::new(1, 10, Some(1), 1));
+    journal.note(RewriteEntry::new(2, 20, Some(2), 2));
+    let flushed = journal.force_flush(1, true, 9);
+    assert_eq!(flushed.len(), 1);
+    assert_eq!(flushed[0].source, 1);
+    assert_eq!(journal.len(), 1);
+    let second = journal.force_flush(2, false, 10);
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].source, 2);
 }

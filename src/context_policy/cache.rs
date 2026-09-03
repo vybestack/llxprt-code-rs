@@ -2,6 +2,7 @@
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RewriteEntry {
+    pub source: u64,
     pub tokens_reclaimed: u64,
     pub invalidation_cost: Option<u64>,
     pub logical_time: u64,
@@ -11,11 +12,13 @@ pub struct RewriteEntry {
 
 impl RewriteEntry {
     pub const fn new(
+        source: u64,
         tokens_reclaimed: u64,
         invalidation_cost: Option<u64>,
         logical_time: u64,
     ) -> Self {
         Self {
+            source,
             tokens_reclaimed,
             invalidation_cost,
             logical_time,
@@ -175,13 +178,18 @@ impl RewriteJournal {
         armed: bool,
         wall_elapsed_us: u64,
     ) -> Vec<RewriteEntry> {
-        let _ = source;
         self.report.forced_flushes = self.report.forced_flushes.saturating_add(1);
-        let mut drained = std::mem::take(&mut self.noted);
-        for entry in &mut drained {
-            entry.amortized = !armed;
-            entry.wall_elapsed_us = wall_elapsed_us;
-            self.record(*entry);
+        let noted = std::mem::take(&mut self.noted);
+        let mut drained = Vec::new();
+        for mut entry in noted {
+            if entry.source == source {
+                entry.amortized = !armed;
+                entry.wall_elapsed_us = wall_elapsed_us;
+                self.record(entry);
+                drained.push(entry);
+            } else {
+                self.noted.push(entry);
+            }
         }
         drained
     }

@@ -1,6 +1,5 @@
-//! Read-only runtime monitor. It only proposes; it never mutates state.
+//! Read-only runtime monitor. It only proposes; it never mutates managed state.
 
-/// Enumerated monitor signals (closed set).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum MonitorSignal {
     Reacquisition,
@@ -13,17 +12,15 @@ pub enum MonitorSignal {
 impl MonitorSignal {
     pub fn all() -> [MonitorSignal; 5] {
         [
-            MonitorSignal::Reacquisition,
-            MonitorSignal::RereadAfterReclaim,
-            MonitorSignal::FullOutputAfterDigest,
-            MonitorSignal::Thrash,
-            MonitorSignal::OverprotectiveClassification,
+            Self::Reacquisition,
+            Self::RereadAfterReclaim,
+            Self::FullOutputAfterDigest,
+            Self::Thrash,
+            Self::OverprotectiveClassification,
         ]
     }
 }
 
-/// A monitor proposal: read-only, relaxation-only filters allowed only after a
-/// disarmed window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MonitorProposal {
     pub signal: MonitorSignal,
@@ -31,7 +28,6 @@ pub struct MonitorProposal {
     pub disarmed_windows_seen: usize,
 }
 
-/// Sticky counters with a cap; frozen when the monitor fails.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct MonitorCounters {
     pub reacquisition: u32,
@@ -42,23 +38,38 @@ pub struct MonitorCounters {
     pub frozen: bool,
 }
 
-/// Runtime monitor with sticky, capped counters.
 #[derive(Debug)]
 pub struct RuntimeMonitor {
     cap: u32,
     counters: MonitorCounters,
+    disarmed_windows: usize,
 }
 
 impl RuntimeMonitor {
     pub fn new(cap: u32) -> Self {
+        assert!(cap > 0, "monitor sticky cap must be positive");
         Self {
             cap,
             counters: MonitorCounters::default(),
+            disarmed_windows: 0,
         }
     }
 
     pub fn cap(&self) -> u32 {
         self.cap
+    }
+
+    /// Window boundaries own the relaxation gate. Any armed window resets it.
+    pub fn begin_window(&mut self, armed: bool) {
+        if armed {
+            self.disarmed_windows = 0;
+        } else {
+            self.disarmed_windows = self.disarmed_windows.saturating_add(1);
+        }
+    }
+
+    pub fn disarmed_windows(&self) -> usize {
+        self.disarmed_windows
     }
 
     pub fn counter(&self, signal: MonitorSignal) -> u32 {
@@ -75,9 +86,7 @@ impl RuntimeMonitor {
         &self.counters
     }
 
-    /// Observe a signal. Sticky counters cap; observations freeze when failed.
-    pub fn observe(&mut self, signal: MonitorSignal, disarmed_window: bool) {
-        let _ = disarmed_window;
+    pub fn observe(&mut self, signal: MonitorSignal) {
         if self.counters.frozen {
             return;
         }
@@ -88,25 +97,23 @@ impl RuntimeMonitor {
             MonitorSignal::Thrash => &mut self.counters.thrash,
             MonitorSignal::OverprotectiveClassification => &mut self.counters.overprotective,
         };
-        *slot = (*slot).saturating_add(1).min(self.cap);
+        *slot = slot.saturating_add(1).min(self.cap);
     }
 
-    /// Monitor failure freezes all sticky counters.
     pub fn fail(&mut self) {
         self.counters.frozen = true;
     }
 
-    /// Relaxation-only filter proposals, permitted only after a disarmed window.
-    pub fn proposals(&self, disarmed_windows: usize) -> Vec<MonitorProposal> {
-        if disarmed_windows == 0 {
+    pub fn proposals(&self) -> Vec<MonitorProposal> {
+        if self.disarmed_windows == 0 {
             return Vec::new();
         }
         MonitorSignal::all()
-            .iter()
+            .into_iter()
             .map(|signal| MonitorProposal {
-                signal: *signal,
+                signal,
                 relax_filter: true,
-                disarmed_windows_seen: disarmed_windows,
+                disarmed_windows_seen: self.disarmed_windows,
             })
             .collect()
     }

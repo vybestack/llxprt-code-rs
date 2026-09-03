@@ -1,4 +1,6 @@
-//! Parameter registry classes for the Phase-4 plane.
+//! Parameter classes and logged mutation governance for the Phase-4 plane.
+
+use std::collections::BTreeMap;
 
 /// Parameter classes. Calibrated updates are blocked while armed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -129,4 +131,126 @@ pub fn all() -> &'static [Parameter] {
 
 pub fn calibratable_while_armed(name: &str) -> bool {
     lookup(name).is_some_and(|parameter| !matches!(parameter.class, ParameterClass::Calibrated))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateAuthority {
+    ProfileLoad,
+    CalibrationTxn,
+    Operator,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParameterUpdate {
+    pub name: &'static str,
+    pub prior: f64,
+    pub value: f64,
+    pub logical_time: u64,
+    pub authority: UpdateAuthority,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateError {
+    Unknown,
+    SafetyInvariant,
+    WrongAuthority,
+    ArmedCalibration,
+    InvalidValue,
+    NonMonotonicTime,
+}
+
+#[derive(Debug)]
+pub struct ParameterRegistry {
+    values: BTreeMap<&'static str, f64>,
+    updates: Vec<ParameterUpdate>,
+}
+
+impl Default for ParameterRegistry {
+    fn default() -> Self {
+        Self {
+            values: PARAMETERS
+                .into_iter()
+                .map(|parameter| (parameter.name, parameter.default))
+                .collect(),
+            updates: Vec::new(),
+        }
+    }
+}
+
+impl ParameterRegistry {
+    pub fn class_of(name: &str) -> ParameterClass {
+        lookup(name)
+            .map(|parameter| parameter.class)
+            .unwrap_or(ParameterClass::SafetyInvariant)
+    }
+    pub fn value(&self, name: &str) -> Option<f64> {
+        self.values.get(name).copied()
+    }
+    pub fn updates(&self) -> &[ParameterUpdate] {
+        &self.updates
+    }
+
+    pub fn update(
+        &mut self,
+        name: &str,
+        value: f64,
+        logical_time: u64,
+        authority: UpdateAuthority,
+        armed: bool,
+    ) -> Result<(), UpdateError> {
+        let parameter = lookup(name).ok_or(UpdateError::Unknown)?;
+        let expected = match parameter.class {
+            ParameterClass::SafetyInvariant => return Err(UpdateError::SafetyInvariant),
+            ParameterClass::ProfileTunable => UpdateAuthority::ProfileLoad,
+            ParameterClass::Calibrated => UpdateAuthority::CalibrationTxn,
+            ParameterClass::OperatorEnvelope => UpdateAuthority::Operator,
+        };
+        if authority != expected {
+            return Err(UpdateError::WrongAuthority);
+        }
+        if armed && matches!(parameter.class, ParameterClass::Calibrated) {
+            return Err(UpdateError::ArmedCalibration);
+        }
+        if !valid_value(parameter.name, value) {
+            return Err(UpdateError::InvalidValue);
+        }
+        let monotonic = self
+            .updates
+            .last()
+            .map(|entry| logical_time > entry.logical_time)
+            .unwrap_or(true);
+        if !monotonic {
+            return Err(UpdateError::NonMonotonicTime);
+        }
+        let prior = self
+            .values
+            .insert(parameter.name, value)
+            .expect("all declared parameters have values");
+        self.updates.push(ParameterUpdate {
+            name: parameter.name,
+            prior,
+            value,
+            logical_time,
+            authority,
+        });
+        Ok(())
+    }
+}
+
+fn valid_value(name: &str, value: f64) -> bool {
+    if !value.is_finite() || value < 0.0 {
+        return false;
+    }
+    if matches!(
+        name,
+        "governor.alpha"
+            | "pressure.arm"
+            | "pressure.disarm"
+            | "pressure.target"
+            | "pressure.minimum_floor"
+            | "ladder.confidence_floor"
+    ) {
+        return value <= 1.0;
+    }
+    true
 }
