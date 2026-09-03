@@ -2,10 +2,10 @@
 //!
 //! This deliberately uses a small lexer rather than a Rust parser: module dependencies are
 //! determined from absolute `crate::module` paths after comments, strings, and test-only code
-//! are removed. The repository's production modules are the public modules declared by
+//! are removed. The repository's production modules are the public and private top-level modules declared by
 //! `src/lib.rs`; all files belonging to each of those modules are discovered recursively.
 
-use crate::coupling_graph::{adjacency, cycle_forming_edges, strongly_connected_components};
+use crate::coupling_graph::{adjacency, minimum_feedback_arc_set, strongly_connected_components};
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -45,11 +45,12 @@ fn run_with_paths(source: &Path, ledger_path: &Path, accept: bool) -> Result<(),
     let graph = analyze(source)?;
     let ledger = read_ledger(ledger_path)?;
     let debt: BTreeSet<Edge> = ledger.iter().map(|item| item.edge.clone()).collect();
-    let cycle_edges = cycle_forming_edges(&graph);
+    let feedback = minimum_feedback_arc_set(&graph);
+    let cycle_edges = &feedback.edges;
     let unowned: Vec<_> = cycle_edges.difference(&debt).cloned().collect();
     let retired: Vec<_> = debt.difference(&graph.edges).cloned().collect();
 
-    report(&graph, &cycle_edges, &ledger, &unowned, &retired);
+    report(&graph, cycle_edges, &ledger, &unowned, &retired);
 
     if !unowned.is_empty() {
         return Err(format!(
@@ -117,11 +118,11 @@ fn analyze(source: &Path) -> Result<Graph, String> {
 }
 
 fn declared_modules(source: &str) -> BTreeSet<String> {
-    let tokens = identifiers(source);
+    let tokens = identifiers(&production_text(source));
     let mut result = BTreeSet::new();
-    for window in tokens.windows(3) {
-        if window[0] == "pub" && window[1] == "mod" {
-            result.insert(window[2].clone());
+    for (index, token) in tokens.iter().enumerate() {
+        if token == "mod" && index + 1 < tokens.len() {
+            result.insert(tokens[index + 1].clone());
         }
     }
     result
@@ -412,7 +413,7 @@ fn report(
 ) {
     let adjacent = adjacency(graph);
     println!(
-        "coupling: {} production modules, {} dependencies, {} cycle-forming edges, {} ledger entries",
+        "coupling: {} production modules, {} dependencies, {} feedback edges, {} ledger entries",
         graph.modules.len(),
         graph.edges.len(),
         cycle_edges.len(),
@@ -497,6 +498,18 @@ mod tests {
     }
 
     #[test]
+    fn discovers_public_and_private_top_level_modules() {
+        let source = "pub mod alpha;\nmod private;\npub(crate) mod scoped;\npub mod nested {}\n";
+        assert_eq!(
+            declared_modules(source),
+            ["alpha", "nested", "private", "scoped"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        );
+    }
+
+    #[test]
     fn new_back_edge_fails_without_ledger_growth() {
         let fixture = Fixture::new();
         fixture.write(
@@ -508,9 +521,9 @@ mod tests {
         fixture.write("src/leaf.rs", "pub struct Leaf;\n");
         fixture.write(LEDGER_PATH, "# empty\n");
 
-        let error =
-            run_with_paths(&fixture.0.join("src"), &fixture.0.join(LEDGER_PATH), true).unwrap_err();
-        assert!(error.contains("2 cycle-forming edge(s)"), "{error}");
+        let error = run_with_paths(&fixture.0.join("src"), &fixture.0.join(LEDGER_PATH), false)
+            .unwrap_err();
+        assert!(error.contains("1 cycle-forming edge(s)"), "{error}");
         assert_eq!(
             fs::read_to_string(fixture.0.join(LEDGER_PATH)).unwrap(),
             "# empty\n"
