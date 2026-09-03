@@ -61,17 +61,19 @@ impl Pressure {
 
     /// Observe projected pressure, occupancy, and the mandatory floor `M`.
     pub fn observe(&mut self, projected: f64, occupancy: f64, minimum_floor: f64) -> SafetyTier {
-        // RED: never arms, so hysteresis and the effective target never engage.
-        let _ = (projected, occupancy);
-        if minimum_floor > self.floor {
-            self.floor = minimum_floor;
+        self.floor = minimum_floor;
+        if self.tier == SafetyTier::Disarmed && projected >= self.thresholds.arm {
+            self.tier = SafetyTier::Armed;
+        } else if self.tier == SafetyTier::Armed
+            && occupancy <= self.thresholds.target.max(self.floor)
+        {
+            self.tier = SafetyTier::Disarmed;
         }
         self.tier
     }
 
     /// Effective reclamation target: `max(T, M)`.
     pub fn effective_target(&self) -> f64 {
-        // RED: reports the arm threshold instead of max(T, M).
-        self.thresholds.arm
+        self.thresholds.target.max(self.floor)
     }
 }

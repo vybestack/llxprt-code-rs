@@ -78,7 +78,6 @@ pub struct RewriteJournal {
     config: CacheConfig,
     entries: Vec<RewriteEntry>,
     noted: Vec<RewriteEntry>,
-    pending_forced: Vec<u64>,
     report: CacheReport,
 }
 
@@ -88,7 +87,6 @@ impl RewriteJournal {
             config,
             entries: Vec::new(),
             noted: Vec::new(),
-            pending_forced: Vec::new(),
             report: CacheReport::default(),
         }
     }
@@ -99,6 +97,10 @@ impl RewriteJournal {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Record a rewrite that happened (journal accounting).

@@ -164,13 +164,11 @@ pub const REGISTRY: [RegistryEntry; 24] = [
 ///
 /// Scans in registry order and stops after `budget` inspected rows.
 pub fn find_admissible_in(entries: &[RegistryEntry], budget: usize) -> Option<RegistryEntry> {
-    // RED: scans in reverse registry order and ignores the budget.
     entries
         .iter()
-        .rev()
+        .take(budget)
         .copied()
         .find(|entry| entry.admissible)
-        .filter(|_| budget > 0)
 }
 
 /// Deterministic bounded admissibility search over the closed registry view.
@@ -216,42 +214,51 @@ impl ClassedQueues {
     /// Submit a proposal. Returns `true` when newly queued, `false` when the
     /// proposal is a semantic duplicate (retry accounting still advances).
     pub fn submit(&mut self, proposal: Proposal) -> bool {
-        // RED: dedups on source ranges only, ignoring class and source version,
-        // and never advances the bounded retry counter.
-        let duplicate = self
-            .queues
-            .values()
-            .any(|q| q.iter().any(|p| p.key.ranges == proposal.key.ranges));
-        if duplicate {
+        if let Some(count) = self.retries.get_mut(&proposal.key) {
+            *count = (*count).saturating_add(1).min(self.config.max_retries);
             return false;
         }
-        let class = proposal.key.class;
-        self.queues.entry(class).or_default().push(proposal);
+        self.retries.insert(proposal.key.clone(), 0);
+        self.queues
+            .entry(proposal.key.class)
+            .or_default()
+            .push(proposal);
         true
     }
 
     /// Service one cycle: deterministic, share-respecting, safety preempting.
     pub fn service_cycle(&mut self) -> Vec<Proposal> {
-        // RED: fills the cycle from class order without honoring reserved
-        // shares, so a saturated Model class starves Monitor.
         let mut out = Vec::new();
         let slots = self.config.cycle_slots;
-        let mut remaining = slots;
-        for class in QueueClass::all() {
-            if remaining == 0 {
-                break;
-            }
-            let take = remaining;
-            if let Some(q) = self.queues.get_mut(&class) {
-                while out.len() < slots {
-                    match q.pop_front() {
-                        Some(p) => out.push(p),
-                        None => break,
+        for pass in 0..2 {
+            for class in QueueClass::all() {
+                let remaining = slots.saturating_sub(out.len());
+                let limit = if pass == 0 {
+                    (self.config.shares[&class]).min(remaining)
+                } else {
+                    remaining
+                };
+                let mut popped = Vec::new();
+                if let Some(queue) = self.queues.get_mut(&class) {
+                    while popped.len() < limit {
+                        match queue.pop_front() {
+                            Some(proposal) => popped.push(proposal),
+                            None => break,
+                        }
                     }
                 }
+                for p in popped {
+                    let counter = self.served.entry(p.key.clone()).or_insert(0);
+                    *counter = counter.saturating_add(1);
+                    out.push(p);
+                }
+                if out.len() >= slots {
+                    break;
+                }
             }
-            remaining = slots.saturating_sub(out.len());
-            let _ = take;
+            if out.len() >= slots {
+                break;
+            }
         }
         out
     }

@@ -1,6 +1,7 @@
 //! Admission governor: per-source/per-window quota, per-turn ceiling, and the
 //! `admitted_rate <= alpha * measured_reclamation_throughput` invariant.
 
+use std::collections::BTreeMap;
 /// Governor tuning.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GovernorConfig {
@@ -50,6 +51,10 @@ pub enum Admission {
 pub struct Governor {
     config: GovernorConfig,
     state: GovernorState,
+
+    source_admitted: BTreeMap<(u64, u64), u64>,
+    active_window: u64,
+    violations: u8,
 }
 
 impl Governor {
@@ -65,6 +70,9 @@ impl Governor {
                 at_floor: false,
                 quiescing: false,
             },
+            source_admitted: BTreeMap::new(),
+            active_window: 0,
+            violations: 0,
         }
     }
 
@@ -77,18 +85,59 @@ impl Governor {
     }
 
     /// Admit `bytes` from `source` in `window`.
+    fn reset_window(&mut self, window: u64) {
+        self.active_window = window;
+        self.violations = 0;
+        self.source_admitted.clear();
+        self.state.turn_admitted = 0;
+        self.state.window_admitted = 0;
+        self.state.window_reclaimed = 0;
+    }
+
     pub fn admit(&mut self, source: u64, bytes: u64, window: u64) -> Admission {
-        // RED: never enforces quota, the per-turn ceiling, or quiesce.
-        let _ = (source, window);
-        self.state.turn_admitted += bytes;
-        self.state.window_admitted += bytes;
+        if self.state.quiescing {
+            return Admission::Quiesce;
+        }
+        if window != self.active_window {
+            self.reset_window(window);
+        }
+        let used = self
+            .source_admitted
+            .get(&(source, window))
+            .copied()
+            .unwrap_or(0);
+        if bytes > self.config.per_turn_ceiling
+            || self.state.turn_admitted.saturating_add(bytes) > self.config.per_turn_ceiling
+            || used.saturating_add(bytes) > self.state.quota
+        {
+            return Admission::Handle;
+        }
+        self.state.turn_admitted = self.state.turn_admitted.saturating_add(bytes);
+        self.state.window_admitted = self.state.window_admitted.saturating_add(bytes);
+        self.source_admitted
+            .insert((source, window), used.saturating_add(bytes));
         Admission::Admit
     }
 
     /// Observe measured reclamation throughput for a window.
     pub fn observe_reclaim(&mut self, bytes: u64, window: u64) {
-        // RED: records throughput but never tightens the quota or quiesces.
-        let _ = window;
-        self.state.window_reclaimed += bytes;
+        if window != self.active_window {
+            self.reset_window(window);
+        }
+        self.state.window_reclaimed = self.state.window_reclaimed.saturating_add(bytes);
+        let violation = self.state.window_admitted as f64
+            > self.config.alpha * self.state.window_reclaimed as f64;
+        if !violation {
+            return;
+        }
+        self.violations = self.violations.saturating_add(1);
+        if self.violations == 1 {
+            self.state.quota =
+                self.config.quota_floor + (self.state.quota - self.config.quota_floor) / 2;
+        } else {
+            self.state.quota = self.config.quota_floor;
+            self.state.at_floor = true;
+            self.state.quiescing = true;
+        }
     }
 }
