@@ -655,7 +655,7 @@ fn file_profile_uses_local_keyfile_and_no_settings_fallback() {
     let inner = crate::profile::Profile {
         ephemeral: crate::profile::EphemeralSettings {
             base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                "http://127.0.0.1:1/v1",
+                "https://api.example.com/v1",
             )),
             auth_keyfile_orig: Some(local.display().to_string()),
             ..Default::default()
@@ -668,7 +668,7 @@ fn file_profile_uses_local_keyfile_and_no_settings_fallback() {
     let inner = crate::profile::Profile {
         ephemeral: crate::profile::EphemeralSettings {
             base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                "http://127.0.0.1:1/v1",
+                "https://api.example.com/v1",
             )),
             auth_keyfile_orig: None,
             ..Default::default()
@@ -696,11 +696,98 @@ fn openai_responses_uses_the_openai_settings_keyfile_fallback() {
     profile.provider = "openai-responses".to_string();
     profile.ephemeral.auth_key = None;
     profile.ephemeral.auth_keyfile_orig = None;
+    profile.ephemeral.base_url = Some(crate::profile::RedactedUrl::from_unvalidated(
+        "https://api.openai.com/v1",
+    ));
 
     assert_eq!(
         super::resolve_api_key(&profile, false, dir.path()).unwrap(),
         "sk-responses"
     );
+}
+
+/// A loopback endpoint accepts a profile with no credentials at all: local
+/// OpenAI-compatible servers (LM Studio, ollama, llama.cpp server) take any or no
+/// key, so the resolver resolves to the empty key and no keyfile is read.
+#[test]
+fn loopback_profile_without_credentials_resolves_an_empty_key() {
+    for (from_file, endpoint) in [
+        (true, "http://127.0.0.1:1234/v1"),
+        (true, "http://localhost:1234/v1"),
+        (false, "http://[::1]:1234/v1"),
+    ] {
+        let profile = parse_profile_value(
+            &serde_json::json!({
+                "provider": "openai",
+                "model": "qwen/lm-studio",
+                "ephemeralSettings": { "base-url": endpoint }
+            }),
+            "loopback",
+        )
+        .unwrap();
+        let config = crate::model::ModelConfig::from_profile_in(
+            &profile,
+            from_file,
+            false,
+            std::path::Path::new("/definitely-no-settings"),
+        )
+        .unwrap_or_else(|e| panic!("{endpoint}: {e}"));
+        assert!(config.api_key.is_empty(), "{endpoint}");
+        assert!(config.keyfile_path.is_none(), "{endpoint}");
+        assert!(config.secret_values().is_empty(), "{endpoint}");
+    }
+}
+
+/// A loopback base URL never changes the refusal for a *missing* keyfile: the
+/// credential-less mode applies only when the profile carries no credential fields.
+#[test]
+fn loopback_with_an_unreadable_keyfile_still_fails() {
+    let profile = parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "http://127.0.0.1:1234/v1",
+                "auth-keyfile": "/definitely-missing.key"
+            }
+        }),
+        "loopback",
+    )
+    .unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(
+            &profile,
+            true,
+            false,
+            std::path::Path::new("."),
+        ),
+        Err(crate::model::ModelError::KeyfileUnreadable(_))
+    ));
+}
+
+/// A non-loopback endpoint keeps requiring a key: `settings.json` with no
+/// keyfile for the provider still refuses, and a file profile without its own
+/// credentials keeps its fixed refusal.
+#[test]
+fn remote_endpoints_still_require_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
+    let remote = serde_json::json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": { "base-url": "https://api.example.com/v1" }
+    });
+    let profile = parse_profile_value(&remote, "remote").unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(&profile, false, false, dir.path(),)
+            .unwrap_err(),
+        crate::model::ModelError::NoKeyfile
+    ));
+    let profile = parse_profile_value(&remote, "remote").unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(&profile, true, false, dir.path(),).unwrap_err(),
+        crate::model::ModelError::NoProfileAuth
+    ));
 }
 
 #[test]
