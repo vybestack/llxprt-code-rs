@@ -1,6 +1,7 @@
 use super::*;
 
 mod codex_tools;
+mod numeric_strings;
 use serde_json::json;
 
 #[test]

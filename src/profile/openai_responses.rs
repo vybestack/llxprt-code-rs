@@ -1,4 +1,4 @@
-use super::{parse_ephemeral, parse_model_params, EphemeralSettings, ModelParams};
+use super::{numeric_setting, parse_ephemeral, parse_model_params, EphemeralSettings, ModelParams};
 use crate::model_api::settings::{OpenAiResponsesSettingsDraft, PromptCaching};
 use serdes_ai::models::openai::{ReasoningEffort, ReasoningSummary, TextVerbosity};
 
@@ -264,9 +264,7 @@ fn parse_sampling(
 }
 
 fn finite_number(value: serde_json::Value, key: &str, name: &str) -> Result<f64, String> {
-    value
-        .as_f64()
-        .filter(|value| value.is_finite())
+    numeric_setting(&value)
         .ok_or_else(|| format!("profile {name:?}: '{key}' must be a finite number"))
 }
 
