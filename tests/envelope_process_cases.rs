@@ -130,7 +130,10 @@ fn error_server() -> ErrorServer {
 }
 
 fn run_bounded(mut command: Command) -> Output {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = command.spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
