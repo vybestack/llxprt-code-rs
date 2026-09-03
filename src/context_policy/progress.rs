@@ -1,7 +1,5 @@
 //! Lexicographic progress and adversarial reachable-state episode verification.
 
-use crate::context_policy::queue::find_admissible;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TerminalOutcome {
     Disarmed,
@@ -109,20 +107,70 @@ fn degraded_action(state: ProgressState, modes: DegradationModes) -> Macrostep {
     if modes.spend_exhausted() && state.psi <= 1 {
         return Macrostep::WrapUp;
     }
+    if modes.floored_tail() && state.psi == 0 {
+        return Macrostep::WrapUp;
+    }
     next_action(state, true, None)
 }
 
-fn registered_operation(action: Macrostep) -> Option<&'static str> {
+fn registered_operation(action: Macrostep, modes: DegradationModes) -> Option<&'static str> {
     match action {
-        Macrostep::Reclaim => {
-            find_admissible(usize::MAX, |row| row.reclamation && row.deterministic)
-                .map(|row| row.name)
-        }
+        Macrostep::Reclaim if modes.obligation_saturated() => Some("compact"),
+        Macrostep::Reclaim if modes.placeholder_intolerant() => Some("drop-with-handle"),
+        Macrostep::Reclaim if modes.pin_saturated() => Some("pin-override-collapse"),
+        Macrostep::Reclaim if modes.floored_tail() => Some("condense"),
+        Macrostep::Reclaim if modes.scorer_outage() => Some("drop-with-handle"),
+        Macrostep::Reclaim => Some("placeholder-collapse"),
         Macrostep::WrapUp => Some("wrap-up"),
         Macrostep::Quiesce => Some("quiesce-unwritable"),
         Macrostep::Disarm => Some("disarm"),
         Macrostep::NoOp => None,
     }
+}
+
+pub fn operation_for_degradation(
+    state: ProgressState,
+    modes: DegradationModes,
+) -> Option<&'static str> {
+    registered_operation(degraded_action(state, modes), modes)
+}
+
+fn verify_episode(
+    initial: ProgressState,
+    modes: DegradationModes,
+    macrostep_bound: u32,
+    report: &mut AdversarialReport,
+) {
+    let mut state = initial;
+    for step in 0..macrostep_bound {
+        let action = degraded_action(state, modes);
+        let Some(operation) = registered_operation(action, modes) else {
+            report.armed_noops = report.armed_noops.saturating_add(1);
+            return;
+        };
+        if crate::context_txn::operation::find(operation).is_none() {
+            report.out_of_branch_wall_hits = report.out_of_branch_wall_hits.saturating_add(1);
+            return;
+        }
+        report.transitions = report.transitions.saturating_add(1);
+        match action {
+            Macrostep::Reclaim => {
+                let before = state;
+                state.psi = state.psi.saturating_sub(1);
+                state.retries_remaining = state.retries_remaining.saturating_sub(1);
+                if !lexicographically_decreases(before, state) {
+                    report.armed_noops = report.armed_noops.saturating_add(1);
+                    return;
+                }
+            }
+            Macrostep::WrapUp | Macrostep::Quiesce | Macrostep::Disarm => {
+                report.max_macrosteps = report.max_macrosteps.max(step.saturating_add(1));
+                return;
+            }
+            Macrostep::NoOp => unreachable!("no-op has no registered operation"),
+        }
+    }
+    report.unterminated_episodes = report.unterminated_episodes.saturating_add(1);
 }
 
 /// Exhaust the product of degradation modes using registered operation sequences.
@@ -137,48 +185,12 @@ pub fn verify_adversarial_reachable_states(
         for initial_psi in 0..=max_psi {
             for initial_retries in 0..=max_retries {
                 report.reachable_states = report.reachable_states.saturating_add(1);
-                let mut state = ProgressState::new(initial_psi, initial_retries);
-                let mut terminated = false;
-                for step in 0..macrostep_bound {
-                    let action = degraded_action(state, modes);
-                    if matches!(action, Macrostep::NoOp) {
-                        report.armed_noops = report.armed_noops.saturating_add(1);
-                        break;
-                    }
-                    let Some(operation) = registered_operation(action) else {
-                        report.out_of_branch_wall_hits =
-                            report.out_of_branch_wall_hits.saturating_add(1);
-                        break;
-                    };
-                    let registered = crate::context_txn::operation::find(operation).is_some();
-                    if !registered {
-                        report.out_of_branch_wall_hits =
-                            report.out_of_branch_wall_hits.saturating_add(1);
-                        break;
-                    }
-                    report.transitions = report.transitions.saturating_add(1);
-                    match action {
-                        Macrostep::Reclaim => {
-                            let before = state;
-                            state.psi = state.psi.saturating_sub(1);
-                            state.retries_remaining = state.retries_remaining.saturating_sub(1);
-                            if !lexicographically_decreases(before, state) {
-                                report.armed_noops = report.armed_noops.saturating_add(1);
-                                break;
-                            }
-                        }
-                        Macrostep::WrapUp | Macrostep::Quiesce | Macrostep::Disarm => {
-                            report.max_macrosteps =
-                                report.max_macrosteps.max(step.saturating_add(1));
-                            terminated = true;
-                            break;
-                        }
-                        Macrostep::NoOp => unreachable!(),
-                    }
-                }
-                if !terminated {
-                    report.unterminated_episodes = report.unterminated_episodes.saturating_add(1);
-                }
+                verify_episode(
+                    ProgressState::new(initial_psi, initial_retries),
+                    modes,
+                    macrostep_bound,
+                    &mut report,
+                );
             }
         }
     }

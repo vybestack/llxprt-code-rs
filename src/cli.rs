@@ -196,13 +196,14 @@ fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
     }
     // A normal policy terminal is considered only after both quiesce locations.
     if declared.terminal_outcome.is_none() {
-        if let Some(value) = &manifest {
+        for value in [&marker, &manifest].into_iter().flatten() {
             if let Some(outcome) = value
                 .get("terminal_outcome")
                 .and_then(serde_json::Value::as_str)
             {
                 if !outcome.is_empty() {
                     declared.terminal_outcome = Some(outcome.to_string());
+                    break;
                 }
             }
         }

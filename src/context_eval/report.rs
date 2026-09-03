@@ -101,7 +101,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
         "armed_hit_rate": report["armed_hit_rate"],
         "disarmed_hit_rate": report["disarmed_hit_rate"],
         "invalidation_cost_per_event": report["invalidation_cost_per_event"],
-        "prefix_invalidation_cost_per_rewrite": report["invalidation_cost_per_event"],
+        "prefix_invalidation_cost_per_rewrite": Value::Null,
         "known_invalidation_cost_events": report["known_invalidation_cost_events"],
         "unknown_invalidation_cost_events": report["unknown_invalidation_cost_events"],
         "rewrite_journal_entries": entries,
@@ -117,7 +117,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
             "armed_hit_rate": report["armed_hit_rate"],
             "disarmed_hit_rate": report["disarmed_hit_rate"],
         },
-        "suspended_while_armed": report["armed_rewrites"].as_u64().unwrap_or(0) > 0,
+        "suspended_while_armed": report["economic_gate_suspensions"].as_u64().unwrap_or(0) > 0,
         "source": "context/rewrite-journal.log",
     })
 }

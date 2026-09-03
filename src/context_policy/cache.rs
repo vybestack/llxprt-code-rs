@@ -62,6 +62,7 @@ pub struct CacheReport {
     pub forced_flushes: u64,
     pub armed_rewrites: u64,
     pub disarmed_rewrites: u64,
+    pub economic_gate_suspensions: u64,
     pub hit_rate: Option<f64>,
     pub armed_hit_rate: Option<f64>,
     pub disarmed_hit_rate: Option<f64>,
@@ -150,6 +151,10 @@ impl RewriteJournal {
             || invalidation_cost.is_some_and(|cost| {
                 expected_benefit >= cost.saturating_add(self.config.amortization_bar)
             });
+        if armed {
+            self.report.economic_gate_suspensions =
+                self.report.economic_gate_suspensions.saturating_add(1);
+        }
         if allowed {
             self.report.threshold_passes = self.report.threshold_passes.saturating_add(1);
             if armed {

@@ -131,50 +131,70 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
     use crate::context_ingress::capture::CaptureSource;
     use crate::context_ingress::ingress::IngressTxn;
     let started = Instant::now();
-    let proposal = state.policy.propose_bulk(tool, bytes);
+    let pressure = normalized_pressure(bytes.len());
+    let proposal = state.policy.propose_bulk(tool, bytes.len(), pressure);
     if proposal.admission == crate::context_policy::governor::Admission::Quiesce {
+        state.policy.abort_bulk(proposal);
         return Err("policy governor quiesced before bulk admission".to_string());
     }
-    state
-        .store
-        .begin_state_advancing_turn()
-        .map_err(|blocked| match blocked {
-            crate::context_store::store::StoreBlocked::Mode { mode } => {
-                format!("store mode {mode} refused the turn")
-            }
-        })?;
-    let handle = format!(
-        "content-{:016x}",
-        crate::context_kernel::canonical::digest(bytes)
-    );
-    let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
-    txn.capture(CaptureSource::ToolResult, bytes)
-        .map_err(|error| ingress_error(&error))?;
-    let records = txn
-        .commit(&mut state.store)
-        .map_err(|error| ingress_error(&error))?;
-    let segments = records
-        .first()
-        .ok_or_else(|| "ingress committed no records".to_string())?
-        .segments
-        .clone();
-    let range = state
-        .store
-        .sanitized_append(&handle, bytes)
-        .map_err(|error| context_store_error(&error))?;
-    state
-        .store
-        .vault_put(bytes, "tool-result")
-        .map_err(|error| context_store_error(&error))?;
-    let digest = state
-        .filters
-        .digest(tool, &handle, vec![range], bytes, &segments);
-    let record = digest_record(state, tool, bytes, &handle, &digest);
-    let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
-    state
-        .policy
-        .complete_bulk(proposal, bytes, record.len(), elapsed);
-    Ok(record)
+    let result = (|| {
+        state
+            .store
+            .begin_state_advancing_turn()
+            .map_err(|blocked| match blocked {
+                crate::context_store::store::StoreBlocked::Mode { mode } => {
+                    format!("store mode {mode} refused the turn")
+                }
+            })?;
+        let handle = format!(
+            "content-{:016x}",
+            crate::context_kernel::canonical::digest(bytes)
+        );
+        let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
+        txn.capture(CaptureSource::ToolResult, bytes)
+            .map_err(|error| ingress_error(&error))?;
+        let records = txn
+            .commit(&mut state.store)
+            .map_err(|error| ingress_error(&error))?;
+        let segments = records
+            .first()
+            .ok_or_else(|| "ingress committed no records".to_string())?
+            .segments
+            .clone();
+        let range = state
+            .store
+            .sanitized_append(&handle, bytes)
+            .map_err(|error| context_store_error(&error))?;
+        state
+            .store
+            .vault_put(bytes, "tool-result")
+            .map_err(|error| context_store_error(&error))?;
+        let digest = state
+            .filters
+            .digest(tool, &handle, vec![range], bytes, &segments);
+        Ok(digest_record(state, tool, bytes, &handle, &digest))
+    })();
+    match result {
+        Ok(record) => {
+            let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
+            state.policy.complete_bulk(
+                proposal,
+                bytes,
+                record.len(),
+                normalized_pressure(record.len()),
+                elapsed,
+            );
+            Ok(record)
+        }
+        Err(reason) => {
+            state.policy.abort_bulk(proposal);
+            Err(reason)
+        }
+    }
+}
+
+fn normalized_pressure(bytes: usize) -> f64 {
+    (bytes as f64 / BULK_RESULT_BYTES as f64).min(1.0)
 }
 
 /// The same record shape computed entirely in memory: no store, no vault, no artifacts.
@@ -269,6 +289,24 @@ fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> 
 /// A context-store or artifact-write failure never fails the session transaction:
 /// the run quiesces (recorded best-effort in the manifest) and keeps its committed
 /// exit state, so an unwritable store degrades instead of aborting the turn.
+pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
+    let mut guard = store
+        .context
+        .lock()
+        .map_err(|_| StoreError::Lock("context store lock poisoned".into()))?;
+    let Some(state) = guard.as_mut() else {
+        return Ok(());
+    };
+    state.policy.wrap_up();
+    if let Err(reason) = persist_context(store, state) {
+        state.quiesce = Some("quiesce_unwritable".to_string());
+        state.detail = Some(reason);
+        record_quiesce_manifest(store, state);
+        record_quiesce_fallback(store, state);
+    }
+    Ok(())
+}
+
 pub(crate) fn context_exchange(
     store: &SessionStore,
     rounds: &[RoundRecord],
@@ -337,6 +375,17 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
     record
 }
 
+impl SessionStore {
+    /// Reads one bounded deterministic page from the sanitized context spine.
+    pub fn context_read_page(
+        &self,
+        range: std::ops::Range<u64>,
+        limit: usize,
+    ) -> Result<crate::context_store::spine::Page, String> {
+        read_context_page(self, range, limit)
+    }
+}
+
 /// Bounded deterministic range read-back for the minimum management floor.
 pub fn read_context_page(
     store: &SessionStore,
@@ -400,8 +449,9 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         .policy
         .events()
         .iter()
-        .map(|event| serde_json::to_string(event).expect("policy event serializes"))
-        .collect::<Vec<_>>()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("encode policy event failed: {error}"))?
         .join("\n");
     write_artifact(&dir, &root, "events.log", events.as_bytes())?;
     let checkpoints = state
@@ -439,6 +489,7 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
                 "threshold_denials": report.threshold_denials,
                 "armed_rewrites": report.armed_rewrites,
                 "disarmed_rewrites": report.disarmed_rewrites,
+                "economic_gate_suspensions": report.economic_gate_suspensions,
                 "forced_flushes": report.forced_flushes,
             }
         })

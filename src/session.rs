@@ -851,7 +851,8 @@ impl SessionStore {
                 owner: reserved.owner.clone(),
                 rounds: suffix.to_vec(),
                 summary: summary.to_string(),
-            })
+            })?;
+            crate::context_persist::finalize_context(self)
         })
     }
 
@@ -901,15 +902,6 @@ impl SessionStore {
     /// Compacts one tool result before it is recorded into the round.
     pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
         crate::context_persist::compact_tool_result(self, tool, result)
-    }
-
-    /// Reads one bounded deterministic page from the sanitized context spine.
-    pub fn context_read_page(
-        &self,
-        range: std::ops::Range<u64>,
-        limit: usize,
-    ) -> Result<crate::context_store::spine::Page, String> {
-        crate::context_persist::read_context_page(self, range, limit)
     }
 
     fn live_branch<'a>(

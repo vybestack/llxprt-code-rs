@@ -16,6 +16,7 @@ pub struct BulkProposal {
     pub logical_time: u64,
     pub admission: Admission,
     pub armed: bool,
+    pub input_bytes: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -64,35 +65,40 @@ impl Default for ProposalOnlyController {
 
 impl ProposalOnlyController {
     /// Proposes handle admission for bulk evidence without touching the context store.
-    pub fn propose_bulk(&mut self, tool: &str, _bytes: &[u8]) -> BulkProposal {
+    pub fn propose_bulk(
+        &mut self,
+        tool: &str,
+        input_bytes: usize,
+        projected_pressure: f64,
+    ) -> BulkProposal {
         self.logical_time = self.logical_time.saturating_add(1);
         let source = crate::context_kernel::canonical::digest(tool.as_bytes());
-        let tier = self.pressure.observe(1.0, 1.0, 0.1);
+        let tier = self
+            .pressure
+            .observe(projected_pressure, projected_pressure, 0.1);
         BulkProposal {
             source,
             logical_time: self.logical_time,
             admission: Admission::Handle,
             armed: tier == SafetyTier::Armed,
+            input_bytes: input_bytes as u64,
         }
     }
 
-    /// Records the caller's completed rewrite. This updates policy accounting only.
+    /// Records a completed caller-owned rewrite using measured post-rewrite pressure.
     pub fn complete_bulk(
         &mut self,
         proposal: BulkProposal,
         bytes: &[u8],
         admitted_bytes: usize,
+        admitted_pressure: f64,
         wall_elapsed_us: u64,
     ) {
         let content = crate::context_kernel::canonical::digest(bytes);
         let hit = !self.seen_content.insert(content);
         self.journal.observe_access(hit, proposal.armed);
         let reclaimed = bytes.len().saturating_sub(admitted_bytes) as u64;
-        let economic_pass = self.journal.should_rewrite(reclaimed, None, proposal.armed);
-        assert!(
-            economic_pass,
-            "armed pressure must suspend cache economic gates"
-        );
+        self.journal.should_rewrite(reclaimed, None, proposal.armed);
         self.journal.note(RewriteEntry::new(
             proposal.source,
             reclaimed,
@@ -107,25 +113,70 @@ impl ProposalOnlyController {
             admitted_bytes as u64,
             proposal.logical_time,
         );
-        assert_eq!(
-            digest_admission,
-            Admission::Admit,
-            "digest record exceeds admission reserve"
-        );
         self.governor
             .observe_reclaim(reclaimed, proposal.logical_time);
         self.governor.finish_window(proposal.logical_time);
-        let after = self.pressure.observe(0.0, 0.0, 0.1);
-        self.monitor.begin_window(after == SafetyTier::Armed);
+        let after = self
+            .pressure
+            .observe(admitted_pressure, admitted_pressure, 0.1);
+        let armed_after = after == SafetyTier::Armed;
+        self.monitor.begin_window(armed_after);
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
             source: proposal.source,
-            operation: "drop-with-handle",
-            input_bytes: bytes.len() as u64,
+            operation: match digest_admission {
+                Admission::Quiesce => "quiesce-unwritable",
+                Admission::Admit | Admission::Handle => "drop-with-handle",
+            },
+            input_bytes: proposal.input_bytes,
             admitted_bytes: admitted_bytes as u64,
             reclaimed_bytes: reclaimed,
             armed_before: proposal.armed,
-            armed_after: after == SafetyTier::Armed,
+            armed_after,
+        });
+        self.terminal_outcome =
+            if digest_admission == Admission::Quiesce || self.governor.state().quiescing {
+                Some("quiesce_unwritable")
+            } else if armed_after {
+                None
+            } else {
+                Some("disarm")
+            };
+    }
+
+    /// Accounts a failed caller-owned store transaction and enters a named terminal branch.
+    pub fn abort_bulk(&mut self, proposal: BulkProposal) {
+        let armed_after = self.pressure.observe(0.0, 0.0, 0.1) == SafetyTier::Armed;
+        self.monitor.begin_window(armed_after);
+        self.events.push(PolicyEvent {
+            logical_time: proposal.logical_time,
+            source: proposal.source,
+            operation: "quiesce-unwritable",
+            input_bytes: proposal.input_bytes,
+            admitted_bytes: 0,
+            reclaimed_bytes: 0,
+            armed_before: proposal.armed,
+            armed_after,
+        });
+        self.terminal_outcome = Some("quiesce_unwritable");
+    }
+
+    /// Records the explicit session-finalization terminal without overriding quiescence.
+    pub fn wrap_up(&mut self) {
+        if self.terminal_outcome == Some("quiesce_unwritable") {
+            return;
+        }
+        self.logical_time = self.logical_time.saturating_add(1);
+        let armed = self.pressure.tier() == SafetyTier::Armed;
+        self.events.push(PolicyEvent {
+            logical_time: self.logical_time,
+            source: 0,
+            operation: "wrap-up",
+            input_bytes: 0,
+            admitted_bytes: 0,
+            reclaimed_bytes: 0,
+            armed_before: armed,
+            armed_after: armed,
         });
         self.terminal_outcome = Some("wrap_up");
     }

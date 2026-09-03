@@ -243,6 +243,16 @@ fn valid_value(name: &str, value: f64) -> bool {
     }
     if matches!(
         name,
+        "cache.flush_epoch"
+            | "governor.per_window_quota"
+            | "governor.per_turn_ceiling"
+            | "governor.quota_floor"
+    ) && value == 0.0
+    {
+        return false;
+    }
+    if matches!(
+        name,
         "governor.alpha"
             | "pressure.arm"
             | "pressure.disarm"

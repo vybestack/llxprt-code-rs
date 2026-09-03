@@ -361,6 +361,7 @@ fn cache_acceptance_report_reads_durable_conditional_telemetry() {
             "\"disarmed_hit_rate\":null,\"disarmed_rewrites\":0,\"hit_rate\":0.5,",
             "\"invalidation_cost_per_event\":null,\"known_invalidation_cost_events\":0,",
             "\"threshold_denials\":0,\"threshold_passes\":1,",
+            "\"economic_gate_suspensions\":1,",
             "\"unknown_invalidation_cost_events\":1}}\n"
         ),
     )
@@ -369,6 +370,7 @@ fn cache_acceptance_report_reads_durable_conditional_telemetry() {
     assert_eq!(cache["class"], "measured");
     assert_eq!(cache["rewrite_journal_tokens_reclaimed"], 100);
     assert!(cache["rewrite_journal_tokens_invalidated"].is_null());
+    assert!(cache["prefix_invalidation_cost_per_rewrite"].is_null());
     assert_eq!(cache["conditional"]["armed_hit_rate"], 0.5);
     assert_eq!(cache["suspended_while_armed"], true);
     fs::remove_dir_all(dir).ok();

@@ -11,8 +11,9 @@ use crate::context_policy::params::{
 };
 use crate::context_policy::pressure::{Pressure, SafetyTier, Thresholds};
 use crate::context_policy::progress::{
-    lexicographically_decreases, next_action, terminal_reserve,
-    verify_adversarial_reachable_states, Macrostep, ProgressState, TerminalOutcome,
+    lexicographically_decreases, next_action, operation_for_degradation, terminal_reserve,
+    verify_adversarial_reachable_states, DegradationModes, Macrostep, ProgressState,
+    TerminalOutcome,
 };
 use crate::context_policy::queue::{
     find_admissible, ClassedQueues, OperationClass, Proposal, QueueClass, QueueConfig, SemanticKey,
@@ -62,7 +63,7 @@ fn queue_reserved_shares_prevent_monitor_starvation() {
 }
 
 #[test]
-fn semantic_dedup_and_bounded_reposal() {
+fn semantic_dedup_and_bounded_reproposal() {
     let mut q = queues();
     let original = proposal(QueueClass::Model, "fold", 10, 3, 32);
     assert!(q.submit(original.clone()));
@@ -97,7 +98,11 @@ fn find_admissible_is_registry_ordered_and_bounded() {
     };
     let first = find_admissible(registry.len(), admissible);
     assert_eq!(first.map(|row| row.name), Some("placeholder-collapse"));
-    let before_reclamation = find_admissible(13, admissible);
+    let first_reclamation = registry
+        .iter()
+        .position(|row| row.name == "placeholder-collapse")
+        .expect("reclamation operation is registered");
+    let before_reclamation = find_admissible(first_reclamation, admissible);
     assert!(before_reclamation.is_none());
     assert!(find_admissible(0, |_| true).is_none());
 }
@@ -326,95 +331,73 @@ fn cache_forced_flush_and_armed_suspension() {
     assert_eq!(journal.report().armed_hit_rate, Some(1.0));
     assert_eq!(journal.report().disarmed_hit_rate, Some(0.0));
     assert_eq!(journal.report().invalidation_cost_per_event, Some(6.5));
+    assert_eq!(journal.report().economic_gate_suspensions, 1);
     journal.record(RewriteEntry::new(3, 1, None, 11));
     assert_eq!(journal.report().invalidation_cost_per_event, None);
 }
 
+const EXPECTED_PARAMETERS: [(&str, ParameterClass); 26] = [
+    (
+        "safety.classification_floor",
+        ParameterClass::SafetyInvariant,
+    ),
+    ("safety.mandatory_reserve", ParameterClass::SafetyInvariant),
+    ("queue.cycle_slots", ParameterClass::ProfileTunable),
+    ("queue.monitor_share", ParameterClass::ProfileTunable),
+    ("queue.max_retries", ParameterClass::ProfileTunable),
+    ("governor.per_window_quota", ParameterClass::Calibrated),
+    (
+        "governor.per_turn_ceiling",
+        ParameterClass::OperatorEnvelope,
+    ),
+    ("governor.alpha", ParameterClass::SafetyInvariant),
+    ("governor.quota_floor", ParameterClass::OperatorEnvelope),
+    ("pressure.arm", ParameterClass::ProfileTunable),
+    ("pressure.disarm", ParameterClass::ProfileTunable),
+    ("pressure.target", ParameterClass::ProfileTunable),
+    ("pressure.minimum_floor", ParameterClass::OperatorEnvelope),
+    ("ladder.amortization_bar", ParameterClass::ProfileTunable),
+    ("ladder.escalation_bound", ParameterClass::OperatorEnvelope),
+    ("ladder.confidence_floor", ParameterClass::ProfileTunable),
+    ("monitor.sticky_cap", ParameterClass::ProfileTunable),
+    ("monitor.relaxation_windows", ParameterClass::ProfileTunable),
+    ("cache.amortization_bar", ParameterClass::ProfileTunable),
+    ("cache.flush_epoch", ParameterClass::ProfileTunable),
+    ("cache.invalidation_penalty", ParameterClass::Calibrated),
+    (
+        "progress.mandatory_queue_weight",
+        ParameterClass::ProfileTunable,
+    ),
+    ("progress.retry_weight", ParameterClass::ProfileTunable),
+    ("progress.terminal_reserve", ParameterClass::SafetyInvariant),
+    (
+        "profile.reclaim_aggressiveness",
+        ParameterClass::ProfileTunable,
+    ),
+    ("profile.log_verbosity", ParameterClass::ProfileTunable),
+];
+
 #[test]
 fn parameters_are_total_and_classed_once() {
-    let expected = [
-        "safety.classification_floor",
-        "safety.mandatory_reserve",
-        "queue.cycle_slots",
-        "queue.monitor_share",
-        "queue.max_retries",
-        "governor.per_window_quota",
-        "governor.per_turn_ceiling",
-        "governor.alpha",
-        "governor.quota_floor",
-        "pressure.arm",
-        "pressure.disarm",
-        "pressure.target",
-        "pressure.minimum_floor",
-        "ladder.amortization_bar",
-        "ladder.escalation_bound",
-        "ladder.confidence_floor",
-        "monitor.sticky_cap",
-        "monitor.relaxation_windows",
-        "cache.amortization_bar",
-        "cache.flush_epoch",
-        "cache.invalidation_penalty",
-        "progress.mandatory_queue_weight",
-        "progress.retry_weight",
-        "progress.terminal_reserve",
-        "profile.reclaim_aggressiveness",
-        "profile.log_verbosity",
-    ];
-
+    assert_eq!(all().len(), EXPECTED_PARAMETERS.len());
+    assert_eq!(PARAMETERS.len(), EXPECTED_PARAMETERS.len());
     let mut names = std::collections::BTreeSet::new();
-    let mut total = true;
-    for name in expected.iter() {
-        match lookup(name) {
-            Some(param) => {
-                let inserted = names.insert(param.name);
-                if !inserted {
-                    total = false;
-                }
-            }
-            None => total = false,
-        }
-    }
-    assert!(total);
-    let no_aliases = names.len() == PARAMETERS.len();
-    assert!(no_aliases);
-    let complete = names.len() == expected.len();
-    assert!(complete);
-
-    let expected_classes = [
-        ParameterClass::SafetyInvariant,
-        ParameterClass::SafetyInvariant,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::Calibrated,
-        ParameterClass::OperatorEnvelope,
-        ParameterClass::SafetyInvariant,
-        ParameterClass::OperatorEnvelope,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::OperatorEnvelope,
-        ParameterClass::ProfileTunable,
-        ParameterClass::OperatorEnvelope,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::Calibrated,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-        ParameterClass::SafetyInvariant,
-        ParameterClass::ProfileTunable,
-        ParameterClass::ProfileTunable,
-    ];
-    assert_eq!(all().len(), expected_classes.len());
-    for (parameter, expected_class) in all().iter().zip(expected_classes) {
+    for (parameter, (name, class)) in all().iter().zip(EXPECTED_PARAMETERS) {
+        assert_eq!(parameter.name, name);
+        assert_eq!(parameter.class, class, "wrong class for {name}");
+        assert!(names.insert(parameter.name), "duplicate parameter {name}");
         assert_eq!(
-            parameter.class, expected_class,
-            "wrong class for {}",
-            parameter.name
+            lookup(name).map(|found| (found.name, found.class)),
+            Some((parameter.name, parameter.class)),
         );
+    }
+    for class in [
+        ParameterClass::SafetyInvariant,
+        ParameterClass::ProfileTunable,
+        ParameterClass::Calibrated,
+        ParameterClass::OperatorEnvelope,
+    ] {
+        assert!(all().iter().any(|parameter| parameter.class == class));
     }
     assert!(!crate::context_policy::params::calibratable_while_armed(
         "governor.per_window_quota"
@@ -422,28 +405,25 @@ fn parameters_are_total_and_classed_once() {
     assert!(crate::context_policy::params::calibratable_while_armed(
         "pressure.arm"
     ));
+}
 
-    let classes: Vec<ParameterClass> = all().iter().map(|p| p.class).collect();
-    let has_safety = classes
-        .iter()
-        .any(|c| matches!(c, ParameterClass::SafetyInvariant));
-    let has_profile = classes
-        .iter()
-        .any(|c| matches!(c, ParameterClass::ProfileTunable));
-    let has_calibrated = classes
-        .iter()
-        .any(|c| matches!(c, ParameterClass::Calibrated));
-    let has_envelope = classes
-        .iter()
-        .any(|c| matches!(c, ParameterClass::OperatorEnvelope));
-    let covered = has_safety;
-    let tuned = has_profile;
-    let measured = has_calibrated;
-    let bounded = has_envelope;
-    assert!(covered);
-    assert!(tuned);
-    assert!(measured);
-    assert!(bounded);
+#[test]
+fn constructor_positive_parameters_reject_zero_updates() {
+    let cases = [
+        ("cache.flush_epoch", UpdateAuthority::ProfileLoad),
+        ("governor.per_window_quota", UpdateAuthority::CalibrationTxn),
+        ("governor.per_turn_ceiling", UpdateAuthority::Operator),
+        ("governor.quota_floor", UpdateAuthority::Operator),
+    ];
+    for (name, authority) in cases {
+        let mut registry = ParameterRegistry::default();
+        let result = registry.update(name, 0.0, 1, authority, false);
+        assert_eq!(
+            result,
+            Err(UpdateError::InvalidValue),
+            "accepted zero for {name}"
+        );
+    }
 }
 
 #[test]
@@ -463,6 +443,55 @@ fn macrostep_measure_decreases_or_retries_decrease() {
 
     let stalled = lexicographically_decreases(before, before);
     assert!(!stalled);
+}
+
+#[test]
+fn every_degradation_axis_changes_the_selected_registered_operation() {
+    let cases = [
+        (1, ProgressState::new(2, 2)),
+        (2, ProgressState::new(2, 2)),
+        (4, ProgressState::new(2, 2)),
+        (8, ProgressState::new(2, 2)),
+        (16, ProgressState::new(1, 2)),
+        (32, ProgressState::new(2, 2)),
+        (64, ProgressState::new(2, 2)),
+    ];
+    for (bits, state) in cases {
+        let baseline = operation_for_degradation(state, DegradationModes::from_bits(0));
+        let operation = operation_for_degradation(state, DegradationModes::from_bits(bits));
+        assert_ne!(
+            operation, baseline,
+            "degradation bit {bits} was behaviorally inert"
+        );
+        assert!(operation
+            .and_then(crate::context_txn::operation::find)
+            .is_some());
+    }
+}
+
+#[test]
+fn runtime_bulk_accounting_uses_measured_pressure_without_panicking() {
+    let mut policy = crate::context_policy::runtime::ProposalOnlyController::default();
+    let bytes = vec![b'x'; 2048];
+    let proposal = policy.propose_bulk("read_file", bytes.len(), 1.0);
+    assert!(proposal.armed);
+    policy.complete_bulk(proposal, &bytes, 5000, 0.2, 7);
+    assert_eq!(policy.terminal_outcome(), Some("disarm"));
+    assert_eq!(policy.cache_report().economic_gate_suspensions, 1);
+    assert!(!policy.events()[0].armed_after);
+    policy.wrap_up();
+    assert_eq!(policy.terminal_outcome(), Some("wrap_up"));
+}
+
+#[test]
+fn runtime_failed_proposal_quiesces_and_wrap_up_cannot_override_it() {
+    let mut policy = crate::context_policy::runtime::ProposalOnlyController::default();
+    let proposal = policy.propose_bulk("read_file", 2048, 1.0);
+    policy.abort_bulk(proposal);
+    assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
+    assert_eq!(policy.events()[0].operation, "quiesce-unwritable");
+    policy.wrap_up();
+    assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
 }
 
 #[test]
