@@ -122,20 +122,24 @@ impl RewriteJournal {
         invalidation_cost: Option<u64>,
         armed: bool,
     ) -> bool {
-        // RED: ignores the amortization bar and unknown-cost conservatism, and
-        // does not suspend economics while armed.
-        let _ = armed;
-        self.report.events += 1;
-        match invalidation_cost {
-            Some(cost) => expected_benefit >= cost,
-            None => true,
+        let allowed = armed
+            || invalidation_cost.is_some_and(|cost| {
+                expected_benefit >= cost.saturating_add(self.config.amortization_bar)
+            });
+        if allowed {
+            self.report.threshold_passes += 1;
+        } else {
+            self.report.threshold_denials += 1;
         }
+        if armed {
+            self.report.armed_rewrites += 1;
+        }
+        allowed
     }
 
     /// Epoch-batched note flush.
     pub fn should_flush(&self) -> bool {
-        // RED: flushes early.
-        !self.noted.is_empty()
+        self.noted.len() >= self.config.flush_epoch
     }
 
     /// Note an entry for a later epoch batch.
@@ -150,9 +154,7 @@ impl RewriteJournal {
         armed: bool,
         wall_elapsed_us: u64,
     ) -> Vec<RewriteEntry> {
-        // RED: reports forced flushes as amortized even while armed and never
-        // registers the wall elapsed time.
-        let _ = (source, wall_elapsed_us);
+        let _ = source;
         self.report.forced_flushes += 1;
         if armed {
             self.report.armed_rewrites += 1;

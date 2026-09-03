@@ -47,7 +47,6 @@ pub struct MonitorCounters {
 pub struct RuntimeMonitor {
     cap: u32,
     counters: MonitorCounters,
-    disarmed_windows: usize,
 }
 
 impl RuntimeMonitor {
@@ -55,7 +54,6 @@ impl RuntimeMonitor {
         Self {
             cap,
             counters: MonitorCounters::default(),
-            disarmed_windows: 0,
         }
     }
 
@@ -79,10 +77,7 @@ impl RuntimeMonitor {
 
     /// Observe a signal. Sticky counters cap; observations freeze when failed.
     pub fn observe(&mut self, signal: MonitorSignal, disarmed_window: bool) {
-        // RED: counts past the cap and keeps counting while frozen.
-        if disarmed_window {
-            self.disarmed_windows += 1;
-        }
+        let _ = disarmed_window;
         if self.counters.frozen {
             return;
         }
@@ -93,18 +88,19 @@ impl RuntimeMonitor {
             MonitorSignal::Thrash => &mut self.counters.thrash,
             MonitorSignal::OverprotectiveClassification => &mut self.counters.overprotective,
         };
-        *slot = (*slot).saturating_add(1);
+        *slot = (*slot).saturating_add(1).min(self.cap);
     }
 
     /// Monitor failure freezes all sticky counters.
     pub fn fail(&mut self) {
-        // RED: failure does not freeze.
-        self.counters.frozen = false;
+        self.counters.frozen = true;
     }
 
     /// Relaxation-only filter proposals, permitted only after a disarmed window.
     pub fn proposals(&self, disarmed_windows: usize) -> Vec<MonitorProposal> {
-        // RED: proposes relaxation regardless of disarmed windows.
+        if disarmed_windows == 0 {
+            return Vec::new();
+        }
         MonitorSignal::all()
             .iter()
             .map(|signal| MonitorProposal {
