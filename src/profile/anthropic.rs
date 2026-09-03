@@ -68,7 +68,7 @@ mod issue81_parser_tests {
 
         let config_root = tempfile::tempdir().unwrap();
         let error =
-            crate::model::ModelConfig::from_profile_in(profile, None, true, config_root.path())
+            crate::model::ModelConfig::from_profile_in(&profile, false, true, config_root.path())
                 .unwrap_err();
         assert!(
             error

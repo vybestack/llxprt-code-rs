@@ -1006,15 +1006,17 @@ fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
         let profiles = workspace.path().join("profiles");
         std::fs::create_dir_all(&profiles).unwrap();
         let (base_url, request_rx, server) = spawn_anthropic_request_server();
-        let mut ephemeral = serde_json::json!({ "base-url": base_url });
+        let mut ephemeral = serde_json::json!({
+            "base-url": base_url,
+            "auth-key": "loopback-key"
+        });
         if let Some(setting) = prompt_caching {
             ephemeral["prompt-caching"] = Value::String(setting.to_owned());
         }
         let profile = serde_json::json!({
             "provider": "anthropic",
             "model": "claude-loopback",
-            "auth-key": "loopback-key",
-            "ephemeralSettings": ephemeral,
+                "ephemeralSettings": ephemeral,
         });
         std::fs::write(
             profiles.join(format!("{name}.json")),
@@ -1026,6 +1028,10 @@ fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
             .env("LLXPRT_CONFIG_HOME", workspace.path())
             .arg("--profile")
             .arg(name)
+            .arg("--session")
+            .arg(format!("issue81-cache-{name}"))
+            .arg("--cwd")
+            .arg(workspace.path())
             .arg("-p")
             .arg("Reply with loopback complete")
             .output()
