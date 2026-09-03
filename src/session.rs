@@ -36,6 +36,10 @@ const SESSION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Poll interval while waiting for a contended session lock.
 const SESSION_LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
 
+use aes_gcm::{
+    aead::{AeadCore as _, OsRng},
+    Aes256Gcm,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -280,14 +284,17 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// A fresh unique owner token: process id + wall-clock nanos is unique per process and
-/// never a secret.
+fn random_token_hex() -> String {
+    format!(
+        "{:032x}",
+        Aes256Gcm::generate_nonce(&mut OsRng)
+            .iter()
+            .fold(0_u128, |n, b| (n << 8) | u128::from(*b))
+    )
+}
+
 fn new_owner() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{}-{now}", std::process::id())
+    format!("{}-{}", std::process::id(), random_token_hex())
 }
 
 fn fchmod(fd: std::os::fd::RawFd, mode: libc::mode_t) -> Result<(), StoreError> {
@@ -453,6 +460,13 @@ pub(crate) fn ensure_private_subdir(
 }
 
 impl SessionId {
+    /// Generate a collision-resistant identifier using OS-backed randomness.
+    pub fn fresh() -> Self {
+        Self {
+            id: format!("session-{}", random_token_hex()),
+        }
+    }
+
     /// Resolve the session id, rejecting unsafe components.
     pub fn parse(id: &str) -> Result<SessionId, String> {
         if !is_safe_component(id) {

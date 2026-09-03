@@ -263,7 +263,11 @@ fn hostile_usage_session_still_emits_a_schema_valid_envelope() {
         serde_json::from_slice(include_bytes!("../docs/envelope.schema.json")).unwrap();
     let validator = jsonschema::draft202012::new(&schema).unwrap();
     let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(envelope["session_id"], "default");
+    let session_id = envelope["session_id"].as_str().unwrap();
+    assert!(
+        session_id.starts_with("session-"),
+        "usage envelope should use a fresh fallback session id, got {session_id:?}"
+    );
     assert!(
         validator.is_valid(&envelope),
         "usage envelope failed published schema: {:?}",

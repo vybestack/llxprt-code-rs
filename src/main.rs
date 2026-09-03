@@ -4,7 +4,7 @@ use llxprt_code_rs::{cli, envelope::Envelope, memory_profile::Profiler};
 
 fn main() {
     let session_hint = cli::session_hint();
-    let args = cli::parse_args_fallback();
+    let args = cli::parse_args_fallback(&session_hint);
     if let Err(message) = llxprt_code_rs::session::SessionId::parse(&args.session) {
         let outcome = Err(cli::AppError::new(cli::Code::Usage, "session", message));
         println!("{}", cli::json(&outcome, &session_hint));

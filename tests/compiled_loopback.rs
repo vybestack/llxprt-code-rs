@@ -530,6 +530,114 @@ fn openai_redirects_never_reach_the_redirect_target() {
 /// failed session, and no pending branch. The reflected marker near the truncation
 /// boundary must never survive (scrub runs before the 8192-byte bound).
 #[test]
+fn omitted_session_is_fresh_and_matches_its_directory() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            let body = br#"{"error":{"message":"provider stopped"}}"#;
+            write!(stream, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+
+    let home = tempfile::tempdir().unwrap();
+    let profile_dir = home.path().join("profiles");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(profile_dir.join("loop.json"), format!(r#"{{"provider":"openai","model":"test-model","ephemeralSettings":{{"base-url":"http://127.0.0.1:{port}","auth-key":"test"}}}}"#)).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let run = || {
+        let output = bin()
+            .args(["--profile", "loop", "--prompt", "hello"])
+            .env("LLXPRT_CONFIG_HOME", home.path())
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5));
+        assert_eq!(
+            output.stdout.iter().filter(|&&byte| byte == b'\n').count(),
+            1
+        );
+        let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session_id = envelope["session_id"].as_str().unwrap().to_string();
+        assert!(home
+            .path()
+            .join("code-rs-sessions")
+            .join(&session_id)
+            .is_dir());
+        session_id
+    };
+
+    let first = run();
+    let second = run();
+    assert_ne!(first, second);
+    server.join().unwrap();
+}
+
+#[test]
+fn explicit_default_session_resumes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            let body = br#"{"error":{"message":"provider stopped"}}"#;
+            write!(stream, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+
+    let home = tempfile::tempdir().unwrap();
+    let profile_dir = home.path().join("profiles");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(profile_dir.join("loop.json"), format!(r#"{{"provider":"openai","model":"test-model","ephemeralSettings":{{"base-url":"http://127.0.0.1:{port}","auth-key":"test"}}}}"#)).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    for _ in 0..2 {
+        let output = bin()
+            .args([
+                "--profile",
+                "loop",
+                "--session",
+                "default",
+                "--prompt",
+                "hello",
+            ])
+            .env("LLXPRT_CONFIG_HOME", home.path())
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5));
+        let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(envelope["session_id"], "default");
+    }
+    assert!(home
+        .path()
+        .join("code-rs-sessions")
+        .join("default")
+        .is_dir());
+    server.join().unwrap();
+}
+
+#[test]
 #[cfg(unix)]
 fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
     let oversized_prompt_bytes = 512 * 1024 + 1;
