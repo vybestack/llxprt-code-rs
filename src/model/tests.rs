@@ -317,10 +317,7 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
     });
     assert_eq!(
         load_err(&both, "ordering", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            NAMED_KEY_RESOLUTION_FAILURE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // The structural gate (class 4) precedes unsupported-key rejection
@@ -467,10 +464,7 @@ fn friendliglm_ladder_first_failures_in_order() {
     .to_string();
     assert_eq!(
         err,
-        format!(
-            "unsupported profile setting(s): {}",
-            NAMED_KEY_RESOLUTION_FAILURE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // Rung 3: drop auth-key-name; the unsupported model parameters are now
@@ -532,10 +526,7 @@ fn marker_profiles_fail_on_their_first_structural_cause() {
         serde_json::from_str(include_str!("../../tests/fixtures/profiles/qwen38.json")).unwrap();
     assert_eq!(
         load_err(&qwen38, "qwen38", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            NAMED_KEY_RESOLUTION_FAILURE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     let mi300x: serde_json::Value = serde_json::from_str(include_str!(
