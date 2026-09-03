@@ -1,0 +1,10 @@
+# Coupling debt burn-down ledger. Entries may only be removed by the ordinary gate.
+# FROM<TAB>TO<TAB>OPEN_GITHUB_ISSUE
+adapter	cli	69
+agent	cli	69
+model	model_api	73
+profile	agent	72
+profile	model_api	73
+session	agent	70
+session	model_api	71
+tools	agent	70

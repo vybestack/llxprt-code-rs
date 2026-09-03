@@ -8,6 +8,8 @@
 
 pub mod analyze;
 pub mod complexity;
+pub mod coupling;
+mod coupling_graph;
 pub mod loc;
 pub mod release;
 

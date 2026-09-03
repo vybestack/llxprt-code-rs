@@ -373,6 +373,8 @@ The limits cannot be raised or bypassed through command-line options, baselines,
 per-file exceptions, or suppressions. Syntax, prohibited macro expansion, or source traversal
 errors fail the gate.
 
+`cargo xtask coupling-check` reports production-module dependencies, cyclic strongly connected components, cycle-forming edges, and the checked-in count in `xtask/coupling-ledger.tsv`. The ledger is burn-down-only in normal CI: every listed edge owns an open GitHub removal issue, new cycle-forming edges fail, and removed debt must be deleted. After removing a listed dependency, explicitly shrink it locally with `LLXPRT_ACCEPT_COUPLING_LEDGER=1 cargo xtask coupling-check`; this switch never adds entries.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball

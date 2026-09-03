@@ -26,6 +26,7 @@ pub fn run_release_gates(root: &Path) -> Result<(), String> {
     heading("checksum-locked registry source closure");
     run(root, "python3", &["scripts/verify-registry-vendor.py"])?;
     run_format(root)?;
+    crate::coupling::run(root)?;
     run_xtask_checks(root)?;
     run_release_fixtures(root)?;
     run_vendor_policy_fixtures(root)?;

@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use xtask::release::{run_release_fixtures, run_release_gates, run_source_bundle};
-use xtask::{run_gate, Gate};
+use xtask::{coupling, run_gate, Gate};
 
 fn main() -> ExitCode {
     match real_main() {
@@ -22,6 +22,7 @@ fn real_main() -> Result<(), String> {
     match command.as_str() {
         "loc" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Loc)),
         "complexity" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Complexity)),
+        "coupling-check" => no_args(&remaining).and_then(|()| coupling::run(&root)),
         "quality" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::All)),
         "lint" => no_args(&remaining).and_then(|()| run_lint(&root)),
         "release-gates" => no_args(&remaining).and_then(|()| run_release_gates(&root)),
@@ -88,7 +89,7 @@ fn no_args(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
+    "usage: cargo xtask <lint|quality|loc|complexity|coupling-check|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
         .to_string()
 }
 
