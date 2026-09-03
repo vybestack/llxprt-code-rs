@@ -202,9 +202,11 @@ fn missing_finish_reason_fails() {
     assert!(err.contains("missing"), "{err}");
 }
 
-/// The accepted endpoint forms all reach a loopback chat-completions request. Each real
-/// request path is verified; an arbitrary prefix parses but is rejected by
-/// [`ModelConfig::from_profile`], so it never issues a request.
+/// The accepted endpoint forms, including nested provider prefixes such as z.ai's
+/// `/api/paas/v4` and FriendliGLM's `/serverless/v1`, all reach a loopback
+/// chat/completions request. Each derived request path is verified; a base whose path
+/// already repeats the API suffix is rejected by [`ModelConfig::from_profile`], so it
+/// never issues a request.
 #[test]
 fn endpoint_route_matrix_and_loopback_requests() {
     use llxprt_code_rs::model::ModelConfig;
@@ -212,7 +214,8 @@ fn endpoint_route_matrix_and_loopback_requests() {
     use llxprt_code_rs::profile::parse_profile_value;
     use serde_json::json;
 
-    // Accepted base forms derive the same full route.
+    // Accepted base forms derive the expected full route: a bare origin keeps the
+    // documented /v1 route, and a declared prefix keeps that prefix.
     for (base, expected) in [
         (
             "http://127.0.0.1:8080",
@@ -229,6 +232,14 @@ fn endpoint_route_matrix_and_loopback_requests() {
         (
             "http://127.0.0.1:8080/v1/",
             "http://127.0.0.1:8080/v1/chat/completions",
+        ),
+        (
+            "http://127.0.0.1:8080/api/paas/v4",
+            "http://127.0.0.1:8080/api/paas/v4/chat/completions",
+        ),
+        (
+            "http://127.0.0.1:8080/serverless/v1",
+            "http://127.0.0.1:8080/serverless/v1/chat/completions",
         ),
         (
             "http://127.0.0.1:8080/chat/completions",
@@ -252,6 +263,9 @@ fn endpoint_route_matrix_and_loopback_requests() {
         "/",
         "/v1",
         "/v1/",
+        "/api/paas/v4",
+        "/api/paas/v4/",
+        "/serverless/v1",
         "/chat/completions",
         "/v1/chat/completions",
     ] {
@@ -277,29 +291,31 @@ fn endpoint_route_matrix_and_loopback_requests() {
         );
     }
 
-    // An arbitrary path prefix is rejected before any request.
-    let p = parse_profile_value(
-        &json!({
-            "provider": "openai",
-            "model": "m",
-            "ephemeralSettings": {
-                "base-url": "http://127.0.0.1:8080/inference/v1",
-                "auth-key": "k"
-            }
-        }),
-        "t",
-    )
-    .expect("arbitrary route profile must parse before construction");
-    let err = ModelConfig::from_profile(&p, true, true).expect_err("arbitrary prefix must reject");
+    // A base whose path already repeats the API suffix, or that carries an empty
+    // path segment, is rejected before any request.
+    for bad in [
+        "http://127.0.0.1:8080/inference/v1/chat/completions",
+        "http://127.0.0.1:8080/chat/completions/v1",
+        "http://127.0.0.1:8080/api//paas/v4",
+    ] {
+        let p = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "m",
+                "ephemeralSettings": {"base-url": bad, "auth-key": "k"}
+            }),
+            "t",
+        )
+        .expect("the malformed route profile must parse before construction");
+        let err =
+            ModelConfig::from_profile(&p, true, true).expect_err("a repeated suffix must reject");
 
-    assert!(
-        matches!(err, ModelError::InvalidEndpoint(_)),
-        "unexpected: "
-    );
-    assert!(
-        !format!("{err:?}").contains("inference"),
-        "no unsanitized path echoed"
-    );
+        assert!(matches!(err, ModelError::InvalidEndpoint(_)), "{err}");
+        assert!(
+            !format!("{err}").contains("completions"),
+            "no unsanitized path echoed"
+        );
+    }
 }
 
 #[test]

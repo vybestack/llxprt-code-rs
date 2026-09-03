@@ -143,8 +143,10 @@ pub struct ToolCallRecord {
 
 /// The endpoint base URL after validation.
 ///
-/// The **full** URL is kept verbatim for the transport and strict validation. Its path must be
-/// empty or one of `/v1`, `/chat/completions`, or `/v1/chat/completions`. Every rendering for
+/// The **full** URL is kept verbatim for the transport and strict validation. Its path may
+/// be empty, `/`, `/v1`, `/chat/completions`, or any nested prefix of the final
+/// chat-completions route (for example `/api/paas/v4` or `/serverless/v1`); it carries no
+/// userinfo, query, or fragment. Every rendering for
 /// `Debug`/`Display`/errors goes through the redacted
 /// `scheme://host:port` form, which never carries userinfo, query, fragment, or the
 /// path.

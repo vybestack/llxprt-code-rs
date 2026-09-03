@@ -2102,7 +2102,7 @@
           "stage": "in-scope installed openai",
           "target": "target-resolved",
           "plaintextOptIn": true,
-          "firstFailure": "arbitrary route prefix rejects (endpoint class) before the named secure-store reference"
+          "firstFailure": "named secure-store reference rejects after the nested /serverless/v1 base resolves as an endpoint"
         }
       },
       {
