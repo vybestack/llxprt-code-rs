@@ -274,3 +274,37 @@ fn hostile_usage_session_still_emits_a_schema_valid_envelope() {
         validator.iter_errors(&envelope).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn omitted_session_with_end_of_options_keeps_generated_identity_in_usage_envelope() {
+    let root = tempfile::tempdir().unwrap();
+    let output = invoke(root.path(), &["--"]);
+    assert_error(&output, 2);
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session_id = envelope["session_id"].as_str().unwrap();
+    assert!(llxprt_code_rs::session::SessionId::parse(session_id).is_ok());
+    assert!(session_id.starts_with("session-"));
+    assert!(session_id[8..]
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+}
+
+#[test]
+fn session_shaped_text_after_end_of_options_does_not_select_envelope_session() {
+    for trailing in [
+        vec!["--", "--session", "named"],
+        vec!["--", "--session=named"],
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let output = invoke(root.path(), &trailing);
+        assert_error(&output, 2);
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session_id = envelope["session_id"].as_str().unwrap();
+        assert_ne!(session_id, "named");
+        assert!(llxprt_code_rs::session::SessionId::parse(session_id).is_ok());
+        assert!(session_id.starts_with("session-"));
+        assert!(session_id[8..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    }
+}

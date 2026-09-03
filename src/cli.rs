@@ -293,10 +293,12 @@ fn session_hint_from(args: impl IntoIterator<Item = std::ffi::OsString>) -> Stri
 }
 
 fn has_session_argument(args: &[std::ffi::OsString]) -> bool {
-    args.iter().any(|argument| {
-        let argument = argument.to_string_lossy();
-        argument == "--session" || argument.starts_with("--session=")
-    })
+    args.iter()
+        .take_while(|argument| *argument != "--")
+        .any(|argument| {
+            let argument = argument.to_string_lossy();
+            argument == "--session" || argument.starts_with("--session=")
+        })
 }
 
 /// Try-parse the CLI args, turning usage errors into a JSON error object. `--help` and
@@ -305,8 +307,10 @@ pub fn parse_args_fallback(session_hint: &str) -> Args {
     use clap::Parser;
     let mut argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if !has_session_argument(&argv[1..]) {
-        argv.push("--session".into());
-        argv.push(session_hint.into());
+        argv.splice(
+            1..1,
+            [std::ffi::OsString::from("--session"), session_hint.into()],
+        );
     }
     match Args::try_parse_from(argv) {
         Ok(a) => a,
@@ -488,6 +492,20 @@ mod tests {
 
         let args = Args::try_parse_from(["llxprt-code-rs", "--session", "default"]).unwrap();
         assert_eq!(args.session, "default");
+    }
+
+    #[test]
+    fn session_arguments_after_end_of_options_are_not_options() {
+        for arguments in [
+            vec![
+                OsString::from("--"),
+                OsString::from("--session"),
+                OsString::from("named"),
+            ],
+            vec![OsString::from("--"), OsString::from("--session=named")],
+        ] {
+            assert!(!has_session_argument(&arguments));
+        }
     }
 
     #[test]
