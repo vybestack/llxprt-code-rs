@@ -200,7 +200,7 @@ fn aggregate(reports: Vec<Value>, opts: &Options, revision: &str) -> Value {
         "runner": opts.runner.name(),
         "runner_revision": revision,
         "expected_status_mode": true,
-        "cache": report::cache_block(),
+        "cache": report::aggregate_cache(&reports),
         "summary": summary,
         "scenarios": reports,
     })
@@ -213,6 +213,7 @@ fn run_one(path: &Path, scen: &Scenario, opts: &Options, revision: &str) -> Resu
         RunnerKind::Typescript => drive_typescript(scen, opts)?,
     };
     let _ = path;
+    let cache = report::cache_block_from_session(evidence.session_dir.as_deref());
     Ok(json!({
         "id": scen.id,
         "schema_version": report::REPORT_SCHEMA_VERSION,
@@ -246,7 +247,7 @@ fn run_one(path: &Path, scen: &Scenario, opts: &Options, revision: &str) -> Resu
             "terminal_outcome": evidence.terminal_outcome,
             "isolation_ok": isolation_ok,
         },
-        "cache": report::cache_block(),
+        "cache": cache,
     }))
 }
 

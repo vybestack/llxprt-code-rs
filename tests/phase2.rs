@@ -788,6 +788,30 @@ fn later_round_context_overflow_stops_before_next_call() {
         context_artifact(&st, "vault").len() >= payload_len,
         "the vault holds the full payload bytes"
     );
+    let first = st
+        .context_read_page(0..64, 64)
+        .expect("bounded context read-back");
+    let replay = st
+        .context_read_page(0..64, 64)
+        .expect("deterministic context read-back");
+    assert_eq!(first.bytes, replay.bytes);
+    assert!(first.remaining.is_none());
+    assert!(
+        !first.bytes.is_empty(),
+        "bounded read-back returns stored evidence"
+    );
+    let raw_present = retained.contains(&"y".repeat(256));
+    assert!(
+        !raw_present,
+        "raw bulk evidence never reaches the transcript"
+    );
+    let journal = context_artifact(&st, "rewrite-journal.log");
+    assert!(!journal.is_empty(), "policy rewrite accounting is durable");
+    assert!(!context_artifact(&st, "events.log").is_empty());
+    assert!(!context_artifact(&st, "checkpoints").is_empty());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&context_artifact(&st, "manifest.json")).unwrap();
+    assert_eq!(manifest["terminal_outcome"], "wrap_up");
 }
 
 /// Two rounds each under the per-turn assistant cap are still bounded together: the total

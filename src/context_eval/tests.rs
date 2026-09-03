@@ -334,6 +334,49 @@ fn malformed_reports_are_detected() {
 }
 
 #[test]
+fn terminal_outcomes_are_allowed_alternatives() {
+    let text = good_manifest().replace(
+        "required_final_marker = \"CTXEVAL-FINAL-7f3a9c\"",
+        "required_outcomes = [\"disarm\", \"quiesce_unwritable\", \"wrap_up\"]",
+    );
+    let scenario = manifest::parse_str(&text, &fixtures()).unwrap();
+    let evidence = Evidence {
+        turns_total: 1,
+        turns_ok: 1,
+        terminal_outcome: Some("wrap_up".to_string()),
+        ..Evidence::default()
+    };
+    assert!(grader::grade(&scenario, &evidence).passed);
+}
+
+#[test]
+fn cache_acceptance_report_reads_durable_conditional_telemetry() {
+    let dir = std::env::temp_dir().join(format!("ctxeval-cache-{}", crate::harness::uniq()));
+    fs::create_dir_all(dir.join("context")).unwrap();
+    fs::write(
+        dir.join("context/rewrite-journal.log"),
+        concat!(
+            "{\"invalidation_cost\":null,\"tokens_reclaimed\":100}\n",
+            "{\"report\":{\"armed_hit_rate\":0.5,\"armed_rewrites\":1,",
+            "\"disarmed_hit_rate\":null,\"disarmed_rewrites\":0,\"hit_rate\":0.5,",
+            "\"invalidation_cost_per_event\":null,\"known_invalidation_cost_events\":0,",
+            "\"threshold_denials\":0,\"threshold_passes\":1,",
+            "\"economic_gate_suspensions\":1,",
+            "\"unknown_invalidation_cost_events\":1}}\n"
+        ),
+    )
+    .unwrap();
+    let cache = report::cache_block_from_session(Some(&dir));
+    assert_eq!(cache["class"], "measured");
+    assert_eq!(cache["rewrite_journal_tokens_reclaimed"], 100);
+    assert!(cache["rewrite_journal_tokens_invalidated"].is_null());
+    assert!(cache["prefix_invalidation_cost_per_rewrite"].is_null());
+    assert_eq!(cache["conditional"]["armed_hit_rate"], 0.5);
+    assert_eq!(cache["suspended_while_armed"], true);
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn false_success_from_a_model_claim_is_caught() {
     let scen = manifest::parse_str(&good_manifest(), &fixtures()).unwrap();
     // A lying turn: the summary claims the marker, the provider never issued it.
