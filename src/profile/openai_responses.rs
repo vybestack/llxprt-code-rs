@@ -1,4 +1,5 @@
-use super::{numeric_setting, parse_ephemeral, parse_model_params, EphemeralSettings, ModelParams};
+use super::chat::{numeric_setting, parse_ephemeral, parse_model_params};
+use super::{EphemeralSettings, ModelParams};
 use crate::model_api::settings::{OpenAiResponsesSettingsDraft, PromptCaching};
 use serdes_ai::models::openai::{ReasoningEffort, ReasoningSummary, TextVerbosity};
 
