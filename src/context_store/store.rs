@@ -1,6 +1,7 @@
 //! The store facade: modes, retrieval index, checkpoints, and the quiesce contract.
 
-use crate::context_store::spine::{Spine, SpineError};
+use crate::context_ingress::ingress::SpinePlacement;
+use crate::context_store::spine::{Spine, SpineError, SpineFrame, SpineLoadError};
 use crate::context_store::vault::{Vault, VaultError, VaultKey};
 use std::ops::Range;
 
@@ -100,16 +101,23 @@ impl ContextStore {
     }
 
     /// Appends sanitized bytes (the one exempt write) and indexes the handle.
+    ///
+    /// `None` derives the canonical content-stable handle
+    /// (`sanitized-<frame digest>`), which survives a reload unchanged.
     pub fn sanitized_append(
         &mut self,
-        handle: &str,
+        handle: Option<&str>,
         bytes: &[u8],
     ) -> Result<Range<u64>, StoreError> {
         self.begin_state_advancing_turn()
             .map_err(StoreError::Blocked)?;
-        let range = self.spine.append(handle, bytes);
+        let start = self.spine.len();
+        let owned = handle
+            .map(str::to_string)
+            .unwrap_or_else(|| SpineFrame::canonical_handle(start, bytes));
+        let range = self.spine.append(&owned, bytes);
         self.index.push(IndexEntry {
-            handle: handle.to_string(),
+            handle: owned,
             ranges: vec![range.clone()],
             labels: Vec::new(),
         });
@@ -197,17 +205,14 @@ impl ContextStore {
         &self,
         checkpoint: Checkpoint,
     ) -> Vec<crate::context_store::spine::SpineRecord> {
-        // Records replay under the canonical positional names a fresh load
-        // reconstructs, so a replayed tail is comparable across processes.
+        // The handle must be the canonical content-stable one the sink
+        // recorded, so a replayed tail or a reloaded spine resolves the same
+        // evidence under the same name (issue #120).
         self.spine
             .records()
             .iter()
-            .enumerate()
             .skip(checkpoint.applied as usize)
-            .map(|(index, record)| crate::context_store::spine::SpineRecord {
-                handle: format!("sanitized-{index}"),
-                ..record.clone()
-            })
+            .cloned()
             .collect()
     }
 
@@ -216,11 +221,22 @@ impl ContextStore {
         self.spine.encode()
     }
 
-    /// Replaces the spine from encoded bytes, dropping any corrupt tail.
+    /// Replaces the spine from encoded bytes, rebuilding the index.
+    ///
+    /// Returns the corrupt-tail count of the loaded spine.
     pub fn load_spine(&mut self, encoded: &[u8]) -> usize {
         self.spine = Spine::load(encoded);
         self.rebuild_index();
         self.spine.recovered_tail_records()
+    }
+
+    /// Typed replacement of the spine from encoded bytes: a corrupt frame is
+    /// an integrity failure, never a silent truncation (issue #102).
+    pub fn load_spine_typed(&mut self, encoded: &[u8]) -> Result<(), SpineLoadError> {
+        let spine = Spine::load_typed(encoded)?;
+        self.spine = spine;
+        self.rebuild_index();
+        Ok(())
     }
 
     /// Corrupt-tail count of the loaded spine.
@@ -231,6 +247,17 @@ impl ContextStore {
     /// Deterministic serialized vault state for durable artifacts.
     pub fn vault_snapshot(&self) -> crate::context_store::vault::VaultSnapshot {
         self.vault.snapshot()
+    }
+
+    /// Restores a vault from its durable snapshot: live slots re-open under
+    /// their recorded ciphertext and the slot counter advances past every
+    /// recorded handle, so restored handles read back and new seals never
+    /// repeat a handle (issue #120).
+    pub fn restore_vault(
+        &mut self,
+        snapshot: crate::context_store::vault::VaultSnapshot,
+    ) -> Result<(), StoreError> {
+        self.vault.restore(snapshot).map_err(StoreError::Vault)
     }
 }
 
@@ -244,12 +271,11 @@ fn store_refusal(error: &StoreError) -> String {
 }
 
 impl crate::context_ingress::ingress::IngressSink for ContextStore {
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<Range<u64>, String> {
-        let handle = format!(
-            "ingress-{:016x}",
-            crate::context_kernel::canonical::digest(bytes)
-        );
-        ContextStore::sanitized_append(self, &handle, bytes).map_err(|error| store_refusal(&error))
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+        let handle = SpineFrame::canonical_handle(self.spine.len(), bytes);
+        let range = ContextStore::sanitized_append(self, Some(&handle), bytes)
+            .map_err(|error| store_refusal(&error))?;
+        Ok(SpinePlacement { handle, range })
     }
 
     fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {

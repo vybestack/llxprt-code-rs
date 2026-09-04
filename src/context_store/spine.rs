@@ -15,10 +15,47 @@ pub struct SpineRecord {
     pub content_digest: u64,
 }
 
+/// One admitted sanitized record with its stored handle.
+///
+/// Handles are content-stable: `sanitized-<16 hex of frame digest>` where the
+/// frame digest covers the payload and the preceding byte length, so the same
+/// payload at the same spine position resolves to the same handle before and
+/// after a reload (issue #102).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpineFrame {
+    pub handle: String,
+    pub bytes: Vec<u8>,
+    pub content_digest: u64,
+}
+
+impl SpineFrame {
+    /// The canonical content-stable handle for the frame that would start at
+    /// byte offset `preceding_len`.
+    pub fn canonical_handle(preceding_len: u64, bytes: &[u8]) -> String {
+        let mut material = Vec::with_capacity(bytes.len() + 8);
+        material.extend_from_slice(&preceding_len.to_le_bytes());
+        material.extend_from_slice(bytes);
+        format!("sanitized-{:016x}", digest(&material))
+    }
+}
+
+/// Errors raised by typed framed loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpineLoadError {
+    /// A frame is truncated, has a bad length, or fails its digest.
+    CorruptFrame {
+        /// Zero-based index of the first bad frame.
+        index: usize,
+        /// How many frames validated before the failure.
+        good_records: usize,
+    },
+}
+
 /// Errors raised by the spine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpineError {
     RangeOutside { start: u64, end: u64, len: u64 },
+    CorruptTail(SpineLoadError),
 }
 
 /// In-memory append-only spine with framing and corrupt-tail recovery.
@@ -125,26 +162,53 @@ impl Spine {
         out
     }
 
+    /// Loads framed records, failing closed with the index of the first
+    /// corrupt frame instead of silently truncating the spine (issue #102).
+    pub fn load_typed(encoded: &[u8]) -> Result<Self, SpineLoadError> {
+        let mut spine = Spine::new();
+        let mut cursor = 0usize;
+        let mut index = 0usize;
+        while cursor < encoded.len() {
+            let Some(record) = frame_at(encoded, cursor) else {
+                return Err(SpineLoadError::CorruptFrame {
+                    index,
+                    good_records: spine.records.len(),
+                });
+            };
+            let (bytes, content_digest, next) = record;
+            if digest(bytes) != content_digest {
+                return Err(SpineLoadError::CorruptFrame {
+                    index,
+                    good_records: spine.records.len(),
+                });
+            }
+            let handle = SpineFrame::canonical_handle(spine.len(), bytes);
+            spine.append(&handle, bytes);
+            cursor = next;
+            index += 1;
+        }
+        Ok(spine)
+    }
+
     /// Loads framed records, dropping a corrupt tail instead of failing the whole spine.
+    ///
+    /// In-process salvage path; the durable loader is [`Spine::load_typed`].
     pub fn load(encoded: &[u8]) -> Self {
         let mut spine = Spine::new();
         let mut cursor = 0usize;
-        let mut recovered = 0usize;
         while cursor < encoded.len() {
             let Some(record) = frame_at(encoded, cursor) else {
-                recovered += 1;
                 break;
             };
             let (bytes, content_digest, next) = record;
             if digest(bytes) != content_digest {
-                recovered += 1;
                 break;
             }
-            let handle = format!("sanitized-{}", spine.records.len());
+            let handle = SpineFrame::canonical_handle(spine.len(), bytes);
             spine.append(&handle, bytes);
             cursor = next;
         }
-        spine.recovered_tails = recovered;
+        spine.recovered_tails = usize::from(cursor != encoded.len());
         spine
     }
 }

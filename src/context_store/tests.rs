@@ -95,28 +95,28 @@ fn vault_seals_and_erases_with_tombstones() {
 fn store_modes_block_state_advancing_turns() {
     let mut store = ContextStore::open(&key());
     assert_eq!(store.mode(), StoreMode::Normal);
-    store.sanitized_append("h0", b"bytes").unwrap();
+    store.sanitized_append(Some("h0"), b"bytes").unwrap();
     for mode in [StoreMode::ReadOnly, StoreMode::Unavailable] {
         store.set_mode(mode);
         assert_eq!(
             store.begin_state_advancing_turn().unwrap_err(),
             StoreBlocked::Mode { mode: mode.name() }
         );
-        assert!(store.sanitized_append("h1", b"more").is_err());
+        assert!(store.sanitized_append(Some("h1"), b"more").is_err());
         assert!(store.vault_put(b"raw", "why").is_err());
         // Reads still work: only state advancement and side effects are blocked.
         assert_eq!(store.read_page(0..5, 16).unwrap().bytes, b"bytes");
     }
     store.set_mode(StoreMode::Normal);
-    store.sanitized_append("h2", b"again").unwrap();
+    store.sanitized_append(Some("h2"), b"again").unwrap();
 }
 
 #[test]
 fn store_index_rebuild_and_range_selector() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append("h0", b"aaaa").unwrap();
-    store.sanitized_append("h1", b"bbbb").unwrap();
-    store.sanitized_append("h2", b"cccc").unwrap();
+    store.sanitized_append(Some("h0"), b"aaaa").unwrap();
+    store.sanitized_append(Some("h1"), b"bbbb").unwrap();
+    store.sanitized_append(Some("h2"), b"cccc").unwrap();
     assert_eq!(store.rebuild_index(), 3);
     let hits = store.select(4..8);
     assert_eq!(hits.len(), 1);
@@ -127,21 +127,21 @@ fn store_index_rebuild_and_range_selector() {
 #[test]
 fn store_checkpoint_tail_replay_is_exact() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append("h0", b"one").unwrap();
+    store.sanitized_append(Some("h0"), b"one").unwrap();
     let checkpoint = store.checkpoint();
-    store.sanitized_append("h1", b"two").unwrap();
-    store.sanitized_append("h2", b"three").unwrap();
+    store.sanitized_append(Some("h1"), b"two").unwrap();
+    store.sanitized_append(Some("h2"), b"three").unwrap();
     let tail = store.replay_tail(checkpoint);
     let handles: Vec<&str> = tail.iter().map(|record| record.handle.as_str()).collect();
-    assert_eq!(handles, ["sanitized-1", "sanitized-2"]);
+    assert_eq!(handles, ["h1", "h2"]);
     assert_eq!(store.latest_checkpoint(), Some(checkpoint));
 }
 
 #[test]
 fn store_loads_encoded_spine_and_rebuilds_the_index() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append("h0", b"one").unwrap();
-    store.sanitized_append("h1", b"two").unwrap();
+    store.sanitized_append(Some("h0"), b"one").unwrap();
+    store.sanitized_append(Some("h1"), b"two").unwrap();
     let encoded = store.spine_bytes();
     let mut fresh = ContextStore::open(&key());
     assert_eq!(fresh.load_spine(&encoded), 0);
