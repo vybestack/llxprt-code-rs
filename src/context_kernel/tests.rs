@@ -1759,3 +1759,126 @@ fn publication_crash_between_write_and_swap_keeps_the_old_version_active() {
     assert!(descriptor.verify_build(&built));
     assert!(reframed.published() || descriptor.published);
 }
+
+/// GREEN: the whole migration flow through the store API: the private build
+/// copies the plan's ranges out of the live v2 store, the build lands in the
+/// inactive slot, the selection event is recorded in the log, and the swap
+/// makes v3 active — with each identity verified in its own hash scope.
+#[test]
+fn migration_publication_flow_lands_swaps_and_verifies_in_its_scopes() {
+    use crate::context_store::store::ContextStore;
+    use crate::context_store::vault::VaultKey;
+
+    // The v2 side: a live store whose spine the build copies.
+    let mut raw = [0u8; 32];
+    for (index, byte) in raw.iter_mut().enumerate() {
+        *byte = index as u8;
+    }
+    let key = VaultKey::from(raw);
+    let mut v2_store = ContextStore::open(&key);
+    v2_store
+        .sanitized_append("v2-record-a", &[1_u8; 16])
+        .unwrap();
+    v2_store
+        .sanitized_append("v2-record-b", &[2_u8; 16])
+        .unwrap();
+    let v2_bytes = v2_store.spine_bytes();
+
+    // The log the migration is recorded in.
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("before", 1), &mut sequencer, &mut log);
+    assert_eq!(decide(&log).store_version(), V2, "nothing selected yet");
+
+    // The private build: the plan names the v2 ranges, the build copies them.
+    let plan = MigrationPlan::from(
+        V3,
+        vec![
+            StoreRange {
+                offset: 0,
+                length: 16,
+            },
+            StoreRange {
+                offset: 16,
+                length: 16,
+            },
+        ],
+        log.head_checksum(),
+    );
+    assert_eq!(plan.units(), 32);
+    let mut build = PrivateBuild::start(plan);
+    assert!(
+        Publication::of(&build).is_none(),
+        "an incomplete build never publishes"
+    );
+
+    // Copy the plan's bytes into the private build.
+    let mut copied: Vec<u8> = Vec::new();
+    for range in &build.plan.ranges {
+        copied.extend_from_slice(&v2_bytes[range.offset as usize..range.end() as usize]);
+    }
+    build.complete_with(&copied);
+    let publication = Publication::of(&build).unwrap();
+    assert_eq!(publication.store_version, V3);
+    assert!(
+        publication.verify_build(&copied),
+        "the build checksum is scoped"
+    );
+    assert!(!publication.verify_build(&v2_bytes), "the scopes never mix");
+
+    // Land the build in the inactive slot; the readers still resolve v2.
+    let mut slots = SlotPair::genesis(V2, v2_bytes.len() as u64, log.head_checksum());
+    slots
+        .land(Generation::Built {
+            store_version: V3,
+            bytes: copied.len() as u64,
+            checksum: publication.built_checksum,
+        })
+        .unwrap();
+    assert_eq!(slots.active().store_version(), V2, "landing is invisible");
+
+    // Record the selection, then swap.
+    append(
+        op(OperationClass::MigrationSelect, V3, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    assert_eq!(
+        decide(&log).store_version(),
+        V3,
+        "the recorded selection switches the crash-matrix decision"
+    );
+    let descriptor = MigrationDescriptor::seal(V3, publication.built_checksum, log.head_checksum());
+    assert_eq!(
+        slots
+            .swap(descriptor.selection_chain)
+            .unwrap()
+            .store_version(),
+        V3,
+        "the swap is the visibility switch"
+    );
+    assert!(descriptor.verify_build(&copied));
+    assert!(descriptor.verify_chain(&log));
+
+    // And the log still replays to identical state, framing version intact.
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(state.store_version, V2);
+    assert_eq!(state.selected_store_version, Some(V3));
+}
+
+/// A migration publication written to the durable directory, recovered from
+/// disk after a crash at each interval, must resolve the same generation as the
+/// live process did. Requires the durable directory shape from unit A.
+#[test]
+#[ignore = "requires unit A durable directory"]
+fn migration_publication_is_durable_across_a_crash() {
+    // The publication lands in the inactive slot and the swap is atomic, so a
+    // crash between the write and the swap must recover with v2 active and the
+    // inactive build either complete or absent — never a partial migration. The
+    // durable directory that makes this observable on disk is unit A's substrate.
+}

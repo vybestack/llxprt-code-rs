@@ -5,7 +5,7 @@
 //! migrated store, because selection is an event in the log and v3 is only selected
 //! once the private build is complete.
 
-use crate::context_kernel::canonical::{digest, Digest, HashScope, Sink};
+use crate::context_kernel::canonical::{Digest, HashScope, Sink};
 use crate::context_kernel::events::{EventKind, EventLog, OperationClass};
 use crate::context_kernel::ir::StoreRange;
 
@@ -161,9 +161,11 @@ impl PrivateBuild {
         }
     }
 
-    /// Marks the build complete with the checksum of the built bytes.
+    /// Marks the build complete with the checksum of the built bytes, computed
+    /// inside the store-build scope so it is never equated with an event-chain
+    /// checksum or a state hash.
     pub fn complete_with(&mut self, bytes: &[u8]) {
-        self.built_checksum = Some(digest(bytes));
+        self.built_checksum = Some(HashScope::StoreBuild.digest(bytes));
         self.complete = true;
     }
 
@@ -183,7 +185,8 @@ impl PrivateBuild {
 pub struct Publication {
     /// Version the publication switched readers to.
     pub store_version: u64,
-    /// Checksum of the private build the publication adopted.
+    /// Checksum of the private build the publication adopted, inside the
+    /// store-build hash scope.
     pub built_checksum: Digest,
     /// Whether the publication happened.
     pub published: bool,
@@ -200,10 +203,18 @@ impl Publication {
         })
     }
 
-    /// Encodes the publication into `sink`.
+    /// Whether `bytes` is the build the publication adopted, verified inside the
+    /// store-build hash scope.
+    pub fn verify_build(&self, bytes: &[u8]) -> bool {
+        HashScope::StoreBuild.digest(bytes) == self.built_checksum
+    }
+
+    /// Encodes the publication into `sink`, with a byte-order mark between the
+    /// header and the scoped value.
     pub fn encode(&self, sink: &mut Sink) {
         sink.tag("publication");
         sink.int(self.store_version);
+        sink.byte_order_mark();
         sink.int(self.built_checksum);
         sink.flag(self.published);
     }
