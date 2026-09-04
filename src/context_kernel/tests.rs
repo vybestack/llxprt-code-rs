@@ -1039,6 +1039,17 @@ fn resumed_sequencer_continues_the_recorded_chain() {
         verified.append(clone).unwrap();
     }
     assert_eq!(verified.head_checksum(), log.head_checksum());
+    // The chain verifies event by event from genesis through the resume point.
+    let mut previous = GENESIS_CHECKSUM;
+    for event in log.events() {
+        assert!(
+            event.verify(previous),
+            "sequence {} commits to its recorded predecessor",
+            event.sequence
+        );
+        previous = event.checksum;
+    }
+    assert_eq!(previous, log.head_checksum());
     assert_eq!(
         Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap().state_hash,
         Reducer::new(IDLENESS_WINDOW)
@@ -1881,4 +1892,59 @@ fn migration_publication_is_durable_across_a_crash() {
     // crash between the write and the swap must recover with v2 active and the
     // inactive build either complete or absent — never a partial migration. The
     // durable directory that makes this observable on disk is unit A's substrate.
+}
+
+/// GREEN: every event records the version it was written under, and the reducer
+/// binds each event to the framing version, so a log that crosses a version
+/// boundary is refused rather than replayed against the wrong one.
+#[test]
+fn every_event_binds_the_version_it_was_written_under() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("a", 1), &mut sequencer, &mut log);
+    append(
+        op(OperationClass::MigrationSelect, V3, 0),
+        &mut sequencer,
+        &mut log,
+    );
+
+    // Every recorded event carries the version it was written under.
+    for event in log.events() {
+        assert_eq!(event.store_version, V2, "each event records its version");
+    }
+
+    // An event written under another version is refused by the log.
+    let foreign = sequencer.append(user("v3 bytes", 1), V3);
+    assert_eq!(
+        log.append(foreign).unwrap_err(),
+        crate::context_kernel::events::LogError::StoreVersion {
+            sequence: 4,
+            log: V2,
+            event: V3
+        },
+        "a v3-framed event never lands in a v2 log"
+    );
+
+    // And the reducer refuses to fold a version-crossing state.
+    let mut state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(state.store_version, V2);
+    let mut v3_log = EventLog::new(V3);
+    let mut v3_sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let v3_event = v3_sequencer.append(user("v3 bytes", 1), V3);
+    v3_log.append(v3_event).unwrap();
+    assert_eq!(
+        Reducer::new(IDLENESS_WINDOW)
+            .fold_from(&mut state, &v3_log)
+            .unwrap_err(),
+        ReducerError::StoreVersion {
+            state: V2,
+            event: V3
+        },
+        "replay binds each event to the version of the state it folds into"
+    );
 }
