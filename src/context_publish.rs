@@ -42,18 +42,24 @@ fn policy_events(state: &ContextState) -> String {
         .unwrap_or_default()
 }
 
-/// The durable `checkpoints` lines: one line per publication, each stamped over
-/// EXACTLY the content it names -- the first `applied` spine records, encoded.
+/// The durable `checkpoints` lines: recovered history plus this process's own
+/// current line, one per publication, each stamped over EXACTLY the content it
+/// names -- the first `applied` spine records, encoded.
 /// The prefix a reloaded store recovers from `sanitized` is the encoding of its
 /// first N records, so a checkpoint naming N records carries the length and
 /// digest of that same prefix: a reopened store can verify its recovered spine
 /// against the last line it claims to resume from (108).
 ///
-/// Exactly ONE line is written per publication, at the current position -- never
-/// one line per applied record -- so publication stays linear in the spine
-/// instead of quadratic (108). Recovered lines from a previous process come
-/// back first, byte for byte, so a restart preserves the checkpoints it claims
-/// to resume from instead of truncating them away (issue 102).
+/// Each publication REWRITES the artifact as: the lines recovered from the
+/// previous process, byte for byte and first, followed by exactly ONE line for
+/// this process's current position -- never one line per applied record -- so
+/// the artifact grows by one line per process generation and publication stays
+/// linear in the spine instead of quadratic (108). Within one process the
+/// current line is overwritten by each later publication rather than
+/// accumulated, so a process's own generations do not stack up; only a restart
+/// appends, because the previous generation's lines are recovered then. A
+/// restart still preserves the checkpoints it claims to resume from instead of
+/// truncating them away (issue 102).
 fn checkpoint_lines(state: &ContextState) -> String {
     let spine = state.store.spine_ref();
     let records = spine.records().len() as u64;

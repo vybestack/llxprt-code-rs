@@ -5,7 +5,7 @@ use crate::context_ingress::filter::{
     VocabularySnapshot,
 };
 use crate::context_ingress::ingress::{
-    IngressError, IngressRecord, IngressSink, IngressTxn, SpinePlacement,
+    IngressError, IngressRecord, IngressSink, IngressTxn, SinkRefusal, SpinePlacement,
 };
 use crate::context_ingress::launder::{LaunderVerdict, QuarantineSet};
 use crate::context_ingress::redactor::{
@@ -33,9 +33,9 @@ impl MemSink {
 }
 
 impl IngressSink for MemSink {
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal> {
         if self.mode != "normal" {
-            return Err(format!("store mode {} refuses append", self.mode));
+            return Err(SinkRefusal::Mode { mode: self.mode });
         }
         let start = self.spine.len() as u64;
         self.spine.extend_from_slice(bytes);
@@ -46,9 +46,9 @@ impl IngressSink for MemSink {
         })
     }
 
-    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
+    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, SinkRefusal> {
         if self.fail_vault {
-            return Err(format!("vault unavailable while {reason}"));
+            return Err(SinkRefusal::Vault);
         }
         let handle = format!("vault-{}", self.vault.len());
         self.vault.push((reason.to_string(), raw.to_vec()));
@@ -681,7 +681,7 @@ fn coverage_validation_precedes_the_first_durable_append() {
         }
     }
     impl IngressSink for OrderingSink {
-        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal> {
             self.calls.borrow_mut().push("append");
             let start = self.spine.len() as u64;
             self.spine.extend_from_slice(bytes);
@@ -690,7 +690,7 @@ fn coverage_validation_precedes_the_first_durable_append() {
                 range: start..(self.spine.len() as u64),
             })
         }
-        fn vault_put(&mut self, raw: &[u8], _reason: &str) -> Result<String, String> {
+        fn vault_put(&mut self, raw: &[u8], _reason: &str) -> Result<String, SinkRefusal> {
             self.calls.borrow_mut().push("vault");
             Ok(format!("vault-{}", raw.len()))
         }
@@ -784,7 +784,7 @@ fn store_state_is_rechecked_after_the_durable_append() {
         }
     }
     impl IngressSink for FlippingSink {
-        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal> {
             let start = self.spine.len() as u64;
             self.spine.extend_from_slice(bytes);
             // The append is durable from here; the store then stops admitting.
@@ -794,7 +794,7 @@ fn store_state_is_rechecked_after_the_durable_append() {
                 range: start..(self.spine.len() as u64),
             })
         }
-        fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
+        fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, SinkRefusal> {
             let handle = format!("vault-{}", self.vault.len());
             self.vault.push((reason.to_string(), raw.to_vec()));
             Ok(handle)

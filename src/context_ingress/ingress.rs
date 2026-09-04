@@ -28,7 +28,10 @@ pub enum IngressError {
     /// empty placement would otherwise be admitted with a zero-length spine
     /// range that preserves nothing.
     EmptyPreservedSpine,
-    /// Store is not in a writable mode: fail closed before any side effect.
+    /// The sink refused a durable write: `mode` names what refused it. For a
+    /// store-mode refusal it is the store's own mode name (`read-only`,
+    /// `unavailable`), carried through the sink typed rather than recovered
+    /// from a rendered message; a vault refusal names the vault.
     StoreBlocked {
         mode: &'static str,
     },
@@ -124,13 +127,28 @@ pub struct PendingDerivation {
     pub raw: Vec<u8>,
 }
 
+/// Why the sink refused a durable write.
+///
+/// Typed, not rendered: the sink reports the store's own mode name so the
+/// transaction fails fast on a value it can name, instead of recovering a mode
+/// by matching substrings inside an error string. `Mode` carries the store's own
+/// `&'static str` name, so `read-only` and `unavailable` are exactly the names
+/// the store reports; `Vault` is a vault refusal under a writable store mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SinkRefusal {
+    /// The store's mode refused the durable write.
+    Mode { mode: &'static str },
+    /// The vault refused the quarantined write.
+    Vault,
+}
+
 /// Callback port the transaction uses to reach the store.
 pub trait IngressSink {
     /// Appends sanitized bytes and returns where they landed: the
     /// sink-assigned content-stable handle plus the spine byte range.
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String>;
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal>;
     /// Writes quarantined plaintext into the encrypted vault; returns its handle.
-    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String>;
+    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, SinkRefusal>;
     /// Current store mode name, used to refuse writes before any side effect.
     fn mode(&self) -> &'static str;
 }
@@ -216,7 +234,7 @@ impl IngressTxn {
 
     /// Pure validation of one slot's sanitized bytes: the coverage check runs
     /// BEFORE the durable append, so a rejected payload never leaves bytes in
-    /// the spine (issue [r-- regression).
+    /// the spine (issue 107 regression).
     fn validate_slot(&self, raw: &[u8]) -> Result<(), IngressError> {
         match self.redactor.redact(raw) {
             RedactionOutcome::Sanitized { bytes, .. } => {
@@ -275,11 +293,11 @@ impl IngressTxn {
                 })
             }
             RedactionOutcome::Vaulted { reason, byte_len } => {
-                let handle =
-                    sink.vault_put(raw, reason.name())
-                        .map_err(|e| IngressError::StoreBlocked {
-                            mode: leak_mode(&e),
-                        })?;
+                let handle = sink.vault_put(raw, reason.name()).map_err(|refusal| {
+                    IngressError::StoreBlocked {
+                        mode: sink_refusal_mode(&refusal),
+                    }
+                })?;
                 let placeholder = vault_placeholder(reason.clone(), byte_len);
                 let (placement, segments) = Self::place_on_spine(sink, &placeholder)?;
                 let payload = IngressPayload {
@@ -324,11 +342,11 @@ impl IngressTxn {
         sink: &mut dyn IngressSink,
         bytes: &[u8],
     ) -> Result<(SpinePlacement, Vec<Segment>), IngressError> {
-        let placement = sink
-            .sanitized_append(bytes)
-            .map_err(|e| IngressError::StoreBlocked {
-                mode: leak_mode(&e),
-            })?;
+        let placement =
+            sink.sanitized_append(bytes)
+                .map_err(|refusal| IngressError::StoreBlocked {
+                    mode: sink_refusal_mode(&refusal),
+                })?;
         // The mode was checked before the append, but a store that flips to a
         // non-writable state during the append leaves the placement's validity
         // unproven, so the durable state is re-checked after the write.
@@ -381,13 +399,16 @@ fn is_separator(byte: u8) -> bool {
     )
 }
 
-fn leak_mode(message: &str) -> &'static str {
-    if message.contains("read-only") {
-        "read-only"
-    } else if message.contains("unavailable") {
-        "unavailable"
-    } else {
-        "blocked"
+/// The store mode name a sink refusal implies, typed from the refusal itself.
+///
+/// A mode refusal carries the store's own mode name straight through, so the
+/// transaction never guesses a mode back out of a rendered message. A vault
+/// refusal is not a mode change: the store reported itself writable, so the
+/// refusal names the sink's vault state and the caller fails fast on it.
+fn sink_refusal_mode(refusal: &SinkRefusal) -> &'static str {
+    match refusal {
+        SinkRefusal::Mode { mode } => mode,
+        SinkRefusal::Vault => "vault",
     }
 }
 

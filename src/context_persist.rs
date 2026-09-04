@@ -150,12 +150,18 @@ pub(crate) fn encoded_spine_prefix(
     out
 }
 
-/// Draws one 64-bit word from the std entropy pool (OS-seeded per-process keys).
+/// Draws one 64-bit word of OS entropy: the shared bounded `/dev/urandom` read
+/// in [`crate::context_store::vault::os_entropy_u64`], with no fallback of any
+/// kind.
+///
+/// The read is exactly 8 bytes and any failure - a missing device, a short
+/// read, an I/O error - is a hard failure (a panic, matching this module's
+/// fail-fast style) rather than a degraded source such as a hashed counter or a
+/// per-thread `RandomState`. The vault key is derived from this, so the
+/// entropy behind a 256-bit AES key must be the OS's own, not one 128-bit seed
+/// stretched by a hasher with no CSPRNG contract.
 fn entropy_u64() -> u64 {
-    use std::hash::{BuildHasher as _, Hasher as _};
-    std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish()
+    crate::context_store::vault::os_entropy_u64()
 }
 
 /// The per-session vault key, stored as a private artifact beside the session
@@ -293,10 +299,12 @@ fn executor_refusal(error: &crate::context_txn::executor::ExecutorError) -> Stri
 
 /// The content-stable digest key for the bytes a bulk result carries.
 ///
-/// Both the durable-append path (`ingest_bulk_committed`) and the in-memory fallback
-/// (`memory_digest`) derive their `content-` key from this one function, so the
-/// content-addressed handle and the sanitized-bytes record can never disagree about
-/// which bytes they name (issue 131).
+/// The basis is the SANITIZED bytes, on every path that calls this: the
+/// durable-append path (`ingest_bulk_committed`) digests the record's own
+/// `payload.bytes`, and the in-memory fallback (`memory_digest`) digests the
+/// same redacted output, so the content-addressed handle always names the
+/// bytes the record itself carries and never the raw, unredacted input (issue
+/// 131).
 fn content_digest_handle(bytes: &[u8]) -> String {
     format!("content-{:016x}", digest(bytes))
 }
@@ -356,7 +364,6 @@ fn ingest_bulk_committed(
                 format!("store mode {mode} refused the turn")
             }
         })?;
-    let handle = content_digest_handle(bytes);
     // The parent version is the applied spine record count, so the executor's
     // compare-and-commit is anchored to the store position it commits against.
     let parent_version = state.store.index().len() as u64;
@@ -385,6 +392,11 @@ fn ingest_bulk_committed(
         .spine
         .as_ref()
         .ok_or_else(|| "ingress committed no sanitized record".to_string())?;
+    // The content handle is digested over the SANITIZED bytes the record's
+    // own `payload.bytes` carries, never over the raw input: the in-memory
+    // fallback (`memory_digest`) derives it from the same basis, so the same
+    // result compacted on either path resolves to one name (issue 131).
+    let handle = content_digest_handle(&record.sanitized);
     let payload = IngressPayload {
         handle: spine.handle.clone(),
         ranges: vec![spine.range.clone()],

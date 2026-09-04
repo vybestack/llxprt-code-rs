@@ -270,25 +270,37 @@ impl ContextStore {
     }
 }
 
-/// Stable textual refusal used at the ingress seam.
-fn store_refusal(error: &StoreError) -> String {
-    match error {
-        StoreError::Spine(_) => "spine refused the sanitized append".to_string(),
-        StoreError::Vault(_) => "vault refused the quarantined write".to_string(),
-        StoreError::Blocked(_) => "store mode refused the write".to_string(),
-    }
-}
-
 impl crate::context_ingress::ingress::IngressSink for ContextStore {
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+    fn sanitized_append(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<SpinePlacement, crate::context_ingress::ingress::SinkRefusal> {
         let handle = SpineFrame::canonical_handle(self.spine.len(), bytes);
-        let range = ContextStore::sanitized_append(self, Some(&handle), bytes)
-            .map_err(|error| store_refusal(&error))?;
+        let range =
+            ContextStore::sanitized_append(self, Some(&handle), bytes).map_err(|error| {
+                match error {
+                    // The store's own mode name is carried through typed, so the
+                    // transaction never has to recover it from a rendered string.
+                    StoreError::Blocked(StoreBlocked::Mode { mode }) => {
+                        crate::context_ingress::ingress::SinkRefusal::Mode { mode }
+                    }
+                    _ => crate::context_ingress::ingress::SinkRefusal::Vault,
+                }
+            })?;
         Ok(SpinePlacement { handle, range })
     }
 
-    fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
-        ContextStore::vault_put(self, raw, reason).map_err(|error| store_refusal(&error))
+    fn vault_put(
+        &mut self,
+        raw: &[u8],
+        reason: &str,
+    ) -> Result<String, crate::context_ingress::ingress::SinkRefusal> {
+        ContextStore::vault_put(self, raw, reason).map_err(|error| match error {
+            StoreError::Blocked(StoreBlocked::Mode { mode }) => {
+                crate::context_ingress::ingress::SinkRefusal::Mode { mode }
+            }
+            _ => crate::context_ingress::ingress::SinkRefusal::Vault,
+        })
     }
 
     fn mode(&self) -> &'static str {

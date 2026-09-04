@@ -27,6 +27,28 @@ enum Slot {
     Tombstone,
 }
 
+/// Draws one 64-bit word of OS entropy: a single bounded read from
+/// `/dev/urandom`, with no fallback of any kind.
+///
+/// The read is exactly 8 bytes, and any failure - a missing device, a short
+/// read, an I/O error - is a hard failure (a panic, matching the fail-fast
+/// style of this plane) rather than a degraded source such as a hashed counter
+/// or a per-thread `RandomState` seed. The nonce prefix and the session's
+/// vault key are derived from this, so the entropy behind a 256-bit AES key
+/// must be the OS's own and not one 128-bit seed stretched by a hasher that
+/// carries no CSPRNG contract (issue 120).
+pub(crate) fn os_entropy_u64() -> u64 {
+    use std::io::Read as _;
+
+    const WORD: usize = 8;
+    let mut bytes = [0u8; WORD];
+    let mut file = std::fs::File::open("/dev/urandom")
+        .unwrap_or_else(|error| panic!("open /dev/urandom failed: {error}"));
+    file.read_exact(&mut bytes)
+        .unwrap_or_else(|error| panic!("read 8 bytes of OS entropy failed: {error}"));
+    u64::from_le_bytes(bytes)
+}
+
 /// Encrypted vault holding quarantined plaintext outside the sanitized spine.
 pub struct Vault {
     cipher: Aes256Gcm,
@@ -39,16 +61,14 @@ pub struct Vault {
 impl Vault {
     /// Opens the vault with key material supplied by the caller.
     ///
-    /// The nonce prefix is drawn from the std entropy pool (`RandomState`
-    /// seeds from OS entropy), so two processes that share key material never
-    /// reuse a nonce even after a restart (the slot counter restarts at zero,
-    /// the prefix does not). Deterministic tests open with
-    /// [`Vault::open_with_prefix`].
+    /// The nonce prefix is drawn straight from the OS entropy pool
+    /// (`/dev/urandom`, via [`os_entropy_u64`]), so two processes that share
+    /// key material never reuse a nonce even after a restart (the slot counter
+    /// restarts at zero, the prefix does not). Deterministic tests open with
+    /// [`Vault::open_with_prefix`], so the test plane keeps its injected
+    /// prefixes while the production path draws from the OS.
     pub fn open(key: &VaultKey) -> Self {
-        use std::hash::{BuildHasher as _, Hasher as _};
-        let prefix = std::collections::hash_map::RandomState::new()
-            .build_hasher()
-            .finish() as u32;
+        let prefix = os_entropy_u64() as u32;
         Self::open_with_prefix(key, prefix)
     }
 
@@ -193,12 +213,8 @@ impl Vault {
         self.next = snapshot.next;
         // Fresh per-process prefix: the recorded prefix described the previous
         // process, and resuming it under the same key would reuse a nonce.
-        self.nonce_prefix = {
-            use std::hash::{BuildHasher as _, Hasher as _};
-            std::collections::hash_map::RandomState::new()
-                .build_hasher()
-                .finish() as u32
-        };
+        // Drawn from the OS entropy pool, never from a hashed counter seed.
+        self.nonce_prefix = os_entropy_u64() as u32;
         Ok(())
     }
 }

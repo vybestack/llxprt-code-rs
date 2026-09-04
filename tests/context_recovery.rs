@@ -1240,11 +1240,15 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
 
     // The handle names the sanitized bytes the record itself carries: the
     // spine is readable, so the payload that produced the handle is the
-    // recorded one and the handle re-derives from it exactly.
+    // recorded one, and the re-derivation below compares them exactly.
     let sanitized = artifact(&store, "sanitized");
     assert!(
         sanitized.windows(base.len()).any(|w| w == base.as_bytes()),
         "the sanitized spine holds the payload the handle names"
+    );
+    assert!(
+        !String::from_utf8_lossy(&sanitized).contains(SECRET),
+        "the spine never holds the redacted secret"
     );
 
     // The handle format is exactly `content-<16 hex>` over the sanitized basis:
@@ -1259,10 +1263,61 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
         handle_raw.starts_with("content-") && handle_raw.len() == "content-".len() + 16,
         "the handle is the canonical 16-hex content form: {handle_raw}"
     );
+
+    // The re-derivation proof, on the payload the record actually carries:
+    // the `sanitized` artifact is re-read AFTER the secret-bearing payload was
+    // ingested, its framed records are decoded, and the frame holding that
+    // payload is located by the unique filler run it carries, so the handle can
+    // be recomputed from exactly the recorded bytes. The persisted handle must
+    // equal that re-derivation, and it must differ from a handle computed over
+    // the RAW input, which is the divergence F11 forbids.
+    let recorded = artifact(&store, "sanitized");
+    let filler: String = "y".repeat(1024);
+    let payload = frame_bodies(&recorded)
+        .into_iter()
+        .find(|body| body.windows(filler.len()).any(|w| w == filler.as_bytes()))
+        .expect("the sanitized spine carries the secret-bearing payload");
     assert!(
-        !String::from_utf8_lossy(&sanitized).contains(SECRET),
-        "the digest basis never includes the redacted secret"
+        payload.windows(base.len()).any(|w| w == base.as_bytes()),
+        "the located frame is the secret-bearing record itself"
     );
+    let rederived = content_handle(&payload);
+    assert_eq!(
+        handle_raw, rederived,
+        "the persisted handle re-derives from the recorded payload bytes exactly"
+    );
+    let raw_handle = content_handle(raw.as_bytes());
+    assert_ne!(
+        handle_raw, raw_handle,
+        "the handle is a digest of the sanitized bytes, never of the raw input"
+    );
+}
+
+/// The `content-<16 hex>` handle for `bytes`, the same form the compact seam derives.
+fn content_handle(bytes: &[u8]) -> String {
+    format!("content-{:016x}", fnv1a64(bytes))
+}
+
+/// The framed record bodies of a sanitized spine, in order, decoding the same
+/// `[u32 length][bytes][u64 digest]` framing `Spine::encode` writes.
+fn frame_bodies(spine: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while cursor + 4 <= spine.len() {
+        let len = u32::from_le_bytes([
+            spine[cursor],
+            spine[cursor + 1],
+            spine[cursor + 2],
+            spine[cursor + 3],
+        ]) as usize;
+        assert!(
+            cursor + 4 + len + 8 <= spine.len(),
+            "the framed records decode inside the spine"
+        );
+        out.push(spine[cursor + 4..cursor + 4 + len].to_vec());
+        cursor += 4 + len + 8;
+    }
+    out
 }
 
 /// F13: both arms of the recovery disjunction are reachable.
