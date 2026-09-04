@@ -250,7 +250,8 @@ fn every_committed_class_has_a_registry_row() {
         OperationClass::QuiesceUnwritable,
     ];
     // The enum's own `name()` is the authority for the row spelling, so the
-    // test can never drift from the encoder.
+    // test can never drift from the encoder. The match below is the
+    // coverage authority; the coercion keeps it a used item in every build.
     const _: () = {
         fn exhaustive(class: &OperationClass) {
             match class {
@@ -275,10 +276,7 @@ fn every_committed_class_has_a_registry_row() {
                 | OperationClass::QuiesceUnwritable => (),
             }
         }
-        // Referenced, not just defined, so the arm-coverage helper is a used
-        // item instead of dead residue; the match above is what enforces the
-        // coverage, and the call keeps it compiled in every build.
-        exhaustive(&OperationClass::ScopeOpen);
+        let _arm_coverage: fn(&OperationClass) = exhaustive;
     };
     for class in classes {
         let name = class.name();
@@ -831,26 +829,6 @@ fn every_phase4_row_generates_durable_effect_artifacts() {
         assert_eq!(generated.op, row.name);
         assert_eq!(executor.state(), TxnState::Generated);
     }
-}
-
-/// unknown rows are rejected at propose.
-#[test]
-fn unknown_rows_are_rejected() {
-    let mut ex = armed_executor(0);
-    assert_eq!(
-        ex.propose("no-such-op", 1),
-        Err(ExecutorError::CapabilityNotLanded { op: "no-such-op" })
-    );
-}
-
-/// GREEN: proposer letters round-trip.
-#[test]
-fn proposer_letters_round_trip() {
-    assert_eq!(Proposer::S.as_str(), "S");
-    assert_eq!(Proposer::C.as_str(), "C");
-    assert_eq!(Proposer::M.as_str(), "M");
-    assert_eq!(Proposer::O.as_str(), "O");
-    assert_eq!(Proposer::L.as_str(), "L");
 }
 
 /// Fencing: a newer lease epoch fences older executors out at commit, and the

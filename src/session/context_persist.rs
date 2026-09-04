@@ -480,10 +480,12 @@ fn ingest_bulk_committed(
     // The governed effect this commit releases: the executor is the sole
     // writer, so it appends and folds the `AdmitIngress` operation commit
     // itself, which is what keeps the legality gate running against the live
-    // region instead of genesis (F3).
+    // region instead of genesis (F3). The admission attributes to the session
+    // scope, which the executor opens before the first admission; the
+    // store-position parent still anchors the compare-and-commit below.
     let effect = crate::context_kernel::events::EventKind::OperationCommit {
         class: crate::context_kernel::events::OperationClass::AdmitIngress,
-        subject: parent_version,
+        subject: crate::context_txn::executor::SESSION_SCOPE,
         argument: effect_bytes,
     };
     sequence_admission(

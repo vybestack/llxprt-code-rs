@@ -21,6 +21,12 @@ use crate::context_kernel::reducer::{Reducer, TypedState, IDLENESS_WINDOW};
 use super::budget::{self, AccountingPort, Budget, Margins};
 use super::operation::{self, Proposer};
 
+/// The scope every session ingress admission attributes to. Unit B owns the
+/// executor log, so it also owns opening this scope the first time an
+/// admission arrives: the executor appends the governed `ScopeOpen` before
+/// the first `AdmitIngress` event instead of failing the fold at genesis.
+pub(crate) const SESSION_SCOPE: u64 = 1;
+
 /// Fenced epoch; monotonic, single writer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Epoch(pub u64);
@@ -616,8 +622,37 @@ impl Executor {
     /// the executor's own typed state, so the next commit is gated against the
     /// state this one produced (#105).
     fn append_effect(&mut self, kind: crate::context_kernel::events::EventKind) {
-        use crate::context_kernel::events::Sequencer;
+        use crate::context_kernel::events::{EventKind, OperationClass, Sequencer};
         let mut sequencer = Sequencer::continuing(&self.log, self.epoch.0, 1_000);
+        // A first ingress admission attributes to the session scope, which
+        // does not exist at genesis, so the executor - the sole writer of this
+        // log - opens it first. Lazy and idempotent: once the scope exists an
+        // admission appends only its own event, and a scope that exists but is
+        // closed is a fault to propagate, never a scope to reopen silently.
+        if let EventKind::OperationCommit {
+            class: OperationClass::AdmitIngress,
+            ..
+        } = kind
+        {
+            let scope = SESSION_SCOPE;
+            match self.typed.scope_registry.state(scope) {
+                Ok(state) if state.is_open() => {}
+                Ok(_) => panic!("the session scope is closed"),
+                Err(_) => {
+                    let scope_open = sequencer.append(
+                        EventKind::OperationCommit {
+                            class: OperationClass::ScopeOpen,
+                            subject: SESSION_SCOPE,
+                            argument: 0,
+                        },
+                        self.log.store_version(),
+                    );
+                    self.log
+                        .append(scope_open)
+                        .expect("the commit log continues");
+                }
+            }
+        }
         let event = sequencer.append(kind, self.log.store_version());
         self.log.append(event).expect("the commit log continues");
         Reducer::new(IDLENESS_WINDOW)
