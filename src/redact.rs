@@ -146,6 +146,17 @@ pub const MAX_KEY_BYTES: usize = 4096;
 /// secure-store reference, never a keyfile path, and is rejected during profile parsing.)
 pub const MAX_KEYFILE_PATH_BYTES: usize = 1024;
 
+/// The fixed cap (bytes) for a named provider key (`ephemeralSettings.auth-key-name`,
+/// which selects a credential env var and a secure-store account). A name at most 256
+/// bytes is accepted; a longer or malformed name is rejected with the fixed value-free
+/// refusal [`KEY_NAME_CAP_MESSAGE`].
+pub const MAX_KEY_NAME_BYTES: usize = 256;
+
+/// A fixed, path-free, value-free refusal for a named provider key that is empty or over
+/// [`MAX_KEY_NAME_BYTES`]. The name is a credential surface and its bytes never travel.
+pub const KEY_NAME_CAP_MESSAGE: &str =
+    "auth-key-name is an invalid or over-long named key reference";
+
 /// A fixed, path-free refusal for a keyfile path over [`MAX_KEYFILE_PATH_BYTES`]. The
 /// over-limit path is a credential surface and its bytes never travel.
 pub const KEY_PATH_CAP_MESSAGE: &str = "the auth keyfile path exceeds the documented byte cap";

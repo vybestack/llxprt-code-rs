@@ -421,13 +421,17 @@ impl ModelConfig {
         validate_base_url(&policy_url)?;
         check_http_policy(&policy_url, allow_insecure_http)?;
 
-        // Credential policy (class 3): the fixed value-free refusal for a named
-        // secure-store reference, after endpoint validation (class 2).
-        if profile.ephemeral.auth_key_name {
-            return Err(ModelError::UnsupportedSetting(
-                crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string(),
-            ));
-        }
+        // Credential policy (class 3): a named provider key resolves through the
+        // credential env selector then the secure store, after endpoint validation
+        // (class 2). The name is a credential surface; the fixed value-free refusal
+        // below is the only thing that travels when neither layer holds the key.
+        let named_key = profile
+            .ephemeral
+            .auth_key_name
+            .as_deref()
+            .map(crate::model_api::provider_keys::resolve_named_key)
+            .transpose()
+            .map_err(|error| ModelError::UnsupportedSetting(error.to_string()))?;
 
         // Structural dsflash selection (class 4): a marker without the
         // `chat_template_kwargs` discriminator names its lexicographically first
@@ -465,7 +469,11 @@ impl ModelConfig {
             ));
         }
 
-        let api_key = resolve_api_key(profile, from_file, config_root)?;
+        let api_key = if let Some(key) = named_key {
+            key
+        } else {
+            resolve_api_key(profile, from_file, config_root)?
+        };
 
         let timeout = profile
             .ephemeral
