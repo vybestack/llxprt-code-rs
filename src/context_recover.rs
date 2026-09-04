@@ -1,6 +1,6 @@
 //! Durable-context recovery and publication: the reload half of
 //! [`crate::context_persist`]. Pure moves from `context_persist.rs`; the
-//! recovery seams (`SessionStore` -> live [`ContextState`]) keep their call
+//! recovery seams (`SessionStore` -> live ContextState) keep their call
 //! sites in `session.rs`.
 
 use std::path::Path;
@@ -13,7 +13,7 @@ use crate::context_persist::{
 use crate::session::{open_regular_at, SessionStore};
 
 /// Reopens the durable `context/` artifacts of a previous process into a live
-/// [`ContextState`]: the sanitized spine is re-framed and integrity-checked as a
+/// ContextState: the sanitized spine is re-framed and integrity-checked as a
 /// whole (a corrupt frame is a typed error, never a silent truncation), the
 /// vault snapshot restores its slots so restored handles read back, and the
 /// manifest restores mode, quiesce state, and the preserved-span window.

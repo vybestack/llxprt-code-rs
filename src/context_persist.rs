@@ -151,7 +151,7 @@ pub(crate) fn encoded_spine_prefix(
 }
 
 /// Draws one 64-bit word of OS entropy: the shared bounded `/dev/urandom` read
-/// in [`crate::context_store::vault::os_entropy_u64`], with no fallback of any
+/// in `crate::context_store::vault::os_entropy_u64`, with no fallback of any
 /// kind.
 ///
 /// The read is exactly 8 bytes and any failure - a missing device, a short

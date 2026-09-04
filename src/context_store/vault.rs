@@ -66,7 +66,7 @@ impl Vault {
     /// Opens the vault with key material supplied by the caller.
     ///
     /// The nonce prefix is drawn straight from the OS entropy pool
-    /// (`/dev/urandom`, via [`os_entropy_u64`]), so two processes that share
+    /// (`/dev/urandom`, via os_entropy_u64), so two processes that share
     /// key material never reuse a nonce even after a restart (the slot counter
     /// restarts at zero, the prefix does not). Deterministic tests open with
     /// [`Vault::open_with_prefix`], so the test plane keeps its injected
