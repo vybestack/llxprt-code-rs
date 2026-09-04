@@ -131,7 +131,7 @@ fn reclaim(
         return Err(corrupt("branch reclaim has an illegal source state"));
     }
     branch.prompt = prompt.to_string();
-    branch.digest = crate::agent::prompt_digest(prompt);
+    branch.digest = crate::limits::prompt_digest(prompt);
     branch.owner = owner.to_string();
     branch.reserved_at = reserved_at;
     branch.lease_expiry = lease_expiry;

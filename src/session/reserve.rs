@@ -391,7 +391,7 @@ impl SessionStore {
             parent_turn: input.parent.turn,
             parent_attempt: input.parent.attempt,
             prompt: input.prompt.to_string(),
-            digest: crate::agent::prompt_digest(input.prompt),
+            digest: crate::limits::prompt_digest(input.prompt),
             lifecycle: Lifecycle::Pending,
             rounds: Vec::new(),
             summary: String::new(),

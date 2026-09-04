@@ -29,6 +29,10 @@ pub use finish::finish_check;
 // Compatibility alias retained while route construction remains owned by the adapter.
 pub use crate::adapter::chat_route;
 
+pub use crate::limits::{
+    prompt_digest, MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES,
+    MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS,
+};
 /// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
 /// the **complete** outgoing request on top of the message parts. The value stays
 /// published from the root module ([`crate::agent`]) for phase 1 consumers.
@@ -36,9 +40,7 @@ pub use request_budget::REQUEST_FIXED_OVERHEAD_BYTES;
 pub use request_budget::{
     context_exceeded_message, estimate_history_bytes, estimate_request_bytes, history_needs_check,
     history_within, materialization_budget, round_budget_exceeded, turn_args_bytes,
-    MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES, MAX_TURN_ARGS_BYTES,
-    MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS, PER_PART_OVERHEAD_BYTES,
-    PER_REQUEST_OVERHEAD_BYTES,
+    PER_PART_OVERHEAD_BYTES, PER_REQUEST_OVERHEAD_BYTES,
 };
 
 mod memory;
@@ -99,8 +101,7 @@ use helpers::{
 };
 mod config;
 pub use config::{
-    coding_system_prompt, prompt_digest, round_limit_message, validate_timeout,
-    TIMEOUT_LEASE_MARGIN_SECONDS,
+    coding_system_prompt, round_limit_message, validate_timeout, TIMEOUT_LEASE_MARGIN_SECONDS,
 };
 
 struct TurnUsage {
