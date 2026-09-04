@@ -55,14 +55,16 @@ pub enum SpineLoadError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpineError {
     RangeOutside { start: u64, end: u64, len: u64 },
-    CorruptTail(SpineLoadError),
 }
 
 /// In-memory append-only spine with framing and corrupt-tail recovery.
 pub struct Spine {
     bytes: Vec<u8>,
     records: Vec<SpineRecord>,
-    recovered_tails: usize,
+    /// How many tail FRAMES the last in-process salvage dropped. The salvage
+    /// stops at the first frame that fails validation, so this is a count of
+    /// frames (each dropped frame carries one record), not a boolean.
+    dropped_tail_frames: usize,
 }
 
 /// One bounded page of a range read.
@@ -78,7 +80,7 @@ impl Spine {
         Self {
             bytes: Vec::new(),
             records: Vec::new(),
-            recovered_tails: 0,
+            dropped_tail_frames: 0,
         }
     }
 
@@ -97,9 +99,12 @@ impl Spine {
         &self.records
     }
 
-    /// Corrupt tails dropped by the last load.
+    /// How many tail frames the last in-process salvage dropped. Honest
+    /// crash-salvage reporting: each dropped frame is one record's worth of
+    /// bytes recovered away, so the count is reported as the number of frames
+    /// dropped rather than collapsed into a mere yes/no.
     pub fn recovered_tail_records(&self) -> usize {
-        self.recovered_tails
+        self.dropped_tail_frames
     }
 
     /// The stored bytes of one record, exactly as `encode` frames them.
@@ -218,7 +223,27 @@ impl Spine {
             spine.append(&handle, bytes);
             cursor = next;
         }
-        spine.recovered_tails = usize::from(cursor != encoded.len());
+        // Count EVERY tail frame the salvage dropped, not merely whether the
+        // salvage stopped early: frames after the first invalid one are
+        // dropped with it even when they individually validate, because a
+        // spine cannot resume past a frame it could not verify. A trailing
+        // partial frame counts as one dropped frame too, so a truncated run
+        // is reported as the number of frames recovered away rather than
+        // collapsed into a yes/no (the accessor reports this count).
+        let mut dropped = 0usize;
+        while cursor < encoded.len() {
+            match frame_at(encoded, cursor) {
+                Some((_, _, next)) => {
+                    dropped += 1;
+                    cursor = next;
+                }
+                None => {
+                    dropped += 1;
+                    break;
+                }
+            }
+        }
+        spine.dropped_tail_frames = dropped;
         spine
     }
 }

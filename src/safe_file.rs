@@ -42,11 +42,18 @@ pub(crate) fn publish_artifact(
 ) -> Result<(), std::io::Error> {
     use std::io::Write as _;
 
-    let temp = format!(".{name}.tmp");
+    // The temp name is unique per publisher (process id), so two processes
+    // publishing the same artifact never clobber each other's temp file: each
+    // fsyncs and renames its own payload, and the rename itself stays the one
+    // atomic step per file (the loser's rename overwrites the winner's final
+    // name only after the loser's payload is fully written and synced).
+    let temp = format!(".{name}.{}.tmp", std::process::id());
+    // O_EXCL keeps the temp file exclusive to this publisher: a stale temp
+    // name left by an earlier crash cannot be truncated by a later publisher.
     let mut file = open(
         dir,
         &temp,
-        libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
         0o600,
     )?;
     file.write_all(bytes)?;
@@ -84,6 +91,14 @@ pub enum ArtifactError {
     OverBound { name: String, max: usize },
     /// The artifact name is not a valid C string.
     BadName { name: String },
+    /// The opened descriptor's own metadata could not be inspected, so the
+    /// artifact's type is unknown rather than known-bad: an fstat failure is a
+    /// failure to read state, never a verdict that the artifact is not a
+    /// regular file.
+    Unstatable {
+        name: String,
+        kind: std::io::ErrorKind,
+    },
 }
 
 impl std::fmt::Display for ArtifactError {
@@ -103,6 +118,9 @@ impl std::fmt::Display for ArtifactError {
                 write!(f, "artifact {name} exceeds the read bound {max}")
             }
             ArtifactError::BadName { name } => write!(f, "artifact name {name} is invalid"),
+            ArtifactError::Unstatable { name, kind } => {
+                write!(f, "inspect artifact {name} failed: {kind}")
+            }
         }
     }
 }
@@ -145,7 +163,18 @@ pub(crate) fn read_artifact(
     }
     // SAFETY: the descriptor is owned from here on and `File` closes it on drop.
     let file = unsafe { std::fs::File::from(std::os::fd::OwnedFd::from_raw_fd(fd)) };
-    if !file.metadata().map(|meta| meta.is_file()).unwrap_or(false) {
+    // An fstat I/O failure is surfaced as its own typed failure: silently
+    // folding it into `NotRegular` would let an unreadable-directory or
+    // EIO-condition be reported as "not a regular file", which is a different
+    // fact about a different object than the one that failed.
+    let is_file = file
+        .metadata()
+        .map(|meta| meta.is_file())
+        .map_err(|error| ArtifactError::Unstatable {
+            name: name.to_string(),
+            kind: error.kind(),
+        })?;
+    if !is_file {
         return Err(ArtifactError::NotRegular {
             name: name.to_string(),
         });
@@ -230,5 +259,79 @@ mod tests {
         std::fs::write(temp.path().join("target"), b"secret").unwrap();
         std::os::unix::fs::symlink("target", temp.path().join("link")).unwrap();
         assert!(read_artifact(&dir, "link", 1024).is_err());
+    }
+
+    /// The temp file name is unique per publisher, so two concurrent publishers
+    /// of one artifact cannot clobber each other's temp file: each writes,
+    /// fsyncs and renames its own payload (final-review finding).
+    #[test]
+    fn the_temp_file_name_is_unique_per_publisher() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = openat::Dir::open(temp.path()).unwrap();
+        let open = |dir: &openat::Dir, name: &str, flags: libc::c_int, mode: libc::mode_t| {
+            crate::session::open_regular_at(dir, name, flags, mode)
+        };
+        // Simulate two publishers of one artifact: each one creates its own
+        // temp file, so publishing twice in a row leaves one final artifact and
+        // no survivor of either temp name.
+        publish_artifact(&dir, "artifact", b"first", open).unwrap();
+        publish_artifact(&dir, "artifact", b"second", open).unwrap();
+        assert_eq!(
+            read_artifact(&dir, "artifact", 1024).unwrap(),
+            b"second",
+            "the later publisher's payload wins the rename"
+        );
+        let entries: Vec<String> = dir
+            .list_dir(".")
+            .unwrap()
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|entry| entry.file_name().to_string_lossy().to_string())
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["artifact".to_string()],
+            "no temp file survives a pair of publications: {entries:?}"
+        );
+        // The temp name embeds the process id, so a second publisher in the
+        // same process cannot collide with a first publisher's stale temp file.
+        let expected = format!(".artifact.{}.tmp", std::process::id());
+        let stale = temp.path().join(&expected);
+        std::fs::write(&stale, b"stale").unwrap();
+        let error = publish_artifact(&dir, "artifact", b"third", open).unwrap_err();
+        assert!(
+            error.kind() == std::io::ErrorKind::AlreadyExists,
+            "O_EXCL refuses a stale temp name instead of truncating it: {error}"
+        );
+        std::fs::remove_file(&stale).unwrap();
+        publish_artifact(&dir, "artifact", b"third", open).unwrap();
+        assert_eq!(read_artifact(&dir, "artifact", 1024).unwrap(), b"third");
+    }
+
+    /// An fstat I/O failure on an opened descriptor is surfaced as its own
+    /// typed failure, never silently folded into `NotRegular` (final-review
+    /// finding): the two are different facts about different objects.
+    #[test]
+    fn read_artifact_surfaces_an_fstat_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = openat::Dir::open(temp.path()).unwrap();
+        // A directory cannot be read through `read_artifact`, and the failure
+        // must be classified: it opens, the fstat reports a non-regular type.
+        let error = read_artifact(&dir, ".", 1024).unwrap_err();
+        assert!(
+            matches!(error, ArtifactError::NotRegular { .. }),
+            "a directory is reported as not a regular file: {error}"
+        );
+        // A symlinked name fails at open under O_NOFOLLOW and is typed as
+        // unopenable, so the type check is never reached for it.
+        std::os::unix::fs::symlink("regular", temp.path().join("link")).unwrap();
+        std::fs::write(temp.path().join("regular"), b"value").unwrap();
+        let error = read_artifact(&dir, "link", 1024).unwrap_err();
+        assert!(
+            matches!(error, ArtifactError::Unopenable { .. }),
+            "the symlinked name fails at open and is typed, got {error}"
+        );
     }
 }

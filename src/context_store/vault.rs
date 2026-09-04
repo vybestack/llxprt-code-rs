@@ -19,6 +19,10 @@ pub enum VaultError {
     UnknownHandle,
     Erased,
     OpenFailure,
+    /// The restored nonce bytes are not the length the AEAD in use requires,
+    /// so the snapshot cannot be accepted: accepting it would leave a slot
+    /// whose first read panics inside `Nonce::from_slice`.
+    NonceLength,
 }
 
 /// One vault slot: ciphertext plus its nonce, or a tombstone.
@@ -188,13 +192,20 @@ impl Vault {
     }
 
     /// Restores a vault from its durable snapshot: live slots re-open under
-    /// their recorded ciphertext and nonces, the slot counter advances past
+    /// their recorded ciphertext and nonces (refused unless every nonce has
+    /// the length the AEAD in use requires), the slot counter advances past
     /// every recorded handle, and the nonce prefix is replaced by a fresh
     /// per-process draw. Restored handles read back unchanged, but every new
     /// seal after a restart mixes a prefix the previous process never used,
     /// so a nonce is never reused under one key (issue #101).
     pub fn restore(&mut self, snapshot: VaultSnapshot) -> Result<(), VaultError> {
         let mut slots = HashMap::new();
+        // Floor the slot counter at one past the highest embedded slot
+        // number: every live and erased handle carries `vault-<reason>-<slot>`,
+        // so a snapshot whose recorded `next` is smaller than its own slots
+        // would otherwise mint a reused `vault-<reason>-<slot>` handle (and
+        // therefore a reused nonce) on the first seal after the restart.
+        let mut floor = 0u64;
         for slot in &snapshot.slots {
             if slots.contains_key(&slot.handle) {
                 return Err(VaultError::Unavailable);
@@ -202,21 +213,52 @@ impl Vault {
             let restored = if slot.erased {
                 Slot::Tombstone
             } else {
+                let nonce = unhex(&slot.nonce).ok_or(VaultError::Unavailable)?;
+                // The AEAD in use is AES-256-GCM, whose nonce is exactly 12
+                // bytes. Validate the restored length here, at restore time,
+                // instead of panicking in `get` when `Nonce::from_slice`
+                // slices a snapshot of the wrong length.
+                if nonce.len() != NONCE_LEN {
+                    return Err(VaultError::NonceLength);
+                }
                 Slot::Live {
-                    nonce: unhex(&slot.nonce).ok_or(VaultError::Unavailable)?,
+                    nonce,
                     ciphertext: unhex(&slot.ciphertext).ok_or(VaultError::Unavailable)?,
                 }
             };
+            // Refuse a snapshot inconsistent with its own slots rather than
+            // silently widening the counter floor past the recorded `next`.
+            if let Some(slot_number) = embedded_slot_number(&slot.handle) {
+                if slot_number >= snapshot.next {
+                    return Err(VaultError::Unavailable);
+                }
+                floor = floor.max(slot_number.saturating_add(1));
+            } else if !slot.erased {
+                // A live handle the vault itself never minted cannot be
+                // decrypted through this port, so refuse it up front.
+                return Err(VaultError::Unavailable);
+            }
             slots.insert(slot.handle.clone(), restored);
         }
         self.slots = slots;
-        self.next = snapshot.next;
+        self.next = snapshot.next.max(floor);
         // Fresh per-process prefix: the recorded prefix described the previous
         // process, and resuming it under the same key would reuse a nonce.
         // Drawn from the OS entropy pool, never from a hashed counter seed.
         self.nonce_prefix = os_entropy_u64() as u32;
         Ok(())
     }
+}
+
+/// Nonce length the AEAD in use requires (AES-256-GCM: 12 bytes).
+const NONCE_LEN: usize = 12;
+
+/// The slot number embedded in a handle the vault itself minted
+/// (`vault-<reason>-<slot>`), or `None` for any other handle shape.
+fn embedded_slot_number(handle: &str) -> Option<u64> {
+    let rest = handle.strip_prefix("vault-")?;
+    let slot = rest.rsplit_once('-')?.1;
+    slot.parse().ok()
 }
 
 /// Decodes lowercase hex without an external codec dependency.

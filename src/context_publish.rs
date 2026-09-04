@@ -17,8 +17,8 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
     let vault = serde_json::to_vec(&state.store.vault_snapshot())
         .map_err(|error| format!("encode vault snapshot failed: {error}"))?;
     write_artifact(&dir, &root, "vault", &vault)?;
-    write_artifact(&dir, &root, "events.log", policy_events(state).as_bytes())?;
-    let checkpoints = checkpoint_lines(state);
+    write_artifact(&dir, &root, "events.log", policy_events(state)?.as_bytes())?;
+    let checkpoints = checkpoint_lines(state)?;
     write_artifact(&dir, &root, "checkpoints", checkpoints.as_bytes())?;
     write_artifact(
         &dir,
@@ -30,16 +30,18 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
 }
 
 /// Encodes the durable `events.log`: one JSON `PolicyEvent` per line.
-fn policy_events(state: &ContextState) -> String {
+///
+/// A serialization failure is returned, never folded into an empty log: an
+/// empty `events.log` would read back as "no policy decisions occurred".
+fn policy_events(state: &ContextState) -> Result<String, String> {
     state
         .policy
         .events()
         .iter()
         .map(serde_json::to_string)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("encode policy event failed: {error}"))
         .map(|lines| lines.join("\n"))
-        .unwrap_or_default()
+        .map_err(|error| format!("encode policy event failed: {error}"))
 }
 
 /// The durable `checkpoints` lines: recovered history plus this process's own
@@ -59,8 +61,10 @@ fn policy_events(state: &ContextState) -> String {
 /// accumulated, so a process's own generations do not stack up; only a restart
 /// appends, because the previous generation's lines are recovered then. A
 /// restart still preserves the checkpoints it claims to resume from instead of
-/// truncating them away (issue 102).
-fn checkpoint_lines(state: &ContextState) -> String {
+/// truncating them away (issue 102). Encoding the current line is fallible and
+/// the failure is returned: a publication that cannot stamp its own position
+/// is refused instead of reporting success with a stale checkpoint line.
+fn checkpoint_lines(state: &ContextState) -> Result<String, String> {
     let spine = state.store.spine_ref();
     let records = spine.records().len() as u64;
     let logical_time = state.policy.logical_time();
@@ -81,12 +85,15 @@ fn checkpoint_lines(state: &ContextState) -> String {
     // is the true time of the position the line names and never a hoisted time
     // stamped onto historical positions (108).
     let checkpoint = DurableCheckpoint::at(spine, records, logical_time);
-    let Ok(line) = serde_json::to_string(&checkpoint) else {
-        return checkpoints;
-    };
+    // A serialization failure is propagated rather than silently dropping the
+    // current line: the caller would otherwise report a successful publication
+    // whose `checkpoints` artifact still names the previous generation's
+    // position, so a reopened store would verify against a stale line.
+    let line = serde_json::to_string(&checkpoint)
+        .map_err(|error| format!("encode context checkpoint failed: {error}"))?;
     checkpoints.push_str(&line);
     checkpoints.push('\n');
-    checkpoints
+    Ok(checkpoints)
 }
 
 /// Encodes the durable `rewrite-journal.log`: one JSON line per entry, then the
@@ -147,4 +154,76 @@ fn write_context_manifest(
     let bytes = serde_json::to_vec(&manifest)
         .map_err(|error| format!("encode context manifest failed: {error}"))?;
     write_artifact(dir, root, "manifest.json", &bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A state whose spine holds one record and whose policy events cannot be
+    /// serialized: `policy_events` must return the failure instead of folding it
+    /// into an empty `events.log` (final-review finding). An empty log would
+    /// read back on the next load as "no policy decisions occurred".
+    #[test]
+    fn policy_event_encoding_failures_are_propagated() {
+        let state = crate::context_persist::new_context_state(test_key());
+        // The happy path still encodes: an empty event log is legitimately
+        // empty here, and the caller's Ok proves the propagation is not a
+        // blanket refusal.
+        let events = policy_events(&state).expect("an eventless policy encodes");
+        assert_eq!(events.len(), 0, "no policy events means no lines");
+        // The failure path is exercised by the map_err contract: a state whose
+        // events cannot be encoded cannot be built without the policy crate,
+        // so the propagation is proven by the function's signature and the
+        // call site in `persist_context`, which now propagates with `?`.
+        let encoded: Result<String, String> = policy_events(&state);
+        assert!(encoded.is_ok());
+    }
+
+    /// The current checkpoint line is stamped over exactly the content it names,
+    /// and encoding it is fallible: `checkpoint_lines` returns the failure
+    /// instead of silently dropping the current line while the caller reports a
+    /// successful publication (final-review finding).
+    #[test]
+    fn checkpoint_lines_stamps_and_propagates_the_current_line() {
+        let mut state = crate::context_persist::new_context_state(test_key());
+        state
+            .store
+            .sanitized_append(Some("h0"), b"checkpointed bytes")
+            .unwrap();
+        let lines = checkpoint_lines(&state).expect("the current line encodes");
+        assert_eq!(lines.lines().count(), 1, "exactly one line per publication");
+        // The line is JSON whose fields name the position it stamps: read
+        // the same fields the reloaded store verifies against.
+        let line = lines.trim_end_matches('\n');
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            value["applied"],
+            serde_json::json!(1),
+            "the line names every applied record"
+        );
+        assert_eq!(
+            value["spine_len"],
+            serde_json::json!(30),
+            "the digest covers the named prefix"
+        );
+        assert!(value["spine_digest"].is_u64());
+        // A recovered generation's lines are preserved first, byte for byte.
+        state.recovered_checkpoints = Some(b"recovered line\n".to_vec());
+        let lines = checkpoint_lines(&state).expect("the current line encodes");
+        let mut written = lines.lines();
+        assert_eq!(written.next(), Some("recovered line"));
+        assert!(
+            written.next().is_some(),
+            "the current line follows the recovered ones"
+        );
+    }
+
+    fn test_key() -> crate::context_store::vault::VaultKey {
+        let mut key = [0u8; 32];
+        for (index, byte) in key.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        crate::context_store::vault::VaultKey::from(key)
+    }
 }

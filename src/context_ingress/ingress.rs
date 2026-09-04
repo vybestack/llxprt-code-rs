@@ -293,13 +293,18 @@ impl IngressTxn {
                 })
             }
             RedactionOutcome::Vaulted { reason, byte_len } => {
+                // The placeholder depends only on the quarantine reason and the
+                // raw byte length, never on where the spine places it, so it
+                // is built and landed on the spine BEFORE the vault write: a
+                // spine refusal must not leave already-durable raw plaintext
+                // in the vault with no spine reference naming it (issue 130).
+                let placeholder = vault_placeholder(reason.clone(), byte_len);
+                let (placement, segments) = Self::place_on_spine(sink, &placeholder)?;
                 let handle = sink.vault_put(raw, reason.name()).map_err(|refusal| {
                     IngressError::StoreBlocked {
                         mode: sink_refusal_mode(&refusal),
                     }
                 })?;
-                let placeholder = vault_placeholder(reason.clone(), byte_len);
-                let (placement, segments) = Self::place_on_spine(sink, &placeholder)?;
                 let payload = IngressPayload {
                     handle: placement.handle.clone(),
                     ranges: vec![placement.range.clone()],

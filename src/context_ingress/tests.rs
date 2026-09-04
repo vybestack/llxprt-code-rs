@@ -764,7 +764,9 @@ fn commit_validates_every_slot_before_any_append() {
 /// the vaulted branches: a sink that admits writes at entry but stops admitting them
 /// during the append cannot have the transaction's records reported as admitted
 /// against it. The recorded pre-check alone does not cover a store that flips mode
-/// mid-append (issue 129).
+/// mid-append (issue 129). On the vaulted branch the placeholder append is the
+/// FIRST durable call, so a store that flips on it is refused before the raw
+/// bytes are sealed at all.
 #[test]
 fn store_state_is_rechecked_after_the_durable_append() {
     /// Sink that starts writable and stops admitting after the first append.
@@ -823,8 +825,9 @@ fn store_state_is_rechecked_after_the_durable_append() {
         "the append was already durable when the re-check fired"
     );
 
-    // Vaulted branch: a tiny work budget forces the payload to the vault, the
-    // placeholder append flips the store, and the same re-check refuses.
+    // Vaulted branch: a tiny work budget forces the payload to the vault, and
+    // the placeholder append flips the store before any raw byte is sealed, so
+    // the same re-check refuses WITHOUT leaving vault bytes behind.
     let mut vaulting = FlippingSink::new();
     let mut quarantined = IngressTxn::new(1 << 20, 1);
     quarantined
@@ -835,5 +838,144 @@ fn store_state_is_rechecked_after_the_durable_append() {
         matches!(error, IngressError::StoreBlocked { mode: "read-only" }),
         "the vaulted branch re-checks store state too, got {error:?}"
     );
-    assert_eq!(vaulting.vault.len(), 1, "the vault write did happen first");
+    assert!(
+        !vaulting.spine.is_empty(),
+        "the placeholder append was already durable when the re-check fired"
+    );
+    assert!(
+        vaulting.vault.is_empty(),
+        "no raw byte is sealed while the store refuses the spine placement"
+    );
+}
+
+/// A spine refusal in the VAULTED branch leaves NO vault bytes: the placeholder
+/// is placed on the spine BEFORE `vault_put`, because the placeholder depends
+/// only on the quarantine reason and the raw byte length, never on where the
+/// spine puts it. The old order sealed the raw plaintext first, so a spine
+/// refusal left already-durable ciphertext in the vault with no spine reference
+/// naming it -- the plaintext was unreachable through the port but still
+/// durable, and nothing in the sanitized spine accounted for it (final-review
+/// finding).
+#[test]
+fn a_spine_refusal_in_the_vaulted_branch_leaves_no_vault_bytes() {
+    /// Sink that refuses every spine append but accepts vault writes, so a
+    /// wrong ordering shows up as durable vault bytes with no spine reference.
+    struct SpineRefusingSink {
+        vault: Vec<(String, Vec<u8>)>,
+    }
+    impl IngressSink for SpineRefusingSink {
+        fn sanitized_append(&mut self, _bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal> {
+            Err(SinkRefusal::Mode { mode: "read-only" })
+        }
+        fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, SinkRefusal> {
+            let handle = format!("vault-{}", self.vault.len());
+            self.vault.push((reason.to_string(), raw.to_vec()));
+            Ok(handle)
+        }
+        fn mode(&self) -> &'static str {
+            "normal"
+        }
+    }
+
+    // A one-byte work budget forces the whole payload into the vault branch.
+    let mut sink = SpineRefusingSink { vault: Vec::new() };
+    let mut txn = IngressTxn::new(1 << 20, 1);
+    txn.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    let error = txn.commit(&mut sink).unwrap_err();
+    assert!(
+        matches!(error, IngressError::StoreBlocked { mode: "read-only" }),
+        "a spine refusal is a typed refusal, got {error:?}"
+    );
+    assert!(
+        sink.vault.is_empty(),
+        "a refused spine placement must not leave raw bytes in the vault: {:#?}",
+        sink.vault
+    );
+
+    // Same proof through the shared `MemSink`, whose `fail_vault` proves the
+    // reverse ordering too: when the vault itself refuses, nothing about the
+    // spine placement is attempted as a result of it.
+    let mut refused_vault = MemSink::normal();
+    refused_vault.fail_vault = true;
+    let mut txn = IngressTxn::new(1 << 20, 1);
+    txn.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    let error = txn.commit(&mut refused_vault).unwrap_err();
+    assert!(
+        matches!(error, IngressError::StoreBlocked { mode: "vault" }),
+        "a vault refusal is a typed refusal, got {error:?}"
+    );
+}
+
+/// The vaulted branch's spine placement precedes the vault write in the
+/// durable-call order, which is the property the refusal test above depends on.
+#[test]
+fn the_vaulted_branch_places_the_spine_before_the_vault_write() {
+    use std::cell::RefCell;
+
+    /// Sink that records the order of every durable call it receives.
+    struct OrderedVaultSink {
+        calls: RefCell<Vec<&'static str>>,
+        spine: Vec<u8>,
+        vault: Vec<(String, Vec<u8>)>,
+    }
+    impl IngressSink for OrderedVaultSink {
+        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, SinkRefusal> {
+            self.calls.borrow_mut().push("append");
+            let start = self.spine.len() as u64;
+            self.spine.extend_from_slice(bytes);
+            Ok(SpinePlacement {
+                handle: format!("ingress-{:016x}", bytes.len()),
+                range: start..(self.spine.len() as u64),
+            })
+        }
+        fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, SinkRefusal> {
+            self.calls.borrow_mut().push("vault");
+            let handle = format!("vault-{}", self.vault.len());
+            self.vault.push((reason.to_string(), raw.to_vec()));
+            Ok(handle)
+        }
+        fn mode(&self) -> &'static str {
+            "normal"
+        }
+    }
+
+    let mut sink = OrderedVaultSink {
+        calls: RefCell::new(Vec::new()),
+        spine: Vec::new(),
+        vault: Vec::new(),
+    };
+    let mut txn = IngressTxn::new(1 << 20, 1);
+    txn.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    let records = txn.commit(&mut sink).unwrap();
+    assert_eq!(
+        *sink.calls.borrow(),
+        vec!["append", "vault"],
+        "the placeholder is durable before the raw bytes are sealed"
+    );
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].sanitized.len(), sink.spine.len());
+}
+
+/// An EMPTY vocabulary history is a typed refusal at restore time, not a
+/// registry whose first use panics: the baseline v1 vocabulary is always
+/// durable, so an empty snapshot list is a corrupt artifact (final-review
+/// finding).
+#[test]
+fn vocabulary_restore_refuses_an_empty_history() {
+    let mut registry = FilterRegistry::new();
+    assert!(
+        registry.restore_vocabulary_snapshots(Vec::new()).is_err(),
+        "an empty vocabulary history must be refused at restore time"
+    );
+    // The refusal adopted nothing: the registry still resolves its seeded v1.
+    assert_eq!(registry.vocabulary().version, 1);
+    let refused = registry
+        .restore_vocabulary_snapshots(Vec::new())
+        .unwrap_err();
+    assert_eq!(
+        refused.name(),
+        "tightening-requires-offline",
+        "the refusal is the registry's typed rejected mode"
+    );
+    assert_eq!(registry.vocabulary_history().len(), 1);
 }

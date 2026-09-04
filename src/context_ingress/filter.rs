@@ -226,7 +226,9 @@ impl FilterRegistry {
     /// how often the process restarts (off-by-one/phantom-version regression).
     ///
     /// The accepted sequence is exactly what [`Self::update_vocabulary`] can
-    /// produce: the first snapshot is version 1, and each later snapshot is
+    /// produce: the list is non-empty (an empty list is refused, because the
+    /// registry is always seeded and an unseeded one cannot resolve a
+    /// version), the first snapshot is version 1, and each later snapshot is
     /// strictly newer than its predecessor with a label set that contains
     /// every earlier label. A restored session can never be stricter than the
     /// running session that produced the snapshots, so a version gap
@@ -236,6 +238,14 @@ impl FilterRegistry {
         &mut self,
         snapshots: Vec<VocabularySnapshot>,
     ) -> Result<(), RejectedUpdate> {
+        // An empty history is not a registry: every accessor assumes the
+        // vocabulary stack is seeded, and restoring an empty list would leave
+        // a registry whose first use panics. The baseline v1 vocabulary is
+        // always durable, so an empty snapshot list is a corrupt artifact and
+        // is refused here rather than deferred to a panic on use.
+        if snapshots.is_empty() {
+            return Err(RejectedUpdate::TighteningRequiresOffline { from: 0, to: 0 });
+        }
         let mut restored = Vec::with_capacity(snapshots.len());
         let mut labels = Vocabulary::v1().labels;
         let mut version = 0;

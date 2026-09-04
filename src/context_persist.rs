@@ -263,8 +263,14 @@ fn sequence_admission(
     }
 }
 
-/// Region budget the context store admits bulk evidence into: the sum of the
-/// session slot cap (`SPINE_RELOAD_MAX`) and the bulk work budget.
+/// `B` bound handed to the admission executor for ONE bulk admission: the sum
+/// of the session slot cap (`SPINE_RELOAD_MAX`) and the bulk work budget. What
+/// `validate` enforces with it today is the single payload's projected bound
+/// (this one payload's bytes plus its 64-byte frame overhead, checked against
+/// `B - R - H`) together with the protection floor; it does NOT sum the
+/// payloads admitted so far, so this is not a region-wide budget over the
+/// whole admitted region. Region-wide enforcement is recorded for unit B and
+/// is deliberately NOT added here.
 const ADMISSION_REGION_BUDGET: u64 = (SPINE_RELOAD_MAX + INGRESS_WORK_BUDGET) as u64;
 /// Reclamation reserve kept out of every admission: one bulk payload's worth.
 const ADMISSION_RECLAMATION_RESERVE: u64 = 1 << 20;
