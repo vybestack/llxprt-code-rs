@@ -1,0 +1,6 @@
+{"scenario":"quiesce-unwritable","phase":2,"observed_status":"red","reason_class":"task-failure","verdict":"unexpected-red-reason","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"quiesce-unwritable","phase":2,"observed_status":"red","reason_class":"task-failure","verdict":"unexpected-red-reason","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke2"}
+{"scenario":"quiesce-unwritable","phase":2,"observed_status":"red","reason_class":"recovery-failure","verdict":"unexpected-red-reason","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"quiesce-unwritable","phase":2,"observed_status":"green","reason_class":"task-failure","verdict":"pass","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"ingress-secret-and-digest","phase":2,"observed_status":"red","reason_class":"leakage","verdict":"unexpected-red-reason","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}
+{"scenario":"quiesce-unwritable","phase":2,"observed_status":"green","reason_class":"task-failure","verdict":"pass","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}

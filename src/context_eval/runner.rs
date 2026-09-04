@@ -111,6 +111,8 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
     // the CLI never touches a native credential store or a real provider. Only profile
     // keys this CLI accepts for a plain loopback Chat provider are emitted:
     // `stream-idle-timeout-ms` is dsflash-only and would be rejected as model-config.
+    // The effective context limit comes from the scenario's arm-specific runtime config
+    // (GAP-H7): arm selection must change installed runtime behavior, not just a label.
     let profile = serde_json::json!({
         "version": 1,
         "provider": scen.profile.provider,
@@ -119,7 +121,7 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
         "ephemeralSettings": {
             "auth-key": "ctxeval-loopback-local-stub",
             "base-url": base_url,
-            "context-limit": scen.profile.context_limit_tokens,
+            "context-limit": scen.runtime.context_limit,
             "maxOutputTokens": scen.profile.max_output_tokens,
         },
     });

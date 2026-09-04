@@ -1,0 +1,4 @@
+{"scenario":"endurance-restart","phase":9,"observed_status":"red","reason_class":"harness-error","verdict":"harness-error","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"endurance-restart","phase":9,"observed_status":"red","reason_class":"recovery-failure","verdict":"expected-red","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"endurance-restart","phase":9,"observed_status":"red","reason_class":"missing-evidence","verdict":"expected-red","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-smoke"}
+{"scenario":"endurance-restart","phase":9,"observed_status":"red","reason_class":"missing-evidence","verdict":"expected-red","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}

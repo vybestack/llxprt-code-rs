@@ -25,3 +25,7 @@ fixture = "tool-output-block.txt"
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
 required_context_artifacts = ["context/checkpoints", "context/events.log"]
 required_outcomes = ["wrap_up"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

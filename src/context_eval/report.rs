@@ -10,7 +10,7 @@ pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const CACHE_UNKNOWN_CLASS: &str = "disarmed_unavailable";
 
 /// Fields every per-scenario report must carry.
-pub const SCENARIO_REQUIRED: [&str; 12] = [
+pub const SCENARIO_REQUIRED: [&str; 16] = [
     "id",
     "schema_version",
     "owner_phase",
@@ -23,15 +23,22 @@ pub const SCENARIO_REQUIRED: [&str; 12] = [
     "result",
     "evidence_status",
     "cache",
+    "runtime_config",
+    "evidence_dimensions",
+    "request_observations",
+    "leakage_scan",
 ];
 
 /// Fields every aggregate report must carry.
-pub const AGGREGATE_REQUIRED: [&str; 8] = [
+pub const AGGREGATE_REQUIRED: [&str; 11] = [
     "tool",
     "schema_version",
     "run_id",
     "runner",
+    "runner_revision",
     "expected_status_mode",
+    "phase0_baseline",
+    "records_root",
     "scenarios",
     "summary",
     "cache",
@@ -181,6 +188,45 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
     }
     if value["cache"]["class"].is_null() {
         return Err("report cache block has no cost class".to_string());
+    }
+    if !aggregate {
+        let dims = value["evidence_dimensions"]
+            .as_object()
+            .ok_or("report has no evidence_dimensions object")?;
+        for dim in [
+            "task",
+            "protocol",
+            "resource",
+            "latency",
+            "recovery",
+            "wall_realism",
+        ] {
+            if dims.get(dim).and_then(Value::as_bool).is_none() {
+                return Err(format!("evidence_dimensions is missing boolean {dim}"));
+            }
+        }
+        let obs = value["request_observations"]
+            .as_object()
+            .ok_or("report has no request_observations object")?;
+        for field in [
+            "requests",
+            "max_request_bytes",
+            "streamed_requests",
+            "tool_names",
+            "observations_source",
+        ] {
+            if obs.get(field).is_none() {
+                return Err(format!("request_observations is missing {field}"));
+            }
+        }
+        let leak = value["leakage_scan"]
+            .as_object()
+            .ok_or("report has no leakage_scan object")?;
+        if leak.get("clean").and_then(Value::as_bool).is_none()
+            || leak.get("findings").and_then(Value::as_array).is_none()
+        {
+            return Err("leakage_scan must carry boolean clean and findings array".to_string());
+        }
     }
     if aggregate {
         validate_summary(&value["summary"])?;

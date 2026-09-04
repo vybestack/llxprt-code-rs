@@ -27,3 +27,7 @@ required_context_artifacts = ["context/manifest.json"]
 
 [faults]
 injected = ["store-unwritable-after-round-1"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

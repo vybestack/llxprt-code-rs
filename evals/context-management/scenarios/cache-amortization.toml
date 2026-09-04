@@ -23,3 +23,7 @@ fixture = "tool-output-block.txt"
 
 [assertions]
 required_context_artifacts = ["context/rewrite-journal.log"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

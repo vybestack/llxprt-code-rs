@@ -1,0 +1,4 @@
+{"scenario":"baseline-minimum-management-floor","phase":4,"observed_status":"red","reason_class":"context-limit","verdict":"expected-red","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}
+{"scenario":"budget-governor-progress","phase":4,"observed_status":"green","reason_class":"task-failure","verdict":"pass","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}
+{"scenario":"cache-amortization","phase":4,"observed_status":"green","reason_class":"task-failure","verdict":"pass","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}
+{"scenario":"terminal-reserve-wrap-up","phase":4,"observed_status":"green","reason_class":"task-failure","verdict":"pass","report":"/Users/acoliver/projects/llxprt/agent/main/llxprt-code-rs-unitE/tmp/unite-full-run"}

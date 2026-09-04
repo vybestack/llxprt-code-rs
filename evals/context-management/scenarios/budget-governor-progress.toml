@@ -24,3 +24,7 @@ fixture = "tool-output-block.txt"
 [assertions]
 required_context_artifacts = ["context/rewrite-journal.log"]
 required_outcomes = ["disarm", "quiesce_unwritable", "wrap_up"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 12000

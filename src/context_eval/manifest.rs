@@ -10,6 +10,8 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::context_eval::faults;
+
 /// Current manifest schema version. Bumping it is a breaking eval change.
 pub const SCHEMA_VERSION: u32 = 1;
 /// Highest tool-round count a manifest may request (keeps a red run bounded).
@@ -25,8 +27,20 @@ pub enum Arm {
     Feature,
     /// Status-quo full-replay baseline arm.
     StatusQuo,
-    /// Future minimum-management-floor configuration; red until Phase 4.
+    /// Minimum-management-floor configuration: arm-specific runtime config carried into
+    /// the generated profile, so arm selection changes actual runtime behavior.
     MinimumFloor,
+}
+
+impl Arm {
+    /// Stable kebab-case name used in reports and records.
+    pub fn name(self) -> &'static str {
+        match self {
+            Arm::Feature => "feature",
+            Arm::StatusQuo => "status-quo",
+            Arm::MinimumFloor => "minimum-floor",
+        }
+    }
 }
 
 /// Expected status of a scenario in the current phase.
@@ -35,6 +49,16 @@ pub enum Arm {
 pub enum ExpectedStatus {
     Red,
     Green,
+}
+
+impl ExpectedStatus {
+    /// Stable lowercase name for manifests, reports, and records.
+    pub fn name(self) -> &'static str {
+        match self {
+            ExpectedStatus::Red => "red",
+            ExpectedStatus::Green => "green",
+        }
+    }
 }
 
 /// Profile budget the adapter materialises for the run. No credentials live here.
@@ -91,6 +115,20 @@ pub struct Faults {
     pub injected: Vec<String>,
 }
 
+/// Arm-specific runtime configuration materialised into the generated profile.
+///
+/// Two arms may describe the same stimulus and still be a comparison only if the
+/// configuration they install selects different runtime behavior. `context_limit`
+/// is the knob the acceptance target already honors, so the status-quo arm keeps the
+/// profile limit and the minimum-floor arm overrides it to the arm's floor.
+#[derive(Clone, Debug, Deserialize)]
+pub struct RuntimeConfig {
+    /// Effective context limit (tokens) this arm installs.
+    pub context_limit: u64,
+    /// Names the installed configuration in reports so arm runs are distinguishable.
+    pub name: String,
+}
+
 /// One runner-neutral scenario.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,6 +151,9 @@ pub struct Scenario {
     pub assertions: Assertions,
     #[serde(default)]
     pub faults: Faults,
+    /// Arm-specific runtime configuration. Required: without it two arms differ only
+    /// in label, which is exactly the non-selecting comparison the program forbids.
+    pub runtime: RuntimeConfig,
 }
 
 impl Scenario {
@@ -158,6 +199,35 @@ impl Scenario {
         if self.stimulus.prompt.trim().is_empty() {
             return Err(format!("scenario {id} has an empty prompt", id = self.id));
         }
+        self.validate_wall(fixtures)?;
+        if self.runtime.name.trim().is_empty() || self.runtime.context_limit == 0 {
+            return Err(format!(
+                "scenario {id:?} has an unusable runtime config",
+                id = self.id
+            ));
+        }
+        faults::validate(&self.faults.injected)
+            .map_err(|e| format!("scenario {id}: {e}", id = self.id))?;
+        if self.arm == Arm::MinimumFloor && self.expected_status == ExpectedStatus::Green {
+            return Err(format!(
+                "scenario {id:?}: the minimum-floor arm cannot declare green before its \
+                 comparison against the status-quo arm exists",
+                id = self.id
+            ));
+        }
+        Ok(())
+    }
+
+    /// Prompts in drive order: the opening prompt then every followup.
+    pub fn prompts(&self) -> Vec<&str> {
+        let mut all = vec![self.stimulus.prompt.as_str()];
+        all.extend(self.stimulus.followups.iter().map(String::as_str));
+        all
+    }
+    /// Wall and fixture bounds (delegated so the contract stays readable): round count,
+    /// per-round byte pressure, and that a round-requesting scenario names a real,
+    /// bounded fixture file.
+    fn validate_wall(&self, fixtures: &Path) -> Result<(), String> {
         if self.wall.tool_rounds > MAX_TOOL_ROUNDS {
             return Err(format!(
                 "scenario {id} asks for {rounds} tool rounds (max {MAX_TOOL_ROUNDS})",
@@ -191,13 +261,6 @@ impl Scenario {
             }
         }
         Ok(())
-    }
-
-    /// Prompts in drive order: the opening prompt then every followup.
-    pub fn prompts(&self) -> Vec<&str> {
-        let mut all = vec![self.stimulus.prompt.as_str()];
-        all.extend(self.stimulus.followups.iter().map(String::as_str));
-        all
     }
 }
 
