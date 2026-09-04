@@ -112,6 +112,12 @@ impl Loopback {
         format!("http://{addr}/v1")
     }
 
+    /// Shared observation handle, so fault threads can observe trigger points
+    /// (scripted tool rounds, in-flight requests) as the loopback records them.
+    pub fn observations_handle(&self) -> Arc<Mutex<Observations>> {
+        self.shared.clone()
+    }
+
     /// Snapshot the observations so far.
     pub fn snapshot(&self) -> Observations {
         self.shared
