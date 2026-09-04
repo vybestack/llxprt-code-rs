@@ -846,13 +846,17 @@ impl SessionStore {
                 ));
             }
             let suffix = replay::suffix(&branch.rounds, &rounds)?;
+            // The context artifacts are durable before BranchCompleted is
+            // appended: the event is what makes completion observable to a
+            // later process, so it must not be able to fire for state the
+            // context store never accepted (106).
+            crate::context_persist::finalize_context(self)?;
             self.append_event(log::Event::BranchCompleted {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
                 rounds: suffix.to_vec(),
                 summary: summary.to_string(),
-            })?;
-            crate::context_persist::finalize_context(self)
+            })
         })
     }
 
