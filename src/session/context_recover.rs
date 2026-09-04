@@ -41,8 +41,8 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
         .load_spine_typed(&spine_bytes)
         .map_err(|error| format!("context spine corrupt: {error:?}"))?;
     recover_durable_policy_artifacts(&dir, &mut state)?;
-    if let Some(outcome) = recover_manifest_artifacts(&dir, &mut state)? {
-        state.policy.restore_terminal_outcome(outcome);
+    if let Some((outcome, saturated)) = recover_manifest_artifacts(&dir, &mut state)? {
+        state.policy.restore_terminal_outcome(outcome, saturated);
     }
     Ok(state)
 }
@@ -109,7 +109,7 @@ fn recover_durable_policy_artifacts(
 fn recover_manifest_artifacts(
     dir: &openat::Dir,
     state: &mut ContextState,
-) -> Result<Option<&'static str>, String> {
+) -> Result<Option<(&'static str, Option<bool>)>, String> {
     match crate::safe_file::read_artifact(dir, "vault", VAULT_RELOAD_MAX) {
         Ok(bytes) => {
             let snapshot: crate::context_store::vault::VaultSnapshot =
@@ -136,7 +136,19 @@ fn recover_manifest_artifacts(
             let manifest: PersistedManifest = serde_json::from_slice(&bytes)
                 .map_err(|error| format!("context manifest corrupt: {error}"))?;
             restore_manifest_into_state(&manifest, state)?;
-            Ok(recover_terminal_outcome(manifest.terminal_outcome))
+            let outcome = recover_terminal_outcome(manifest.terminal_outcome);
+            let saturated = manifest.terminal_fit_saturated;
+            // Only a feasible wrap-up constrains the recorded room: it must
+            // have had space for the wrap-up cost when the decision was made.
+            // A saturated record does not, because the write-failure branch
+            // saturates against an unwritable store, whatever the room said.
+            if let (Some(false), Some(room)) = (saturated, manifest.terminal_fit_available) {
+                debug_assert!(
+                    room >= crate::session::context_persist::WRAP_UP_COST_UNITS,
+                    "a feasible wrap-up must have been decided with room for its cost"
+                );
+            }
+            Ok(outcome.map(|outcome| (outcome, saturated)))
         }
         // A missing manifest is a fresh session (no filter history yet); an
         // unreadable manifest fails recovery instead of being read as absence
@@ -240,11 +252,19 @@ fn load_rewrite_journal(bytes: &[u8]) -> Result<RecoveredJournal, String> {
 
 /// Maps a reloaded manifest terminal outcome back to its stable name; an
 /// unknown name is left unset rather than rewritten into a made-up branch.
-fn recover_terminal_outcome(outcome: Option<String>) -> Option<&'static str> {
+///
+/// Issue 108-4: nothing emits a `disarm` terminal any more (a disarmed
+/// completion records no durable branch), so a historical marker reloads as
+/// unset - the arm exists only to translate journals written by earlier
+/// builds into the honest absence, never to restore a branch no producer
+/// can reach.
+pub(crate) fn recover_terminal_outcome(outcome: Option<String>) -> Option<&'static str> {
     match outcome.as_deref() {
         Some("quiesce_unwritable") => Some("quiesce_unwritable"),
+        Some("quiesce_rate") => Some("quiesce_rate"),
         Some("wrap_up") => Some("wrap_up"),
-        Some("disarm") => Some("disarm"),
+        // A historical `disarm` marker falls through to the same arm: the
+        // terminal no longer exists, so it reloads as unset.
         _ => None,
     }
 }

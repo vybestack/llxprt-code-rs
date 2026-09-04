@@ -3,7 +3,14 @@
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RewriteEntry {
     pub source: u64,
-    pub tokens_reclaimed: u64,
+    /// Bytes this rewrite reclaimed, in budget units (renamed from the
+    /// token-spelling `tokens_reclaimed`, issue 123). The alias keeps
+    /// journals written by pre-rename builds recoverable: `load_rewrite_journal`
+    /// treats a line that fails to deserialize as a corrupt artifact and fails
+    /// the whole recovery, so without the alias a pre-rename session could
+    /// never be reopened (issue 102 recovery).
+    #[serde(alias = "tokens_reclaimed")]
+    pub bytes_reclaimed: u64,
     pub invalidation_cost: Option<u64>,
     pub logical_time: u64,
     pub wall_elapsed_us: u64,
@@ -13,13 +20,13 @@ pub struct RewriteEntry {
 impl RewriteEntry {
     pub const fn new(
         source: u64,
-        tokens_reclaimed: u64,
+        bytes_reclaimed: u64,
         invalidation_cost: Option<u64>,
         logical_time: u64,
     ) -> Self {
         Self {
             source,
-            tokens_reclaimed,
+            bytes_reclaimed,
             invalidation_cost,
             logical_time,
             wall_elapsed_us: 0,
@@ -248,4 +255,38 @@ impl RewriteJournal {
 
 fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then(|| numerator as f64 / denominator as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue 121-c (F13): a journal line written by a pre-rename build - which
+    /// spelled the field `tokens_reclaimed` - must still deserialize, because
+    /// `load_rewrite_journal` fails the whole recovery on an entry that does
+    /// not. The alias is the only thing keeping those sessions recoverable.
+    #[test]
+    fn a_pre_rename_journal_line_still_deserializes() {
+        let line = r#"{"source":7,"tokens_reclaimed":4096,"invalidation_cost":null,"logical_time":3,"wall_elapsed_us":12,"amortized":true}"#;
+        let entry: RewriteEntry =
+            serde_json::from_str(line).expect("the old spelling must deserialize");
+        assert_eq!(entry.bytes_reclaimed, 4096);
+        // New builds write the new spelling, and both spellings never mix in
+        // one entry: the new key is the one serialization emits.
+        let round: String = serde_json::to_string(&entry).expect("entry serializes");
+        assert!(round.contains("bytes_reclaimed"));
+        assert!(!round.contains("tokens_reclaimed"));
+    }
+
+    /// A journal written by the CURRENT build keeps restoring through the same
+    /// path recovery uses, so the alias never masks a real corruption of the
+    /// new spelling.
+    #[test]
+    fn a_current_journal_line_still_deserializes() {
+        let line = r#"{"source":9,"bytes_reclaimed":32,"invalidation_cost":8,"logical_time":5,"wall_elapsed_us":0,"amortized":false}"#;
+        let entry: RewriteEntry =
+            serde_json::from_str(line).expect("the new spelling must deserialize");
+        assert_eq!(entry.bytes_reclaimed, 32);
+        assert_eq!(entry.invalidation_cost, Some(8));
+    }
 }

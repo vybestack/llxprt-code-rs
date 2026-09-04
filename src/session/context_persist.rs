@@ -50,6 +50,14 @@ pub(crate) struct ContextState {
     pub(crate) detail: Option<String>,
     pub(crate) preserved: Vec<String>,
     pub(crate) policy: crate::context_policy::runtime::ProposalOnlyController,
+    /// Region units already admitted this session (#121-c).
+    pub(crate) region_admitted: u64,
+    /// This session's fencing clock (issue 108-4): owned by the state, never
+    /// a thread-local, so every writer sharing this state leases against the
+    /// ONE ledger and `commit_fenced` compares against a clock that actually
+    /// advances. Each admission acquires a strictly newer epoch, so a stale
+    /// writer holding an older lease is fenced out.
+    pub(crate) fencing_clock: crate::context_txn::executor::FencingClock,
     /// Durable checkpoint lines a previous process published, reloaded on
     /// recovery so a republished `checkpoints` artifact preserves them ahead
     /// of this generation's own line instead of truncating them away
@@ -69,6 +77,10 @@ pub(crate) struct ContextManifest<'a> {
     pub(crate) rules: &'a [crate::context_ingress::filter::FilterRules],
     pub(crate) vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
     pub(crate) terminal_outcome: Option<&'a str>,
+    /// Whether the accepted wrap-up saturated the terminal fit gate (108-4).
+    pub(crate) terminal_fit_saturated: Option<bool>,
+    /// Region units still free when the terminal was recorded (108-4).
+    pub(crate) terminal_fit_available: Option<u64>,
     pub(crate) preserved: &'a [String],
 }
 
@@ -84,6 +96,16 @@ pub(crate) struct PersistedManifest {
     /// back and restores the controller's terminal branch, so a restarted
     /// session resumes the branch it had recorded instead of reopening as live.
     pub(crate) terminal_outcome: Option<String>,
+    /// Whether the accepted wrap-up saturated the terminal fit gate (108-4):
+    /// `false` is a feasible wrap-up, `true` a fit-saturated quiesce; `None`
+    /// when no terminal was recorded. Persisted so the two terminals stay
+    /// distinguishable in the durable record after a restart.
+    #[serde(default)]
+    pub(crate) terminal_fit_saturated: Option<bool>,
+    /// Region units still free when the terminal was recorded (108-4), the
+    /// measured second half of the same distinction.
+    #[serde(default)]
+    pub(crate) terminal_fit_available: Option<u64>,
     #[serde(default)]
     pub(crate) preserved: Vec<String>,
 }
@@ -215,8 +237,55 @@ pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> C
         detail: None,
         preserved: Vec::new(),
         policy: crate::context_policy::runtime::ProposalOnlyController::default(),
+        region_admitted: 0,
+        fencing_clock: crate::context_txn::executor::FencingClock::new(),
         recovered_checkpoints: None,
     }
+}
+
+/// Builds the FRESH executor one admission runs on (issue 108-4).
+///
+/// A failed validate or commit leaves its executor `Aborted`, and the
+/// executor refuses any further proposal from that state - so an executor
+/// that survived across admissions would wedge every later admission after
+/// ONE refused attempt (the F11 wedge). Each admission therefore builds its
+/// own executor; the epoch is handed in, drawn from the session's fencing
+/// clock, so a stale writer holding an older lease is still fenced out by
+/// `commit_fenced`.
+fn admission_executor(
+    epoch: crate::context_txn::executor::Epoch,
+    governed: u64,
+    tool_declarations: usize,
+) -> crate::context_txn::executor::Executor {
+    use crate::context_txn::executor::Executor;
+    let mut executor = Executor::new(
+        epoch,
+        crate::context_kernel::legality::RenderContract::generous(1),
+    );
+    // Issue 105-4: the bound comes from the bound [`AccountingPort`], never from
+    // the caller: the session executor is bound at construction to the
+    // production port over the versioned margin table, the session's declared
+    // tool surface, and the governed units the durable spine already holds.
+    // `validate` then computes the bound and refuses a caller-invented one,
+    // which is the only way a bulk admission reaches commit (AC 5.1).
+    executor.bind_port(std::rc::Rc::new(
+        crate::context_txn::bound_port::BoundPort::new(
+            session_port_margins(),
+            tool_declarations,
+            governed,
+        ),
+    ));
+    executor
+}
+
+/// Margin table the session's production port is bound over: V1 unchanged,
+/// so the commit frame is charged exactly once by the port that owns every
+/// margin (F1). The caller's claimed bound is built from the SAME table - the
+/// effect bytes plus this frame - so the port's recomputation and the caller's
+/// claim can only disagree when the caller invented a number, which is the
+/// disagreement `validate` refuses.
+fn session_port_margins() -> crate::context_txn::budget::Margins {
+    crate::context_txn::budget::Margins::V1
 }
 
 /// Keeps the preserved-span window bounded across pre-entry compaction calls.
@@ -234,13 +303,26 @@ fn trim_preserved(state: &mut ContextState) {
 /// Returns the parent version the admission committed against, so the store's
 /// spine position and the executor's compare-and-commit stay in step.
 fn sequence_admission(
+    state: &mut ContextState,
     parent_version: u64,
-    bound: u64,
+    payload_bound: u64,
+    effect_bytes: u64,
+    effect: Option<crate::context_kernel::events::EventKind>,
     budget: &crate::context_txn::budget::Budget,
     floor: u64,
 ) -> Result<(), String> {
-    use crate::context_txn::executor::{CommitOutcome, Epoch, Executor};
-    let mut executor = Executor::new(Epoch(1));
+    use crate::context_txn::executor::CommitOutcome;
+    // Region-wide admission accounting (121-c): the projected occupancy is
+    // summed against the ceiling the executor is armed with, and only an
+    // applied compare-and-commit moves the session's `region_admitted`.
+    let epoch = state.fencing_clock.acquire();
+    // The port is bound over the same algebra the caller's claim is built
+    // from (effect bytes plus the V1 commit frame, no governed term and no
+    // declared surface yet), so the disagreement `validate` checks stays a
+    // real caller-invented-number test; the region total lives on the state,
+    // and re-basing the claim on it is S1 (F2) territory, untouched here.
+    let mut executor = admission_executor(epoch, 0, 0);
+    executor.arm_region_accounting(budget.commit_ceiling());
     executor
         .propose("admit-ingress", parent_version)
         .map_err(|error| executor_refusal(&error))?;
@@ -251,12 +333,20 @@ fn sequence_admission(
         .generate()
         .map_err(|error| executor_refusal(&error))?;
     executor
-        .validate(bound, budget, floor, 0, 0)
+        .validate(payload_bound, budget, floor, 0, 0, effect_bytes)
         .map_err(|error| executor_refusal(&error))?;
-    match executor.commit_outcome(parent_version) {
+    match executor.commit_fenced(parent_version, &state.fencing_clock, effect, payload_bound) {
+        Ok(CommitOutcome::Applied) => {
+            // F2: the session total ACCUMULATES across admissions instead of
+            // being overwritten by the last payload applied, so the region a
+            // later admission projects against is every unit already admitted
+            // plus this one.
+            state.region_admitted = state.region_admitted.saturating_add(payload_bound);
+            Ok(())
+        }
         // The parent cannot move inside this call, so a rebase verdict would
-        // mean the executor itself is inconsistent with its own proposal.
-        Ok(CommitOutcome::Applied) => Ok(()),
+        // mean the executor itself is inconsistent with its own proposal; it
+        // is surfaced, never collapsed into a committed state (#121-a).
         Ok(CommitOutcome::RebaseNoOp) => {
             Err("executor reported a rebase no-op for an unmoved parent".to_string())
         }
@@ -264,14 +354,12 @@ fn sequence_admission(
     }
 }
 
-/// `B` bound handed to the admission executor for ONE bulk admission: the sum
-/// of the session slot cap (`SPINE_RELOAD_MAX`) and the bulk work budget. What
-/// `validate` enforces with it today is the single payload's projected bound
-/// (this one payload's bytes plus its 64-byte frame overhead, checked against
-/// `B - R - H`) together with the protection floor; it does NOT sum the
-/// payloads admitted so far, so this is not a region-wide budget over the
-/// whole admitted region. Region-wide enforcement is recorded for unit B and
-/// is deliberately NOT added here.
+/// `B` bound of the admission region: the sum of the session slot cap
+/// (`SPINE_RELOAD_MAX`) and the bulk work budget. Unit B (#121-c) enforces it
+/// region-wide: every admission sums its projected occupancy (the units
+/// already admitted plus this payload's bound) against `B - R - H`, so the
+/// region cannot fill one payload at a time past the budget the reload bound
+/// assumes.
 const ADMISSION_REGION_BUDGET: u64 = (SPINE_RELOAD_MAX + INGRESS_WORK_BUDGET) as u64;
 /// Reclamation reserve kept out of every admission: one bulk payload's worth.
 const ADMISSION_RECLAMATION_RESERVE: u64 = 1 << 20;
@@ -301,6 +389,20 @@ fn executor_refusal(error: &crate::context_txn::executor::ExecutorError) -> Stri
             format!("admission transition {from:?} to {to:?} is illegal")
         }
         ExecutorError::NotRebaseSafe => "admission row is not rebase-safe".to_string(),
+        ExecutorError::BoundDisagrees {
+            claimed,
+            computed,
+        } => format!("admission bound {claimed} disagrees with the computed bound {computed}"),
+        ExecutorError::Illegal { which, predicate } => {
+            format!("admission legality gate rejected the projection: {which} ({predicate})")
+        }
+        ExecutorError::RegionOverBudget {
+            admitted,
+            projected,
+            ceiling,
+        } => format!(
+            "admission region over budget: {admitted} admitted plus {projected} projected exceeds {ceiling}"
+        ),
     }
 }
 
@@ -371,18 +473,44 @@ fn ingest_bulk_committed(
                 format!("store mode {mode} refused the turn")
             }
         })?;
-    // The parent version is the applied spine record count, so the executor's
+    // Parent version: the applied spine record count, so the executor's
     // compare-and-commit is anchored to the store position it commits against.
     let parent_version = state.store.index().len() as u64;
-    // Bound: the admitted payload plus its frame overhead must fit the
-    // region budget net of the reclamation reserve and headroom.
-    let bound = (bytes.len() as u64).saturating_add(64);
+    // The port's input is the EFFECT size (F1): the payload bytes this
+    // admission admits, which is the same quantity the bound port saw, so
+    // the caller's claimed bound is compared against a bound recomputed from
+    // the effect and never echoed back.
+    let effect_bytes = bytes.len() as u64;
+    // Bound: the effect plus the versioned commit frame the port charges.
+    // The port owns every margin, so the frame is added here exactly once
+    // and the claim the executor validates is the port's own algebra - a
+    // caller-invented number disagrees with it and fails validation.
+    let bound = effect_bytes + crate::context_txn::budget::Margins::V1.commit_frame;
     let budget = crate::context_txn::budget::Budget {
         b: ADMISSION_REGION_BUDGET,
         r: ADMISSION_RECLAMATION_RESERVE,
         h: ADMISSION_HEADROOM,
     };
-    sequence_admission(parent_version, bound, &budget, bytes.len() as u64)?;
+    // The governed effect this commit releases: the executor is the sole
+    // writer, so it appends and folds the `AdmitIngress` operation commit
+    // itself, which is what keeps the legality gate running against the live
+    // region instead of genesis (F3). The admission attributes to the session
+    // scope, which the executor opens before the first admission; the
+    // store-position parent still anchors the compare-and-commit below.
+    let effect = crate::context_kernel::events::EventKind::OperationCommit {
+        class: crate::context_kernel::events::OperationClass::AdmitIngress,
+        subject: crate::context_txn::executor::SESSION_SCOPE,
+        argument: effect_bytes,
+    };
+    sequence_admission(
+        state,
+        parent_version,
+        bound,
+        effect_bytes,
+        Some(effect),
+        &budget,
+        bytes.len() as u64,
+    )?;
     let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
     txn.capture(CaptureSource::ToolResult, bytes)
         .map_err(|error| ingress_error(&error))?;
@@ -579,7 +707,13 @@ pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
     let Some(state) = guard.as_mut() else {
         return Ok(());
     };
-    state.policy.wrap_up();
+    // #107-2/#107-3: wrap-up is gated on a measured fit (the wrap-up cost
+    // against the room the region still has) and on the store's own mode,
+    // which is the writability signal the write path already exposes.
+    let writable = state.store.mode().writable();
+    state
+        .policy
+        .wrap_up(WRAP_UP_COST_UNITS, wrap_up_available(state), writable);
     if let Err(reason) = persist_context(store, state) {
         state.quiesce = Some("quiesce_unwritable".to_string());
         state.detail = Some(reason.clone());
@@ -590,6 +724,16 @@ pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
         )));
     }
     Ok(())
+}
+
+/// Wrap-up work budget, in the region's budget units: the artifacts one
+/// publication writes plus the manifest. It is the measured number
+/// `terminal_reserve` is fed (#107-2).
+pub(crate) const WRAP_UP_COST_UNITS: u64 = 64 << 10;
+/// Region units still free for a wrap-up: the admission budget net of what
+/// this session already admitted (#107-2, #107-4).
+pub(crate) fn wrap_up_available(state: &ContextState) -> u64 {
+    ADMISSION_REGION_BUDGET.saturating_sub(state.region_admitted)
 }
 
 pub(crate) fn context_exchange(
@@ -615,7 +759,15 @@ pub(crate) fn context_exchange(
         .ok_or_else(|| StoreError::Lock("context store missing".into()))?;
     let mut transformed = rounds.to_vec();
     if let Err(reason) = digest_bulk_results(state, &mut transformed) {
-        state.quiesce = Some("quiesce_unwritable".to_string());
+        // The honest split: a rate quiesce carries the rate spelling, an
+        // ingress or store failure keeps the unwritable one.
+        state.quiesce = Some(
+            state
+                .policy
+                .terminal_outcome()
+                .unwrap_or("quiesce_unwritable")
+                .to_string(),
+        );
         state.detail = Some(reason.clone());
         // A blocked admission is an integrity failure: the bulk bytes never
         // entered the store, so the session must not advance (issue #106).
@@ -685,7 +837,17 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
     let record = match ingest_bulk(state, tool, result.as_bytes()) {
         Ok(record) => record,
         Err(reason) => {
-            state.quiesce = Some("quiesce_unwritable".to_string());
+            // The store-write paths below keep the unwritable spelling; this
+            // branch is where a rate quiesce lands, so it carries the rate
+            // spelling when the policy recorded one and the unwritable
+            // spelling otherwise (the ingress transaction failed).
+            state.quiesce = Some(
+                state
+                    .policy
+                    .terminal_outcome()
+                    .unwrap_or("quiesce_unwritable")
+                    .to_string(),
+            );
             state.detail = Some(reason);
             memory_digest(state, tool, result.as_bytes())
         }
@@ -744,6 +906,11 @@ pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState
         rules: state.filters.rules_history(),
         vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
+        terminal_fit_saturated: state.policy.terminal_fit_saturated(),
+        terminal_fit_available: state
+            .policy
+            .terminal_fit_room()
+            .or_else(|| Some(wrap_up_available(state))),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {
@@ -772,6 +939,11 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
         rules: state.filters.rules_history(),
         vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
+        terminal_fit_saturated: state.policy.terminal_fit_saturated(),
+        terminal_fit_available: state
+            .policy
+            .terminal_fit_room()
+            .or_else(|| Some(wrap_up_available(state))),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {

@@ -505,7 +505,7 @@ fn cache_acceptance_report_reads_durable_conditional_telemetry() {
     fs::write(
         dir.join("context/rewrite-journal.log"),
         concat!(
-            "{\"invalidation_cost\":null,\"tokens_reclaimed\":100}\n",
+            "{\"invalidation_cost\":null,\"bytes_reclaimed\":100}\n",
             "{\"report\":{\"armed_hit_rate\":0.5,\"armed_rewrites\":1,",
             "\"disarmed_hit_rate\":null,\"disarmed_rewrites\":0,\"hit_rate\":0.5,",
             "\"invalidation_cost_per_event\":null,\"known_invalidation_cost_events\":0,",
@@ -517,8 +517,8 @@ fn cache_acceptance_report_reads_durable_conditional_telemetry() {
     .unwrap();
     let cache = report::cache_block_from_session(Some(&dir));
     assert_eq!(cache["class"], "measured");
-    assert_eq!(cache["rewrite_journal_tokens_reclaimed"], 100);
-    assert!(cache["rewrite_journal_tokens_invalidated"].is_null());
+    assert_eq!(cache["rewrite_journal_bytes_reclaimed"], 100);
+    assert!(cache["rewrite_journal_bytes_invalidated"].is_null());
     assert!(cache["prefix_invalidation_cost_per_rewrite"].is_null());
     assert_eq!(cache["conditional"]["armed_hit_rate"], 0.5);
     assert_eq!(cache["suspended_while_armed"], true);

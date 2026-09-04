@@ -228,7 +228,7 @@ fn legality_enforces_the_quoting_convention() {
 }
 
 #[test]
-fn legality_table_covers_all_seven_predicates() {
+fn legality_table_covers_all_predicates() {
     let names: Vec<&str> = crate::context_kernel::legality::rules()
         .iter()
         .map(|rule| rule.name)
@@ -240,6 +240,7 @@ fn legality_table_covers_all_seven_predicates() {
             "ordering",
             "placeholder-illegal",
             "region-over-budget",
+            "profile-over-budget",
             "floor",
             "pin",
             "quoting-convention",

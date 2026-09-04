@@ -105,7 +105,7 @@ fn journal_lines(state: &ContextState) -> String {
     for entry in state.policy.journal().entries() {
         let line = serde_json::json!({
             "source": entry.source,
-            "tokens_reclaimed": entry.tokens_reclaimed,
+            "bytes_reclaimed": entry.bytes_reclaimed,
             "invalidation_cost": entry.invalidation_cost,
             "logical_time": entry.logical_time,
             "wall_elapsed_us": entry.wall_elapsed_us,
@@ -151,6 +151,11 @@ fn write_context_manifest(
         rules: state.filters.rules_history(),
         vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
+        terminal_fit_saturated: state.policy.terminal_fit_saturated(),
+        terminal_fit_available: state
+            .policy
+            .terminal_fit_room()
+            .or_else(|| Some(crate::session::context_persist::wrap_up_available(state))),
         preserved: &state.preserved,
     };
     let bytes = serde_json::to_vec(&manifest)
@@ -219,6 +224,50 @@ mod tests {
             written.next().is_some(),
             "the current line follows the recovered ones"
         );
+    }
+
+    /// F7: the persisted record distinguishes a feasible wrap-up from a
+    /// write-free quiesce. The saturation fields ride the manifest both ways:
+    /// the publication encodes them, and the reload type restores them, so a
+    /// restarted session can tell the two terminals apart.
+    #[test]
+    fn the_persisted_record_carries_terminal_fit_saturation() {
+        use crate::session::context_persist::PersistedManifest;
+        let borrowed = ContextManifest {
+            mode: "read-write",
+            quiesce: None,
+            detail: None,
+            rules: &[],
+            vocabularies: Vec::new(),
+            terminal_outcome: Some("wrap_up"),
+            terminal_fit_saturated: Some(false),
+            terminal_fit_available: Some(1 << 20),
+            preserved: &[],
+        };
+        let bytes = serde_json::to_vec(&borrowed).expect("the manifest encodes");
+        let reloaded: PersistedManifest =
+            serde_json::from_slice(&bytes).expect("the manifest reloads");
+        assert_eq!(reloaded.terminal_outcome.as_deref(), Some("wrap_up"));
+        assert_eq!(reloaded.terminal_fit_saturated, Some(false));
+        assert_eq!(reloaded.terminal_fit_available, Some(1 << 20));
+        // The saturated refusal carries the opposite spelling with the room it
+        // was refused against, so the two terminals never read the same.
+        let saturated = ContextManifest {
+            mode: "read-write",
+            quiesce: Some("quiesce_unwritable"),
+            detail: None,
+            rules: &[],
+            vocabularies: Vec::new(),
+            terminal_outcome: Some("quiesce_unwritable"),
+            terminal_fit_saturated: Some(true),
+            terminal_fit_available: Some(0),
+            preserved: &[],
+        };
+        let bytes = serde_json::to_vec(&saturated).expect("the manifest encodes");
+        let reloaded: PersistedManifest =
+            serde_json::from_slice(&bytes).expect("the manifest reloads");
+        assert_eq!(reloaded.terminal_fit_saturated, Some(true));
+        assert_eq!(reloaded.terminal_fit_available, Some(0));
     }
 
     fn test_key() -> crate::context_store::vault::VaultKey {
