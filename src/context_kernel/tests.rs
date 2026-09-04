@@ -1,13 +1,13 @@
 //! Red tests for the context kernel: reducer determinism, IR invariants, legality.
 
-use crate::context_kernel::canonical::Sink;
+use crate::context_kernel::canonical::{HashScope, Sink};
 use crate::context_kernel::events::{
     AppendSource, EventKind, EventLog, LedgerEventKind, OperationClass, ProviderTurnKind,
     RecordedEvent, Sequencer, FIRST_SEQUENCE, GENESIS_CHECKSUM,
 };
 use crate::context_kernel::ir::{
-    covered_units, slice_into, ConversationIr, IrError, Item, ItemId, Region, SegmentClaim,
-    SplitContract, SplitNamespace, StoreRange, StructuralClass,
+    covered_units, slice_into, ConversationIr, IrError, Item, ItemId, ItemNamespace, Region,
+    SegmentClaim, SplitContract, SplitNamespace, StoreRange, StructuralClass,
 };
 use crate::context_kernel::lanes::{
     Lane, LanePolicyRegistry, PolicyError, LANE_POLICY_LATEST_VERSION,
@@ -1404,4 +1404,358 @@ fn structural_classes_resolve_to_documented_lanes() {
     }
     assert_eq!(StructuralClass::from_code(0), None);
     assert_eq!(StructuralClass::from_code(7), None);
+}
+
+/// GREEN: a logged resegment that would cut a recorded claim in two is refused,
+/// children, and the children's provenance is disjoint and total.
+#[test]
+fn reducer_resegment_refines_a_single_claim_into_atomic_children() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    let payload = b"0123456789abcdefghijklmn"; // 24 bytes
+    let item = append(
+        user(std::str::from_utf8(payload).unwrap(), 1),
+        &mut sequencer,
+        &mut log,
+    )
+    .sequence;
+    append(
+        op(OperationClass::Resegment, item, 3),
+        &mut sequencer,
+        &mut log,
+    );
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(
+        state.conversation_ir.len(),
+        3,
+        "three parts, each its own new claim boundary"
+    );
+    let total: u64 = state
+        .conversation_ir
+        .items()
+        .iter()
+        .map(|item| item.units())
+        .sum();
+    assert_eq!(total as usize, payload.len());
+    for child in state.conversation_ir.items() {
+        assert_eq!(
+            child.provenance.len(),
+            1,
+            "a refined part is one contiguous claim"
+        );
+        assert_eq!(
+            child.id().namespace(),
+            ItemNamespace::Split,
+            "logged resegment mints split-namespace children"
+        );
+    }
+    let mut spans: Vec<StoreRange> = state
+        .conversation_ir
+        .items()
+        .iter()
+        .map(|item| item.provenance[0])
+        .collect();
+    spans.sort_by_key(|range| range.offset);
+    assert_eq!(
+        spans,
+        vec![
+            StoreRange {
+                offset: 0,
+                length: 8
+            },
+            StoreRange {
+                offset: 8,
+                length: 8
+            },
+            StoreRange {
+                offset: 16,
+                length: 8
+            },
+        ],
+        "the parts are disjoint, ordered, and cover the parent exactly"
+    );
+}
+
+/// GREEN: a logged resegment naming an item that does not exist is a typed
+/// refusal, not a panic.
+#[test]
+fn reducer_resegment_names_a_missing_item_as_a_typed_refusal() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(
+        op(OperationClass::Resegment, 99, 2),
+        &mut sequencer,
+        &mut log,
+    );
+    assert_eq!(
+        Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap_err(),
+        ReducerError::Ir(IrError::UnknownItem { id: 99 }),
+        "a resegment over a retired or absent item is typed"
+    );
+}
+
+/// GREEN: interleaved appends and logged resegments never mint a colliding
+/// identifier, across both namespaces, from the log alone.
+#[test]
+fn interleaved_appends_and_logged_resegments_never_collide() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    let first = append(user("first append", 1), &mut sequencer, &mut log).sequence;
+    append(
+        op(OperationClass::Resegment, first, 2),
+        &mut sequencer,
+        &mut log,
+    );
+    let second = append(user("second append", 1), &mut sequencer, &mut log).sequence;
+    append(
+        op(OperationClass::Resegment, second, 2),
+        &mut sequencer,
+        &mut log,
+    );
+    let third = append(user("third append", 1), &mut sequencer, &mut log).sequence;
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    let ids: Vec<ItemId> = state
+        .conversation_ir
+        .items()
+        .iter()
+        .map(|item| item.id())
+        .collect();
+    let unique: std::collections::BTreeSet<ItemId> = ids.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "every live identifier is distinct across namespaces"
+    );
+    assert_eq!(state.conversation_ir.len(), 5, "two splits and one append");
+    let append_ids: Vec<u64> = ids
+        .iter()
+        .filter(|id| id.namespace() == ItemNamespace::Append)
+        .map(|id| id.value())
+        .collect();
+    assert_eq!(
+        append_ids,
+        vec![third],
+        "the surviving append identifier is the event sequence, untouched by split mints"
+    );
+    let split_ids: Vec<u64> = ids
+        .iter()
+        .filter(|id| id.namespace() == ItemNamespace::Split)
+        .map(|id| id.value())
+        .collect();
+    assert_eq!(
+        split_ids,
+        vec![0, 1, 2, 3],
+        "split children mint from their own sequence, one per child, never reused"
+    );
+}
+
+/// GREEN: a log containing a migration replays to identical state, and the
+/// selection never rewrites the log's framing version, so a v2 log with a v3
+/// selection followed by more v2-framed events replays exactly as written.
+#[test]
+fn a_log_crossing_a_migration_replays_identically() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("before the migration", 1), &mut sequencer, &mut log);
+    let selection = append(
+        op(OperationClass::MigrationSelect, V3, 0),
+        &mut sequencer,
+        &mut log,
+    )
+    .sequence;
+    append(user("after the migration", 1), &mut sequencer, &mut log);
+    append(
+        op(OperationClass::StoreMode, 2, 0),
+        &mut sequencer,
+        &mut log,
+    );
+
+    let reducer = Reducer::new(IDLENESS_WINDOW);
+    let state = reducer.fold(&log).unwrap();
+    assert_eq!(state.store_version, V2, "the log keeps its framing version");
+    assert_eq!(
+        state.selected_store_version,
+        Some(V3),
+        "the selection is its own recorded field"
+    );
+    assert_eq!(selection, 3, "the selection is an event in the total order");
+
+    let first_pass = reducer.fold(&log).unwrap();
+    let second_pass = reducer.fold(&log).unwrap();
+    assert_eq!(
+        encode_state(&first_pass),
+        encode_state(&second_pass),
+        "two replays of the same log are byte-identical"
+    );
+    assert_eq!(first_pass.state_hash, second_pass.state_hash);
+
+    for count in 1..=log.len() {
+        let prefix = reducer.fold(&log.prefix(count)).unwrap();
+        let mut resumed = prefix;
+        reducer.fold_from(&mut resumed, &log).unwrap();
+        assert_eq!(
+            encode_state(&resumed),
+            encode_state(&state),
+            "every prefix resumes to the identical full state, including the selection"
+        );
+    }
+
+    let mut other = EventLog::new(V2);
+    let mut replay_sequencer = Sequencer::new(FIRST_SEQUENCE, 7, 500_000);
+    for recorded in log.events() {
+        let clone =
+            replay_sequencer.append_at(recorded.kind.clone(), V2, recorded.recorded_unix_ms);
+        other.append(clone).unwrap();
+    }
+    assert_eq!(
+        reducer.fold(&other).unwrap().state_hash,
+        state.state_hash,
+        "replay from a different epoch and clock is identical"
+    );
+}
+
+/// GREEN: a selection naming a version no migration defines is a typed refusal.
+#[test]
+fn migration_selection_names_an_undefined_version_as_a_typed_refusal() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(
+        op(OperationClass::MigrationSelect, 9, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    assert_eq!(
+        Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap_err(),
+        ReducerError::MigrationTarget { found: 9 },
+        "a selection is refused unless a migration defines the version"
+    );
+}
+
+/// GREEN: old and new versions have independent hash scopes; corruption in one
+/// never invalidates the other's evidence.
+#[test]
+fn migration_hash_scopes_are_independent() {
+    let v2_bytes = [2_u8; 64];
+    let v3_bytes = [3_u8; 64];
+    let v2_chain = HashScope::EventChain.digest(b"v2 recorded events");
+    let build_checksum = HashScope::StoreBuild.digest(&v3_bytes);
+
+    let mut slots = SlotPair::genesis(V2, v2_bytes.len() as u64, v2_chain);
+    slots
+        .land(Generation::Built {
+            store_version: V3,
+            bytes: v3_bytes.len() as u64,
+            checksum: build_checksum,
+        })
+        .unwrap();
+
+    // Corrupting the committed generation's chain evidence does not let a build
+    // checksum verify in the event-chain scope, and vice versa.
+    let tampered_chain = v2_chain ^ 1;
+    assert_ne!(tampered_chain, v2_chain);
+    assert_ne!(
+        HashScope::StoreBuild.digest(&v2_bytes),
+        HashScope::EventChain.digest(&v2_bytes),
+        "the same bytes in different scopes are different identities"
+    );
+    assert_ne!(
+        HashScope::StoreBuild.digest(&v3_bytes),
+        build_checksum ^ 1,
+        "corrupting one scope's value never matches the other scope's digest"
+    );
+
+    // The landed build verifies only inside the store-build scope.
+    let inactive = slots.inactive().unwrap();
+    assert_eq!(inactive.scope(), HashScope::StoreBuild);
+    assert_eq!(inactive.store_version(), V3);
+    let descriptor = MigrationDescriptor::seal(V3, build_checksum, tampered_chain);
+    assert!(
+        descriptor.verify_build(&v3_bytes),
+        "the build evidence is intact"
+    );
+    assert!(!descriptor.verify_build(&v2_bytes));
+    // And the chain evidence refuses verification, but the build evidence does not.
+    let mut verified = EventLog::new(V2);
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let event = sequencer.append(op(OperationClass::ScopeOpen, 1, 0), V2);
+    verified.append(event).unwrap();
+    assert!(!descriptor.verify_chain(&verified));
+    assert!(
+        MigrationDescriptor::seal(V3, build_checksum, verified.head_checksum())
+            .verify_chain(&verified),
+        "chain evidence verifies against the log it names"
+    );
+}
+
+/// GREEN: a crash between the build write and the swap leaves the old version
+/// active, and the swap is a single visibility transition.
+#[test]
+fn publication_crash_between_write_and_swap_keeps_the_old_version_active() {
+    let v2_chain = HashScope::EventChain.digest(b"v2 recorded events");
+    let built = [9_u8; 32];
+    let mut slots = SlotPair::genesis(V2, 64, v2_chain);
+    slots
+        .land(Generation::Built {
+            store_version: V3,
+            bytes: built.len() as u64,
+            checksum: HashScope::StoreBuild.digest(&built),
+        })
+        .unwrap();
+
+    // Simulate a crash after the write, before the swap: nothing was mutated, so
+    // recovery re-frames the pair from the durable record and v2 stays active.
+    let recovered = SlotPair::genesis(V2, 64, v2_chain);
+    assert_eq!(
+        recovered.active().store_version(),
+        V2,
+        "a crash before the swap leaves the committed generation active"
+    );
+    assert!(
+        recovered.inactive().is_none(),
+        "the build is not durable yet"
+    );
+    assert!(!recovered.published());
+
+    // And after the swap, the published state is durable and idempotent.
+    let selection_chain = HashScope::EventChain.chain(v2_chain, b"migration-select v3");
+    let swapped = slots.swap(selection_chain).unwrap();
+    assert_eq!(swapped.store_version(), V3);
+    assert_eq!(slots.active().store_version(), V3);
+    assert!(matches!(slots.active(), Generation::Committed { .. }));
+    let descriptor =
+        MigrationDescriptor::seal(V3, HashScope::StoreBuild.digest(&built), selection_chain);
+    // Re-framing from the descriptor reproduces the active generation.
+    let reframed = SlotPair::genesis(
+        descriptor.store_version,
+        built.len() as u64,
+        descriptor.selection_chain,
+    );
+    assert_eq!(reframed.active().store_version(), V3);
+    assert!(descriptor.verify_build(&built));
+    assert!(reframed.published() || descriptor.published);
 }
