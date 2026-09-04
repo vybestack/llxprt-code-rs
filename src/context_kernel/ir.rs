@@ -398,9 +398,14 @@ fn collapsible(item: &Item) -> bool {
 }
 
 impl Item {
-    /// Builds an appended item over `provenance`, placed in the body region.
+    /// Builds an item over `provenance` that keeps its bytes but sits out of every
+    /// region. Placement is not implied by construction: a constructor that placed
+    /// an item would invent a placement no logged event recorded, which is the
+    /// same defect class the hash scopes forbid. A logged `Place` operation is the
+    /// only way an item enters a region, so region budget accounting and ordering
+    /// only ever reflect recorded events.
     pub fn new(id: ItemId, lane: Lane, provenance: Vec<StoreRange>, scope: ScopeId) -> Self {
-        Self::with_placement(id, lane, provenance, scope, Placement::Placed(Region::Body))
+        Self::with_placement(id, lane, provenance, scope, Placement::StoreOnly)
     }
 
     /// Builds an item whose placement state is given, not implied.
@@ -789,7 +794,9 @@ impl ConversationIr {
 
     /// Splits an item into claim-atomic children under `contract`. The contract
     /// carries the namespace the children mint from, the expected part count, and
-    /// the per-part range counts; a split that does not satisfy it is refused.
+    /// the per-part range counts; a split that does not satisfy it is refused. Every
+    /// child inherits the parent's placement state, so the split changes neither
+    /// which region is charged nor whether the bytes are charged at all.
     pub fn split(
         &mut self,
         id: ItemId,
@@ -828,13 +835,17 @@ impl ConversationIr {
                 return Err(IrError::ClaimBoundary { id: id.value() });
             }
         }
-        let region = parent.region();
+        let placement = parent.placement();
         let lane = parent.lane;
         let scope = parent.scope;
         self.remove(id);
         let mut children: Vec<ItemId> = Vec::new();
         for part in parts {
-            let child = Item::new(self.reserve_split_id(), lane, part, scope);
+            // Children inherit the parent's placement state: a resegment never
+            // invents a placement, so a parent in Head keeps its children in Head
+            // (with the partition, the item field, and the occupancy charge all
+            // agreeing) and a store-only parent keeps its children store-only.
+            let child = Item::with_placement(self.reserve_split_id(), lane, part, scope, placement);
             if self.items.iter().any(|existing| existing.id == child.id()) {
                 return Err(IrError::DuplicateItem {
                     id: child.id().value(),
@@ -843,8 +854,8 @@ impl ConversationIr {
             children.push(child.id());
             self.items.push(child);
         }
-        if let Some(target) = region {
-            for child in &children {
+        for child in &children {
+            if let Some(target) = placement.region() {
                 self.attach(*child, target);
             }
         }

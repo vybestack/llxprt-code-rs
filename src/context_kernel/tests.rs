@@ -1455,6 +1455,168 @@ fn segmented_appends_followed_by_other_appends_never_collide() {
     assert_eq!(units, 24 + 13 + 12 + 16);
 }
 
+/// GREEN: an item enters a region only through a logged Place event. The append
+/// constructor places nothing, so a bare append leaves every region empty and
+/// occupancy unchanged: a constructor that placed an item would invent a
+/// placement no event recorded and silently spend a region's budget.
+#[test]
+fn a_bare_append_places_nothing_and_a_place_event_places_it() {
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("a plain task statement", 1), &mut sequencer, &mut log);
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    for region in Region::all() {
+        assert!(
+            state.conversation_ir.region_items(region).is_empty(),
+            "no region holds an item an append placed by construction"
+        );
+        assert_eq!(
+            state.conversation_ir.region_occupancy(region),
+            0,
+            "no region is charged for an unplaced append"
+        );
+    }
+    assert!(state.conversation_ir.placed_ids().is_empty());
+    assert!(
+        state.conversation_ir.items()[0].is_store_only(),
+        "a fresh append keeps its bytes out of every region"
+    );
+    assert_eq!(state.conversation_ir.items()[0].units(), 22);
+
+    // A logged Place is the only way in, and it is a recorded event.
+    let mut continuing_log = log.clone();
+    let mut resumed = Sequencer::continuing(&log, 1, 2_000);
+    append(
+        op(OperationClass::Place, 0, Region::Head.rank()),
+        &mut resumed,
+        &mut continuing_log,
+    );
+    let moved = Reducer::new(IDLENESS_WINDOW).fold(&continuing_log).unwrap();
+    assert_eq!(
+        moved.conversation_ir.region_items(Region::Head),
+        vec![ItemId::append(0)],
+        "the logged Place event moves the item into the head region"
+    );
+    assert_eq!(
+        moved.conversation_ir.region_occupancy(Region::Head),
+        22,
+        "the region is charged exactly once, for the recorded event"
+    );
+    assert_eq!(moved.conversation_ir.region_items(Region::Body).len(), 0);
+    assert_eq!(moved.applied_len(), 3, "the placement is a recorded event");
+}
+
+/// GREEN: split children inherit the parent's placement, so a parent in the head
+/// region keeps its children there: the item field, the region partition, and the
+/// occupancy charge all agree, and no other region gains an item.
+#[test]
+fn split_children_inherit_the_parents_region() {
+    let mut ir = ConversationIr::new();
+    let id = ir.reserve_append_id();
+    ir.insert(Item::new(
+        id,
+        Lane::Constitutional,
+        vec![StoreRange {
+            offset: 0,
+            length: 8,
+        }],
+        1,
+    ))
+    .unwrap();
+    // The parent enters the head region through the placement transition.
+    ir.place(id, Region::Head).unwrap();
+    let children = ir
+        .split(
+            id,
+            vec![
+                vec![StoreRange {
+                    offset: 0,
+                    length: 4,
+                }],
+                vec![StoreRange {
+                    offset: 4,
+                    length: 4,
+                }],
+            ],
+            &SplitContract {
+                namespace: SplitNamespace::Fresh,
+                parts: 2,
+                split_points: vec![1, 1],
+            },
+        )
+        .unwrap();
+    assert_eq!(children.len(), 2);
+    for child in &children {
+        assert_eq!(
+            ir.item(*child).unwrap().region(),
+            Some(Region::Head),
+            "each child carries the parent's placement in its own field"
+        );
+    }
+    let mut head = ir.region_items(Region::Head);
+    head.sort();
+    let mut expected = children.clone();
+    expected.sort();
+    assert_eq!(head, expected, "the head partition holds the children");
+    assert!(
+        ir.region_items(Region::Body).is_empty(),
+        "the split moved nothing into another region"
+    );
+    assert!(ir.region_items(Region::Notes).is_empty() && ir.region_items(Region::Tail).is_empty());
+    assert_eq!(
+        ir.region_occupancy(Region::Head),
+        8,
+        "occupancy is charged once, to the region the parent sat in"
+    );
+
+    // A store-only parent keeps its children store-only: no placement is invented.
+    let mut other = ConversationIr::new();
+    let parent = other.reserve_append_id();
+    other
+        .insert(Item::new(
+            parent,
+            Lane::Evidential,
+            vec![StoreRange {
+                offset: 0,
+                length: 6,
+            }],
+            1,
+        ))
+        .unwrap();
+    let inherited = other
+        .split(
+            parent,
+            vec![
+                vec![StoreRange {
+                    offset: 0,
+                    length: 3,
+                }],
+                vec![StoreRange {
+                    offset: 3,
+                    length: 3,
+                }],
+            ],
+            &SplitContract {
+                namespace: SplitNamespace::Fresh,
+                parts: 2,
+                split_points: vec![1, 1],
+            },
+        )
+        .unwrap();
+    for child in &inherited {
+        assert!(
+            other.item(*child).unwrap().is_store_only(),
+            "a store-only parent leaves its children store-only"
+        );
+    }
+    assert_eq!(other.placed_ids().len(), 0);
+}
+
 /// GREEN: a fold that refuses one claim of an append leaves the state untouched:
 /// no item of that append lands, not even the claims that minted cleanly. The
 /// refused append is one whose second claim cannot become an item, so the refusal
