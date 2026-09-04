@@ -153,6 +153,7 @@ impl SessionState {
     }
 }
 
+pub(crate) mod context_persist;
 mod log;
 mod replay;
 mod reserve;
@@ -270,7 +271,7 @@ pub struct SessionStore {
     lock: Mutex<()>,
     cache: Mutex<Option<snapshot::LoadedStore>>,
     operation_metrics: Mutex<StoreMetrics>,
-    pub(crate) context: Mutex<Option<crate::context_persist::ContextState>>,
+    pub(crate) context: Mutex<Option<context_persist::ContextState>>,
 }
 
 fn now_secs() -> u64 {
@@ -851,7 +852,7 @@ impl SessionStore {
             // appended: the event is what makes completion observable to a
             // later process, so it must not be able to fire for state the
             // context store never accepted (106).
-            crate::context_persist::finalize_context(self)?;
+            context_persist::finalize_context(self)?;
             self.append_event(log::Event::BranchCompleted {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
@@ -901,12 +902,12 @@ impl SessionStore {
     /// Digests bulk tool results and persists the phase-2 context artifacts,
     /// returning the transcript the session log should store.
     fn context_exchange(&self, rounds: &[RoundRecord]) -> Result<Vec<RoundRecord>, StoreError> {
-        crate::context_persist::context_exchange(self, rounds)
+        context_persist::context_exchange(self, rounds)
     }
 
     /// Compacts one tool result before it is recorded into the round.
     pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
-        crate::context_persist::compact_tool_result(self, tool, result)
+        context_persist::compact_tool_result(self, tool, result)
     }
 
     fn live_branch<'a>(

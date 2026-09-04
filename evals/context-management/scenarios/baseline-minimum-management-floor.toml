@@ -2,7 +2,7 @@ schema_version = 1
 id = "baseline-minimum-management-floor"
 owner_phase = 4
 arm = "minimum-floor"
-expected_status = "green"
+expected_status = "red"
 # Phase 0: the floor does not exist yet, so this arm walls exactly like the
 # status-quo baseline. It may only turn green when Phase 4 supplies quotas, handle
 # admission, the store, and deterministic read-back.
@@ -28,3 +28,7 @@ fixture = "tool-output-block.txt"
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
 required_context_artifacts = ["context/rewrite-journal.log"]
 required_outcomes = ["wrap_up"]
+
+[runtime]
+name = "minimum-floor-overrides"
+context_limit = 4000

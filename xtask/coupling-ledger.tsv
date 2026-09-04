@@ -6,7 +6,5 @@ profile	model_api	73
 session	agent	70
 session	model_api	71
 tools	agent	70
-context_kernel	context_store	86
-context_publish	context_persist	147
-context_recover	context_persist	147
-session	context_persist	86
+session	context_publish	86
+session	context_recover	86

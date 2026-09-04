@@ -2,9 +2,9 @@ schema_version = 1
 id = "terminal-reserve-wrap-up"
 owner_phase = 4
 arm = "feature"
-expected_status = "green"
-expected_reason_class = "missing-evidence"
-accept_any_reason = true
+expected_status = "red"
+expected_reason_class = "context-limit"
+accept_any_reason = false
 
 [profile]
 name = "ctxeval-loopback"
@@ -25,3 +25,7 @@ fixture = "tool-output-block.txt"
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
 required_context_artifacts = ["context/checkpoints", "context/events.log"]
 required_outcomes = ["wrap_up"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

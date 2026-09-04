@@ -338,3 +338,212 @@ fn phase2_operation_rows_are_named_and_complete() {
     assert!(!StoreOperation::QuiesceUnwritable.advances_state());
     assert!(StoreOperation::AdmitIngress.advances_state());
 }
+
+#[test]
+fn phase2_rows_carry_the_registry_names_in_order() {
+    use crate::context_kernel::events::OperationClass;
+
+    fn kernel_row(row: StoreOperation) -> OperationClass {
+        match row {
+            StoreOperation::AdmitIngress => OperationClass::AdmitIngress,
+            StoreOperation::Sanitize => OperationClass::Sanitize,
+            StoreOperation::Redact => OperationClass::Redact,
+            StoreOperation::Import => OperationClass::Import,
+            StoreOperation::RuleUpdate => OperationClass::RuleUpdate,
+            StoreOperation::VocabularyUpdate => OperationClass::VocabularyUpdate,
+            StoreOperation::IndexRebuild => OperationClass::IndexRebuild,
+            StoreOperation::StoreMode => OperationClass::StoreMode,
+            StoreOperation::QuiesceUnwritable => OperationClass::QuiesceUnwritable,
+        }
+    }
+
+    let rows = StoreOperation::all();
+    let named: Vec<&'static str> = rows.iter().map(|row| kernel_row(*row).name()).collect();
+    assert_eq!(
+        named,
+        vec![
+            "admit-ingress",
+            "sanitize",
+            "redact",
+            "import",
+            "rule-update",
+            "vocabulary-update",
+            "index-rebuild",
+            "store-mode",
+            "quiesce-unwritable",
+        ]
+    );
+}
+
+// ===========================================================================
+// Migration flow tests (moved from src/context_kernel/tests/migration.rs when the
+// context_kernel -> context_store edge was removed; these exercise the store + kernel
+// migration machinery together, so they live on the store side where the kernel is the
+// dependency).
+// ===========================================================================
+
+use crate::context_kernel::events::{
+    AppendSource, EventKind, EventLog, OperationClass, RecordedEvent, Sequencer, FIRST_SEQUENCE,
+};
+use crate::context_kernel::ir::StoreRange;
+use crate::context_kernel::migration::{
+    decide, Generation, MigrationDescriptor, MigrationPlan, PrivateBuild, Publication, SlotPair,
+    V2, V3,
+};
+use crate::context_kernel::reducer::{Reducer, IDLENESS_WINDOW};
+
+fn append(kind: EventKind, sequencer: &mut Sequencer, log: &mut EventLog) -> RecordedEvent {
+    let event = sequencer.append(kind, log.store_version());
+    let expected = log.len() as u64 + FIRST_SEQUENCE;
+    assert_eq!(
+        event.sequence, expected,
+        "fixture continues the total order"
+    );
+    log.append(event.clone()).unwrap();
+    event
+}
+
+fn user(text: &str, scope: u64) -> EventKind {
+    EventKind::Append {
+        source: AppendSource::User,
+        sanitized: text.as_bytes().to_vec(),
+        scope,
+        claims: Vec::new(),
+    }
+}
+
+fn op(class: OperationClass, subject: u64, argument: u64) -> EventKind {
+    EventKind::OperationCommit {
+        class,
+        subject,
+        argument,
+    }
+}
+
+/// The v2 side of the migration flow: a live store with two records, and the plan
+/// that names the spine ranges the private build copies. Returns the store's spine
+/// bytes, the log the migration is recorded in, and the sequencer that continues it.
+fn v2_store_for_the_flow() -> (Vec<u8>, EventLog, Sequencer) {
+    let mut raw = [0u8; 32];
+    for (index, byte) in raw.iter_mut().enumerate() {
+        *byte = index as u8;
+    }
+    let key = VaultKey::from(raw);
+    let mut v2_store = ContextStore::open(&key);
+    v2_store
+        .sanitized_append(Some("v2-record-a"), &[1_u8; 16])
+        .unwrap();
+    v2_store
+        .sanitized_append(Some("v2-record-b"), &[2_u8; 16])
+        .unwrap();
+    let v2_bytes = v2_store.spine_bytes();
+
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("before", 1), &mut sequencer, &mut log);
+    assert_eq!(decide(&log).store_version(), V2, "nothing selected yet");
+    (v2_bytes, log, sequencer)
+}
+
+/// The completed private build that copied the plan's ranges out of the v2 spine:
+/// the build itself, its copied bytes, and the publication it frames.
+fn built_publication_for_the_flow(
+    v2_bytes: &[u8],
+    log: &EventLog,
+) -> (PrivateBuild, Vec<u8>, Publication) {
+    let plan = MigrationPlan::from(
+        V3,
+        vec![
+            StoreRange {
+                offset: 0,
+                length: 16,
+            },
+            StoreRange {
+                offset: 16,
+                length: 16,
+            },
+        ],
+        log.head_checksum(),
+    );
+    assert_eq!(plan.units(), 32);
+    let mut build = PrivateBuild::start(plan);
+    assert!(
+        Publication::of(&build).is_none(),
+        "an incomplete build never publishes"
+    );
+
+    // Copy the plan's bytes into the private build.
+    let mut copied: Vec<u8> = Vec::new();
+    for range in &build.plan.ranges {
+        copied.extend_from_slice(&v2_bytes[range.offset as usize..range.end() as usize]);
+    }
+    build.complete_with(&copied);
+    let publication = Publication::of(&build).unwrap();
+    (build, copied, publication)
+}
+
+/// GREEN: the private build copies the plan's ranges out of the live v2 store, and
+/// the publication it frames verifies only inside the store-build hash scope.
+#[test]
+fn the_private_build_copies_the_plan_in_the_store_build_scope() {
+    let (v2_bytes, log, _sequencer) = v2_store_for_the_flow();
+    let (_build, copied, publication) = built_publication_for_the_flow(&v2_bytes, &log);
+    assert_eq!(publication.store_version, V3);
+    assert!(
+        publication.verify_build(&copied),
+        "the build checksum is scoped"
+    );
+    assert!(!publication.verify_build(&v2_bytes), "the scopes never mix");
+}
+
+/// GREEN: the build lands in the inactive slot while the readers still resolve v2,
+/// the recorded selection switches the crash-matrix decision, and the swap makes
+/// v3 the visible generation — verified against both hash scopes.
+#[test]
+fn the_flow_lands_swaps_and_verifies_in_its_scopes() {
+    let (v2_bytes, mut log, mut sequencer) = v2_store_for_the_flow();
+    let (_build, copied, publication) = built_publication_for_the_flow(&v2_bytes, &log);
+
+    let mut slots = SlotPair::genesis(V2, v2_bytes.len() as u64, log.head_checksum());
+    slots
+        .land(Generation::Built {
+            store_version: V3,
+            bytes: copied.len() as u64,
+            checksum: publication.built_checksum,
+        })
+        .unwrap();
+    assert_eq!(slots.active().store_version(), V2, "landing is invisible");
+
+    // Record the selection, then swap.
+    append(
+        op(OperationClass::MigrationSelect, V3, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    assert_eq!(
+        decide(&log).store_version(),
+        V3,
+        "the recorded selection switches the crash-matrix decision"
+    );
+    let descriptor = MigrationDescriptor::seal(V3, publication.built_checksum, log.head_checksum());
+    assert_eq!(
+        slots
+            .swap(descriptor.selection_chain)
+            .unwrap()
+            .store_version(),
+        V3,
+        "the swap is the visibility switch"
+    );
+    assert!(descriptor.verify_build(&copied));
+    assert!(descriptor.verify_chain(&log));
+
+    // And the log still replays to identical state, framing version intact.
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(state.store_version, V2);
+    assert_eq!(state.selected_store_version, Some(V3));
+}

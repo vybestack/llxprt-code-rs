@@ -1,11 +1,11 @@
-//! Durable-context recovery and publication: the reload half of
-//! [`crate::context_persist`]. Pure moves from `context_persist.rs`; the
+//! Durable-context recovery and publication: the reload half of the session
+//! store's context persistence submodule. Pure moves from that submodule; the
 //! recovery seams (`SessionStore` -> live ContextState) keep their call
 //! sites in `session.rs`.
 
 use std::path::Path;
 
-use crate::context_persist::{
+use crate::session::context_persist::{
     context_dir, ensure_vault_key, new_context_state, ContextState, PersistedManifest,
     CHECKPOINT_RELOAD_MAX, EVENTS_RELOAD_MAX, JOURNAL_RELOAD_MAX, MANIFEST_RELOAD_MAX,
     SPINE_RELOAD_MAX, VAULT_RELOAD_MAX,

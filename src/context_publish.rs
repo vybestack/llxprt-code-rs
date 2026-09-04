@@ -1,11 +1,13 @@
-//! Durable-context publication: the write half of [`crate::context_persist`].
-//! Pure moves from `context_persist.rs`; the session store keeps one-line
-//! wrappers at the old call sites.
+//! Durable-context publication: the write half of the session store's context
+//! persistence submodule. Pure moves from that submodule; the session store
+//! keeps one-line wrappers at the old call sites.
 
 use std::path::Path;
 
-use crate::context_persist::{context_dir, ContextManifest, ContextState, DurableCheckpoint};
 use crate::context_recover::write_artifact;
+use crate::session::context_persist::{
+    context_dir, ContextManifest, ContextState, DurableCheckpoint,
+};
 use crate::session::SessionStore;
 
 /// Writes the sanitized spine, the vault snapshot, and the manifest under `context/`.
@@ -166,7 +168,7 @@ mod tests {
     /// read back on the next load as "no policy decisions occurred".
     #[test]
     fn policy_event_encoding_failures_are_propagated() {
-        let state = crate::context_persist::new_context_state(test_key());
+        let state = crate::session::context_persist::new_context_state(test_key());
         // The happy path still encodes: an empty event log is legitimately
         // empty here, and the caller's Ok proves the propagation is not a
         // blanket refusal.
@@ -186,7 +188,7 @@ mod tests {
     /// successful publication (final-review finding).
     #[test]
     fn checkpoint_lines_stamps_and_propagates_the_current_line() {
-        let mut state = crate::context_persist::new_context_state(test_key());
+        let mut state = crate::session::context_persist::new_context_state(test_key());
         state
             .store
             .sanitized_append(Some("h0"), b"checkpointed bytes")
