@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::cache::{CacheConfig, CacheReport, RewriteEntry, RewriteJournal};
 use super::governor::{Admission, Governor, GovernorConfig};
@@ -19,7 +19,7 @@ pub struct BulkProposal {
     pub input_bytes: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyEvent {
     pub logical_time: u64,
     pub source: u64,
@@ -29,6 +29,49 @@ pub struct PolicyEvent {
     pub reclaimed_bytes: u64,
     pub armed_before: bool,
     pub armed_after: bool,
+}
+
+impl PolicyEvent {
+    /// Rebuilds a reloaded event from an owned JSON value.
+    ///
+    /// `PolicyEvent` names its operation with a `&'static str`, so the derived
+    /// `Deserialize` impl is only valid for `'static` input and cannot borrow a
+    /// line straight out of the reloaded `events.log`. This reader takes the
+    /// owned `Value` a line already parsed into and copies the fields, so the
+    /// returned event borrows nothing from the reload buffer (issue 102).
+    pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        let operation = value
+            .get("operation")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "context policy event missing operation".to_string())?;
+        let field = |name: &str| -> Result<u64, String> {
+            value
+                .get(name)
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| format!("context policy event missing {name}"))
+        };
+        let flag = |name: &str| -> Result<bool, String> {
+            value
+                .get(name)
+                .and_then(serde_json::Value::as_bool)
+                .ok_or_else(|| format!("context policy event missing {name}"))
+        };
+        Ok(Self {
+            logical_time: field("logical_time")?,
+            source: field("source")?,
+            operation: match operation {
+                "quiesce-unwritable" => "quiesce-unwritable",
+                "drop-with-handle" => "drop-with-handle",
+                "wrap-up" => "wrap-up",
+                other => return Err(format!("context policy event unknown operation: {other}")),
+            },
+            input_bytes: field("input_bytes")?,
+            admitted_bytes: field("admitted_bytes")?,
+            reclaimed_bytes: field("reclaimed_bytes")?,
+            armed_before: flag("armed_before")?,
+            armed_after: flag("armed_after")?,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -184,6 +227,34 @@ impl ProposalOnlyController {
     pub fn events(&self) -> &[PolicyEvent] {
         &self.events
     }
+    /// Restores the durable policy history a previous process published: the
+    /// event log, the rewrite journal, and the logical time it had reached.
+    ///
+    /// `events.log` is reloaded so the republished log carries the previous
+    /// process's records ahead of the new ones instead of replacing them; the
+    /// journal entries come back so `rewrite-journal.log` likewise survives a
+    /// restart; the logical time resumes past the last reloaded event so a
+    /// restored event never shares a logical time with a new one.
+    ///
+    /// The restored events are appended after any events this process already
+    /// emitted (a recovery can happen after a refused admission), and the
+    /// logical time resumes past the maximum of the reloaded and local ones.
+    pub fn restore_history(
+        &mut self,
+        events: Vec<PolicyEvent>,
+        entries: Vec<RewriteEntry>,
+        logical_time: u64,
+    ) {
+        for event in events {
+            self.logical_time = self.logical_time.max(event.logical_time);
+            self.events.push(event);
+        }
+        for entry in entries {
+            self.logical_time = self.logical_time.max(entry.logical_time);
+            self.journal.restore_entry(entry);
+        }
+        self.logical_time = self.logical_time.max(logical_time);
+    }
     pub fn journal(&self) -> &RewriteJournal {
         &self.journal
     }
@@ -192,6 +263,21 @@ impl ProposalOnlyController {
     }
     pub fn terminal_outcome(&self) -> Option<&'static str> {
         self.terminal_outcome
+    }
+    /// Restores the terminal outcome a previous process recorded in its
+    /// manifest, so a restarted session resumes the branch it had reached
+    /// instead of silently reopening as a live session (issue 102 restart).
+    /// Quiescence is never upgraded: a restored `quiesce_unwritable` stays even
+    /// if a later wrap-up would have written a softer branch.
+    pub fn restore_terminal_outcome(&mut self, outcome: &'static str) {
+        if self.terminal_outcome == Some("quiesce_unwritable") {
+            return;
+        }
+        self.terminal_outcome = Some(outcome);
+    }
+    /// Current policy logical time, used to stamp durable checkpoint lines.
+    pub fn logical_time(&self) -> u64 {
+        self.logical_time
     }
     pub fn governor(&self) -> &Governor {
         &self.governor

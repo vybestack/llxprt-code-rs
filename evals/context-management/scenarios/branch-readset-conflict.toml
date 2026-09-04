@@ -23,3 +23,7 @@ fixture = "branch-readset.md"
 
 [assertions]
 required_context_artifacts = ["context/events.log"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

@@ -24,3 +24,7 @@ fixture = "mixed-lanes.md"
 [assertions]
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
 required_answer_tokens = ["CTXEVAL-CONSTRAINT-K1", "CTXEVAL-FAILING-TEST-T7"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000
