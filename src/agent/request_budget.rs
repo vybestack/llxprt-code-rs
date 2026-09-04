@@ -1,39 +1,13 @@
 //! Request-budget constants, estimator helpers, and their tests for the agent loop.
 //!
-//! The per-turn byte and round caps owned here are the same bounds the session
-//! validator enforces on persisted transcripts; the free helpers below estimate the
-//! complete outgoing request and materialized history so an over-budget turn is refused
-//! before the backend call. Every accumulator here uses saturated arithmetic so an
-//! oversized request or history can never wrap a smaller value.
+//! The shared per-turn byte and round caps now live in `crate::limits`; the same bounds
+//! the session validator enforces on persisted transcripts. This module owns the free
+//! estimator helpers and framing overhead constants below, which estimate the complete
+//! outgoing request and materialized history so an over-budget turn is refused before the
+//! backend call. Every accumulator here uses saturated arithmetic so an oversized request
+//! or history can never wrap a smaller value.
 
 use super::LlmResult;
-/// Cap on the combined assistant text bytes materialized in one turn.
-pub const MAX_TURN_ASSISTANT_BYTES: usize = 1024 * 1024;
-/// Cap on the combined raw tool-call argument bytes in one turn.
-pub const MAX_TURN_ARGS_BYTES: usize = 1024 * 1024;
-/// Cap on the combined tool-result bytes materialized in one turn.
-pub const MAX_TURN_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-/// Default cap on the number of assistant/tool rounds in one turn: none. Rounds are
-/// uncapped unless the profile (`maxTurnsPerPrompt`) or an explicit value caps them;
-/// byte/output caps and the declared tool-call and turn-time budgets still bound the
-/// run.
-pub const MAX_TURN_ROUNDS: usize = usize::MAX;
-/// Default per-prompt tool-call budget: none. Tools are uncapped unless the profile
-/// (`maxToolCallsPerPrompt`) or `--max-tool-calls` caps them; the round cap
-/// (`maxTurnsPerPrompt`), the turn-time budget, and byte/output caps still bound the
-/// run. The parity harness validates the envelope's `tool_calls` against the declared
-/// budget, so an uncapped run must still account for every call it executed.
-/// Hard cap on one model reply (bytes). A reply over this bound is refused by the
-/// agent's model-call path as a typed `model` failure rather than ever becoming an
-/// unbounded assistant round, so it can never be counted toward the aggregate turn caps or
-/// touch session-persist. The error path persists the failure (owner cleared, lease
-/// released) with a scrubbed bounded diagnostic.
-pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
-/// Maximum UTF-8 byte length of one provider-supplied tool-call identifier.
-pub const MAX_TOOL_CALL_ID_BYTES: usize = 256;
-/// Maximum UTF-8 byte length of one provider-supplied tool name.
-pub const MAX_TOOL_NAME_BYTES: usize = 64;
-
 /// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
 /// the **complete** outgoing request on top of the message parts: the model identifier
 /// (capped at [`crate::profile::MAX_MODEL_NAME_BYTES`]), the full
@@ -299,6 +273,6 @@ mod tests {
 
     #[test]
     fn model_response_cap_is_a_positive_bound() {
-        assert_ne!(MAX_RESPONSE_BYTES, 0);
+        assert_ne!(crate::limits::MAX_RESPONSE_BYTES, 0);
     }
 }

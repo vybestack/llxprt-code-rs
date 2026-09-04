@@ -163,14 +163,13 @@ fn oversized_corrupt_branch_cwd_parent_field_is_one_bounded_json() {
     run_case("parent", &format!("{}pa", uniq()));
 }
 
-/// `auth-key-name` is a named **secure-store** reference, never a keyfile path. The
-/// parser records only its presence; the refusal fires in `from_profile_in`'s
-/// credential-policy class, so the compiled CLI reports it at the model-config
-/// stage with the fixed value-free refusal. A same-named local file is never read
-/// as a keyfile (its contents never travel) and stdout is exactly one bounded
-/// JSON error.
+/// `auth-key-name` names a provider key (issue 6): the CLI resolves it through the
+/// `LLXPRT_PROVIDER_KEY_<NAME>` selector and then the secure store, and a name that
+/// neither layer holds reports the fixed value-free refusal at the model-config stage.
+/// A same-named local file is never read as a keyfile (its contents never travel) and
+/// stdout is exactly one bounded JSON error.
 #[test]
-fn auth_key_name_fails_with_fixed_message_and_never_reads_a_local_file() {
+fn auth_key_name_unresolved_reports_the_fixed_refusal_and_never_reads_a_local_file() {
     let dir = tempfile::tempdir().unwrap();
     // A local file whose name equals the auth-key-name value; if the binary ever treated
     // the name as a keyfile path it would read this sentinel.
@@ -198,8 +197,8 @@ fn auth_key_name_fails_with_fixed_message_and_never_reads_a_local_file() {
     assert_eq!(parsed["error"]["code"], "model-config");
     let msg = parsed["error"]["message"].as_str().unwrap_or("");
     assert!(
-        msg.contains("secure-store"),
-        "the fixed unsupported refusal is surfaced: {msg}"
+        msg.contains("LLXPRT_PROVIDER_KEY"),
+        "the refusal names the two resolution layers: {msg}"
     );
     assert!(
         !msg.contains("secure-ref-94021"),
@@ -213,6 +212,44 @@ fn auth_key_name_fails_with_fixed_message_and_never_reads_a_local_file() {
         msg.len() <= llxprt_code_rs::redact::MAX_DIAGNOSTIC_BYTES,
         "the diagnostic must stay bounded: {}",
         msg.len()
+    );
+}
+
+/// The positive half of issue 6: with the credential env selector staged, the same
+/// profile passes model config (the refusal is gone), reaches the transport stage
+/// against a refused loopback port, and the staged secret never appears in stdout.
+#[test]
+fn auth_key_name_resolved_from_the_env_selector_reaches_the_transport_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("namedref.json");
+    std::fs::write(
+        &profile,
+        r#"{"provider":"openai","model":"m",
+            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1","auth-key-name":"secure-ref-94021"}}"#,
+    )
+    .unwrap();
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .env(
+            "LLXPRT_PROVIDER_KEY_SECURE_REF_94021",
+            "black-box-named-key-6",
+        )
+        .arg("--profile-load")
+        .arg(&profile)
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: Value = serde_json::from_str(stdout.trim()).expect("exactly one JSON object");
+    assert_eq!(parsed["status"], "error");
+    assert_ne!(
+        parsed["error"]["code"], "model-config",
+        "the named key resolved, so the failure is transport, not config: {stdout}"
+    );
+    assert!(
+        !stdout.contains("black-box-named-key-6"),
+        "the staged secret never travels: {stdout}"
     );
 }
 /// Errors (broken profile) still emit exactly one JSON object on stdout with
@@ -338,12 +375,14 @@ fn insecure_http_error_is_one_json_object() {
 #[test]
 fn profile_precedence_and_missing_named_profile() {
     let dir = tempfile::tempdir().unwrap();
-    // File profile without its own key -> NoProfileAuth, not settings.json fallback.
+    // File profile without its own key -> NoProfileAuth, not settings.json fallback. The
+    // endpoint stays remote: a loopback base URL is credential-less by design (see
+    // `loopback_profile_without_credentials_passes_the_config_gate`).
     let profile = dir.path().join("keyless.json");
     std::fs::write(
         &profile,
         r#"{"provider":"openai","model":"m",
-            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1"}}"#,
+            "ephemeralSettings":{"base-url":"https://api.example.com/v1"}}"#,
     )
     .unwrap();
     let out = bin()
@@ -371,6 +410,40 @@ fn profile_precedence_and_missing_named_profile() {
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(stdout_json(&out)["error"]["code"], "profile-missing");
+}
+
+/// A loopback profile with no credentials at all is accepted by the config gate: the
+/// request then reaches the (refused) loopback endpoint, so the failure is a transport
+/// error, never `model-config`'s "auth keyfile path not set".
+#[test]
+fn loopback_profile_without_credentials_passes_the_config_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    // No settings.json, no auth-key, no auth-keyfile: the loopback endpoint makes this
+    // credential-less profile valid (LM Studio, ollama, llama.cpp server).
+    let profile = dir.path().join("lm-studio.json");
+    std::fs::write(
+        &profile,
+        r#"{"provider":"openai","model":"qwen/lm-studio",
+            "ephemeralSettings":{"base-url":"http://localhost:1/v1"}}"#,
+    )
+    .unwrap();
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile-load")
+        .arg(&profile)
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    let parsed = stdout_json(&out);
+    assert_eq!(
+        parsed["status"], "error",
+        "localhost:1 refuses the connection, so the run still fails"
+    );
+    assert_ne!(
+        parsed["error"]["code"], "model-config",
+        "a credential-less loopback profile must clear the config gate"
+    );
 }
 
 /// Missing or relative configuration roots fail before profile access or network activity.

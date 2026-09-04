@@ -11,25 +11,32 @@
 //! failure (`HarnessError`) and from a red scenario that unexpectedly passed
 //! (`UnexpectedGreen`), which is exactly the false-success shape the harness must catch.
 
+pub mod faults;
 pub mod grader;
+pub mod inject;
 pub mod loopback;
 pub mod manifest;
+pub mod records;
 pub mod report;
 pub mod runner;
+pub mod secrets;
+mod ts_drive;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_inject;
+#[cfg(test)]
+mod tests_records;
 
 use crate::harness::{self, BbResult, ContinuationState, InvocationSpec};
-use crate::process::{self, CmdSpec};
 use grader::{Evidence, Graded, Verdict};
 use loopback::Loopback;
 use manifest::Scenario;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Cap on one raw stream copied into an artifact file; the flag records the cut.
 pub const ARTIFACT_STREAM_CAP: usize = 64 * 1024;
@@ -37,6 +44,20 @@ pub const ARTIFACT_STREAM_CAP: usize = 64 * 1024;
 pub const TURN_TIMEOUT_SECS: u64 = 600;
 /// Default artifact root, repository-local and never a bare `/tmp` path.
 pub const DEFAULT_OUT_ROOT: &str = "tmp/issue37-context-evals";
+/// The acceptance target's typed error code for the context wall.
+pub const CONTEXT_LIMIT_ERROR_CODE: &str = "context-limit";
+
+/// The reference runner's residual, deliberately-distrusted context-wall classification.
+///
+/// The TS runner prints prose rather than a typed error contract, so this is a substring
+/// match and inherits both of its failure modes: a false positive on prose that merely
+/// mentions the words, and a false negative on a wall described with other wording. It
+/// exists only so the calibration drive can say *something*; it is never used as gating
+/// evidence.
+fn ts_context_limit_hit(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    lowered.contains("context-limit") || lowered.contains("context limit")
+}
 
 /// Which runner adapter a drive uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +88,9 @@ pub struct Options {
     pub ts_root: PathBuf,
     pub ts_bin: String,
     pub allow: Vec<String>,
+    /// Root holding the append-only expected-status history and observed-run records.
+    /// Defaults to `<eval_root>/records` when left empty.
+    pub records_root: PathBuf,
 }
 
 impl Options {
@@ -119,6 +143,33 @@ fn absolute_child(parent: &Path, name: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// The repository-relative path of this run's aggregate report file.
+///
+/// Run records must name a report file *relative to the repository root* (#116.2): an
+/// absolute path would embed one developer's filesystem layout into the append-only
+/// evidence trail, and the out root itself is a directory rather than this run's
+/// report. The out root is always created under the working directory, so stripping it
+/// yields a stable relative path.
+fn repo_relative(path: &Path) -> String {
+    let Ok(cwd) = std::env::current_dir() else {
+        return path.display().to_string();
+    };
+    path.strip_prefix(&cwd)
+        .map(|rel| rel.display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+/// Path (repository-relative) of the run's one aggregate report file.
+fn pending_report_path_for(opts: &Options, report_file: &str) -> String {
+    repo_relative(&opts.out_root.join(report_file))
+}
+
+/// SHA-256 hex of a manifest file's bytes, for the run record's digest binding.
+fn manifest_file_digest(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(hex_digest(&sha2::Sha256::digest(&bytes)))
+}
+
 /// Load every scenario manifest under the eval root, schema-validated.
 pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String> {
     let all = manifest::load_dir(&opts.scenario_dir(), &opts.fixtures_dir())?;
@@ -129,16 +180,69 @@ pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String
         .into_iter()
         .filter(|(_, scen)| opts.allow.iter().any(|id| id == &scen.id))
         .collect();
-    if chosen.is_empty() {
+    // Every requested id must resolve, not just one of them: an allow-list that silently
+    // drops a typo'd or missing scenario would drive fewer scenarios than the operator
+    // asked for and still report success.
+    let missing: Vec<String> = opts
+        .allow
+        .iter()
+        .filter(|id| !chosen.iter().any(|(_, scen)| &scen.id == *id))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
         return Err(format!(
-            "none of the requested scenarios {} exist",
-            opts.allow.join(", ")
+            "requested scenarios do not exist: {} (loaded {})",
+            missing.join(", "),
+            chosen.len()
         ));
     }
     Ok(chosen)
 }
 
 /// Run every selected scenario and return `(report, all_accepted)`.
+/// The #116.1 green gate: a manifest may declare `green` for its owning phase only when
+/// the append-only run records carry an *observed* red `RunRecord` for that same
+/// (scenario, phase) — a red that was actually driven and graded, not merely predicted.
+///
+/// History expectations never license green: an `expected_status = "red"` entry is a
+/// prediction about a future run, and the whole point of the gate is that a phase must
+/// have *seen* the red it claims to have turned green. Declaring green without that
+/// observed red is rejected before a single subprocess is spawned.
+fn green_gate(
+    store: &records::Records,
+    scen: &Scenario,
+    all: &[(PathBuf, Scenario)],
+) -> Result<(), String> {
+    if scen.expected_status != manifest::ExpectedStatus::Green {
+        return Ok(());
+    }
+    let prior = records::prior_observed_red(store, &scen.id, scen.owner_phase);
+    if prior.is_empty() {
+        return Err(format!(
+            "scenario {} declares green for phase {}, but no observed red run record \
+             exists for that phase; run the phase first and let it record the red, then \
+             declare green",
+            scen.id, scen.owner_phase
+        ));
+    }
+    // The cited red must come from a manifest state other than this one, so a manifest
+    // cannot cite a red driven from the very bytes that now declare themselves green.
+    let digest = manifest_file_digest(
+        &all.iter()
+            .find(|(_, s)| s.id == scen.id)
+            .map(|(path, _)| path.clone())
+            .ok_or_else(|| format!("scenario {}: manifest path lost", scen.id))?,
+    )?;
+    if prior.iter().any(|r| r.manifest_digest == digest) {
+        return Err(format!(
+            "scenario {} declares green for phase {} but every cited red run record was \
+             driven from the same manifest digest {digest}; a phase may only turn green \
+             past a red it observed under an earlier manifest state",
+            scen.id, scen.owner_phase
+        ));
+    }
+    Ok(())
+}
 pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
     let opts = &Options {
         out_root: absolute_out_root(&opts.out_root)?,
@@ -146,23 +250,68 @@ pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
     };
     fs::create_dir_all(&opts.out_root).map_err(|e| format!("create out root: {e}"))?;
     let scenarios = load_scenarios(opts)?;
+    let store = records::Records::new(&opts.records_root);
+    let history = records::load_history(&store.history_path())?;
+    for (_, scen) in &scenarios {
+        records::validate_history(
+            &history,
+            &scen.id,
+            scen.owner_phase,
+            scen.expected_status.name(),
+            &scen.expected_reason_class,
+        )
+        .map_err(|e| format!("scenario {}: {e}", scen.id))?;
+        green_gate(&store, scen, &scenarios)?;
+    }
+    // Append-only phase-indexed history (R-013): a manifest's own declaration for its
+    // owning phase is recorded as a new entry the first time this harness sees it, so
+    // every expectation this run graded against is preserved with the phase that owned
+    // it. An already-recorded phase is left untouched, which is what makes the file
+    // append-only rather than rewritten.
+    for (_, scen) in &scenarios {
+        if !records::has_phase_entry(&history, &scen.id, scen.owner_phase) {
+            store
+                .record(&records::StatusRecord {
+                    scenario: scen.id.clone(),
+                    phase: scen.owner_phase,
+                    expected_status: scen.expected_status.name().to_string(),
+                    expected_reason_class: scen.expected_reason_class.clone(),
+                    accept_any_reason: scen.accept_any_reason,
+                    note: format!(
+                        "phase {} declared expectation for scenario {}",
+                        scen.owner_phase, scen.id
+                    ),
+                })
+                .map_err(|e| format!("scenario {}: {e}", scen.id))?;
+        }
+    }
     let revision = git_revision(root);
     let mut reports = Vec::new();
     let mut all_accepted = true;
+    // One report filename for the whole run, chosen before any scenario is driven, so
+    // every `RunRecord` this run appends names the exact aggregate file the run will
+    // publish — a relative path, never the out root (#116.2).
+    let report_file = format!("report-{}.json", harness::uniq());
+    let report_path = pending_report_path_for(opts, &report_file);
     for (path, scen) in scenarios {
-        let report = run_one(&path, &scen, opts, &revision)?;
+        let report = run_one(&path, &scen, opts, &revision, &store, &report_path)?;
         if !accepted(&report) {
             all_accepted = false;
         }
         reports.push(report);
     }
     let report = aggregate(reports, opts, &revision);
-    let path = opts
-        .out_root
-        .join(format!("report-{}.json", harness::uniq()));
+    // The publish path validates what this run actually produced, so a harness change
+    // that drops a required field fails here instead of publishing a report the schema
+    // would reject. Validating before the write keeps a bad report unpublishable.
+    report::validate(&report, true)
+        .map_err(|e| format!("aggregate report failed schema validation: {e}"))?;
     let bytes = serde_json::to_vec(&report).map_err(|e| format!("encode report: {e}"))?;
-    publish(&path, &bytes)?;
-    harness::eprint_status(&format!("context-evals report: {}", path.display()));
+    publish(&opts.out_root.join(&report_file), &bytes)?;
+    harness::eprint_status(&format!(
+        "context-evals report: {}",
+        opts.out_root.join(&report_file).display()
+    ));
     Ok((report, all_accepted))
 }
 
@@ -193,6 +342,12 @@ fn aggregate(reports: Vec<Value>, opts: &Options, revision: &str) -> Value {
         *summary.get_mut(key).unwrap_or(&mut json!(0)) =
             json!(summary.get(key).and_then(Value::as_u64).unwrap_or(0) + 1);
     }
+    let store = records::Records::new(&opts.records_root);
+    let ids: Vec<String> = reports
+        .iter()
+        .filter_map(|r| r["id"].as_str().map(str::to_string))
+        .collect();
+    let baseline = records::baseline_summary(&store, &ids).unwrap_or(json!(null));
     json!({
         "tool": "llxprt-context-eval",
         "schema_version": report::REPORT_SCHEMA_VERSION,
@@ -200,29 +355,172 @@ fn aggregate(reports: Vec<Value>, opts: &Options, revision: &str) -> Value {
         "runner": opts.runner.name(),
         "runner_revision": revision,
         "expected_status_mode": true,
+        "phase0_baseline": baseline,
+        "records_root": opts.records_root.display().to_string(),
         "cache": report::aggregate_cache(&reports),
         "summary": summary,
         "scenarios": reports,
     })
 }
 
-fn run_one(path: &Path, scen: &Scenario, opts: &Options, revision: &str) -> Result<Value, String> {
+fn run_one(
+    path: &Path,
+    scen: &Scenario,
+    opts: &Options,
+    revision: &str,
+    store: &records::Records,
+    report_path: &str,
+) -> Result<Value, String> {
     harness::eprint_status(&format!("== context-eval {} ==", scen.id));
     let (evidence, graded, verdict, digests, isolation_ok) = match opts.runner {
         RunnerKind::Rust => drive_rust(scen, opts)?,
-        RunnerKind::Typescript => drive_typescript(scen, opts)?,
+        RunnerKind::Typescript => ts_drive::drive_typescript(scen, opts)?,
     };
-    let _ = path;
-    let cache = report::cache_block_from_session(evidence.session_dir.as_deref());
-    Ok(json!({
+    // The run record binds this observation to the source revision, the manifest bytes it
+    // was driven from, and the digests of every expanded fixture round (#116.2).
+    let manifest_digest = manifest_file_digest(path)?;
+    let dims = grader::dimension_results(scen, &evidence);
+    let evidence_dimensions = dimensions_block(&dims);
+    let request_observations = request_observations_block(&evidence);
+    // Captured before the moves below: the run record needs the verdict name too.
+    let verdict_name = verdict.name().to_string();
+    let observed_status = if graded.passed { "green" } else { "red" }.to_string();
+    // A green observation has no failure to name, so it records none (R-013).
+    let observed_reason = graded.reason_class.clone();
+    let session_dir = evidence.session_dir.clone();
+    let drive = DriveOutcome::new(
+        evidence,
+        graded,
+        verdict,
+        digests,
+        isolation_ok,
+        session_dir.as_deref(),
+    );
+    let report = scenario_report(
+        scen,
+        opts,
+        revision,
+        &drive,
+        evidence_dimensions,
+        request_observations,
+    );
+
+    // Validate the report this drive produced before it leaves the harness: this is the
+    // publish-path check, exercised on real run output rather than a fixture of itself.
+    report::validate(&report, false).map_err(|e| {
+        format!(
+            "scenario {id} report failed schema validation: {e}",
+            id = scen.id
+        )
+    })?;
+
+    // R-013: every observation lands in the append-only run record for this phase, so
+    // the red-then-green trail survives later phases turning scenarios green.
+    store.record_run(&records::RunRecord {
+        scenario: scen.id.clone(),
+        phase: scen.owner_phase,
+        observed_status,
+        reason_class: observed_reason,
+        verdict: verdict_name,
+        runner_revision: revision.to_string(),
+        manifest_digest,
+        fixture_digests: drive.digests.clone(),
+        report: report_path.to_string(),
+    })?;
+
+    Ok(report)
+}
+
+/// The evidence-dimensions block: one boolean per dimension plus the failures charged
+/// to each, so a report reader sees which dimension failed and why (R-016, GAP-M15).
+fn dimensions_block(dims: &[(grader::Dimension, bool, Vec<String>)]) -> Value {
+    let dim_pass = |field: &str| dims.iter().any(|(d, ok, _)| d.field() == field && *ok);
+    let dim_failures: Vec<String> = dims
+        .iter()
+        .flat_map(|(d, _, failures)| {
+            failures
+                .iter()
+                .map(|f| format!("[{}] {f}", d.field()))
+                .collect::<Vec<String>>()
+        })
+        .collect();
+    json!({
+        "task": dim_pass("task"),
+        "protocol": dim_pass("protocol"),
+        "resource": dim_pass("resource"),
+        "latency": dim_pass("latency"),
+        "recovery": dim_pass("recovery"),
+        "wall_realism": dim_pass("wall_realism"),
+        "failures": dim_failures,
+    })
+}
+
+/// The loopback-observed request telemetry block (GAP-M17).
+fn request_observations_block(evidence: &Evidence) -> Value {
+    json!({
+        "requests": evidence.provider_requests,
+        "max_request_bytes": evidence.max_request_bytes,
+        "streamed_requests": evidence.streamed_requests,
+        "tool_names": evidence.tool_names,
+        "last_request_bytes": evidence.last_request_bytes,
+        "observations_source": "loopback",
+        REQUEST_SHAPE_DIGEST_KEY: evidence.request_shape_digest,
+    })
+}
+
+/// One graded drive, carried together so the report assembly takes one value instead of
+/// a long positional list.
+struct DriveOutcome {
+    evidence: Evidence,
+    graded: Graded,
+    verdict: Verdict,
+    digests: Vec<String>,
+    isolation_ok: bool,
+    cache: Value,
+}
+
+impl DriveOutcome {
+    /// Bundle a completed drive with its derived cache block.
+    fn new(
+        evidence: Evidence,
+        graded: Graded,
+        verdict: Verdict,
+        digests: Vec<String>,
+        isolation_ok: bool,
+        session_dir: Option<&Path>,
+    ) -> Self {
+        let cache = report::cache_block_from_session(session_dir);
+        Self {
+            evidence,
+            graded,
+            verdict,
+            digests,
+            isolation_ok,
+            cache,
+        }
+    }
+}
+
+/// Assemble one scenario report from the graded drive, carrying every field the
+/// publish-path schema requires.
+fn scenario_report(
+    scen: &Scenario,
+    opts: &Options,
+    revision: &str,
+    drive: &DriveOutcome,
+    evidence_dimensions: Value,
+    request_observations: Value,
+) -> Value {
+    let (evidence, graded, verdict) = (&drive.evidence, &drive.graded, &drive.verdict);
+    json!({
         "id": scen.id,
         "schema_version": report::REPORT_SCHEMA_VERSION,
         "owner_phase": scen.owner_phase,
-        "arm": format!("{:?}", scen.arm).to_lowercase(),
-        "expected_status": format!("{:?}", scen.expected_status).to_lowercase(),
+        "arm": scen.arm.name(),
+        "expected_status": scen.expected_status.name(),
         "runner": opts.runner.name(),
         "runner_revision": revision,
-        "fixture_digests": digests,
+        "fixture_digests": drive.digests,
         "profile": {
             "name": scen.profile.name,
             "provider": scen.profile.provider,
@@ -245,10 +543,25 @@ fn run_one(path: &Path, scen: &Scenario, opts: &Options, revision: &str) -> Resu
             "final_response_issued": evidence.final_response_issued,
             "wall_hit": evidence.context_limit_hit,
             "terminal_outcome": evidence.terminal_outcome,
-            "isolation_ok": isolation_ok,
+            "isolation_ok": drive.isolation_ok,
         },
-        "cache": cache,
-    }))
+        "cache": drive.cache,
+        "runtime_config": {
+            "name": scen.runtime.name,
+            "context_limit": scen.runtime.context_limit,
+        },
+        "evidence_dimensions": evidence_dimensions,
+        "request_observations": request_observations,
+        "leakage_scan": {
+            "clean": evidence.leaks.is_empty(),
+            "findings": evidence
+                .leaks
+                .iter()
+                .map(|(marker, found_in)| json!({ "marker": marker, "found_in": found_in }))
+                .collect::<Vec<Value>>(),
+            "markers": secrets::LEAK_MARKERS.iter().map(|m| json!(m)).collect::<Vec<Value>>(),
+        },
+    })
 }
 
 type Drive = (Evidence, Graded, Verdict, Vec<String>, bool);
@@ -269,6 +582,7 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     // empty until the bulk fixtures exist inside the prepared workspace.
     let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
     let url = server.base_url();
+    let shared_observations = server.observations_handle();
     let prepared = runner::prepare(&opts.out_root, scen, &url, Vec::new(), Vec::new())?;
     let (bulk, digests) = runner::expand_fixture(
         &opts.fixtures_dir(),
@@ -278,14 +592,13 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         &prepared.workspace.join("bulk"),
     )?;
     server.set_bulk(bulk.clone());
-    let turns = drive_cli_turns(scen, opts, &prepared, &out_dir);
+    let (mut evidence, turn_results) =
+        drive_cli_turns(scen, opts, &prepared, &out_dir, shared_observations)?;
     let obs = server.snapshot();
     server.stop();
-    let mut evidence = turns?.0;
-    evidence.provider_requests = obs.requests.len();
-    evidence.tool_calls_scripted = obs.tool_calls_issued;
-    evidence.final_response_issued = obs.final_response_issued;
+    evidence_from_loopback(&mut evidence, &obs);
     evidence.session_dir = session_dir(&prepared);
+    scan_drive_outputs(&mut evidence, &prepared, &out_dir, &turn_results);
     let graded = grader::grade(scen, &evidence);
     let verdict = grader::verdict(scen, &graded);
     let isolation_ok = prepared.config_home.starts_with(&opts.out_root)
@@ -293,6 +606,95 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         && prepared.workspace.is_absolute()
         && bulk.iter().all(|p| p.starts_with(&prepared.workspace));
     Ok((evidence, graded, verdict, digests, isolation_ok))
+}
+
+/// Copy the loopback's own observations onto the evidence the grader reads, so the
+/// request telemetry in a report is what the server saw, never what the run claimed.
+fn evidence_from_loopback(evidence: &mut Evidence, obs: &loopback::Observations) {
+    evidence.provider_requests = obs.requests.len();
+    evidence.tool_calls_scripted = obs.tool_calls_issued;
+    evidence.final_response_issued = obs.final_response_issued;
+    // Persisted request observations (GAP-M17): sizes, tools, stream mode, digest.
+    evidence.request_bytes = obs.requests.iter().map(|r| r.body_bytes).collect();
+    evidence.max_request_bytes = obs.requests.iter().map(|r| r.body_bytes).max().unwrap_or(0);
+    evidence.last_request_bytes = obs.requests.last().map(|r| r.body_bytes).unwrap_or(0);
+    evidence.streamed_requests = obs.requests.iter().filter(|r| r.streamed).count();
+    let mut tool_names: Vec<String> = Vec::new();
+    for req in &obs.requests {
+        for name in &req.tool_names {
+            if !tool_names.contains(name) {
+                tool_names.push(name.clone());
+            }
+        }
+    }
+    evidence.tool_names = tool_names;
+    evidence.request_shape_digest = request_shape_digest(&obs.requests);
+}
+
+/// Loopback-observed request shapes, in drive order: the observed serialized size
+/// (from the request's `content-length` header; the body bytes are never captured), the
+/// offered tool names, and whether the request asked for a streamed response.
+pub const REQUEST_SHAPE_DIGEST_KEY: &str = "request_shape_digest";
+
+/// Real SHA-256 over the loopback-observed request shapes, in drive order.
+///
+/// Each observed request contributes its observed serialized size, its tool-name list,
+/// and its stream mode, and nothing else: no request body is ever captured, so this
+/// digest cannot and does not claim to cover request contents. Two runs that made the
+/// same requests in the same order digest identically; a different size, a different
+/// tool set or order, a different stream mode, or a different request order moves the
+/// digest. What it cannot reveal is any request change that leaves all of those
+/// observations unchanged, because the loopback observes nothing else about a request.
+fn request_shape_digest(requests: &[loopback::ObservedRequest]) -> String {
+    let mut hasher = Sha256::new();
+    for request in requests {
+        hasher.update((request.body_bytes as u64).to_be_bytes());
+        hasher.update(request.tool_names.join(":").as_bytes());
+        hasher.update([u8::from(request.streamed)]);
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    hex_digest(&digest)
+}
+
+/// Leakage scan (R-012) over everything this run produced or captured: the isolated
+/// config home, the workspace, the harness artifacts, and every captured stream. The
+/// bulk fixtures are the plant's input and are excluded, so an input can never
+/// masquerade as an escaped output.
+fn scan_drive_outputs(
+    evidence: &mut Evidence,
+    prepared: &runner::Prepared,
+    out_dir: &Path,
+    turn_results: &[BbResult],
+) {
+    let bulk_dir = prepared.workspace.join("bulk");
+    evidence.leaks = secrets::scan_tree_skipping(&prepared.config_home, Some(bulk_dir.as_path()))
+        .into_iter()
+        .map(|(marker, found)| (marker, format!("config home: {found}")))
+        .chain(
+            secrets::scan_tree_skipping(&prepared.workspace, Some(bulk_dir.as_path()))
+                .into_iter()
+                .map(|(marker, found)| (marker, format!("workspace: {found}"))),
+        )
+        .chain(
+            secrets::scan_tree_skipping(out_dir, None)
+                .into_iter()
+                .map(|(marker, found)| (marker, format!("harness artifacts: {found}"))),
+        )
+        .collect();
+    for result in turn_results {
+        for stream in [&result.raw_stdout, &result.stderr] {
+            for marker in secrets::scan_bytes(stream) {
+                evidence
+                    .leaks
+                    .push((marker.to_string(), "captured stream".to_string()));
+            }
+        }
+        for marker in secrets::scan_bytes(result.summary.as_bytes()) {
+            evidence
+                .leaks
+                .push((marker.to_string(), "envelope summary".to_string()));
+        }
+    }
 }
 
 /// Drive every prompt of a scenario through the real CLI, one subprocess per turn.
@@ -304,158 +706,177 @@ fn drive_cli_turns(
     opts: &Options,
     prepared: &runner::Prepared,
     out_dir: &Path,
+    shared_observations: std::sync::Arc<std::sync::Mutex<loopback::Observations>>,
 ) -> Result<(Evidence, Vec<BbResult>), String> {
     std::env::set_var("LLXPRT_CODE_RS_BIN", &opts.cli);
     std::env::set_var("LLXPRT_CONFIG_HOME", &prepared.config_home);
     // The store fault is scoped by scenario id, never by turn index: this scenario is one
     // invocation, so any turn-anchored chmod would only ever fire after the run that
     // should have observed it had already completed.
-    let fault_guard = StoreUnwritableGuard::new(scen, prepared);
-    let _fault_thread = fault_guard.as_ref().map(StoreUnwritableInjection::start);
+    let fault_guard = inject::StoreUnwritableGuard::new(scen, prepared);
+    let mut _fault_thread = fault_guard
+        .as_ref()
+        .map(inject::StoreUnwritableInjection::start);
+    let (kill_target, fault_handle) = arm_mid_run_fault(scen, opts, out_dir, shared_observations)?;
     let mut state = ContinuationState::default();
+    let results = drive_turns(scen, prepared, out_dir, &mut state)?;
+    if let Some(target) = &kill_target {
+        target.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let store_fault_applied = _fault_thread
+        .as_mut()
+        .map(inject::StoreUnwritableInjection::applied)
+        .unwrap_or(false);
+    drop(_fault_thread);
+    let mut faults_executed: Vec<String> = Vec::new();
+    if let Some(handle) = fault_handle {
+        if let Some(trigger) = handle.join().ok().flatten() {
+            faults_executed.push(trigger);
+        }
+    }
+    let mut evidence = evidence_from_results(&results);
+    if store_fault_applied {
+        faults_executed.push("context store made unwritable mid-invocation".to_string());
+    }
+    evidence.faults_executed = faults_executed;
+    if evidence.faults_executed.is_empty() {
+        return Ok((evidence, results));
+    }
+    // A fault-triggered SIGKILL kills the bounded runner's child (exit None, no timeout,
+    // nothing truncated). That is the fault working, never a harness infrastructure
+    // failure; any other broken shape is still infrastructure and stays flagged.
+    if !killed_by_infra(&results) {
+        evidence.harness_error = false;
+    }
+    recovery_probe(prepared, out_dir, &mut evidence, &results)?;
+    Ok((evidence, results))
+}
+
+/// Drive one turn of a scenario through the real CLI, bounded per turn.
+fn turn_spec(prepared: &runner::Prepared, index: usize, prompt: &str) -> InvocationSpec {
+    InvocationSpec {
+        session: prepared.session.clone(),
+        cwd: prepared.workspace.clone(),
+        prompt: prompt.to_string(),
+        turn: if index == 0 {
+            None
+        } else {
+            Some(index as u32 + 1)
+        },
+        branch: None,
+        profile: Some(prepared.profile_name.clone()),
+        allow_insecure_http: true,
+        allow_shell: false,
+    }
+}
+
+/// Drive every prompt of a scenario in order, stopping at the first turn that did not
+/// complete cleanly, so a killed run is never billed for turns the fault removed.
+fn drive_turns(
+    scen: &Scenario,
+    prepared: &runner::Prepared,
+    out_dir: &Path,
+    state: &mut ContinuationState,
+) -> Result<Vec<BbResult>, String> {
     let mut results = Vec::new();
     for (index, prompt) in scen.prompts().iter().enumerate() {
-        let spec = InvocationSpec {
-            session: prepared.session.clone(),
-            cwd: prepared.workspace.clone(),
-            prompt: (*prompt).to_string(),
-            turn: if index == 0 {
-                None
-            } else {
-                Some(index as u32 + 1)
-            },
-            branch: None,
-            profile: Some(prepared.profile_name.clone()),
-            allow_insecure_http: true,
-            allow_shell: false,
-        };
-        let result = harness::run_cli_with_state(spec, &mut state);
+        let spec = turn_spec(prepared, index, prompt);
+        let result = harness::run_cli_with_state(spec, state);
         save_turn_artifacts(out_dir, index, &result)?;
         results.push(result);
         if !results.last().map(|r| r.ok).unwrap_or(false) {
             break;
         }
     }
-    drop(_fault_thread);
-    Ok((evidence_from_results(&results), results))
+    Ok(results)
 }
 
-/// Fault key declared by a scenario that wants the store to become unwritable mid-run.
-const STORE_UNWRITABLE_FAULT: &str = "store-unwritable-after-round-1";
-
-/// One scenario's session `context/` directory, resolved from the harness-owned config
-/// home so the fault can only ever land inside a run this harness created.
-struct StoreUnwritableGuard<'a> {
-    dir: &'a Path,
-    session: &'a str,
+/// Whether any result carries a shape only harness infrastructure can produce, i.e. a
+/// broken process that was *not* a clean process-group kill from an executed fault.
+fn killed_by_infra(results: &[BbResult]) -> bool {
+    let killed_by_fault = |r: &BbResult| {
+        r.exit.is_none()
+            && !r.timed_out
+            && !r.stdout_truncated
+            && !r.stderr_truncated
+            && !r.combined_truncated
+            && r.status != "spawn-failed"
+    };
+    results.iter().any(|r| {
+        !killed_by_fault(r)
+            && (r.status == "spawn-failed"
+                || r.status == "stdout-contract-broken"
+                || r.timed_out
+                || r.stdout_truncated
+                || r.stderr_truncated
+                || r.combined_truncated)
+    })
 }
 
-impl<'a> StoreUnwritableGuard<'a> {
-    /// Whether this scenario asked for the unwritable-store fault at all.
-    fn new(scen: &'a Scenario, prepared: &'a runner::Prepared) -> Option<Self> {
-        let wanted = scen
-            .faults
-            .injected
-            .iter()
-            .any(|f| f == STORE_UNWRITABLE_FAULT);
-        if !wanted {
-            return None;
-        }
-        Some(Self {
-            dir: &prepared.config_home,
-            session: &prepared.session,
-        })
-    }
-}
+/// Armed mid-run fault, if the scenario selected one: the kill target to match against
+/// results, and the watcher thread that performs the kill and reports what it did.
+type ArmedMidRun = (
+    Option<inject::KillTarget>,
+    Option<std::thread::JoinHandle<Option<String>>>,
+);
 
-/// Mid-invocation fault injection for the unwritable-store scenario.
+/// Arm the mid-run process-death fault a scenario selected, if it selected one.
 ///
-/// This scenario is driven as ONE CLI invocation, so no turn boundary exists for a chmod
-/// to land on: a turn-anchored fault fires only after the invocation that should have
-/// observed it already finished. A side thread instead polls for the first appearance of
-/// `context/manifest.json` and then makes the directory and every file in it unwritable
-/// (`0o500` / `0o400`), so the store's own later writes actually fail with EACCES rather
-/// than succeeding through an already-open handle.
-struct StoreUnwritableInjection {
-    handle: Option<std::thread::JoinHandle<()>>,
-    context: PathBuf,
+/// Delegates to [`inject::arm_mid_run_fault`]; the wrapper exists so the drive reads as
+/// one flow while the injection machinery stays a separate module.
+fn arm_mid_run_fault(
+    scen: &Scenario,
+    opts: &Options,
+    out_dir: &Path,
+    shared_observations: std::sync::Arc<std::sync::Mutex<loopback::Observations>>,
+) -> Result<ArmedMidRun, String> {
+    let armed = inject::arm_mid_run_fault(scen, &opts.cli, out_dir, shared_observations)?;
+    Ok(match armed {
+        Some(inject::ArmedFault { target, handle }) => (Some(target), Some(handle)),
+        None => (None, None),
+    })
 }
 
-impl StoreUnwritableInjection {
-    /// Polls for the first store artifact, applies the fault, and reports it on stderr.
-    fn start(guard: &StoreUnwritableGuard<'_>) -> Self {
-        let context = guard
-            .dir
-            .join("code-rs-sessions")
-            .join(guard.session)
-            .join("context");
-        let handle = std::thread::spawn({
-            let context = context.clone();
-            move || inject_unwritable(context)
-        });
-        Self {
-            handle: Some(handle),
-            context,
-        }
-    }
-}
-
-impl Drop for StoreUnwritableInjection {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-        // The fault must never outlive this scenario's own drive: restore the modes the
-        // store expects (`0o700` dir / `0o600` files) so later phases read a usable store.
-        restore_writable(&self.context);
-    }
-}
-
-/// Deadline for the store's first write: bounded, so a dead run cannot hang the drive.
-const FAULT_POLL_TIMEOUT: Duration = Duration::from_secs(120);
-/// Poll interval while waiting for the store's first artifact to appear.
-const FAULT_POLL_INTERVAL: Duration = Duration::from_millis(5);
-
-/// Waits for `context/manifest.json`, then makes `context/` and its files unwritable.
-///
-/// Returns once the fault is applied (or the deadline passes, which the scenario's own
-/// verdict reports as missing evidence).
-fn inject_unwritable(context: PathBuf) {
-    let manifest = context.join("manifest.json");
-    let deadline = std::time::Instant::now() + FAULT_POLL_TIMEOUT;
-    while std::time::Instant::now() < deadline {
-        if manifest.is_file() {
-            break;
-        }
-        std::thread::sleep(FAULT_POLL_INTERVAL);
-    }
-    if !manifest.is_file() {
-        return;
-    }
-    // File modes first: a read-only directory alone does not stop a write that re-opens
-    // an existing `0o600` file with O_TRUNC through an open directory handle.
-    if let Ok(entries) = fs::read_dir(&context) {
-        for entry in entries.flatten() {
-            if entry.path().is_file() {
-                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o400));
-            }
-        }
-    }
-    if fs::set_permissions(&context, std::fs::Permissions::from_mode(0o500)).is_ok() {
-        harness::eprint_status("context-evals fault: session context store made unwritable");
-    }
-}
-
-/// Restores the session `context/` tree so later phases read a clean, usable store.
-fn restore_writable(context: &Path) {
-    if let Ok(entries) = fs::read_dir(context) {
-        for entry in entries.flatten() {
-            if entry.path().is_file() {
-                let _ = fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o600));
-            }
-        }
-    }
-    let _ = fs::set_permissions(context, std::fs::Permissions::from_mode(0o700));
+/// Recovery probe after an executed fault: the killed process is gone, so the next
+/// invocation is a real process restart against the same session. A valid envelope of
+/// either kind (ok, or a clean typed error such as a context refusal) proves the
+/// persisted store reopened and replayed; no envelope means the restart path is broken.
+fn recovery_probe(
+    prepared: &runner::Prepared,
+    out_dir: &Path,
+    evidence: &mut Evidence,
+    results: &[BbResult],
+) -> Result<(), String> {
+    let probe_index = results.len();
+    let probe = InvocationSpec {
+        session: prepared.session.clone(),
+        cwd: prepared.workspace.clone(),
+        prompt:
+            "CTXEVAL-RESTART-PROBE: confirm this session reopened after the restart; reply briefly."
+                .to_string(),
+        turn: Some(probe_index as u32 + 1),
+        branch: None,
+        profile: Some(prepared.profile_name.clone()),
+        allow_insecure_http: true,
+        allow_shell: false,
+    };
+    let result = harness::run_cli(probe);
+    save_turn_artifacts(out_dir, probe_index, &result)?;
+    let restarted = result.status == "ok" || result.status == "error";
+    evidence.recovery_after_fault = restarted
+        && session_dir(prepared)
+            .map(|session| inject::store_shape_consistent(&session.join("context")))
+            .unwrap_or(false);
+    let probe_outcome = if restarted {
+        "session reopened with a valid envelope"
+    } else {
+        "no valid envelope (status mismatch)"
+    };
+    harness::eprint_status(&format!(
+        "context-evals recovery probe after {}: {probe_outcome}",
+        evidence.faults_executed.join(", ")
+    ));
+    Ok(())
 }
 
 fn session_dir(prepared: &runner::Prepared) -> Option<PathBuf> {
@@ -475,8 +896,14 @@ fn evidence_from_results(results: &[BbResult]) -> Evidence {
         if is_harness_error(result) {
             evidence.harness_error = true;
         }
-        if result.error_code.contains("context") || result.error_message.contains("context") {
+        // Typed classification (#7): the acceptance target's own error envelope carries
+        // `error.code`, and the context wall is the code `context-limit` exactly. The
+        // substring test that used to run here would have counted any error whose prose
+        // merely mentioned the word "context" as a wall hit, which is exactly how an
+        // unrelated failure could be graded as the predicted reason class.
+        if result.error_code == CONTEXT_LIMIT_ERROR_CODE {
             evidence.context_limit_hit = true;
+            evidence.resource_limit_hit = true;
         }
         if result.ok {
             evidence.turns_ok += 1;
@@ -509,89 +936,6 @@ fn is_harness_error(result: &BbResult) -> bool {
         || result.stdout_truncated
 }
 
-/// Drive the TypeScript reference runner. Calibration only: its verdict is reported and
-/// never gates the phase, because the sibling implementation is not the oracle.
-fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
-    let out_dir = opts
-        .out_root
-        .join(format!("{}-{}", scen.id, harness::uniq()));
-    let (bulk, digests) = runner::expand_fixture(
-        &opts.fixtures_dir(),
-        &scen.wall.fixture,
-        scen.wall.tool_rounds,
-        scen.wall.tool_output_bytes,
-        &out_dir.join("bulk"),
-    )?;
-    let marker = scen
-        .assertions
-        .required_final_marker
-        .clone()
-        .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
-    // `Loopback::start` only binds the port; the scripted rounds arrive through
-    // `set_bulk` once the fixtures exist, exactly as the Rust drive does. Without the
-    // hand-off the stub serves an empty script and answers every turn with the final
-    // marker, so no wall is ever exercised.
-    let rounds = bulk.len();
-    let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
-    server.set_bulk(bulk);
-    let url = server.base_url();
-    let settings = absolute_child(&out_dir, "settings")?;
-    fs::create_dir_all(&settings).map_err(|e| format!("create settings: {e}"))?;
-    let mut evidence = Evidence {
-        turns_total: 1,
-        ..Evidence::default()
-    };
-    let args = runner::ts_args(&scen.stimulus.prompt, &url, &scen.profile.model);
-    let outcome = process::run_cmd(CmdSpec {
-        program: opts.ts_bin.clone(),
-        args,
-        cwd: Some(opts.ts_root.clone()),
-        cwd_fd: None,
-        env_add: vec![
-            ("LLXPRT_CONFIG_HOME".into(), settings.display().to_string()),
-            ("XDG_CONFIG_HOME".into(), settings.display().to_string()),
-            ("CTXEVAL_LOOPBACK_BASE_URL".into(), url),
-        ],
-        timeout: Duration::from_secs(TURN_TIMEOUT_SECS),
-        max_output: 32 * 1024 * 1024,
-    });
-    let obs = server.snapshot();
-    server.stop();
-    evidence.provider_requests = obs.requests.len();
-    evidence.tool_calls_scripted = obs.tool_calls_issued;
-    evidence.final_response_issued = obs.final_response_issued;
-    let text = match &outcome {
-        Ok(o) => format!(
-            "{}{}",
-            String::from_utf8_lossy(&o.stdout),
-            String::from_utf8_lossy(&o.stderr)
-        ),
-        Err(_) => String::new(),
-    };
-    match outcome {
-        Ok(o) => {
-            if o.timed_out || o.status.is_none() {
-                evidence.harness_error = true;
-            }
-            if o.status == Some(0) && serde_json::from_slice::<Value>(&o.stdout).is_ok() {
-                evidence.turns_ok = 1;
-                evidence.last_ok_stdout = o.stdout.clone();
-                evidence.last_ok_summary = String::from_utf8_lossy(&o.stdout).to_string();
-            }
-            save_ts_artifacts(&out_dir, &o.stdout, &o.stderr)?;
-        }
-        Err(e) => {
-            evidence.harness_error = true;
-            harness::eprint_status(&format!("typescript reference spawn failed: {e}"));
-        }
-    }
-    evidence.context_limit_hit =
-        text.to_lowercase().contains("context") || text.to_lowercase().contains("compress");
-    let graded = grader::grade(scen, &evidence);
-    let verdict = grader::verdict(scen, &graded);
-    Ok((evidence, graded, verdict, digests, true))
-}
-
 /// Publish one turn's bounded raw streams as create-only artifacts.
 fn save_turn_artifacts(out_dir: &Path, index: usize, result: &BbResult) -> Result<(), String> {
     fs::create_dir_all(out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
@@ -614,13 +958,6 @@ fn save_turn_artifacts(out_dir: &Path, index: usize, result: &BbResult) -> Resul
     )
 }
 
-fn save_ts_artifacts(out_dir: &Path, stdout: &[u8], stderr: &[u8]) -> Result<(), String> {
-    fs::create_dir_all(out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
-    publish(&out_dir.join("ts.stdout"), &bounded(stdout))?;
-    publish(&out_dir.join("ts.stderr"), &bounded(stderr))?;
-    Ok(())
-}
-
 fn bounded(bytes: &[u8]) -> Vec<u8> {
     bytes[..bytes.len().min(ARTIFACT_STREAM_CAP)].to_vec()
 }
@@ -630,6 +967,17 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(e) => Err(format!("publish {}: {e:?}", path.display())),
     }
+}
+
+/// Test-only re-export of request_shape_digest, so the self-tests can hold the
+/// digest to its documented contract without depending on private visibility.
+pub fn request_shape_digest_for_test(requests: &[loopback::ObservedRequest]) -> String {
+    request_shape_digest(requests)
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn git_revision(root: &Path) -> String {

@@ -1,3 +1,12 @@
+#[test]
+fn fresh_session_ids_are_distinct_and_valid() {
+    let first = super::SessionId::fresh();
+    let second = super::SessionId::fresh();
+    assert_ne!(first.id, second.id);
+    assert_eq!(super::SessionId::parse(&first.id).unwrap().id, first.id);
+    assert_eq!(super::SessionId::parse(&second.id).unwrap().id, second.id);
+}
+
 #[cfg(test)]
 fn write_state_slot(dir: &openat::Dir, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
     write_state_slot_inner(

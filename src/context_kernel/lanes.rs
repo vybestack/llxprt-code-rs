@@ -36,6 +36,21 @@ impl Lane {
             Lane::Ephemeral,
         ]
     }
+
+    /// Lane a recorded structural class claims. Exact spans and identifiers are
+    /// constraints on the task — they bind whatever the agent owes the user — so
+    /// they land in the Constitutional lane; code and test logs are evidence;
+    /// noise is superseded exploration.
+    pub fn for_structural_class(class: crate::context_kernel::ir::StructuralClass) -> Lane {
+        match class {
+            crate::context_kernel::ir::StructuralClass::ExactSpan
+            | crate::context_kernel::ir::StructuralClass::Identifier => Lane::Constitutional,
+            crate::context_kernel::ir::StructuralClass::Code
+            | crate::context_kernel::ir::StructuralClass::TestLog => Lane::Evidential,
+            crate::context_kernel::ir::StructuralClass::Noise => Lane::Ephemeral,
+            crate::context_kernel::ir::StructuralClass::Unknown => Lane::Decisional,
+        }
+    }
 }
 
 /// Target fidelity a lane's items must retain.

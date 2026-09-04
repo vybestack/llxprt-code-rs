@@ -2,9 +2,9 @@ schema_version = 1
 id = "cache-amortization"
 owner_phase = 4
 arm = "feature"
-expected_status = "green"
-expected_reason_class = "missing-evidence"
-accept_any_reason = true
+expected_status = "red"
+expected_reason_class = "context-limit"
+accept_any_reason = false
 
 [profile]
 name = "ctxeval-loopback"
@@ -23,3 +23,7 @@ fixture = "tool-output-block.txt"
 
 [assertions]
 required_context_artifacts = ["context/rewrite-journal.log"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

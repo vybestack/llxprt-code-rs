@@ -15,7 +15,7 @@ fn valid_state() -> SessionState {
             parent_turn: 0,
             parent_attempt: 0,
             prompt: "prompt".to_string(),
-            digest: crate::agent::prompt_digest("prompt"),
+            digest: crate::limits::prompt_digest("prompt"),
             lifecycle: Lifecycle::Completed,
             rounds: vec![
                 RoundRecord {
@@ -54,11 +54,11 @@ fn corruption_message(state: &SessionState) -> String {
 #[test]
 fn persisted_tool_call_id_and_name_caps_are_enforced() {
     let mut state = valid_state();
-    state.branches[0].rounds[0].calls[0].id = "i".repeat(crate::agent::MAX_TOOL_CALL_ID_BYTES + 1);
+    state.branches[0].rounds[0].calls[0].id = "i".repeat(crate::limits::MAX_TOOL_CALL_ID_BYTES + 1);
     assert!(corruption_message(&state).contains("tool call id exceeds its byte cap"));
 
     let mut state = valid_state();
-    state.branches[0].rounds[0].calls[0].name = "n".repeat(crate::agent::MAX_TOOL_NAME_BYTES + 1);
+    state.branches[0].rounds[0].calls[0].name = "n".repeat(crate::limits::MAX_TOOL_NAME_BYTES + 1);
     assert!(corruption_message(&state).contains("tool name exceeds its byte cap"));
 }
 
@@ -69,7 +69,7 @@ fn persisted_mapped_response_aggregate_cap_is_enforced() {
         + state.branches[0].rounds[0].calls[0].name.len()
         + state.branches[0].rounds[0].calls[0].args.len();
     state.branches[0].rounds[0].assistant =
-        "a".repeat(crate::agent::MAX_RESPONSE_BYTES - call_bytes + 1);
+        "a".repeat(crate::limits::MAX_RESPONSE_BYTES - call_bytes + 1);
     assert!(
         corruption_message(&state).contains("mapped response exceeds the model response byte cap")
     );
@@ -143,7 +143,7 @@ fn refused_calls_never_count_as_executed() {
     state.validate().unwrap();
 
     let mut state = valid_state();
-    state.branches[0].rounds[0].calls[0].result = "r".repeat(crate::agent::MAX_TURN_OUTPUT_BYTES);
+    state.branches[0].rounds[0].calls[0].result = "r".repeat(crate::limits::MAX_TURN_OUTPUT_BYTES);
     state.validate().unwrap();
     state.branches[0].rounds[0].calls[0].result.push('r');
     assert!(corruption_message(&state).contains("tool results exceed"));
@@ -152,7 +152,7 @@ fn refused_calls_never_count_as_executed() {
     let args_overhead = r#"{"x":""}"#.len();
     state.branches[0].rounds[0].calls[0].args = format!(
         "{{\"x\":\"{}\"}}",
-        "a".repeat(crate::agent::MAX_TURN_ARGS_BYTES - args_overhead)
+        "a".repeat(crate::limits::MAX_TURN_ARGS_BYTES - args_overhead)
     );
     state.validate().unwrap();
     let insert_at = state.branches[0].rounds[0].calls[0].args.len() - 2;
@@ -166,7 +166,7 @@ fn refused_calls_never_count_as_executed() {
 fn prompt_summary_error_lease_and_lifecycle_fields_are_enforced() {
     let mut state = valid_state();
     state.branches[0].prompt = "p".repeat(MAX_PROMPT_BYTES + 1);
-    state.branches[0].digest = crate::agent::prompt_digest(&state.branches[0].prompt);
+    state.branches[0].digest = crate::limits::prompt_digest(&state.branches[0].prompt);
     assert!(corruption_message(&state).contains("prompt exceeds"));
 
     let mut state = valid_state();

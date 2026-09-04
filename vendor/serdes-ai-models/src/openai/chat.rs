@@ -552,12 +552,16 @@ impl Model for OpenAIChatModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
+        // A credential-less (local OpenAI-compatible) endpoint resolves to the empty key;
+        // an empty key sends no Authorization header rather than a bare `Bearer ` value.
         let mut request = self
             .client
             .post(self.route())
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .timeout(timeout);
+        if !self.api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", self.api_key));
+        }
 
         if let Some(ref org) = self.organization {
             request = request.header("OpenAI-Organization", org);
@@ -588,12 +592,15 @@ impl Model for OpenAIChatModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
+        // Same credential-less rule as `request`: no key, no Authorization header.
         let mut request = self
             .client
             .post(self.route())
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .timeout(timeout);
+        if !self.api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", self.api_key));
+        }
 
         if let Some(ref org) = self.organization {
             request = request.header("OpenAI-Organization", org);
@@ -805,5 +812,49 @@ mod tests {
         let model = OpenAIChatModel::new("gpt-4o", "key")
             .with_base_url("http://127.0.0.1:8080/chat/completions");
         assert_eq!(model.route(), "http://127.0.0.1:8080/chat/completions");
+    }
+
+    /// A credential-less (local OpenAI-compatible) endpoint carries an empty api_key;
+    /// the transport then sends no authorization header rather than an empty bearer
+    /// token that the local server would have to parse.
+    #[tokio::test]
+    async fn empty_key_sends_no_authorization_header() {
+        use crate::ModelRequestParameters;
+        use serdes_ai_core::messages::UserPromptPart;
+        use serdes_ai_core::{ModelRequest, ModelRequestPart, ModelSettings};
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            // The matcher names only the headers that must be present; the assertion
+            // after the request proves no authorization header traveled with it.
+            .and(header("content-type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"{"id":"1","object":"chat.completion","created":1,"model":"local",
+                        "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},
+                        "finish_reason":"stop"}]}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let model = OpenAIChatModel::new("local-model", "")
+            .with_base_url(format!("{}/chat/completions", server.uri()));
+        model
+            .request(
+                &[ModelRequest::with_parts(vec![
+                    ModelRequestPart::UserPrompt(UserPromptPart::new("hi")),
+                ])],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].headers.get("authorization").is_none());
     }
 }

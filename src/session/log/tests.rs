@@ -9,7 +9,7 @@ fn branch() -> BranchRecord {
         parent_turn: 0,
         parent_attempt: 0,
         prompt: "hello".into(),
-        digest: crate::agent::prompt_digest("hello"),
+        digest: crate::limits::prompt_digest("hello"),
         lifecycle: Lifecycle::Pending,
         rounds: Vec::new(),
         summary: String::new(),

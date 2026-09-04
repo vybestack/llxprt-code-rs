@@ -27,3 +27,7 @@ required_context_artifacts = ["context/events.log"]
 
 [faults]
 injected = ["restart-after-round-2"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

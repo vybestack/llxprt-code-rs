@@ -56,6 +56,11 @@ pub(crate) enum PromptCaching {
     Cached,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AnthropicSettingsDraft {
+    pub(crate) prompt_caching: PromptCaching,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpenAiResponsesSettingsDraft {
     pub(crate) reasoning_effort: Option<serdes_ai::models::openai::ReasoningEffort>,

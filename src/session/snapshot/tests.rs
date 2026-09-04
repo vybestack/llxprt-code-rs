@@ -17,7 +17,7 @@ fn reservation_event(prompt: &str) -> log::Event {
             parent_turn: 0,
             parent_attempt: 0,
             prompt: prompt.into(),
-            digest: crate::agent::prompt_digest(prompt),
+            digest: crate::limits::prompt_digest(prompt),
             lifecycle: Lifecycle::Pending,
             rounds: Vec::new(),
             summary: String::new(),
@@ -125,7 +125,7 @@ fn reclaim_event_replaces_prompt_and_digest() {
     assert_eq!(branch.prompt, "different prompt");
     assert_eq!(
         branch.digest,
-        crate::agent::prompt_digest("different prompt")
+        crate::limits::prompt_digest("different prompt")
     );
     assert_eq!(branch.owner, "new-owner");
 }

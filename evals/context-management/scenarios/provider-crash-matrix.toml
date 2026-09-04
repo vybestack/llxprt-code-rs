@@ -26,3 +26,7 @@ required_context_artifacts = ["context/events.log"]
 
 [faults]
 injected = ["crash-at-send"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

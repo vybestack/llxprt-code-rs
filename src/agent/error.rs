@@ -4,11 +4,11 @@ use crate::session::StoreError;
 pub struct AgentError {
     pub key: &'static str,
     pub message: String,
-    pub code: crate::cli::Code,
+    pub code: crate::envelope::Code,
 }
 
 impl AgentError {
-    pub fn new(code: crate::cli::Code, key: &'static str, msg: impl Into<String>) -> Self {
+    pub fn new(code: crate::envelope::Code, key: &'static str, msg: impl Into<String>) -> Self {
         AgentError {
             code,
             key,
@@ -18,7 +18,7 @@ impl AgentError {
 
     pub fn from_store(error: StoreError) -> Self {
         AgentError {
-            code: crate::cli::Code::Session,
+            code: crate::envelope::Code::Session,
             key: "session",
             message: error.to_string(),
         }
