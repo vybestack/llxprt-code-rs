@@ -22,3 +22,5 @@ pub mod operation;
 mod tests;
 #[cfg(test)]
 mod tests_registry;
+#[cfg(test)]
+mod tests_rows;

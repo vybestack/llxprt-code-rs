@@ -308,9 +308,11 @@ fn preconditions_are_typed_predicates() {
     assert!(!fits.precondition.holds(&big));
 }
 
-/// #108-4: emergency-capable rows are flagged and the ladder consumes the flag.
+/// Issue 108-4: every ladder rung names a registered row flagged
+/// emergency-capable - the flag the ladder's gate refuses to select an
+/// emergency rung over.
 #[test]
-fn emergency_flags_cover_the_ladder_and_gate_the_bar() {
+fn emergency_flags_cover_the_ladder() {
     for rung in crate::context_policy::ladder::Rung::all() {
         let row = operation::find(rung.operation()).expect("ladder rungs are registered");
         assert!(row.emergency, "{} must be emergency-capable", row.name);
@@ -346,7 +348,7 @@ fn reclamation_rows_have_nonzero_bars_and_enforce_them() {
     assert_eq!(
         err,
         ExecutorError::PreconditionFailed {
-            which: "reclamation-bar"
+            which: "reclamation-bar" // F9: the row spelling (compact is a reclamation row)
         }
     );
     assert_eq!(ex.state(), TxnState::Aborted);
@@ -358,7 +360,7 @@ fn margin_drift_fixture_recalibrates_under_a_newer_version() {
     let mut ex = armed_executor(0);
     // The margin table lives on the port, so a test port with no table
     // reports `None` and a recalibration is refused rather than moved.
-    assert!(ex.margins().is_none());
+    assert!(ex.port_margins().is_none());
     assert_eq!(
         ex.recalibrate_margins(1, 512),
         Err("the bound port carries no margin table to recalibrate"),
@@ -368,7 +370,7 @@ fn margin_drift_fixture_recalibrates_under_a_newer_version() {
     // a bound is computed from actually moves.
     let mut bound_port_ex = armed_executor_with_bound_port(0);
     let before = bound_port_ex
-        .margins()
+        .port_margins()
         .map_or(Margins::V1.per_tool_declaration, |m| m.per_tool_declaration);
     assert_eq!(before, Margins::V1.per_tool_declaration);
     bound_port_ex
@@ -377,15 +379,15 @@ fn margin_drift_fixture_recalibrates_under_a_newer_version() {
     bound_port_ex
         .recalibrate_margins(2, 512)
         .expect("newer version adopted");
-    assert_eq!(bound_port_ex.margins().map_or(0, |m| m.version), 2);
+    assert_eq!(bound_port_ex.port_margins().map_or(0, |m| m.version), 2);
     assert_eq!(
         bound_port_ex
-            .margins()
+            .port_margins()
             .map_or(0, |m| m.per_tool_declaration),
         512
     );
     assert_eq!(
-        bound_port_ex.margins().map_or(0, |m| m.commit_frame),
+        bound_port_ex.port_margins().map_or(0, |m| m.commit_frame),
         Margins::V1.commit_frame
     );
 }
@@ -706,6 +708,12 @@ fn failed_precondition_blocks_commit() {
     // A bound of 150 with the effect it is charged for: the claim agrees
     // with the port (0 + 150), so the failure below is the FIT check and not
     // a bound disagreement.
+    // F9: the row predicate now runs BEFORE the bound agreement check, so the
+    // failure is the row's own fit precondition (the honest spelling for a
+    // `FITS` row), not a delayed bound agreement.
+    // F9: the row's own typed predicate runs BEFORE the bound-agreement
+    // check, so the failure is the `admit-ingress` row's own FIT precondition
+    // (the honest spelling for a `FITS` row), not a delayed agreement error.
     let err = ex
         .validate(150, &budget, 80, 0, 0, 150)
         .expect_err("bound 150 exceeds the ceiling");
@@ -923,41 +931,4 @@ fn region_accounting_sums_admissions_against_the_ceiling() {
     assert_eq!(ex.state(), TxnState::Aborted);
     // A refused admission adds nothing to the region total.
     assert_eq!(ex.region_admitted(), 80);
-}
-/// Issue DoD: the registry must cover every row of the design's tab:ops.
-#[test]
-fn registry_covers_design_table_rows() {
-    let tex = include_str!("../../design-docs/context-management/design.tex");
-    let have = names();
-    let mut table_rows = 0;
-    // Row coverage is defined by the tab:ops longtable only. Split the
-    // document on table starts, keep the first table whose body (the part
-    // before \end{longtable}) carries the tab:ops label, and parse just its
-    // rows: prose and unrelated tables must never inflate the count.
-    let block = tex
-        .split("\\begin{longtable}")
-        .skip(1)
-        .filter_map(|table| table.split_once("\\end{longtable}"))
-        .map(|(body, _)| body)
-        .find(|body| body.contains("\\label{tab:ops}"))
-        .unwrap_or("");
-    for line in block.lines() {
-        let trimmed = line.trim();
-        let split = trimmed.split_once(" & ");
-        let pair = match split {
-            Some(p) => p,
-            None => continue,
-        };
-        let (name, rest) = pair;
-        let body = name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-');
-        let is_row = !name.is_empty() && body && !rest.starts_with('}');
-        if !is_row {
-            continue;
-        }
-        table_rows += 1;
-        let found = have.contains(&name);
-        assert!(found, "design row {name} missing from registry");
-    }
-    assert!(table_rows >= 55);
-    assert!(table_rows <= 70, "parsed {table_rows} rows - over-matched");
 }

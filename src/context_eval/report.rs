@@ -103,7 +103,7 @@ pub fn cache_block() -> Value {
         "prefix_invalidation_cost_per_rewrite": Value::Null,
         "rewrite_journal_entries": Value::Null,
         "rewrite_journal_bytes_reclaimed": Value::Null,
-        "rewrite_journal_tokens_invalidated": Value::Null,
+        "rewrite_journal_bytes_invalidated": Value::Null,
         "amortization_decisions_below_at_above": Value::Null,
         "suspended_while_armed": Value::Null,
         "source": "unknown",
@@ -121,7 +121,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
     };
     let mut entries = 0_u64;
     let mut bytes_reclaimed = 0_u64;
-    let mut tokens_invalidated = 0_u64;
+    let mut bytes_invalidated = 0_u64;
     let mut unknown_invalidation = false;
     let mut runtime_report = None;
     for line in text.lines() {
@@ -138,17 +138,20 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
         entries = entries.saturating_add(1);
         bytes_reclaimed = bytes_reclaimed.saturating_add(reclaimed);
         match value.get("invalidation_cost").and_then(Value::as_u64) {
-            Some(cost) => tokens_invalidated = tokens_invalidated.saturating_add(cost),
+            Some(cost) => bytes_invalidated = bytes_invalidated.saturating_add(cost),
             None => unknown_invalidation = true,
         }
     }
     let Some(report) = runtime_report else {
         return cache_block();
     };
+    // F17: the sibling field is byte-labelled, so this one keeps the same
+    // unit across journal and report; a missing cost stays unknown rather
+    // than being mislabelled as a measured byte count.
     let invalidated = if unknown_invalidation {
         Value::Null
     } else {
-        json!(tokens_invalidated)
+        json!(bytes_invalidated)
     };
     json!({
         "class": "measured",
@@ -161,7 +164,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
         "unknown_invalidation_cost_events": report["unknown_invalidation_cost_events"],
         "rewrite_journal_entries": entries,
         "rewrite_journal_bytes_reclaimed": bytes_reclaimed,
-        "rewrite_journal_tokens_invalidated": invalidated,
+        "rewrite_journal_bytes_invalidated": invalidated,
         "amortization_decisions_below_at_above": {
             "below": report["threshold_denials"],
             "at_or_above": report["threshold_passes"],
@@ -200,7 +203,7 @@ pub fn aggregate_cache(scenarios: &[Value]) -> Value {
         "hit_rate": Value::Null,
         "prefix_invalidation_cost_per_rewrite": Value::Null,
         "rewrite_journal_bytes_reclaimed": reclaimed,
-        "rewrite_journal_tokens_invalidated": Value::Null,
+        "rewrite_journal_bytes_invalidated": Value::Null,
         "amortization_decisions_below_at_above": Value::Null,
         "suspended_while_armed": measured.iter().any(|cache| cache["suspended_while_armed"] == true),
         "source": "scenario rewrite journals",

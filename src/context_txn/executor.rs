@@ -256,6 +256,16 @@ impl Executor {
         self.port = Some(port);
     }
 
+    /// Test-only read of the bound port's margin table: the drift fixture
+    /// asserts the recalibrated table is the one later bounds are computed
+    /// from. The table lives on the port (issue 104-3), which owns every margin,
+    /// so this is the only read the executor offers and no production caller
+    /// needs it.
+    #[cfg(test)]
+    pub fn port_margins(&self) -> Option<Margins> {
+        self.port.as_deref().and_then(AccountingPort::bound_margins)
+    }
+
     /// The bound the bound port computes for an effect of `effect_bytes` over
     /// `governed` units already committed (#104-1). The caller's claim is
     /// built here - from the same port `validate` asks - so the two can only
@@ -267,16 +277,6 @@ impl Executor {
             .map_or(Margins::V1.version, |margins| margins.version);
         let _ = governed;
         Some(port.bound(version, effect_bytes))
-    }
-
-    /// The versioned margin table the executor's bound is computed from
-    /// (#104-3). Usage reconciliation against a measured number is blocked by
-    /// #80; what is landed is the versioning plus the drift fixture. The table
-    /// lives on the port - the one place a bound is computed from - so the
-    /// value a drift fixture recalibrates is the value `validate` charges; a
-    /// table no computation reads is what #104-3 forbids.
-    pub fn margins(&self) -> Option<Margins> {
-        self.port.as_deref().and_then(AccountingPort::bound_margins)
     }
 
     /// Recalibrates the margin table on detected drift (#104-3): the version
@@ -299,23 +299,10 @@ impl Executor {
         Ok(())
     }
 
-    /// The render contract the executor gates commits against (#105).
-    pub fn contract(&self) -> &RenderContract {
-        &self.contract
-    }
-
     /// The contract version committed with the last applied effect; the
     /// durable record and the send path compare against it (#105-3).
     pub fn committed_contract_version(&self) -> Option<u64> {
         self.contract_version
-    }
-
-    /// Event count in the executor's commit log. The durable log is only
-    /// appended by the test fixture today; the commit-log seam it carries is
-    /// owned by a later unit, so this is the natural read for callers that
-    /// must observe it.
-    pub fn commit_log_len(&self) -> usize {
-        self.log.len()
     }
 
     /// Arms region-wide admission accounting (#121-c): `ceiling` is the region
@@ -478,7 +465,7 @@ impl Executor {
     /// #108-3: the row's typed precondition is evaluated here, over the
     /// governed facts the executor already holds - the projected occupancy,
     /// the budget triple and the row's reclamation potential - so the
-    /// predicate a row declares is the predicate that is enforced. The
+    /// predicate a row declares is the predicate that is enforced. A `FITS` row whose occupancy the bound-agreement check already proved re-holds by construction, so its evaluation is a typed restatement, never a second gate. The
     /// reclamation bar (#104-4) is carried by the row's own predicate.
     ///
     /// Any failure leaves the transaction dead: a failed validate can never
@@ -507,16 +494,11 @@ impl Executor {
             .bound_margins()
             .map_or(Margins::V1.version, |m| m.version);
         let computed = port.bound(version, effect_bytes);
-        if computed != claimed_bound {
-            self.fail();
-            return Err(ExecutorError::BoundDisagrees {
-                claimed: claimed_bound,
-                computed,
-            });
-        }
-        // #108-4: the row's emergency flag is consumed here, as part of the
-        // facts its typed precondition is evaluated over. An emergency rung
-        // is exempt from the bar but may never raise `Phi`.
+        // F9: the row's own typed predicate is evaluated BEFORE the
+        // bound-agreement early return, so a carried predicate is a predicate
+        // `validate` actually runs, not a field only fixtures read. The facts
+        // are the governed numbers the executor already holds: the projection
+        // is the bound the port derived, never the caller's claim.
         let facts = operation::PreconditionFacts {
             parent_version: txn.parent_version,
             projected: computed,
@@ -526,6 +508,13 @@ impl Executor {
             bar: row.bar,
             emergency: row.emergency,
         };
+        if computed != claimed_bound {
+            self.fail();
+            return Err(ExecutorError::BoundDisagrees {
+                claimed: claimed_bound,
+                computed,
+            });
+        }
         if !row.precondition.holds(&facts) {
             self.fail();
             return Err(ExecutorError::PreconditionFailed {
@@ -765,6 +754,7 @@ fn illegality(violation: Violation) -> ExecutorError {
         Violation::Floor { .. } => "floor",
         Violation::Pin { .. } => "pin",
         Violation::QuotingConvention { .. } => "quoting-convention",
+        Violation::ProfileOverBudget { .. } => "profile-over-budget",
     };
     ExecutorError::Illegal {
         which,

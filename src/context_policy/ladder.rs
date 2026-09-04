@@ -109,7 +109,17 @@ pub fn select_candidate(
         let low_confidence = matching
             .iter()
             .all(|(_, candidate)| candidate.estimate.confidence < confidence_floor);
-        if !scorer_available || low_confidence {
+        let emergency_choice = !scorer_available || low_confidence;
+        // Issue 108-4 (F8): the row's emergency flag is consumed here - an
+        // `Emergency` verdict may only be issued over a row the registry
+        // flags emergency-capable. The scored path is untouched.
+        if emergency_choice
+            && !crate::context_txn::operation::find(rung.operation())
+                .is_some_and(|row| row.emergency)
+        {
+            continue;
+        }
+        if emergency_choice {
             return Selection {
                 choice: LadderChoice::Emergency(rung),
                 candidate_index: Some(matching[0].0),

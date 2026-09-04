@@ -50,13 +50,14 @@ pub(crate) struct ContextState {
     pub(crate) detail: Option<String>,
     pub(crate) preserved: Vec<String>,
     pub(crate) policy: crate::context_policy::runtime::ProposalOnlyController,
-    /// Long-lived fenced admission executor (#121-b): the epoch comes from the
-    /// fencing clock and the executor survives across admissions, so a stale
-    /// writer can actually be fenced out; rebuilding it per admission with a
-    /// fresh `Epoch(1)` made the fence meaningless.
-    pub(crate) executor: crate::context_txn::executor::Executor,
     /// Region units already admitted this session (#121-c).
     pub(crate) region_admitted: u64,
+    /// This session's fencing clock (issue 108-4): owned by the state, never
+    /// a thread-local, so every writer sharing this state leases against the
+    /// ONE ledger and `commit_fenced` compares against a clock that actually
+    /// advances. Each admission acquires a strictly newer epoch, so a stale
+    /// writer holding an older lease is fenced out.
+    pub(crate) fencing_clock: crate::context_txn::executor::FencingClock,
     /// Durable checkpoint lines a previous process published, reloaded on
     /// recovery so a republished `checkpoints` artifact preserves them ahead
     /// of this generation's own line instead of truncating them away
@@ -76,6 +77,10 @@ pub(crate) struct ContextManifest<'a> {
     pub(crate) rules: &'a [crate::context_ingress::filter::FilterRules],
     pub(crate) vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
     pub(crate) terminal_outcome: Option<&'a str>,
+    /// Whether the accepted wrap-up saturated the terminal fit gate (108-4).
+    pub(crate) terminal_fit_saturated: Option<bool>,
+    /// Region units still free when the terminal was recorded (108-4).
+    pub(crate) terminal_fit_available: Option<u64>,
     pub(crate) preserved: &'a [String],
 }
 
@@ -91,6 +96,16 @@ pub(crate) struct PersistedManifest {
     /// back and restores the controller's terminal branch, so a restarted
     /// session resumes the branch it had recorded instead of reopening as live.
     pub(crate) terminal_outcome: Option<String>,
+    /// Whether the accepted wrap-up saturated the terminal fit gate (108-4):
+    /// `false` is a feasible wrap-up, `true` a fit-saturated quiesce; `None`
+    /// when no terminal was recorded. Persisted so the two terminals stay
+    /// distinguishable in the durable record after a restart.
+    #[serde(default)]
+    pub(crate) terminal_fit_saturated: Option<bool>,
+    /// Region units still free when the terminal was recorded (108-4), the
+    /// measured second half of the same distinction.
+    #[serde(default)]
+    pub(crate) terminal_fit_available: Option<u64>,
     #[serde(default)]
     pub(crate) preserved: Vec<String>,
 }
@@ -222,34 +237,37 @@ pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> C
         detail: None,
         preserved: Vec::new(),
         policy: crate::context_policy::runtime::ProposalOnlyController::default(),
-        executor: admission_executor(0, 0, 0),
         region_admitted: 0,
+        fencing_clock: crate::context_txn::executor::FencingClock::new(),
         recovered_checkpoints: None,
     }
 }
 
-/// The one long-lived fenced admission executor this session owns (#121-b).
+/// Builds the FRESH executor one admission runs on (issue 108-4).
 ///
-/// The epoch is drawn from the session's fencing clock so successive
-/// admissions hold a strictly increasing lease; the caller may hand in the
-/// clock's latest epoch after a recovery so a restarted session never reuses
-/// the epoch of the writer it just fenced out.
+/// A failed validate or commit leaves its executor `Aborted`, and the
+/// executor refuses any further proposal from that state - so an executor
+/// that survived across admissions would wedge every later admission after
+/// ONE refused attempt (the F11 wedge). Each admission therefore builds its
+/// own executor; the epoch is handed in, drawn from the session's fencing
+/// clock, so a stale writer holding an older lease is still fenced out by
+/// `commit_fenced`.
 fn admission_executor(
-    epoch: u64,
+    epoch: crate::context_txn::executor::Epoch,
     governed: u64,
     tool_declarations: usize,
 ) -> crate::context_txn::executor::Executor {
-    use crate::context_txn::executor::{Epoch, Executor};
+    use crate::context_txn::executor::Executor;
     let mut executor = Executor::new(
-        Epoch(epoch),
+        epoch,
         crate::context_kernel::legality::RenderContract::generous(1),
     );
-    // [r--- the bound comes from the bound [`AccountingPort`], never from
+    // Issue 105-4: the bound comes from the bound [`AccountingPort`], never from
     // the caller: the session executor is bound at construction to the
     // production port over the versioned margin table, the session's declared
     // tool surface, and the governed units the durable spine already holds.
     // `validate` then computes the bound and refuses a caller-invented one,
-    // which is the only way a bulk admission reaches commit ([r----).
+    // which is the only way a bulk admission reaches commit (AC 5.1).
     executor.bind_port(std::rc::Rc::new(
         crate::context_txn::bound_port::BoundPort::new(
             session_port_margins(),
@@ -294,11 +312,16 @@ fn sequence_admission(
     floor: u64,
 ) -> Result<(), String> {
     use crate::context_txn::executor::CommitOutcome;
-    // Region-wide admission accounting (#121-c): the projected occupancy is
     // Region-wide admission accounting (121-c): the projected occupancy is
     // summed against the ceiling the executor is armed with, and only an
     // applied compare-and-commit moves the session's `region_admitted`.
-    let executor = &mut state.executor;
+    let epoch = state.fencing_clock.acquire();
+    // The port is bound over the same algebra the caller's claim is built
+    // from (effect bytes plus the V1 commit frame, no governed term and no
+    // declared surface yet), so the disagreement `validate` checks stays a
+    // real caller-invented-number test; the region total lives on the state,
+    // and re-basing the claim on it is S1 (F2) territory, untouched here.
+    let mut executor = admission_executor(epoch, 0, 0);
     executor.arm_region_accounting(budget.commit_ceiling());
     executor
         .propose("admit-ingress", parent_version)
@@ -312,9 +335,7 @@ fn sequence_admission(
     executor
         .validate(payload_bound, budget, floor, 0, 0, effect_bytes)
         .map_err(|error| executor_refusal(&error))?;
-    match ADMISSION_FENCING_CLOCK
-        .with(|clock| executor.commit_fenced(parent_version, clock, effect, payload_bound))
-    {
+    match executor.commit_fenced(parent_version, &state.fencing_clock, effect, payload_bound) {
         Ok(CommitOutcome::Applied) => {
             // F2: the session total ACCUMULATES across admissions instead of
             // being overwritten by the last payload applied, so the region a
@@ -331,13 +352,6 @@ fn sequence_admission(
         }
         Err(error) => Err(executor_refusal(&error)),
     }
-}
-
-// Session fencing clock: admissions hold a strictly increasing lease epoch
-// across the whole session (#121-b).
-thread_local! {
-    static ADMISSION_FENCING_CLOCK: crate::context_txn::executor::FencingClock =
-        crate::context_txn::executor::FencingClock::new();
 }
 
 /// `B` bound of the admission region: the sum of the session slot cap
@@ -715,10 +729,10 @@ pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
 /// Wrap-up work budget, in the region's budget units: the artifacts one
 /// publication writes plus the manifest. It is the measured number
 /// `terminal_reserve` is fed (#107-2).
-const WRAP_UP_COST_UNITS: u64 = 64 << 10;
+pub(crate) const WRAP_UP_COST_UNITS: u64 = 64 << 10;
 /// Region units still free for a wrap-up: the admission budget net of what
 /// this session already admitted (#107-2, #107-4).
-fn wrap_up_available(state: &ContextState) -> u64 {
+pub(crate) fn wrap_up_available(state: &ContextState) -> u64 {
     ADMISSION_REGION_BUDGET.saturating_sub(state.region_admitted)
 }
 
@@ -892,6 +906,11 @@ pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState
         rules: state.filters.rules_history(),
         vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
+        terminal_fit_saturated: state.policy.terminal_fit_saturated(),
+        terminal_fit_available: state
+            .policy
+            .terminal_fit_room()
+            .or_else(|| Some(wrap_up_available(state))),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {
@@ -920,6 +939,11 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
         rules: state.filters.rules_history(),
         vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
+        terminal_fit_saturated: state.policy.terminal_fit_saturated(),
+        terminal_fit_available: state
+            .policy
+            .terminal_fit_room()
+            .or_else(|| Some(wrap_up_available(state))),
         preserved: &state.preserved,
     };
     let Ok(bytes) = serde_json::to_vec(&manifest) else {

@@ -483,8 +483,24 @@ fn runtime_bulk_accounting_uses_measured_pressure_without_panicking() {
     );
     assert_eq!(policy.cache_report().economic_gate_suspensions, 1);
     assert!(!policy.events()[0].armed_after);
+    // F7: the refusal arms of `wrap_up` are exercised, not assumed. An
+    // unwritable store refuses the terminal (the write would never land), and
+    // a wrap-up cost above the room the region still has refuses the fit.
+    policy.wrap_up(0, u64::MAX, false);
+    assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
+    assert_eq!(policy.terminal_fit_saturated(), Some(true));
+    let mut policy = crate::context_policy::runtime::ProposalOnlyController::default();
+    let proposal = policy.propose_bulk("read_file", 2048, 1.0);
+    policy.complete_bulk(proposal, &bytes, 5000, 0.2, 7);
+    // A cost above the room the region still has refuses the fit.
+    policy.wrap_up(1 << 60, 1 << 59, true);
+    assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
+    assert_eq!(policy.terminal_fit_saturated(), Some(true));
+    // A cost the region can actually absorb is a feasible wrap-up, and the
+    // record distinguishes it from the saturated refusal above.
     policy.wrap_up(0, u64::MAX, true);
     assert_eq!(policy.terminal_outcome(), Some("wrap_up"));
+    assert_eq!(policy.terminal_fit_saturated(), Some(false));
 }
 
 #[test]
@@ -494,8 +510,11 @@ fn runtime_failed_proposal_quiesces_and_wrap_up_cannot_override_it() {
     policy.abort_bulk(proposal);
     assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
     assert_eq!(policy.events()[0].operation, "quiesce-unwritable");
+    // F7: the sticky write-failure branch keeps its own spelling, and no
+    // feasible wrap-up after it can override the terminal.
     policy.wrap_up(0, u64::MAX, true);
     assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
+    assert_eq!(policy.terminal_fit_saturated(), None);
 }
 
 /// Drives the controller's own governor into a rate quiesce the way
@@ -593,7 +612,7 @@ fn rate_and_unwritable_quiesce_are_distinct_terminals_and_both_recover() {
     // recorded on top of it - the split is about WHICH refusal happened, not
     // about wedging a writable store.
     let mut restored = crate::context_policy::runtime::ProposalOnlyController::default();
-    restored.restore_terminal_outcome("quiesce_rate");
+    restored.restore_terminal_outcome("quiesce_rate", None);
     assert_eq!(restored.terminal_outcome(), Some("quiesce_rate"));
     restored.wrap_up(0, u64::MAX, true);
     assert_eq!(restored.terminal_outcome(), Some("wrap_up"));

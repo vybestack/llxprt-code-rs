@@ -518,7 +518,7 @@ fn cache_acceptance_report_reads_durable_conditional_telemetry() {
     let cache = report::cache_block_from_session(Some(&dir));
     assert_eq!(cache["class"], "measured");
     assert_eq!(cache["rewrite_journal_bytes_reclaimed"], 100);
-    assert!(cache["rewrite_journal_tokens_invalidated"].is_null());
+    assert!(cache["rewrite_journal_bytes_invalidated"].is_null());
     assert!(cache["prefix_invalidation_cost_per_rewrite"].is_null());
     assert_eq!(cache["conditional"]["armed_hit_rate"], 0.5);
     assert_eq!(cache["suspended_while_armed"], true);

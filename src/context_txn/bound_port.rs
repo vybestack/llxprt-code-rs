@@ -7,7 +7,7 @@
 //! small tool surface can fail with a larger one even for identical effect
 //! bytes. The port derives the governed term from the *encoded durable
 //! spine*, which is the only region-wide measure the store exposes without a
-//! new store API (see `store_spine_units`).
+//! store API; the governed term is fed by the caller that reads the spine.
 //!
 //! The `version` argument is the **margin-table version the caller validated
 //! under**, so the port compares margin version against margin version and
@@ -37,30 +37,9 @@ impl BoundPort {
         }
     }
 
-    /// The committed units this port charges every commit against.
-    pub fn governed_units(&self) -> u64 {
-        self.governed
-    }
-
     /// The declared tool surface `D`, in budget units.
     pub fn tool_surface(&self) -> u64 {
         self.margins.tool_surface(self.tool_declarations)
-    }
-
-    /// Declared tool pairs the surface is charged for.
-    pub fn tool_declarations(&self) -> usize {
-        self.tool_declarations
-    }
-
-    /// The version of the margin table this port applies.
-    pub fn margin_version(&self) -> u64 {
-        self.margins.version
-    }
-
-    /// Grows the declared tool surface (a session adopting more tools), which
-    /// grows the computed bound.
-    pub fn declare_tools(&mut self, tool_declarations: usize) {
-        self.tool_declarations = tool_declarations;
     }
 
     /// Recalibrates the margin table on detected drift (104-3): a strictly
@@ -80,6 +59,12 @@ impl BoundPort {
     pub fn margins(&self) -> Margins {
         self.margins
     }
+    // NOTE: this accessor's only reader is the drift fixture below; it is kept
+    // because `bound(version, ..)` must be called with the table version the
+    // fixture validated under (104-3), which is exactly what it reads.
+    // NOTE: this accessor's only reader is the drift fixture below; kept
+    // because `bound(version, ..)` must be called with the table version the
+    // fixture validated under (104-3), which is exactly what it reads.
 
     /// A clone of this port with the margin table recalibrated to `version`.
     fn after_recalibration(
@@ -130,13 +115,6 @@ impl AccountingPort for BoundPort {
     }
 }
 
-/// Region-wide units the durable spine occupies: the encoded spine length,
-/// which is what the store charges against `SPINE_RELOAD_MAX` on reload, so
-/// admission accounting and the reload bound stay the same number.
-pub fn store_spine_units(spine_bytes_len: u64) -> u64 {
-    spine_bytes_len
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,12 +156,12 @@ mod tests {
     #[test]
     fn recalibrating_the_port_moves_the_bound() {
         let mut port = BoundPort::new(Margins::V1, 4, 0);
-        let before = port.bound(port.margin_version(), 100);
+        let before = port.bound(port.margins().version, 100);
         port.recalibrate(2, 128)
             .expect("newer version recalibrates");
-        let after = port.bound(port.margin_version(), 100);
+        let after = port.bound(port.margins().version, 100);
         assert!(after > before);
-        assert_eq!(port.margin_version(), 2);
+        assert_eq!(port.margins().version, 2);
         assert!(port.recalibrate(2, 999).is_err());
         assert!(port.recalibrate(1, 999).is_err());
     }

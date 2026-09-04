@@ -60,6 +60,15 @@ pub struct RenderContract {
     /// Contract version; the committed version and the sent version must be equal.
     pub version: u64,
     /// Output token ceiling of the target.
+    ///
+    /// Issue 105-4: carried, not evaluated. `max_output_tokens` prices what
+    /// the provider renders FROM the context; admission legality gates what
+    /// goes INTO it (region occupancy, floors, pairing), and no field of this
+    /// contract bounds the render. The generate call carries its own
+    /// `max_tokens` (adapter/profile), so clamping here would silently
+    /// truncate governed content instead of surfacing the pressure. The
+    /// whole-request ceiling that DOES gate this projection is
+    /// `profile_budget_units`, enforced by the `profile-over-budget` rule.
     pub max_output_tokens: u64,
     /// Whether the target can render the notes region at all.
     pub supports_notes_region: bool,
@@ -68,6 +77,10 @@ pub struct RenderContract {
     /// Quoting convention the target applies to verbatim lanes.
     pub quoting_convention: QuotingConvention,
     /// Profile budget for the whole request, in accounting units.
+    ///
+    /// Issue 105-4: enforced by the `profile-over-budget` rule, which sums
+    /// every region occupancy the projection carries and refuses one that
+    /// bursts this whole-request ceiling.
     pub profile_budget_units: u64,
     /// Per-region occupancy budgets, in accounting units.
     pub region_budgets: Vec<(Region, u64)>,
@@ -156,6 +169,11 @@ pub enum Violation {
         /// Violated predicate.
         predicate: String,
     },
+    /// The projection exceeds the contract's profile budget.
+    ProfileOverBudget {
+        /// Violated predicate.
+        predicate: String,
+    },
 }
 
 impl Violation {
@@ -169,6 +187,7 @@ impl Violation {
             Violation::Floor { .. } => "floor",
             Violation::Pin { .. } => "pin",
             Violation::QuotingConvention { .. } => "quoting-convention",
+            Violation::ProfileOverBudget { .. } => "profile-over-budget",
         }
     }
 
@@ -181,7 +200,8 @@ impl Violation {
             | Violation::RegionOverBudget { predicate }
             | Violation::Floor { predicate }
             | Violation::Pin { predicate }
-            | Violation::QuotingConvention { predicate } => predicate,
+            | Violation::QuotingConvention { predicate }
+            | Violation::ProfileOverBudget { predicate } => predicate,
         }
     }
 }
@@ -232,6 +252,10 @@ const RULES: &[Rule] = &[
     Rule {
         name: "region-over-budget",
         check: check_region_budget,
+    },
+    Rule {
+        name: "profile-over-budget",
+        check: check_profile_budget,
     },
     Rule {
         name: "floor",
@@ -323,6 +347,27 @@ fn check_placeholder(state: &TypedState, contract: &RenderContract) -> Option<Vi
             );
             return Some(Violation::PlaceholderIllegal { predicate });
         }
+    }
+    None
+}
+
+/// Issue 105-4: `profile_budget_units` is the whole-request ceiling, so the
+/// gate sums every region occupancy the projection carries and refuses a
+/// projection that exceeds it. Without this row the field is carried and
+/// never read - exactly the dead surface the reviewer flagged - and a
+/// projection could be legal while bursting past the budget the profile
+/// declares for the whole request.
+fn check_profile_budget(state: &TypedState, contract: &RenderContract) -> Option<Violation> {
+    let mut total = 0u64;
+    for region in Region::all() {
+        total = total.saturating_add(state.conversation_ir.region_occupancy(region));
+    }
+    if total > contract.profile_budget_units {
+        let predicate = format!(
+            "projection holds {total} unit(s) across all regions against a profile budget of {} unit(s)",
+            contract.profile_budget_units
+        );
+        return Some(Violation::ProfileOverBudget { predicate });
     }
     None
 }
