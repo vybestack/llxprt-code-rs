@@ -1,9 +1,10 @@
-//! The ingress transaction itself: capture -> redact -> segment -> append.
+//! The ingress transaction itself: capture -> redact -> coverage-check -> append -> segment.
 //!
 //! The transaction is fail-closed. It owns a bounded volatile capture buffer, runs the
-//! redactor, checks total disjoint byte coverage of the sanitized bytes, performs the
-//! one exempt durable write (the sanitized append), and only then returns the ingress
-//! digest. If the process dies between the sanitized append and item placement, replay
+//! redactor, checks total disjoint byte coverage of the sanitized bytes for every slot
+//! BEFORE any durable write (so a rejected payload leaves the spine byte-identical),
+//! performs the one exempt durable write (the sanitized append), and only then returns the
+//! ingress digest. If the process dies between the sanitized append and item placement, replay
 //! re-derives segmentation and classification deterministically from the stored bytes.
 //! Generated artifacts enter through the same path as a synchronous sub-transaction and
 //! stay volatile until it completes.
@@ -180,7 +181,7 @@ impl IngressTxn {
         self.capture(CaptureSource::GeneratedArtifact, raw)
     }
 
-    /// Commits the transaction: redact, segment, coverage-check, append.
+    /// Commits the transaction: redact, coverage-check, append, then segment.
     pub fn commit(
         &mut self,
         sink: &mut dyn IngressSink,
@@ -188,7 +189,13 @@ impl IngressTxn {
         if sink.mode() != "normal" {
             return Err(IngressError::StoreBlocked { mode: sink.mode() });
         }
+        // Validate every slot first, so a rejected payload leaves the spine
+        // byte-identical to before the attempt (all-or-nothing admission):
+        // a coverage failure in any slot appends nothing at all.
         let slots = self.capture.drain();
+        for slot in slots.iter() {
+            self.validate_slot(&slot.bytes)?;
+        }
         let mut records = Vec::new();
         for slot in slots {
             let record = self.transact_one(sink, slot.source, &slot.bytes)?;
@@ -197,6 +204,33 @@ impl IngressTxn {
             records.push(record);
         }
         Ok(records)
+    }
+
+    /// Pure validation of one slot's sanitized bytes: the coverage check runs
+    /// BEFORE the durable append, so a rejected payload never leaves bytes in
+    /// the spine (issue [r-- regression).
+    fn validate_slot(&self, raw: &[u8]) -> Result<(), IngressError> {
+        match self.redactor.redact(raw) {
+            RedactionOutcome::Sanitized { bytes, .. } => {
+                let segments = segment(&bytes);
+                if !coverage_is_total(&segments, bytes.len()) {
+                    return Err(IngressError::Coverage {
+                        sanitized_len: bytes.len(),
+                    });
+                }
+                Ok(())
+            }
+            RedactionOutcome::Vaulted { reason, byte_len } => {
+                let placeholder = vault_placeholder(reason, byte_len);
+                let segments = segment(&placeholder);
+                if !coverage_is_total(&segments, placeholder.len()) {
+                    return Err(IngressError::Coverage {
+                        sanitized_len: placeholder.len(),
+                    });
+                }
+                Ok(())
+            }
+        }
     }
 
     fn transact_one(
@@ -211,7 +245,10 @@ impl IngressTxn {
                 // Order is durable sanitized append first, segmentation
                 // second: the record is addressable before any consumer sees
                 // it, and segmentation is re-derivable deterministically from
-                // the stored bytes (issue #119).
+                // the stored bytes. The pure validation (coverage) already
+                // ran in `commit` before this append, so a rejected payload
+                // leaves the spine byte-identical to before the attempt
+                // (regression guard).
                 let placement =
                     sink.sanitized_append(&bytes)
                         .map_err(|e| IngressError::StoreBlocked {
@@ -248,8 +285,8 @@ impl IngressTxn {
                         })?;
                 let placeholder = vault_placeholder(reason.clone(), byte_len);
                 // Same order as the sanitized branch: placeholder into the
-                // spine first, segmentation of the stored bytes after (issue
-                // #119).
+                // spine first, segmentation of the stored bytes after; the
+                // coverage check already ran before the durable write.
                 let placement = sink.sanitized_append(&placeholder).map_err(|e| {
                     IngressError::StoreBlocked {
                         mode: leak_mode(&e),

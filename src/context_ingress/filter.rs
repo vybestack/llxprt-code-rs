@@ -219,7 +219,11 @@ impl FilterRegistry {
     }
 
     /// Restores the vocabulary history from its durable form. Additions only:
-    /// dropping a label is a typed refusal (issue #118).
+    /// dropping a label is a typed refusal. Each snapshot's OWN labels come
+    /// back under its OWN version, so a restore is a true round trip: the
+    /// version count and labels are identical to before, every recorded
+    /// version keeps resolving, and no phantom version is minted, no matter
+    /// how often the process restarts (off-by-one/phantom-version regression).
     pub fn restore_vocabulary_snapshots(
         &mut self,
         snapshots: Vec<VocabularySnapshot>,
@@ -237,20 +241,21 @@ impl FilterRegistry {
                     to: snapshot.version,
                 });
             }
-            restored.push(Vocabulary {
-                version: snapshot.version,
-                labels: std::mem::take(&mut labels),
-            });
-            labels = snapshot
+            // Leak the persisted labels once: the vocabulary holds
+            // `&'static str` labels for the rest of the process's life, and
+            // the snapshot count is bounded by the in-session update count, so
+            // repeated restores allocate nothing a fresh process would not.
+            let restored_labels: Vec<&'static str> = snapshot
                 .labels
                 .iter()
-                .map(|l| Box::leak(l.as_str().to_string().into_boxed_str()) as &'static str)
+                .map(|label| Box::leak(label.as_str().to_string().into_boxed_str()) as &'static str)
                 .collect();
+            restored.push(Vocabulary {
+                version: snapshot.version,
+                labels: restored_labels.clone(),
+            });
+            labels = restored_labels;
         }
-        restored.push(Vocabulary {
-            version: snapshots.len() as u64 + 1,
-            labels,
-        });
         self.vocabulary = restored;
         Ok(())
     }

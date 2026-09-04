@@ -193,6 +193,10 @@ impl ProposalOnlyController {
     pub fn terminal_outcome(&self) -> Option<&'static str> {
         self.terminal_outcome
     }
+    /// Current policy logical time, used to stamp durable checkpoint lines.
+    pub fn logical_time(&self) -> u64 {
+        self.logical_time
+    }
     pub fn governor(&self) -> &Governor {
         &self.governor
     }
