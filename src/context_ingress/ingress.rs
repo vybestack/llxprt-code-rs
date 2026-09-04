@@ -23,6 +23,11 @@ pub enum IngressError {
     Coverage {
         sanitized_len: usize,
     },
+    /// A record that preserved zero spine bytes (an empty sanitized/placeholder
+    /// range) is refused admission: an exempt append must land real bytes, and an
+    /// empty placement would otherwise be admitted with a zero-length spine
+    /// range that preserves nothing.
+    EmptyPreservedSpine,
     /// Store is not in a writable mode: fail closed before any side effect.
     StoreBlocked {
         mode: &'static str,
@@ -212,6 +217,9 @@ impl IngressTxn {
     fn validate_slot(&self, raw: &[u8]) -> Result<(), IngressError> {
         match self.redactor.redact(raw) {
             RedactionOutcome::Sanitized { bytes, .. } => {
+                if bytes.is_empty() {
+                    return Err(IngressError::EmptyPreservedSpine);
+                }
                 let segments = segment(&bytes);
                 if !coverage_is_total(&segments, bytes.len()) {
                     return Err(IngressError::Coverage {
@@ -222,6 +230,9 @@ impl IngressTxn {
             }
             RedactionOutcome::Vaulted { reason, byte_len } => {
                 let placeholder = vault_placeholder(reason, byte_len);
+                if placeholder.is_empty() {
+                    return Err(IngressError::EmptyPreservedSpine);
+                }
                 let segments = segment(&placeholder);
                 if !coverage_is_total(&segments, placeholder.len()) {
                     return Err(IngressError::Coverage {
@@ -242,24 +253,7 @@ impl IngressTxn {
         let outcome = self.redactor.redact(raw);
         match outcome {
             RedactionOutcome::Sanitized { bytes, redactions } => {
-                // Order is durable sanitized append first, segmentation
-                // second: the record is addressable before any consumer sees
-                // it, and segmentation is re-derivable deterministically from
-                // the stored bytes. The pure validation (coverage) already
-                // ran in `commit` before this append, so a rejected payload
-                // leaves the spine byte-identical to before the attempt
-                // (regression guard).
-                let placement =
-                    sink.sanitized_append(&bytes)
-                        .map_err(|e| IngressError::StoreBlocked {
-                            mode: leak_mode(&e),
-                        })?;
-                let segments = segment(&bytes);
-                if !coverage_is_total(&segments, bytes.len()) {
-                    return Err(IngressError::Coverage {
-                        sanitized_len: bytes.len(),
-                    });
-                }
+                let (placement, segments) = Self::place_on_spine(sink, &bytes)?;
                 let payload = IngressPayload {
                     handle: placement.handle.clone(),
                     ranges: vec![placement.range.clone()],
@@ -284,20 +278,7 @@ impl IngressTxn {
                             mode: leak_mode(&e),
                         })?;
                 let placeholder = vault_placeholder(reason.clone(), byte_len);
-                // Same order as the sanitized branch: placeholder into the
-                // spine first, segmentation of the stored bytes after; the
-                // coverage check already ran before the durable write.
-                let placement = sink.sanitized_append(&placeholder).map_err(|e| {
-                    IngressError::StoreBlocked {
-                        mode: leak_mode(&e),
-                    }
-                })?;
-                let segments = segment(&placeholder);
-                if !coverage_is_total(&segments, placeholder.len()) {
-                    return Err(IngressError::Coverage {
-                        sanitized_len: placeholder.len(),
-                    });
-                }
+                let (placement, segments) = Self::place_on_spine(sink, &placeholder)?;
                 let payload = IngressPayload {
                     handle: placement.handle.clone(),
                     ranges: vec![placement.range.clone()],
@@ -321,6 +302,38 @@ impl IngressTxn {
                 })
             }
         }
+    }
+
+    /// Appends `bytes` to the spine and validates the placement: order is
+    /// durable append first, segmentation second, and pure validation
+    /// (coverage) already ran in `commit`, so a rejected payload leaves the
+    /// spine byte-identical to before the attempt.
+    ///
+    /// Durable sanitized append first, segmentation second: the record is
+    /// addressable before any consumer sees it, and segmentation is
+    /// re-derivable deterministically from the stored bytes. The pure
+    /// validation (coverage) already ran in `commit` before this append, so
+    /// a rejected payload leaves the spine byte-identical to before the
+    /// attempt (regression guard).
+    fn place_on_spine(
+        sink: &mut dyn IngressSink,
+        bytes: &[u8],
+    ) -> Result<(SpinePlacement, Vec<Segment>), IngressError> {
+        let placement = sink
+            .sanitized_append(bytes)
+            .map_err(|e| IngressError::StoreBlocked {
+                mode: leak_mode(&e),
+            })?;
+        if placement.range.is_empty() {
+            return Err(IngressError::EmptyPreservedSpine);
+        }
+        let segments = segment(bytes);
+        if !coverage_is_total(&segments, bytes.len()) {
+            return Err(IngressError::Coverage {
+                sanitized_len: bytes.len(),
+            });
+        }
+        Ok((placement, segments))
     }
 }
 

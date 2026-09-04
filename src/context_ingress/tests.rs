@@ -506,6 +506,54 @@ fn vocabulary_restore_refuses_a_label_drop() {
     assert!(registry.restore_vocabulary_snapshots(dropped).is_err());
 }
 
+/// A version GAP restores: `update_vocabulary` never requires versions to be
+/// consecutive (version 1 then 3 is a legal additions-only session), so the
+/// restore must accept exactly that sequence instead of rejecting a reload the
+/// running session could have produced. A restore stricter than the session
+/// that produced it would silently drop vocabulary history on restart.
+#[test]
+fn vocabulary_restore_accepts_a_version_gap_update_vocabulary_permits() {
+    let mut registry = FilterRegistry::new();
+    let mut three = Vocabulary::v1();
+    three.version = 3;
+    three.labels = vec!["error-span", "identifier", "commit-hash"];
+    // The exact in-session sequence: v1, then a jump to v3 (no v2 exists).
+    assert_eq!(registry.update_vocabulary(three.clone()).unwrap(), 3);
+    let snapshots = registry.vocabulary_snapshots();
+    assert_eq!(
+        snapshots.iter().map(|s| s.version).collect::<Vec<_>>(),
+        vec![1, 3],
+        "update_vocabulary records a gap: version 2 never exists"
+    );
+
+    let mut restarted = FilterRegistry::new();
+    restarted
+        .restore_vocabulary_snapshots(snapshots.clone())
+        .expect("a prefix-consistent gap restores: the session could produce it");
+    assert_eq!(
+        restarted.vocabulary().version,
+        3,
+        "the restored current version is 3, not 2"
+    );
+    let restored = restarted.vocabulary_snapshots();
+    assert_eq!(
+        restored.iter().map(|s| s.version).collect::<Vec<_>>(),
+        vec![1, 3],
+        "restore is identity over the gapped history"
+    );
+    assert_eq!(
+        restored
+            .iter()
+            .map(|s| s.labels.clone())
+            .collect::<Vec<_>>(),
+        snapshots
+            .iter()
+            .map(|s| s.labels.clone())
+            .collect::<Vec<_>>(),
+        "each version resolves under its own labels after the gap restore"
+    );
+}
+
 /// A payload whose sanitized bytes fail the coverage check leaves the spine
 /// BYTE-IDENTICAL to before the attempt: every pure validation (the coverage
 /// check) runs BEFORE the durable append, so a rejected payload never
@@ -570,6 +618,44 @@ fn rejected_payload_leaves_the_spine_byte_identical() {
         untouched.spine, before,
         "a refused capture appends nothing to the spine"
     );
+}
+
+/// A record that would preserve zero spine bytes (an empty sanitized range) is
+/// a typed refusal, not an admission: an exempt append must land real bytes, so
+/// an empty range is not a record. The refusal runs in `commit`'s validation
+/// pass, BEFORE any durable append, so the spine stays byte-identical to the
+/// state before the attempt (the transaction's all-or-nothing contract).
+#[test]
+fn zero_preserved_spine_bytes_are_refused_without_touching_the_spine() {
+    // An existing record so the spine is non-empty and any mutation is visible.
+    let mut sink = MemSink::normal();
+    let mut seed = IngressTxn::new(1 << 20, 1 << 20);
+    seed.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    seed.commit(&mut sink).unwrap();
+    let before = sink.spine.clone();
+    assert!(!before.is_empty());
+
+    // A zero-byte payload sanitizes to zero bytes: zero preserved spine bytes.
+    let mut txn = IngressTxn::new(1 << 20, 1 << 20);
+    txn.capture(CaptureSource::ToolResult, &[]).unwrap();
+    let error = txn.commit(&mut sink).unwrap_err();
+    assert!(
+        matches!(error, IngressError::EmptyPreservedSpine),
+        "zero preserved spine bytes must be a typed refusal, got {error:?}"
+    );
+    assert_eq!(
+        sink.spine, before,
+        "a refused zero-spine record leaves the spine byte-identical"
+    );
+
+    // The guard holds for every slot of a batch: one zero-spine slot refuses
+    // the whole transaction before any append, not just its own slot.
+    let mut batch = IngressTxn::new(1 << 20, 1 << 20);
+    batch.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    batch.capture(CaptureSource::ToolResult, &[]).unwrap();
+    let error = batch.commit(&mut sink).unwrap_err();
+    assert!(matches!(error, IngressError::EmptyPreservedSpine));
+    assert_eq!(sink.spine, before, "no slot of the batch is admitted");
 }
 
 /// The coverage check runs BEFORE the durable append, on both the sanitized

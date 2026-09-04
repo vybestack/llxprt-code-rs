@@ -204,6 +204,134 @@ fn vault_key_is_stored_privately_and_differs_per_session() {
     }
 }
 
+/// Sealing the SAME plaintext twice in one commit batch, and then again after a
+/// restore redraws the nonce prefix, never repeats a nonce: each seal records
+/// its own nonce in the durable vault artifact, and a repeated nonce under one
+/// AES-GCM key would be ciphertext reuse. The restored prefix is a fresh draw,
+/// so the continuing counter never collides with the nonces the previous
+/// process recorded.
+#[test]
+fn vault_nonces_never_repeat_within_a_batch_or_after_a_restore_redraw() {
+    use llxprt_code_rs::context_store::vault::{Vault, VaultKey};
+    let key = VaultKey::from_slice(&[7u8; 32]);
+    let plaintext = b"CTXEVAL-SECRET-A1B2C3D4E5".as_slice();
+
+    // One commit batch: the same plaintext sealed twice, as two slots of one
+    // transaction would seal it.
+    let mut batch = Vault::open_with_prefix(key, 0x2bad4c0d);
+    let first = batch.put(plaintext, "secret").unwrap();
+    let second = batch.put(plaintext, "secret").unwrap();
+    assert_ne!(
+        first, second,
+        "two seals of one plaintext get distinct handles"
+    );
+    let batch_snapshot = batch.snapshot();
+    let batch_nonces: Vec<String> = batch_snapshot
+        .slots
+        .iter()
+        .map(|slot| slot.nonce.clone())
+        .collect();
+    assert_eq!(batch_nonces.len(), 2);
+    assert_ne!(
+        batch_nonces[0], batch_nonces[1],
+        "two seals of the same plaintext in one batch never share a nonce"
+    );
+
+    // Recovery: the restored vault keeps the recorded nonces readable but
+    // redraws the prefix, so the continuing counter (next = 2) mints a nonce
+    // the previous process never used.
+    let mut restored = Vault::open_with_prefix(key, 0x0badc0de);
+    restored.restore(batch_snapshot.clone()).unwrap();
+    assert_eq!(
+        restored.get(&first).unwrap(),
+        plaintext,
+        "restored slots read back"
+    );
+    assert_eq!(restored.get(&second).unwrap(), plaintext);
+    let third = restored.put(plaintext, "secret").unwrap();
+    assert_ne!(third, first);
+    assert_ne!(third, second);
+    let restored_snapshot = restored.snapshot();
+    let restored_nonces: Vec<&str> = restored_snapshot
+        .slots
+        .iter()
+        .map(|slot| slot.nonce.as_str())
+        .collect();
+    let after_redraw = restored_nonces
+        .iter()
+        .find(|nonce| !batch_nonces.iter().any(|recorded| recorded == *nonce))
+        .expect("the seal after the redraw carries its own nonce");
+    assert_ne!(*after_redraw, batch_nonces[0]);
+    assert_ne!(*after_redraw, batch_nonces[1]);
+    // The redraw itself moved: the new prefix differs from the recorded one.
+    assert_ne!(
+        restored_snapshot.nonce_prefix, batch_snapshot.nonce_prefix,
+        "a restore redraws the nonce prefix instead of resuming it"
+    );
+}
+
+/// The vault key is not derivable from public data: two stores with IDENTICAL
+/// public state (the same session id, the same reserved request, the same
+/// workspace) hold different keys, and no public artifact equals the key
+/// material. The historical bug derived the key from a public seed, so with a
+/// public seed identical public state minted an identical key: this test fails
+/// against that behavior because the two stores share every public input.
+#[test]
+fn vault_key_is_private_entropy_not_a_function_of_public_state() {
+    let cwd = workspace();
+    // Same id, same prompt, same reply, same directory layout: identical public
+    // state, so only private entropy can separate the two keys. Each store gets
+    // its own workspace-rooted directory layout, so the run inputs are identical
+    // while the two stores stay independently reservable.
+    let sid_a = SessionId::parse("vault-key-public-seed-a").unwrap();
+    let sid_b = SessionId::parse("vault-key-public-seed-b").unwrap();
+    let a = SessionStore::load_at(&sid_a, &root()).expect("open store a");
+    let b = SessionStore::load_at(&sid_b, &root()).expect("open store b");
+    let r1 = reserved(&a, None, None, "P1", &cwd).unwrap();
+    let r2 = reserved(&b, None, None, "P1", &cwd).unwrap();
+    agent(Box::new(MockBackend::new(vec![result("done")])), &cwd)
+        .run(&a, &r1)
+        .unwrap();
+    agent(Box::new(MockBackend::new(vec![result("done")])), &cwd)
+        .run(&b, &r2)
+        .unwrap();
+    assert_ne!(a.session_id.as_str(), b.session_id.as_str());
+    assert_eq!(r1.prompt, r2.prompt);
+    let key_a = std::fs::read(a.session_dir.join("context-vault-key")).unwrap();
+    let key_b = std::fs::read(b.session_dir.join("context-vault-key")).unwrap();
+    assert_eq!(key_a.len(), 32);
+    assert_ne!(key_a, key_b, "identical public state yields distinct keys");
+
+    // No public artifact carries the key material: the session id, the manifest,
+    // the vault snapshot, and the sanitized spine are all published, so the key
+    // appearing in any of them would be a durable leak.
+    let session_id = a.session_id.as_bytes();
+    let published = [
+        session_id.to_vec(),
+        artifact(&a, "manifest.json"),
+        artifact(&a, "vault"),
+        artifact(&a, "sanitized"),
+        artifact(&a, "events.log"),
+        artifact(&a, "checkpoints"),
+    ];
+    for (index, bytes) in published.iter().enumerate() {
+        assert!(
+            !windows_contain(bytes, &key_a),
+            "the vault key never appears inside public artifact #{index}"
+        );
+    }
+}
+
+/// True if `needle` appears anywhere inside `haystack`.
+fn windows_contain(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
 /// After a restart, a reloaded store resolves the same evidence: the spine is
 /// re-framed under content-stable handles, the restored vault slot reads back,
 /// and the historical filter versions reload.

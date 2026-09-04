@@ -269,6 +269,9 @@ pub(crate) fn ingress_error(error: &crate::context_ingress::ingress::IngressErro
         crate::context_ingress::ingress::IngressError::Coverage { sanitized_len } => {
             format!("segmentation did not cover {sanitized_len} sanitized bytes")
         }
+        crate::context_ingress::ingress::IngressError::EmptyPreservedSpine => {
+            "ingress refused a record that preserved zero spine bytes".to_string()
+        }
         crate::context_ingress::ingress::IngressError::StoreBlocked { mode } => {
             format!("store mode {mode} refused ingress")
         }

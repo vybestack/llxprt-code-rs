@@ -224,20 +224,31 @@ impl FilterRegistry {
     /// version count and labels are identical to before, every recorded
     /// version keeps resolving, and no phantom version is minted, no matter
     /// how often the process restarts (off-by-one/phantom-version regression).
+    ///
+    /// The accepted sequence is exactly what [`Self::update_vocabulary`] can
+    /// produce: the first snapshot is version 1, and each later snapshot is
+    /// strictly newer than its predecessor with a label set that contains
+    /// every earlier label. A restored session can never be stricter than the
+    /// running session that produced the snapshots, so a version gap
+    /// (`update_vocabulary` never requires versions to be consecutive) restores
+    /// instead of failing a reload that would then have to drop vocabulary.
     pub fn restore_vocabulary_snapshots(
         &mut self,
         snapshots: Vec<VocabularySnapshot>,
     ) -> Result<(), RejectedUpdate> {
         let mut restored = Vec::with_capacity(snapshots.len());
         let mut labels = Vocabulary::v1().labels;
+        let mut version = 0;
         for (index, snapshot) in snapshots.iter().enumerate() {
-            if index as u64 + 1 != snapshot.version
+            let expected = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+            if snapshot.version <= version
+                || (index == 0 && snapshot.version != expected)
                 || !labels
                     .iter()
                     .all(|label| snapshot.labels.contains(&label.to_string()))
             {
                 return Err(RejectedUpdate::TighteningRequiresOffline {
-                    from: index as u64 + 1,
+                    from: if index == 0 { expected } else { version },
                     to: snapshot.version,
                 });
             }
@@ -255,6 +266,7 @@ impl FilterRegistry {
                 labels: restored_labels.clone(),
             });
             labels = restored_labels;
+            version = snapshot.version;
         }
         self.vocabulary = restored;
         Ok(())
