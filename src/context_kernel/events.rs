@@ -1,7 +1,7 @@
 //! Append-only event log: total order, sequence numbers, checksums, identities.
 
 use crate::context_kernel::canonical::{Digest, HashScope, Sink};
-use crate::context_kernel::ir::{SegmentClaim, StoreRange};
+use crate::context_kernel::ir::SegmentClaim;
 use crate::context_kernel::lanes::Lane;
 use crate::context_kernel::scopes::ScopeId;
 
@@ -252,43 +252,6 @@ pub fn structural_lane(source: &AppendSource) -> Lane {
         AppendSource::User => Lane::Constitutional,
         AppendSource::Assistant => Lane::Decisional,
         AppendSource::ToolResult { .. } => Lane::Evidential,
-    }
-}
-
-/// Claims an append records when the ingress transaction has not segmented it:
-/// one claim over the whole payload, carrying no class, so every lane decision
-/// still has a provenance range to attribute.
-pub fn whole_payload_claim(sanitized: &[u8]) -> Vec<SegmentClaim> {
-    vec![SegmentClaim {
-        span: StoreRange {
-            offset: 0,
-            length: sanitized.len() as u64,
-        },
-        class: None,
-    }]
-}
-
-/// Whether the event kind appends store bytes.
-fn is_append(kind: &EventKind) -> bool {
-    matches!(kind, EventKind::Append { .. })
-}
-
-impl EventLog {
-    /// Number of recorded events.
-    pub fn count_appends(&self) -> usize {
-        self.events.iter().filter(|e| is_append(&e.kind)).count()
-    }
-
-    /// Spine length the recorded appends charge, in bytes.
-    pub fn appended_units(&self) -> u64 {
-        self.events
-            .iter()
-            .filter(|e| is_append(&e.kind))
-            .map(|event| match &event.kind {
-                EventKind::Append { sanitized, .. } => sanitized.len() as u64,
-                _ => 0,
-            })
-            .sum()
     }
 }
 

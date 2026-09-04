@@ -2025,16 +2025,31 @@ fn migration_hash_scopes_are_independent() {
     // Corrupting the committed generation's chain evidence does not let a build
     // checksum verify in the event-chain scope, and vice versa.
     let tampered_chain = v2_chain ^ 1;
-    assert_ne!(tampered_chain, v2_chain);
+    assert_ne!(tampered_chain, v2_chain, "the tamper is a real change");
+
+    // The same bytes digested in two scopes are two identities, and tampering the
+    // bytes changes the digest in either scope.
     assert_ne!(
         HashScope::StoreBuild.digest(&v2_bytes),
         HashScope::EventChain.digest(&v2_bytes),
         "the same bytes in different scopes are different identities"
     );
+    let mut tampered_build = v3_bytes;
+    tampered_build[0] ^= 1;
+    assert_ne!(
+        HashScope::StoreBuild.digest(&tampered_build),
+        build_checksum,
+        "tampering the built bytes changes the store-build digest"
+    );
+    assert_ne!(
+        HashScope::EventChain.digest(&tampered_build),
+        HashScope::EventChain.digest(&v3_bytes),
+        "tampering the bytes changes the event-chain digest too"
+    );
     assert_ne!(
         HashScope::StoreBuild.digest(&v3_bytes),
-        build_checksum ^ 1,
-        "corrupting one scope's value never matches the other scope's digest"
+        HashScope::EventChain.digest(&v3_bytes),
+        "a build checksum never equals an event-chain checksum over the same bytes"
     );
 
     // The landed build verifies only inside the store-build scope.
@@ -2047,6 +2062,10 @@ fn migration_hash_scopes_are_independent() {
         "the build evidence is intact"
     );
     assert!(!descriptor.verify_build(&v2_bytes));
+    assert_ne!(
+        descriptor.selection_chain, v2_chain,
+        "the tampered chain the descriptor carries differs from the recorded one"
+    );
     // And the chain evidence refuses verification, but the build evidence does not.
     let mut verified = EventLog::new(V2);
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
@@ -2061,23 +2080,41 @@ fn migration_hash_scopes_are_independent() {
 }
 
 /// GREEN: a crash between the build write and the swap leaves the old version
-/// active, and the swap is a single visibility transition.
+/// active, and the swap is a single visibility transition. The pair is rebuilt from
+/// the durable record, so the recovery path asserts what survived the crash rather
+/// than what a fresh genesis happens to contain.
 #[test]
 fn publication_crash_between_write_and_swap_keeps_the_old_version_active() {
     let v2_chain = HashScope::EventChain.digest(b"v2 recorded events");
     let built = [9_u8; 32];
+    let build_checksum = HashScope::StoreBuild.digest(&built);
     let mut slots = SlotPair::genesis(V2, 64, v2_chain);
     slots
         .land(Generation::Built {
             store_version: V3,
             bytes: built.len() as u64,
-            checksum: HashScope::StoreBuild.digest(&built),
+            checksum: build_checksum,
         })
         .unwrap();
 
-    // Simulate a crash after the write, before the swap: nothing was mutated, so
-    // recovery re-frames the pair from the durable record and v2 stays active.
-    let recovered = SlotPair::genesis(V2, 64, v2_chain);
+    // The pair that holds the landed build: the write landed in the inactive slot
+    // and the swap has not happened, so v2 is still what readers resolve.
+    assert_eq!(
+        slots.active().store_version(),
+        V2,
+        "the write leaves the committed generation active"
+    );
+    let inactive = slots.inactive().unwrap();
+    assert_eq!(inactive.store_version(), V3);
+    assert_eq!(inactive.scope(), HashScope::StoreBuild);
+    assert!(!slots.published(), "the swap has not happened");
+
+    // Simulate a crash after the write, before the swap: the durable record of the
+    // pair is its genesis framing plus whatever the publication already committed,
+    // and a publication that never reached the swap has committed nothing. So
+    // recovery re-frames the pair from the recorded chain and lands the build
+    // again from its descriptor, and v2 is still what readers resolve.
+    let mut recovered = SlotPair::genesis(V2, 64, v2_chain);
     assert_eq!(
         recovered.active().store_version(),
         V2,
@@ -2085,9 +2122,26 @@ fn publication_crash_between_write_and_swap_keeps_the_old_version_active() {
     );
     assert!(
         recovered.inactive().is_none(),
-        "the build is not durable yet"
+        "the write is not durable until the swap commits it"
     );
     assert!(!recovered.published());
+    // Rebuilding the landed build from the durable descriptor reproduces the pair
+    // that held it, without publishing: v2 stays active and v3 stays pending.
+    let descriptor = MigrationDescriptor::seal(V3, build_checksum, v2_chain);
+    assert!(descriptor.verify_build(&built));
+    recovered
+        .land(Generation::Built {
+            store_version: descriptor.store_version,
+            bytes: built.len() as u64,
+            checksum: descriptor.build_checksum,
+        })
+        .unwrap();
+    assert_eq!(recovered.active().store_version(), V2);
+    assert_eq!(recovered.inactive().unwrap().store_version(), V3);
+    assert!(
+        !recovered.published(),
+        "re-landing the build is not a publication"
+    );
 
     // And after the swap, the published state is durable and idempotent.
     let selection_chain = HashScope::EventChain.chain(v2_chain, b"migration-select v3");
@@ -2095,17 +2149,28 @@ fn publication_crash_between_write_and_swap_keeps_the_old_version_active() {
     assert_eq!(swapped.store_version(), V3);
     assert_eq!(slots.active().store_version(), V3);
     assert!(matches!(slots.active(), Generation::Committed { .. }));
-    let descriptor =
-        MigrationDescriptor::seal(V3, HashScope::StoreBuild.digest(&built), selection_chain);
-    // Re-framing from the descriptor reproduces the active generation.
-    let reframed = SlotPair::genesis(
-        descriptor.store_version,
-        built.len() as u64,
-        descriptor.selection_chain,
+    assert_eq!(slots.inactive().unwrap().store_version(), V2);
+    assert!(slots.published(), "the swap is the publication");
+    assert!(
+        slots.swap(selection_chain).is_err(),
+        "the swap happens at most once"
     );
-    assert_eq!(reframed.active().store_version(), V3);
-    assert!(descriptor.verify_build(&built));
-    assert!(reframed.published() || descriptor.published);
+    // The published descriptor is the durable record of the completed publication,
+    // and re-framing from it resolves the new generation, not the old one.
+    let published =
+        MigrationDescriptor::seal(V3, HashScope::StoreBuild.digest(&built), selection_chain);
+    let reframed = SlotPair::genesis(
+        published.store_version,
+        built.len() as u64,
+        published.selection_chain,
+    );
+    assert_eq!(
+        reframed.active().store_version(),
+        V3,
+        "re-framing from the published descriptor resolves the new generation"
+    );
+    assert!(published.verify_build(&built));
+    assert!(published.published);
 }
 
 /// GREEN: the whole migration flow through the store API: the private build
