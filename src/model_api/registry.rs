@@ -237,6 +237,16 @@ fn construct_anthropic(
     let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
         .with_timeout(timeout);
+    let model = if profile
+        .anthropic_settings
+        .as_ref()
+        .map(|settings| settings.prompt_caching)
+        == Some(crate::model_api::settings::PromptCaching::Cached)
+    {
+        model.with_caching()
+    } else {
+        model
+    };
     let max_rounds = resolve_max_rounds(profile)?;
 
     Ok(ConstructedBackend {

@@ -290,7 +290,7 @@ fn budget_properties() {
 /// capability_not_landed verdict, never a silent omission.
 #[test]
 fn later_phase_rows_answer_capability_not_landed() {
-    for name in ["compact", "reopen", "import", "calibration-update"] {
+    for name in ["reopen", "import", "calibration-update"] {
         let mut ex = Executor::new(Epoch(4));
         ex.propose(name, 1).unwrap();
         ex.snapshot().unwrap();
@@ -300,6 +300,23 @@ fn later_phase_rows_answer_capability_not_landed() {
         }
     }
 }
+#[test]
+fn every_phase4_row_generates_durable_effect_artifacts() {
+    let rows: Vec<_> = super::operation::registry()
+        .iter()
+        .filter(|row| row.owner_phase == 4)
+        .collect();
+    assert!(!rows.is_empty());
+    for row in rows {
+        let mut executor = Executor::new(Epoch(4));
+        executor.propose(row.name, 1).unwrap();
+        executor.snapshot().unwrap();
+        let generated = executor.generate().unwrap();
+        assert_eq!(generated.op, row.name);
+        assert_eq!(executor.state(), TxnState::Generated);
+    }
+}
+
 /// unknown rows are rejected at propose.
 #[test]
 fn unknown_rows_are_rejected() {

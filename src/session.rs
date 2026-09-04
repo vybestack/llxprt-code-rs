@@ -852,7 +852,8 @@ impl SessionStore {
                 owner: reserved.owner.clone(),
                 rounds: suffix.to_vec(),
                 summary: summary.to_string(),
-            })
+            })?;
+            crate::context_persist::finalize_context(self)
         })
     }
 

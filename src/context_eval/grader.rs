@@ -56,10 +56,17 @@ fn evidence_failures(scen: &Scenario, ev: &Evidence) -> Vec<String> {
             }
         }
     }
-    for outcome in &scen.assertions.required_outcomes {
-        if ev.terminal_outcome.as_deref() != Some(outcome.as_str()) {
-            out.push(format!("required terminal outcome absent: {outcome}"));
-        }
+    if !scen.assertions.required_outcomes.is_empty()
+        && !scen
+            .assertions
+            .required_outcomes
+            .iter()
+            .any(|outcome| ev.terminal_outcome.as_deref() == Some(outcome.as_str()))
+    {
+        out.push(format!(
+            "required terminal outcome absent: one of [{}]",
+            scen.assertions.required_outcomes.join(", ")
+        ));
     }
     out
 }
