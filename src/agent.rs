@@ -133,13 +133,13 @@ impl CodingAgent {
         validate_timeout(config.timeout).map_err(|m| crate::adapter::ModelErrorAdapter {
             key: "request-timeout",
             message: m,
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         })?;
         let workspace = crate::tools::WorkspaceCap::open(cwd).map_err(|message| {
             crate::adapter::ModelErrorAdapter {
                 key: "workspace",
                 message,
-                code: crate::cli::Code::Config,
+                code: crate::envelope::Code::Config,
             }
         })?;
         let adapter = make_adapter(config)?;
@@ -167,7 +167,7 @@ impl CodingAgent {
             crate::adapter::ModelErrorAdapter {
                 key: "workspace",
                 message,
-                code: crate::cli::Code::Config,
+                code: crate::envelope::Code::Config,
             }
         })?;
         Ok(CodingAgent {
@@ -743,12 +743,12 @@ impl CodingAgent {
             Ok(()) => {
                 let profile = self.profile_store(store, "session_written", rounds.len());
                 match profile {
-                    Ok(()) => AgentError::new(crate::cli::Code::Model, key, bounded),
+                    Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
                     Err(profile_error) => profile_error,
                 }
             }
             Err(pe) => AgentError::new(
-                crate::cli::Code::Session,
+                crate::envelope::Code::Session,
                 "session-persist",
                 format!(
                     "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
