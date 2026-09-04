@@ -389,7 +389,10 @@ pub struct Item {
 }
 
 /// Whether the placement transition is legal from the item's current state: a
-/// pinned item is never collapsed and a phantom is never collapsed again.
+/// phantom is never collapsed again. The guard is placement-only; pins live on
+/// [`TypedState`](crate::context_kernel::reducer::TypedState), not on the IR, so
+/// collapse itself never consults a pin. Refusing to collapse a pinned item is
+/// the projection's job, and it happens where the pin is recorded.
 fn collapsible(item: &Item) -> bool {
     item.placement != Placement::Phantom
 }
@@ -831,14 +834,7 @@ impl ConversationIr {
         self.remove(id);
         let mut children: Vec<ItemId> = Vec::new();
         for part in parts {
-            let child = match contract.namespace {
-                SplitNamespace::Fresh => Item::new(self.reserve_split_id(), lane, part, scope),
-                SplitNamespace::Inherit => {
-                    let value = self.next_split_id;
-                    self.next_split_id += 1;
-                    Item::new(ItemId::append(value), lane, part, scope)
-                }
-            };
+            let child = Item::new(self.reserve_split_id(), lane, part, scope);
             if self.items.iter().any(|existing| existing.id == child.id()) {
                 return Err(IrError::DuplicateItem {
                     id: child.id().value(),
