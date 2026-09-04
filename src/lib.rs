@@ -5,6 +5,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod cli;
+pub mod config;
 pub mod context_eval;
 pub mod context_kernel;
 pub mod envelope;

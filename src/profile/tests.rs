@@ -5,16 +5,6 @@ mod numeric_strings;
 use serde_json::json;
 
 #[test]
-fn configuration_selectors_require_nonempty_absolute_paths() {
-    assert!(require_absolute_path("TEST_CONFIG", PathBuf::new()).is_err());
-    assert!(require_absolute_path("TEST_CONFIG", PathBuf::from("relative")).is_err());
-    assert_eq!(
-        require_absolute_path("TEST_CONFIG", PathBuf::from("/absolute/config")).unwrap(),
-        PathBuf::from("/absolute/config")
-    );
-}
-
-#[test]
 fn top_level_profile_shape_is_strict() {
     for accepted in [
         json!({"provider": "openai", "model": "m"}),

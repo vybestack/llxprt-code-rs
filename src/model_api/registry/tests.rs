@@ -2,10 +2,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::*;
+use crate::config::ConfigHomeRoot;
 use crate::model_api::credentials::{
     parse_credential, Clock, CodexCredential, CredentialError, CredentialSource,
 };
-use crate::model_api::dependencies::ConfigHomeRoot;
 use crate::model_api::provider_keys;
 
 /// Serialized access to one named-provider-key env selector: the process

@@ -399,7 +399,7 @@ impl SessionStore {
 
     pub(crate) fn load_in(
         session: &SessionId,
-        config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+        config_root: &crate::config::ConfigHomeRoot,
     ) -> Result<SessionStore, StoreError> {
         Self::open_in(session, config_root.as_path())
     }
@@ -888,7 +888,7 @@ pub fn load_session_store(session: &SessionId) -> Result<SessionStore, String> {
 
 pub(crate) fn load_session_store_in(
     session: &SessionId,
-    config_root: &crate::model_api::dependencies::ConfigHomeRoot,
+    config_root: &crate::config::ConfigHomeRoot,
 ) -> Result<SessionStore, String> {
     SessionStore::load_in(session, config_root).map_err(|e| e.to_string())
 }

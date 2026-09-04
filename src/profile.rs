@@ -14,48 +14,10 @@ mod openai_responses;
 mod parsing;
 mod provider_settings;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// The platform config directory used by llxprt-code for profiles.
-///
-/// `LLXPRT_CONFIG_HOME` wins, then the legacy `LLXPRT_CONFIG_DIR` alias, then the
-/// platform default: Windows `%AppData%\llxprt-code`, macOS
-/// `~/Library/Preferences/llxprt-code`, otherwise `$XDG_CONFIG_HOME/llxprt-code`
-/// falling back to `~/.config/llxprt-code`.
-pub fn std_profile_dir() -> Result<PathBuf, String> {
-    for name in ["LLXPRT_CONFIG_HOME", "LLXPRT_CONFIG_DIR"] {
-        if let Some(path) = absolute_env_path(name)? {
-            return Ok(path);
-        }
-    }
-    let designed_dir = if cfg!(target_os = "windows") {
-        absolute_env_path("AppData")?.map(|path| path.join("llxprt-code"))
-    } else if cfg!(target_os = "macos") {
-        home_dir()?.map(|path| path.join("Library/Preferences/llxprt-code"))
-    } else if let Some(path) = absolute_env_path("XDG_CONFIG_HOME")? {
-        Some(path.join("llxprt-code"))
-    } else {
-        home_dir()?.map(|path| path.join(".config/llxprt-code"))
-    };
-    designed_dir.ok_or_else(|| "absolute configuration directory is unavailable".to_string())
-}
-
-fn absolute_env_path(name: &str) -> Result<Option<PathBuf>, String> {
-    std::env::var_os(name)
-        .map(|value| require_absolute_path(name, PathBuf::from(value)))
-        .transpose()
-}
-
-fn require_absolute_path(name: &str, path: PathBuf) -> Result<PathBuf, String> {
-    (!path.as_os_str().is_empty() && path.is_absolute())
-        .then_some(path)
-        .ok_or_else(|| format!("{name} must name a nonempty absolute directory"))
-}
-
-fn home_dir() -> Result<Option<PathBuf>, String> {
-    absolute_env_path("HOME")?
-        .map_or_else(|| absolute_env_path("USERPROFILE"), |path| Ok(Some(path)))
-}
+/// Re-export: std_profile_dir stays published from profile for existing consumers.
+pub use crate::config::std_profile_dir;
 
 /// Parsed profile.
 #[derive(Debug, Clone)]
