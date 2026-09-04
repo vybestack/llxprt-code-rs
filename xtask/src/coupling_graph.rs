@@ -86,36 +86,40 @@ pub(super) fn strongly_connected_components(graph: &Graph) -> Vec<Vec<String>> {
 /// every minimum feedback set is represented by an ordering. Branch-and-bound avoids allocating
 /// a `2^n` table while retaining exactness for every graph size accepted by available resources.
 pub(super) fn minimum_feedback_arc_set(graph: &Graph) -> FeedbackArcSet {
-    let mut result = FeedbackArcSet::default();
+    let mut feedback = FeedbackArcSet::default();
+    feedback.edges.extend(
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from == edge.to)
+            .cloned(),
+    );
     for component in strongly_connected_components(graph) {
-        let members: BTreeSet<&str> = component.iter().map(String::as_str).collect();
-        let internal: Vec<Edge> = graph
+        if component.len() < 2 {
+            continue;
+        }
+        let members: BTreeSet<_> = component.iter().cloned().collect();
+        let edges: Vec<_> = graph
             .edges
             .iter()
             .filter(|edge| {
-                members.contains(edge.from.as_str()) && members.contains(edge.to.as_str())
+                edge.from != edge.to && members.contains(&edge.from) && members.contains(&edge.to)
             })
             .cloned()
             .collect();
-        if component.len() == 1 {
-            result
-                .edges
-                .extend(internal.into_iter().filter(|edge| edge.from == edge.to));
-            continue;
-        }
-        let order = exact_minimum_order(&component, &internal);
-        let position: BTreeMap<&str, usize> = order
+        let order = exact_minimum_order(&component, &edges);
+        let positions: BTreeMap<_, _> = order
             .iter()
             .enumerate()
-            .map(|(place, node)| (node.as_str(), place))
+            .map(|(position, module)| (module.as_str(), position))
             .collect();
-        result.edges.extend(
-            internal
+        feedback.edges.extend(
+            edges
                 .into_iter()
-                .filter(|edge| position[edge.from.as_str()] >= position[edge.to.as_str()]),
+                .filter(|edge| positions[edge.from.as_str()] > positions[edge.to.as_str()]),
         );
     }
-    result
+    feedback
 }
 
 fn exact_minimum_order(component: &[String], edges: &[Edge]) -> Vec<String> {
@@ -166,6 +170,9 @@ fn search_orders(
         .iter()
         .filter(|(source, target)| !placed[*source] && placed[*target])
         .count();
+    if charged + crossing >= *best_cost {
+        return;
+    }
     let topological = remaining_topological_order(edges, placed);
     if charged + crossing + usize::from(topological.is_none()) >= *best_cost {
         return;
@@ -287,5 +294,20 @@ mod tests {
         for _ in 0..4 {
             assert_eq!(minimum_feedback_arc_set(&graph).edges, expected);
         }
+    }
+
+    #[test]
+    fn feedback_set_always_contains_self_loops_alongside_scc_debt() {
+        let graph = graph(&[("a", "a"), ("a", "b"), ("b", "a")]);
+        let feedback = minimum_feedback_arc_set(&graph);
+        assert_eq!(feedback.edges.len(), 2);
+        assert!(feedback.edges.contains(&Edge {
+            from: "a".into(),
+            to: "a".into()
+        }));
+        assert!(feedback.edges.contains(&Edge {
+            from: "b".into(),
+            to: "a".into()
+        }));
     }
 }

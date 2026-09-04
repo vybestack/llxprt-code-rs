@@ -117,6 +117,9 @@ jobs:
 
   release-build:
     needs: [test, shellcheck, doc, audit]
+    permissions:
+      contents: read
+      issues: read
     # Resolve only from the shipped checksum-locked registry closure, then run the same strict
     # offline gates used by maintainers. The script builds and verifies the allow-listed bundle.
     name: release build + source bundle
@@ -163,6 +166,42 @@ jobs:
         run: |
           python3 --version
           bash -n scripts/*.sh
+      - name: Test coupling owner validator without network
+        run: python3 scripts/test-validate-coupling-owners.py
+      - name: Derive exact coupling comparison base
+        id: coupling-base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          case "$EVENT_NAME:$REF_TYPE" in
+            pull_request:*) base="$PR_BASE_SHA" ;;
+            push:branch) base="$PUSH_BEFORE_SHA" ;;
+            push:tag)
+              base="$(git rev-parse --verify "HEAD^1^{commit}")" || {
+                echo "tagged commit has no resolvable parent" >&2
+                exit 1
+              }
+              ;;
+            *) echo "unsupported coupling event: $EVENT_NAME/$REF_TYPE" >&2; exit 1 ;;
+          esac
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            echo "missing/all-zero coupling comparison base" >&2
+            exit 1
+          fi
+          git rev-parse --verify "$base^{commit}" >/dev/null || {
+            echo "invalid/unavailable coupling comparison base: $base" >&2
+            exit 1
+          }
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Coupling burn-down and open-owner gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ steps.coupling-base.outputs.base }}
+        run: cargo xtask coupling-check --base-ref "$BASE_REF" --owner-check
+      # dtolnay/rust-toolchain@1.88.0
       - name: Run strict release gates
         env:
           LLXPRT_SKIP_LOCAL_AUDIT: "1"
