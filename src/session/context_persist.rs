@@ -796,11 +796,11 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
 /// One-line wrappers so the session store keeps its old call sites while the
 /// reload and publication halves live in their own modules.
 pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Result<(), String> {
-    crate::context_publish::persist_context(store, state)
+    crate::session::context_publish::persist_context(store, state)
 }
 
 pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState, String> {
-    crate::context_recover::recover_context_state(store)
+    crate::session::context_recover::recover_context_state(store)
 }
 
-pub(crate) use crate::context_recover::{context_store_error, ingress_error};
+pub(crate) use crate::session::context_recover::{context_store_error, ingress_error};

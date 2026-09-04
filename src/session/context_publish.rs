@@ -4,10 +4,10 @@
 
 use std::path::Path;
 
-use crate::context_recover::write_artifact;
 use crate::session::context_persist::{
     context_dir, ContextManifest, ContextState, DurableCheckpoint,
 };
+use crate::session::context_recover::write_artifact;
 use crate::session::SessionStore;
 
 /// Writes the sanitized spine, the vault snapshot, and the manifest under `context/`.

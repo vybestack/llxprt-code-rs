@@ -22,7 +22,5 @@ pub mod tools;
 
 pub mod context_ingress;
 pub mod context_policy;
-pub mod context_publish;
-pub mod context_recover;
 pub mod context_store;
 pub mod context_txn;
