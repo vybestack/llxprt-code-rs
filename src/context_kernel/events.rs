@@ -1,6 +1,7 @@
 //! Append-only event log: total order, sequence numbers, checksums, identities.
 
-use crate::context_kernel::canonical::{chained, digest, Digest, Sink};
+use crate::context_kernel::canonical::{Digest, HashScope, Sink};
+use crate::context_kernel::ir::{SegmentClaim, StoreRange};
 use crate::context_kernel::lanes::Lane;
 use crate::context_kernel::scopes::ScopeId;
 
@@ -157,6 +158,10 @@ pub enum EventKind {
         sanitized: Vec<u8>,
         /// Scope active at ingestion.
         scope: ScopeId,
+        /// Claim-atomic segmentation of `sanitized`, as recorded at ingestion.
+        /// An empty list is the pre-segmentation append: the whole payload is one
+        /// claim with no recorded class, so its lane falls back to the source.
+        claims: Vec<SegmentClaim>,
     },
     /// Fact-ledger event.
     Ledger {
@@ -191,11 +196,21 @@ impl EventKind {
                 source,
                 sanitized,
                 scope,
+                claims,
             } => {
                 sink.tag("append");
                 source.encode(sink);
                 sink.blob(sanitized);
                 sink.int(*scope);
+                sink.int(claims.len() as u64);
+                for claim in claims {
+                    sink.int(claim.span.offset);
+                    sink.int(claim.span.length);
+                    match claim.class {
+                        Some(class) => class.encode(sink),
+                        None => sink.tag("unclassified"),
+                    }
+                }
             }
             EventKind::Ledger { kind, key } => {
                 sink.tag("ledger");
@@ -227,13 +242,53 @@ impl EventKind {
     }
 }
 
-/// Structural lane assignment inside the ingress transaction: conservative and
-/// deterministic, refined later by the logged resegment operation.
+/// Structural lane fallback for an append whose claims carry no recorded class.
+/// Lane assignment is decided by segmentation wherever it classified any claim;
+/// the source is the documented fallback, never the primary rule: a document
+/// pasted into a user message is classified by its own content, not by the
+/// message that carried it.
 pub fn structural_lane(source: &AppendSource) -> Lane {
     match source {
         AppendSource::User => Lane::Constitutional,
         AppendSource::Assistant => Lane::Decisional,
         AppendSource::ToolResult { .. } => Lane::Evidential,
+    }
+}
+
+/// Claims an append records when the ingress transaction has not segmented it:
+/// one claim over the whole payload, carrying no class, so every lane decision
+/// still has a provenance range to attribute.
+pub fn whole_payload_claim(sanitized: &[u8]) -> Vec<SegmentClaim> {
+    vec![SegmentClaim {
+        span: StoreRange {
+            offset: 0,
+            length: sanitized.len() as u64,
+        },
+        class: None,
+    }]
+}
+
+/// Whether the event kind appends store bytes.
+fn is_append(kind: &EventKind) -> bool {
+    matches!(kind, EventKind::Append { .. })
+}
+
+impl EventLog {
+    /// Number of recorded events.
+    pub fn count_appends(&self) -> usize {
+        self.events.iter().filter(|e| is_append(&e.kind)).count()
+    }
+
+    /// Spine length the recorded appends charge, in bytes.
+    pub fn appended_units(&self) -> u64 {
+        self.events
+            .iter()
+            .filter(|e| is_append(&e.kind))
+            .map(|event| match &event.kind {
+                EventKind::Append { sanitized, .. } => sanitized.len() as u64,
+                _ => 0,
+            })
+            .sum()
     }
 }
 
@@ -281,6 +336,7 @@ impl RecordedEvent {
     pub fn encode_body(&self) -> Vec<u8> {
         let mut sink = Sink::new();
         sink.int(self.sequence);
+        sink.byte_order_mark();
         sink.int(self.epoch);
         sink.int(self.recorded_unix_ms);
         sink.int(self.schema_version);
@@ -308,15 +364,15 @@ impl RecordedEvent {
             body_digest: 0,
             checksum: 0,
         };
-        event.body_digest = digest(&event.encode_body());
-        event.checksum = chained(previous, &event.encode_body());
+        event.body_digest = HashScope::EventChain.digest(&event.encode_body());
+        event.checksum = HashScope::EventChain.chain(previous, &event.encode_body());
         event
     }
 
     /// Whether the event's chain checksum matches `previous`.
     pub fn verify(&self, previous: Digest) -> bool {
-        self.body_digest == digest(&self.encode_body())
-            && self.checksum == chained(previous, &self.encode_body())
+        self.body_digest == HashScope::EventChain.digest(&self.encode_body())
+            && self.checksum == HashScope::EventChain.chain(previous, &self.encode_body())
     }
 }
 
@@ -334,8 +390,7 @@ pub struct Sequencer {
 }
 
 impl Sequencer {
-    /// Creates a sequencer continuing from `next_sequence` with chain value
-    /// `last_checksum`.
+    /// Creates a sequencer at the genesis of an empty log.
     pub fn new(next_sequence: u64, epoch: u64, recorded_unix_ms: u64) -> Self {
         Self {
             next_sequence,
@@ -343,6 +398,41 @@ impl Sequencer {
             recorded_unix_ms,
             epoch,
         }
+    }
+
+    /// Creates a sequencer resuming a durable prefix: the chain continues from
+    /// `last_checksum` — the head of the recorded prefix, or [`GENESIS_CHECKSUM`]
+    /// when resuming an empty log — instead of restarting at genesis. A sequencer
+    /// that restarts the chain at genesis over an existing prefix emits events no
+    /// replay can verify.
+    pub fn resume(
+        next_sequence: u64,
+        last_checksum: Digest,
+        epoch: u64,
+        recorded_unix_ms: u64,
+    ) -> Self {
+        Self {
+            next_sequence,
+            last_checksum,
+            recorded_unix_ms,
+            epoch,
+        }
+    }
+
+    /// Creates a sequencer that continues the chain of `log`: the first event it
+    /// appends follows `log`'s head checksum and carries the next sequence number.
+    pub fn continuing(log: &EventLog, epoch: u64, recorded_unix_ms: u64) -> Self {
+        Self::resume(
+            log.len() as u64 + FIRST_SEQUENCE,
+            log.head_checksum(),
+            epoch,
+            recorded_unix_ms,
+        )
+    }
+
+    /// Recorded chain value the next appended event commits to.
+    pub fn last_checksum(&self) -> Digest {
+        self.last_checksum
     }
 
     /// Records the caller-supplied timestamp used for subsequent appends.

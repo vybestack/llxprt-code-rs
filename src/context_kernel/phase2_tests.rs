@@ -11,7 +11,7 @@ use crate::context_store::ops::StoreOperation;
 
 fn append(kind: EventKind, sequencer: &mut Sequencer, log: &mut EventLog) -> u64 {
     let event = sequencer.append(kind, log.store_version());
-    log.append(event.clone()).ok();
+    log.append(event.clone()).unwrap();
     event.sequence
 }
 
@@ -20,6 +20,7 @@ fn user(text: &str, scope: u64) -> EventKind {
         source: AppendSource::User,
         sanitized: text.as_bytes().to_vec(),
         scope,
+        claims: Vec::new(),
     }
 }
 
@@ -82,6 +83,11 @@ fn admit_ingress_advances_the_spine_cursor_and_attributes_the_scope() {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
     append(
+        op(OperationClass::ScopeOpen, 7, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(
         op(OperationClass::AdmitIngress, 7, 10),
         &mut sequencer,
         &mut log,
@@ -93,12 +99,17 @@ fn admit_ingress_advances_the_spine_cursor_and_attributes_the_scope() {
         admitted.provenance[0].offset, 10,
         "the admission advances the spine cursor"
     );
-    assert_eq!(state.applied_len(), 2);
+    assert_eq!(state.applied_len(), 3);
 }
 
 fn redact_log(redact: bool) -> (EventLog, u64) {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
     let item = append(user("secret span", 1), &mut sequencer, &mut log);
     append(
         op(OperationClass::Place, item, Region::Notes.rank()),
@@ -219,6 +230,11 @@ fn executor_landed_later_rows_are_typed_refusals() {
 fn phase2_rows_replay_and_dedup_deterministically() {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
     append(
         op(OperationClass::AdmitIngress, 1, 10),
         &mut sequencer,

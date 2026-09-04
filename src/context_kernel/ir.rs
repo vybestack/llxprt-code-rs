@@ -66,27 +66,169 @@ impl Region {
     }
 }
 
-/// Immutable identifier of an item. Identifiers are never rewritten and never
-/// reused: resegmentation mints fresh identifiers for the children.
+/// Namespace an item identifier is unique within. Append items and resegment
+/// children mint identifiers from independent sequences; the namespace keeps a
+/// split child from ever colliding with a later append (or vice versa) with no
+/// cross-sequence reservation.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ItemId(u64);
+pub enum ItemNamespace {
+    /// Identifiers minted for whole appends, from the event sequence.
+    Append,
+    /// Identifiers minted by resegmentation for claim-atomic children.
+    Split,
+}
 
-impl ItemId {
-    /// Wraps a raw identifier value.
-    pub fn new(value: u64) -> Self {
-        Self(value)
+impl ItemNamespace {
+    /// Stable discriminant used in canonical encodings.
+    pub fn code(self) -> u64 {
+        match self {
+            ItemNamespace::Append => 1,
+            ItemNamespace::Split => 2,
+        }
     }
 
-    /// Raw identifier value.
+    /// Namespace named by a canonical discriminant.
+    pub fn from_code(code: u64) -> Option<ItemNamespace> {
+        match code {
+            1 => Some(ItemNamespace::Append),
+            2 => Some(ItemNamespace::Split),
+            _ => None,
+        }
+    }
+}
+
+/// Immutable identifier of an item: a namespace plus a value, unique as a pair.
+/// Identifiers are never rewritten and never reused within their namespace:
+/// resegmentation mints fresh split identifiers for the children and retires the
+/// parent identifier.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ItemId {
+    namespace: ItemNamespace,
+    value: u64,
+}
+
+impl ItemId {
+    /// Wraps an append identifier: the event sequence that produced the append.
+    pub fn append(value: u64) -> Self {
+        Self {
+            namespace: ItemNamespace::Append,
+            value,
+        }
+    }
+
+    /// Wraps a resegmentation identifier.
+    pub fn split(value: u64) -> Self {
+        Self {
+            namespace: ItemNamespace::Split,
+            value,
+        }
+    }
+
+    /// Wraps a raw identifier value in the append namespace, for operation
+    /// subjects that name an item by a single integer.
+    pub fn new(value: u64) -> Self {
+        Self::append(value)
+    }
+
+    /// Namespace the identifier is unique within.
+    pub fn namespace(self) -> ItemNamespace {
+        self.namespace
+    }
+
+    /// Identifier value inside its namespace.
     pub fn value(self) -> u64 {
-        self.0
+        self.value
+    }
+
+    /// Builds an identifier from a recorded namespace discriminant and value,
+    /// refusing a discriminant no namespace defines.
+    pub fn from_parts(code: u64, value: u64) -> Result<Self, IrError> {
+        let namespace =
+            ItemNamespace::from_code(code).ok_or(IrError::UnknownNamespace { found: code })?;
+        Ok(Self { namespace, value })
     }
 
     /// Encodes the identifier into `sink`.
     pub fn encode(self, sink: &mut Sink) {
         sink.tag("item");
-        sink.int(self.0);
+        sink.int(self.namespace.code());
+        sink.int(self.value);
     }
+}
+
+/// Structural class of one claim, recorded by segmentation. The names are the
+/// documented structural classes; the kernel resolves each to a lane.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StructuralClass {
+    /// Verbatim span the render contract must reproduce exactly.
+    ExactSpan,
+    /// Identifier line.
+    Identifier,
+    /// Source code.
+    Code,
+    /// Test log.
+    TestLog,
+    /// Noise: foldable, never load-bearing.
+    Noise,
+    /// Unclassified prose.
+    Unknown,
+}
+
+impl StructuralClass {
+    /// Stable discriminant used in canonical encodings.
+    pub fn code(self) -> u64 {
+        match self {
+            StructuralClass::ExactSpan => 1,
+            StructuralClass::Identifier => 2,
+            StructuralClass::Code => 3,
+            StructuralClass::TestLog => 4,
+            StructuralClass::Noise => 5,
+            StructuralClass::Unknown => 6,
+        }
+    }
+
+    /// Class named by a canonical discriminant.
+    pub fn from_code(code: u64) -> Option<Self> {
+        match code {
+            1 => Some(StructuralClass::ExactSpan),
+            2 => Some(StructuralClass::Identifier),
+            3 => Some(StructuralClass::Code),
+            4 => Some(StructuralClass::TestLog),
+            5 => Some(StructuralClass::Noise),
+            6 => Some(StructuralClass::Unknown),
+            _ => None,
+        }
+    }
+
+    /// Stable name used in canonical encodings.
+    pub fn name(self) -> &'static str {
+        match self {
+            StructuralClass::ExactSpan => "exact-span",
+            StructuralClass::Identifier => "identifier",
+            StructuralClass::Code => "code",
+            StructuralClass::TestLog => "test-log",
+            StructuralClass::Noise => "noise",
+            StructuralClass::Unknown => "unknown",
+        }
+    }
+
+    /// Encodes the class into `sink`.
+    pub fn encode(self, sink: &mut Sink) {
+        sink.tag(self.name());
+    }
+}
+
+/// One claim-atomic segmentation of an append: a byte span plus the structural
+/// class segmentation assigned it. A claim with no class falls back to the
+/// structural lane of the append's source, so lane assignment is decided by
+/// content wherever segmentation classified any, and by source only as the
+/// documented fallback.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SegmentClaim {
+    /// Byte span of the claim, relative to the append's own bytes.
+    pub span: StoreRange,
+    /// Structural class segmentation assigned the span.
+    pub class: Option<StructuralClass>,
 }
 
 /// A byte range in the context store spine.
@@ -189,7 +331,47 @@ pub fn slice_into(ranges: &[StoreRange], parts: usize) -> Vec<Vec<StoreRange>> {
     pieces
 }
 
-/// One claim: a lane, its byte provenance, its scope, and its placed region.
+/// Explicit placement state of an item. The four states are recorded on the item
+/// itself, never inferred from the absence of a placement, so initial items,
+/// explicit unplacement, collapsed placeholders, and vaulted redactions are
+/// distinguishable in the typed state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Placement {
+    /// The item is claimed into a region and its units are charged there.
+    Placed(Region),
+    /// The item keeps its bytes in the store but sits out of every region:
+    /// explicit unplacement, vaulted redaction, or a returned store handle.
+    StoreOnly,
+    /// The item was collapsed to a placeholder and carries no bytes at all.
+    Phantom,
+}
+
+impl Placement {
+    /// Whether the placement claims the item into a region.
+    pub fn is_placed(self) -> bool {
+        matches!(self, Placement::Placed(_))
+    }
+
+    /// Region the placement claims, when placed.
+    pub fn region(self) -> Option<Region> {
+        match self {
+            Placement::Placed(region) => Some(region),
+            Placement::StoreOnly | Placement::Phantom => None,
+        }
+    }
+
+    /// Stable discriminant used in canonical encodings.
+    pub fn code(self) -> u64 {
+        match self {
+            Placement::Placed(_) => 1,
+            Placement::StoreOnly => 2,
+            Placement::Phantom => 3,
+        }
+    }
+}
+
+/// One claim: a lane, its byte provenance, its scope, and its explicit placement
+/// state.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Item {
     /// Immutable identifier.
@@ -200,24 +382,51 @@ pub struct Item {
     pub provenance: Vec<StoreRange>,
     /// Scope the claim is attributed to.
     pub scope: ScopeId,
-    /// Region the claim is placed in, if any.
-    region: Option<Region>,
+    /// Placement state, carried explicitly.
+    placement: Placement,
     /// Enclosing byte range of the provenance.
     pub byte_range: StoreRange,
 }
 
+/// Whether the placement transition is legal from the item's current state: a
+/// pinned item is never collapsed and a phantom is never collapsed again.
+fn collapsible(item: &Item) -> bool {
+    item.placement != Placement::Phantom
+}
+
 impl Item {
-    /// Builds an unplaced item over `provenance`.
+    /// Builds an appended item over `provenance`, placed in the body region.
     pub fn new(id: ItemId, lane: Lane, provenance: Vec<StoreRange>, scope: ScopeId) -> Self {
+        Self::with_placement(id, lane, provenance, scope, Placement::Placed(Region::Body))
+    }
+
+    /// Builds an item whose placement state is given, not implied.
+    pub fn with_placement(
+        id: ItemId,
+        lane: Lane,
+        provenance: Vec<StoreRange>,
+        scope: ScopeId,
+        placement: Placement,
+    ) -> Self {
         let byte_range = enclosing(&provenance);
         Self {
             id,
             lane,
             provenance,
             scope,
-            region: None,
+            placement,
             byte_range,
         }
+    }
+
+    /// Builds a store-only item over `provenance`.
+    pub fn store_only(id: ItemId, lane: Lane, provenance: Vec<StoreRange>, scope: ScopeId) -> Self {
+        Self::with_placement(id, lane, provenance, scope, Placement::StoreOnly)
+    }
+
+    /// Builds a phantom item: collapsed to zero bytes, out of every region.
+    pub fn phantom(id: ItemId, lane: Lane, scope: ScopeId) -> Self {
+        Self::with_placement(id, lane, Vec::new(), scope, Placement::Phantom)
     }
 
     /// Immutable identifier of the item.
@@ -225,9 +434,14 @@ impl Item {
         self.id
     }
 
-    /// Region the item is placed in.
+    /// Explicit placement state of the item.
+    pub fn placement(&self) -> Placement {
+        self.placement
+    }
+
+    /// Region the item is placed in, when its state is placed.
     pub fn region(&self) -> Option<Region> {
-        self.region
+        self.placement.region()
     }
 
     /// Accounting units charged for this item: covered bytes, counted once.
@@ -235,14 +449,36 @@ impl Item {
         covered_units(&self.provenance)
     }
 
-    /// Whether the item is a collapsed placeholder carrying no bytes.
+    /// Whether the item is a collapsed placeholder: a phantom, holding no bytes.
     pub fn is_placeholder(&self) -> bool {
-        self.units() == 0
+        self.placement == Placement::Phantom
     }
 
-    fn in_region(mut self, region: Option<Region>) -> Self {
-        self.region = region;
-        self
+    /// Whether the item is store-only: bytes in the store, out of every region.
+    pub fn is_store_only(&self) -> bool {
+        self.placement == Placement::StoreOnly
+    }
+
+    /// Transitions the item to store-only, preserving its bytes.
+    pub fn to_store_only(&mut self) {
+        self.placement = Placement::StoreOnly;
+    }
+
+    /// Collapses the item in place: it becomes a phantom holding no bytes. A
+    /// phantom cannot collapse again.
+    pub fn collapse(&mut self) -> Result<(), IrError> {
+        if !collapsible(self) {
+            return Err(IrError::PlacementState {
+                id: self.id.value(),
+            });
+        }
+        self.provenance.clear();
+        self.byte_range = StoreRange {
+            offset: 0,
+            length: 0,
+        };
+        self.placement = Placement::Phantom;
+        Ok(())
     }
 
     /// Encodes the item into `sink`.
@@ -250,9 +486,10 @@ impl Item {
         self.id.encode(sink);
         sink.tag(self.lane.name());
         sink.int(self.scope);
-        match self.region {
-            Some(region) => region.encode(sink),
-            None => sink.tag("unplaced"),
+        match self.placement {
+            Placement::Placed(region) => region.encode(sink),
+            Placement::StoreOnly => sink.tag("store-only"),
+            Placement::Phantom => sink.tag("phantom"),
         }
         sink.int(self.byte_range.offset);
         sink.int(self.byte_range.length);
@@ -286,6 +523,36 @@ pub enum IrError {
         /// Identifier of the item being split.
         id: u64,
     },
+    /// An operation named a namespace discriminant no namespace defines.
+    UnknownNamespace {
+        /// Discriminant carried by the operation.
+        found: u64,
+    },
+    /// A resegment contract was malformed: the part count, the split points, or
+    /// the child ranges did not satisfy the contract.
+    ContractMismatch {
+        /// Identifier of the item being resegmented.
+        id: u64,
+    },
+    /// A placement operation named a state the item cannot enter from its
+    /// current state.
+    PlacementState {
+        /// Identifier of the item.
+        id: u64,
+    },
+    /// A logged resegment tried to cut a parent whose provenance carries more
+    /// than one recorded range: the even slice cannot respect the claims those
+    /// ranges record, so the split is refused.
+    ClaimBoundary {
+        /// Identifier of the item being resegmented.
+        id: u64,
+    },
+    /// An append recorded claims that do not cover its own bytes exactly, so the
+    /// claims cannot become items without silently dropping bytes.
+    ClaimsDontCover {
+        /// Sequence of the offending append event.
+        sequence: u64,
+    },
 }
 
 /// Occupants of one region, in placement order.
@@ -303,12 +570,44 @@ impl RegionPartition {
     }
 }
 
+/// Whether an item's namespace and provenance are internally consistent: an
+/// append identifier always carries provenance, since the append landed bytes on
+/// the spine.
+fn id_fits_provenance(id: ItemId, provenance: &[StoreRange]) -> bool {
+    !matches!(id.namespace(), ItemNamespace::Append) || !provenance.is_empty()
+}
+
+/// Namespace a resegment contract mints child identifiers from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SplitNamespace {
+    /// Children mint from the split namespace, independent of append ids.
+    Fresh,
+    /// Children keep the parent's append namespace. The mint still draws from the
+    /// split counter, so an inherited identifier that would collide with a
+    /// recorded append is refused instead of silently reused.
+    Inherit,
+}
+
+/// The resegment contract: the namespace children mint from, the expected part
+/// count, and the per-part range counts. A logged resegment event carries the
+/// same contract, and a split that does not satisfy it is refused.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SplitContract {
+    /// Namespace the children mint from.
+    pub namespace: SplitNamespace,
+    /// Expected number of children.
+    pub parts: usize,
+    /// Expected range count per part.
+    pub split_points: Vec<usize>,
+}
+
 /// Conversation intermediate representation.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct ConversationIr {
     items: Vec<Item>,
     partitions: Vec<RegionPartition>,
-    next_id: u64,
+    next_append_id: u64,
+    next_split_id: u64,
 }
 
 impl ConversationIr {
@@ -399,63 +698,113 @@ impl ConversationIr {
             .sum()
     }
 
-    /// Inserts an item; identifiers are unique and never reused.
+    /// Inserts an item; identifiers are unique within their namespace and never
+    /// reused there.
     pub fn insert(&mut self, item: Item) -> Result<ItemId, IrError> {
         let id = item.id();
         if self.items.iter().any(|existing| existing.id == id) {
             return Err(IrError::DuplicateItem { id: id.value() });
         }
-        if id.value() >= self.next_id {
-            self.next_id = id.value() + 1;
+        if !id_fits_provenance(id, &item.provenance) {
+            return Err(IrError::PlacementState { id: id.value() });
         }
-        if let Some(region) = item.region {
-            let attached = item.id();
-            self.items.push(item);
-            self.attach(attached, region);
-            return Ok(attached);
-        }
+        self.note_minted_id(id);
+        let region = item.region();
         self.items.push(item);
+        if let Some(region) = region {
+            self.attach(id, region);
+        }
         Ok(id)
     }
 
-    /// Mints the next identifier; minted identifiers never repeat.
-    pub fn reserve_id(&mut self) -> ItemId {
-        let id = ItemId::new(self.next_id);
-        self.next_id += 1;
+    /// Mints the next append identifier; minted identifiers never repeat.
+    pub fn reserve_append_id(&mut self) -> ItemId {
+        let id = ItemId::append(self.next_append_id);
+        self.next_append_id += 1;
         id
+    }
+
+    /// Mints the next split identifier, from the namespace independent of appends.
+    pub fn reserve_split_id(&mut self) -> ItemId {
+        let id = ItemId::split(self.next_split_id);
+        self.next_split_id += 1;
+        id
+    }
+
+    /// Highest identifier value minted per namespace.
+    pub fn namespace_watermark(&self, namespace: ItemNamespace) -> u64 {
+        match namespace {
+            ItemNamespace::Append => self.next_append_id,
+            ItemNamespace::Split => self.next_split_id,
+        }
+    }
+
+    /// Records that `id` was minted, raising the namespace watermark so a later
+    /// mint never reuses it.
+    pub fn note_minted_id(&mut self, id: ItemId) {
+        match id.namespace() {
+            ItemNamespace::Append => {
+                if id.value() >= self.next_append_id {
+                    self.next_append_id = id.value() + 1;
+                }
+            }
+            ItemNamespace::Split => {
+                if id.value() >= self.next_split_id {
+                    self.next_split_id = id.value() + 1;
+                }
+            }
+        }
     }
 
     /// Places an item in `region`, moving it out of any previous region so the
     /// item is charged to exactly one region.
     pub fn place(&mut self, id: ItemId, region: Region) -> Result<(), IrError> {
         let item = self.item_mut(id)?;
-        item.region = Some(region);
+        item.placement = Placement::Placed(region);
         self.detach(id);
         self.attach(id, region);
         Ok(())
     }
 
-    /// Removes an item from its region without touching its bytes.
+    /// Transitions an item to store-only: out of every region, bytes retained.
+    /// The transition is explicit, so it is distinct from a fresh append item, a
+    /// collapsed placeholder, and a vaulted redaction.
     pub fn unplace(&mut self, id: ItemId) -> Result<(), IrError> {
         let item = self.item_mut(id)?;
-        item.region = None;
+        item.to_store_only();
         self.detach(id);
         Ok(())
     }
 
-    /// Splits an item into claim-atomic children. The children's ranges must cover
-    /// the parent exactly and be disjoint, so byte provenance is preserved.
+    /// Collapses an item to a phantom placeholder: it carries no bytes and sits
+    /// out of every region. A phantom cannot collapse again.
+    pub fn collapse(&mut self, id: ItemId) -> Result<(), IrError> {
+        self.item_mut(id)?.collapse()?;
+        self.detach(id);
+        Ok(())
+    }
+
+    /// Splits an item into claim-atomic children under `contract`. The contract
+    /// carries the namespace the children mint from, the expected part count, and
+    /// the per-part range counts; a split that does not satisfy it is refused.
     pub fn split(
         &mut self,
         id: ItemId,
         parts: Vec<Vec<StoreRange>>,
+        contract: &SplitContract,
     ) -> Result<Vec<ItemId>, IrError> {
         let parent = self.item(id)?.clone();
+        if parts.len() != contract.parts || contract.split_points.len() != contract.parts {
+            return Err(IrError::ContractMismatch { id: id.value() });
+        }
         if parts.is_empty() {
             return Err(IrError::EmptySplit { id: id.value() });
         }
         let mut flat: Vec<StoreRange> = Vec::new();
-        for part in &parts {
+        for (index, part) in parts.iter().enumerate() {
+            if part.len() != contract.split_points[index] {
+                return Err(IrError::ContractMismatch { id: id.value() });
+            }
             if part.is_empty() {
                 return Err(IrError::EmptySplit { id: id.value() });
             }
@@ -464,13 +813,37 @@ impl ConversationIr {
         if !covers_exactly(&flat, &parent.provenance) {
             return Err(IrError::CoverageMismatch { id: id.value() });
         }
-        let region = parent.region;
+        let parent_claims = normalize(&parent.provenance);
+        if parent_claims.len() > 1 {
+            let claim_atomic = parts.len() == parent_claims.len()
+                && parts.iter().zip(parent_claims.iter()).all(|(part, claim)| {
+                    part.len() == 1
+                        && part[0].offset == claim.offset
+                        && part[0].length == claim.length
+                });
+            if !claim_atomic {
+                return Err(IrError::ClaimBoundary { id: id.value() });
+            }
+        }
+        let region = parent.region();
         let lane = parent.lane;
         let scope = parent.scope;
         self.remove(id);
         let mut children: Vec<ItemId> = Vec::new();
         for part in parts {
-            let child = Item::new(self.reserve_id(), lane, part, scope).in_region(region);
+            let child = match contract.namespace {
+                SplitNamespace::Fresh => Item::new(self.reserve_split_id(), lane, part, scope),
+                SplitNamespace::Inherit => {
+                    let value = self.next_split_id;
+                    self.next_split_id += 1;
+                    Item::new(ItemId::append(value), lane, part, scope)
+                }
+            };
+            if self.items.iter().any(|existing| existing.id == child.id()) {
+                return Err(IrError::DuplicateItem {
+                    id: child.id().value(),
+                });
+            }
             children.push(child.id());
             self.items.push(child);
         }
@@ -485,7 +858,8 @@ impl ConversationIr {
     /// Encodes the IR into `sink`.
     pub fn encode(&self, sink: &mut Sink) {
         sink.tag("conversation-ir");
-        sink.int(self.next_id);
+        sink.int(self.next_append_id);
+        sink.int(self.next_split_id);
         for item in &self.items {
             item.encode(sink);
         }
@@ -532,7 +906,7 @@ impl ConversationIr {
 }
 
 /// Whether `children` covers `parent` exactly, with no overlap and no gap.
-fn covers_exactly(children: &[StoreRange], parent: &[StoreRange]) -> bool {
+pub fn covers_exactly(children: &[StoreRange], parent: &[StoreRange]) -> bool {
     let child_units: u64 = children.iter().map(|range| range.length).sum();
     child_units == covered_units(parent) && normalize(children) == normalize(parent)
 }
