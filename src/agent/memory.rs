@@ -8,7 +8,7 @@ impl CodingAgent {
     ) -> Result<(), AgentError> {
         match &self.profiler {
             Some(profiler) => profiler.event(phase, data).map_err(|error| {
-                AgentError::new(crate::cli::Code::Profiling, error.stage, error.message)
+                AgentError::new(crate::envelope::Code::Profiling, error.stage, error.message)
             }),
             None => Ok(()),
         }

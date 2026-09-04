@@ -1,19 +1,19 @@
-//! Versioned session storage for the headless agent.
-//!
-//! A framed append-only transaction log plus validated snapshots provides crash recovery and
-//! bounded replay. Legacy generation-numbered state slots are migrated atomically on first open.
-//! The materialized state holds `session_id`, the canonical pinned `cwd`, and an explicit list of `branches`. Each
-//! branch carries its own `branch_id`, parent lineage
-//! (parent `branch_id` + turn + attempt), a 1-based `turn`, an `attempt` id, the
-//! exact prompt and its FNV-1a digest, the owner token + lease timestamps of its
-//! reservation, a `lifecycle` enum (`pending`/`completed`/`failed`), every
-//! assistant response as `rounds`, each tool call's id/name/raw args, each tool
-//! result, and the final `summary`/`error`. Prompts are capped at
-//! [`MAX_PROMPT_BYTES`] (the input limit) before anything is persisted; the session
-//! id is a bounded single path component.
+//! Versioned session storage for the headless agent: a framed append-only
+//! transaction log plus validated snapshots providing crash recovery and
+//! bounded replay. Legacy generation-numbered state slots are migrated
+//! atomically on first open. The materialized state holds `session_id`, the
+//! canonical pinned `cwd`, and an explicit list of `branches`. Each branch
+//! carries its own `branch_id`, parent lineage (parent `branch_id` + turn +
+//! attempt), a 1-based `turn`, an `attempt` id, the exact prompt and its
+//! FNV-1a digest, the owner token + lease timestamps of its reservation, a
+//! `lifecycle` enum (`pending`/`completed`/`failed`), every assistant response
+//! as `rounds`, each tool call's id/name/raw args, each tool result, and the
+//! final `summary`/`error`. Prompts are capped at
+//! [`MAX_PROMPT_BYTES`] (the input limit) before anything is persisted; the
+//! session id is a bounded single path component.
 
 use fs2::FileExt;
-use std::io::Read as _;
+use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
 pub const STORE_VERSION: u32 = 2;
@@ -32,127 +32,19 @@ pub const MAX_BRANCHES: usize = 4096;
 /// Hard cap on the number of tool entries persisted for one branch.
 pub const MAX_TOOL_ENTRIES: usize = 20_000;
 /// Maximum time spent waiting for another process or thread to release a session lock.
-const SESSION_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 /// Poll interval while waiting for a contended session lock.
-const SESSION_LOCK_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
+const SESSION_LOCK_RETRY: Duration = Duration::from_millis(10);
 
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// One round of the turn loop: the assistant message (with its tool calls) and the
-/// executed results. A final no-tool round has empty `calls`; this is the
-/// assistant's final response and is always persisted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoundRecord {
-    /// Assistant text emitted alongside the tool calls of this round.
-    pub assistant: String,
-    /// The tool calls made in this round (empty for the final response).
-    pub calls: Vec<ToolCallRecord>,
-}
-
-/// A recorded tool call for a persisted tool transcript.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallRecord {
-    /// The provider-assigned tool call id (persisted and replayed verbatim).
-    pub id: String,
-    pub name: String,
-    /// Valid argument-object JSON in the adapter's semantic representation. Providers preserve
-    /// malformed raw strings only long enough for the host to reject them before execution.
-    pub args: String,
-    /// Whether the tool run reported success.
-    pub ok: bool,
-    /// True when the host refused to run the call (budget exhaustion);
-    /// refused records never count as executed tool calls.
-    #[serde(default)]
-    pub refused: bool,
-    pub result: String,
-}
-
-/// Lifecycle of one branch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Lifecycle {
-    Pending,
-    Completed,
-    Failed,
-}
-
-/// A single addressable attempt at one turn. `parent_*` records the lineage this
-/// branch continues: the branch it was forked from, plus that parent's turn and attempt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchRecord {
-    /// Globally unique branch id, allocated from a checked counter.
-    pub branch_id: String,
-    /// 1-based turn number within the session.
-    pub turn: u32,
-    /// Attempt id within this turn (1 for the first attempt, 2+ for branches).
-    pub attempt: u32,
-    /// The branch this one continues (its parent lineage). `None` for the root branch.
-    pub parent_branch: Option<String>,
-    pub parent_turn: u32,
-    pub parent_attempt: u32,
-    /// The exact prompt that started this attempt.
-    pub prompt: String,
-    pub digest: String,
-    /// Lifecycle state of this branch.
-    pub lifecycle: Lifecycle,
-    /// The complete round history, including the final no-tool response.
-    #[serde(default)]
-    pub rounds: Vec<RoundRecord>,
-    /// Final plain-text summary (completed branches).
-    #[serde(default)]
-    pub summary: String,
-    /// Terminal error description (failed branches).
-    #[serde(default)]
-    pub error: String,
-    /// Unique owner token of the process that most recently held the reservation.
-    #[serde(default)]
-    pub owner: String,
-    /// Wall-clock unix seconds when the reservation was made; zero once the
-    /// branch reaches a terminal lifecycle.
-    #[serde(default)]
-    pub reserved_at: u64,
-    /// Wall-clock unix seconds when the lease expires; past means stale. Zero
-    /// once the branch reaches a terminal lifecycle: a completed or failed
-    /// branch is no longer leased and cannot be reclaimed.
-    #[serde(default)]
-    pub lease_expiry: u64,
-}
-
-/// The versioned persistent payload stored inside each state slot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionState {
-    pub version: u32,
-    pub session_id: String,
-    /// Canonical working directory pinned on the first turn.
-    pub cwd: Option<String>,
-    /// Filesystem device and inode of the atomically opened workspace root.
-    #[serde(default)]
-    pub cwd_dev: u64,
-    #[serde(default)]
-    pub cwd_ino: u64,
-    #[serde(default)]
-    pub branches: Vec<BranchRecord>,
-    /// Source of unique branch ids (checked increments).
-    #[serde(default)]
-    pub next_branch_seq: u64,
-}
-
-impl SessionState {
-    fn empty(session_id: &str) -> SessionState {
-        SessionState {
-            version: STORE_VERSION,
-            session_id: session_id.to_string(),
-            cwd: None,
-            cwd_dev: 0,
-            cwd_ino: 0,
-            branches: Vec::new(),
-            next_branch_seq: 0,
-        }
-    }
-}
-
+pub(crate) mod context_persist;
+pub(crate) mod context_publish;
+pub(crate) mod context_recover;
+pub(crate) mod records;
+pub use records::{BranchRecord, Lifecycle, RoundRecord, SessionState, ToolCallRecord};
 mod log;
 mod replay;
 mod reserve;
@@ -270,24 +162,18 @@ pub struct SessionStore {
     lock: Mutex<()>,
     cache: Mutex<Option<snapshot::LoadedStore>>,
     operation_metrics: Mutex<StoreMetrics>,
-    pub(crate) context: Mutex<Option<crate::context_persist::ContextState>>,
+    pub(crate) context: Mutex<Option<context_persist::ContextState>>,
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
 }
 
-/// A fresh unique owner token: process id + wall-clock nanos is unique per process and
-/// never a secret.
 fn new_owner() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{}-{now}", std::process::id())
+    format!("{}-{}", std::process::id(), paths::random_token_hex())
 }
 
 fn fchmod(fd: std::os::fd::RawFd, mode: libc::mode_t) -> Result<(), StoreError> {
@@ -308,7 +194,7 @@ pub(crate) fn open_regular_at(
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
 
     let name = std::ffi::CString::new(name)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+        .map_err(|_| std::io::Error::new(ErrorKind::InvalidInput, "invalid file name"))?;
     let fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),
@@ -323,7 +209,7 @@ pub(crate) fn open_regular_at(
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     if !file.metadata()?.file_type().is_file() {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+            ErrorKind::InvalidInput,
             "session entry is not a regular file",
         ));
     }
@@ -346,7 +232,7 @@ fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError
     let mut bytes = Vec::new();
     let f = match open_regular_at(dir, name, libc::O_RDONLY, 0) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(SlotRead::Missing),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(SlotRead::Missing),
         Err(_) => {
             return Err(StoreError::Io(
                 "session state could not be opened safely".into(),
@@ -435,7 +321,7 @@ pub(crate) fn ensure_private_subdir(
     if parent.sub_dir(name).is_err() {
         match parent.create_dir(name, 0o700) {
             Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             Err(_) => {
                 return Err(StoreError::Io("create session directory failed".into()));
             }
@@ -453,6 +339,13 @@ pub(crate) fn ensure_private_subdir(
 }
 
 impl SessionId {
+    /// Generate a collision-resistant identifier using OS-backed randomness.
+    pub fn fresh() -> Self {
+        Self {
+            id: format!("session-{}", paths::random_token_hex()),
+        }
+    }
+
     /// Resolve the session id, rejecting unsafe components.
     pub fn parse(id: &str) -> Result<SessionId, String> {
         if !is_safe_component(id) {
@@ -565,27 +458,27 @@ impl SessionStore {
 
     fn locked_with_timeout<T>(
         &self,
-        timeout: std::time::Duration,
+        timeout: Duration,
         f: impl FnOnce() -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let deadline = std::time::Instant::now()
+        let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or(StoreError::LockTimeout)?;
         let _thread_guard = loop {
             match self.lock.try_lock() {
                 Ok(guard) => break guard,
-                Err(std::sync::TryLockError::Poisoned(_)) => {
+                Err(TryLockError::Poisoned(_)) => {
                     return Err(StoreError::Lock("lock poisoned".into()));
                 }
-                Err(std::sync::TryLockError::WouldBlock) => wait_for_session_lock(deadline)?,
+                Err(TryLockError::WouldBlock) => wait_for_lock(deadline)?,
             }
         };
         loop {
             match FileExt::try_lock_exclusive(&self.file) {
                 Ok(()) => break,
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    wait_for_session_lock(deadline)?;
+                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    wait_for_lock(deadline)?;
                 }
                 Err(_) => return Err(StoreError::Lock("lock operation failed".into())),
             }
@@ -846,13 +739,17 @@ impl SessionStore {
                 ));
             }
             let suffix = replay::suffix(&branch.rounds, &rounds)?;
+            // The context artifacts are durable before BranchCompleted is
+            // appended: the event is what makes completion observable to a
+            // later process, so it must not be able to fire for state the
+            // context store never accepted (106).
+            context_persist::finalize_context(self)?;
             self.append_event(log::Event::BranchCompleted {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
                 rounds: suffix.to_vec(),
                 summary: summary.to_string(),
-            })?;
-            crate::context_persist::finalize_context(self)
+            })
         })
     }
 
@@ -896,12 +793,12 @@ impl SessionStore {
     /// Digests bulk tool results and persists the phase-2 context artifacts,
     /// returning the transcript the session log should store.
     fn context_exchange(&self, rounds: &[RoundRecord]) -> Result<Vec<RoundRecord>, StoreError> {
-        crate::context_persist::context_exchange(self, rounds)
+        context_persist::context_exchange(self, rounds)
     }
 
     /// Compacts one tool result before it is recorded into the round.
     pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
-        crate::context_persist::compact_tool_result(self, tool, result)
+        context_persist::compact_tool_result(self, tool, result)
     }
 
     fn live_branch<'a>(
@@ -917,7 +814,7 @@ impl SessionStore {
         if branch.lifecycle != Lifecycle::Pending
             || branch.owner != reserved.owner
             || branch.turn != reserved.turn
-            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+            || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
             || branch.lease_expiry <= now_secs()
         {
             return Err(StoreError::Stale);
@@ -936,7 +833,7 @@ impl SessionStore {
             .find(|branch| branch.branch_id == reserved.branch_id)
             .ok_or(StoreError::Stale)?;
         if branch.turn != reserved.turn
-            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+            || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
         {
             return Err(StoreError::Stale);
         }
@@ -967,8 +864,8 @@ impl SessionStore {
     }
 }
 
-fn wait_for_session_lock(deadline: std::time::Instant) -> Result<(), StoreError> {
-    let now = std::time::Instant::now();
+fn wait_for_lock(deadline: Instant) -> Result<(), StoreError> {
+    let now = Instant::now();
     if now >= deadline {
         return Err(StoreError::LockTimeout);
     }

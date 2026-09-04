@@ -1,22 +1,22 @@
 //! The llxprt-code-rs offline quality and release gates: source analysis plus the
 //! coordinating lint, fixture, source-bundle, and release commands.
 //!
-//! The production set is exactly the root crate's `src/**/*.rs` (every library and binary
-//! source, including `src/bin/*`). Tests, `vendor/`, and the xtask itself live outside
-//! that set by construction. There are no baselines, allow-lists, or suppressions: every
-//! measured violation is reported.
+//! The LOC and complexity gates measure exactly the root crate's `src/**/*.rs`
+//! (including library and binary sources), with no baselines, allow-lists, or
+//! suppressions. The standalone coupling gate has a different scope: it discovers
+//! public and private top-level modules from `src/lib.rs`, recursively scans each
+//! module's production Rust files, and enforces a checked-in burn-down debt ledger.
 
 pub mod analyze;
 pub mod complexity;
+pub mod coupling;
+mod coupling_graph;
 pub mod loc;
 pub mod release;
 
 pub use analyze::{find_production_sources, run_gate, Gate, Report, Violation};
 
-// Re-export the thresholds the gates enforce. These are the fixed limits inherited from the
-// sibling `llxprt-code` project (its ESLint guard enforces the same numbers):
-// production file effective LOC <= 800, function effective LOC <= 80, cyclomatic <= 25,
-// cognitive <= 30.
+// Re-export the fixed limits inherited from the sibling `llxprt-code` project.
 pub const FILE_LOC_LIMIT: usize = 800;
 pub const FUNCTION_LOC_LIMIT: usize = 80;
 pub const CYCLOMATIC_LIMIT: usize = 25;

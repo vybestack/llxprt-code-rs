@@ -503,7 +503,7 @@ function buildClassificationTable() {
   add('authKeyfile', host, common, 'alias of auth-keyfile');
   add('api-keyfile', host, common, 'alias of auth-keyfile; newly accepted non-Codex');
   add('apiKeyfile', host, common, 'alias of auth-keyfile');
-  add('auth-key-name', rej, common, 'fixed unsupported-credential-source diagnostic');
+  add('auth-key-name', host, common, 'named provider-key credential source; resolves from the credential env selector then the secure store');
   add('base-url', host, common, 'API-specific endpoint alias; Codex requires fixed endpoint');
   add('baseUrl', host, common, 'alias of base-url');
   add('baseURL', host, common, 'alias of base-url');
@@ -1291,7 +1291,7 @@ function generate({ siblingRoot, profilesDir }) {
   }
   installedRows.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   const firstFailures = new Map([
-    ['friendliglm.json', 'arbitrary route prefix rejects (endpoint class) before the named secure-store reference'],
+    ['friendliglm.json', 'named secure-store reference rejects after the nested /serverless/v1 base resolves as an endpoint'],
     ['qwen38.json', 'named secure-store reference rejects before the structural dsflash gate'],
     ['qwen38-mi300x.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement'],
     ['ornith-runpod.json', 'missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms'],

@@ -1,6 +1,7 @@
 use super::*;
 
 mod codex_tools;
+mod numeric_strings;
 use serde_json::json;
 
 #[test]
@@ -361,11 +362,12 @@ fn keyfile_aliases_are_credentials_and_debug_is_redacted() {
     }
 }
 
-/// `auth-key-name` is a named **secure-store** reference, never a keyfile path:
-/// parsing only records its presence (the value never travels), and the fixed
-/// value-free refusal fires at credential-policy time after endpoint validation.
+/// `auth-key-name` names a provider key (issue 6): it is parsed and held for
+/// resolution, never treated as a keyfile path. Parsing keeps the name off every
+/// rendered surface, the aliases must agree, and an over-long or empty name is a
+/// parse error with the fixed value-free refusal.
 #[test]
-fn auth_key_name_is_an_unsupported_secure_store_reference() {
+fn auth_key_name_is_a_named_provider_key_reference() {
     let marker = "secure-store-provider-key";
     let p = parse_profile_value(
         &json!({
@@ -378,20 +380,58 @@ fn auth_key_name_is_an_unsupported_secure_store_reference() {
         }),
         "named-ref",
     )
-    .expect("parse records the deferred refusal");
-    assert!(p.ephemeral.auth_key_name);
+    .expect("parse keeps the named reference for resolution");
+    assert_eq!(p.ephemeral.auth_key_name.as_deref(), Some(marker));
+    assert_eq!(p.auth_key_name(), Some(marker));
     let rendered = format!("{p:?}");
     assert!(!rendered.contains(marker), "the value must never travel");
 
-    let err =
-        crate::model::ModelConfig::from_profile_in(&p, false, false, std::path::Path::new("."))
-            .expect_err("credential policy refuses the named reference");
-    let message = err.to_string();
-    assert_eq!(
-        message,
-        format!("unsupported profile setting(s): {AUTH_KEY_NAME_UNSUPPORTED_MESSAGE}")
-    );
-    assert!(!message.contains(marker));
+    // An over-long name never reaches resolution: the fixed value-free refusal
+    // is a parse error and the bytes never travel.
+    let over = "k".repeat(crate::redact::MAX_KEY_NAME_BYTES + 1);
+    let err = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key-name": over
+            }
+        }),
+        "named-ref",
+    )
+    .expect_err("an over-long name is a profile error");
+    assert_eq!(err, crate::redact::KEY_NAME_CAP_MESSAGE.to_string());
+    assert!(!err.contains("kkk"), "the name never travels: {err}");
+
+    // The aliases are one field: equal values agree and conflicting values reject.
+    let aliased = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key-name": marker,
+                "authKeyName": marker
+            }
+        }),
+        "named-ref",
+    )
+    .expect("equal alias values agree");
+    assert_eq!(aliased.ephemeral.auth_key_name.as_deref(), Some(marker));
+    assert!(parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key-name": marker,
+                "api-key-name": "other"
+            }
+        }),
+        "named-ref",
+    )
+    .is_err());
 }
 
 /// The strict endpoint shape: a non-http(s) scheme, userinfo, query, fragment,

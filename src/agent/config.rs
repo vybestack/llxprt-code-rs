@@ -21,16 +21,6 @@ pub fn validate_timeout(timeout: Option<std::time::Duration>) -> Result<(), Stri
     Ok(())
 }
 
-/// FNV-1a hash of a prompt, used as a compact identity for replay detection.
-pub fn prompt_digest(prompt: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in prompt.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
-
 /// Build the coding-agent system prompt.
 pub fn coding_system_prompt(
     cwd: &std::path::Path,

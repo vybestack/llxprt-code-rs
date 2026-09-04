@@ -23,6 +23,15 @@ fn read_generic_password(service: &str, account: &str) -> Result<Vec<u8>, Creden
         .map_err(|_| CredentialError::remediation())
 }
 
+pub(crate) fn read_named_provider_key(name: &str) -> Option<String> {
+    let bytes = read_generic_password(PROVIDER_KEY_SERVICE, name).ok()?;
+    let value = String::from_utf8(bytes).ok()?;
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+const PROVIDER_KEY_SERVICE: &str = "llxprt-code-provider-keys";
+
 #[cfg(test)]
 pub(crate) fn fixed_item_attributes() -> Result<(), CredentialError> {
     item_attributes(CODEX_SERVICE, CODEX_ACCOUNT)

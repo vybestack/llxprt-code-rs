@@ -23,8 +23,10 @@ pub enum ModelError {
         code: Option<String>,
     },
 
-    /// Request timeout.
-    Timeout(Duration),
+    /// Request timeout. No duration is carried: reqwest reports only that a timeout
+    /// fired, so the configured request timeout stays the single source of truth in the
+    /// host configuration.
+    Timeout,
 
     /// Rate limited by the API.
     RateLimited {
@@ -73,7 +75,7 @@ impl std::fmt::Display for ModelError {
         match self {
             Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
             Self::Api { .. } => f.write_str("Model API error"),
-            Self::Timeout(duration) => write!(f, "Model request timed out after {duration:?}"),
+            Self::Timeout => f.write_str("Model request timed out"),
             Self::RateLimited { retry_after } => {
                 write!(f, "Model request rate limited (retry after {retry_after:?})")
             }
@@ -127,7 +129,7 @@ impl ModelError {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            ModelError::Timeout(_) => true,
+            ModelError::Timeout => true,
             ModelError::RateLimited { .. } => true,
             ModelError::Connection(_) => true,
             ModelError::Http { status, .. } => *status >= 500,
@@ -229,8 +231,10 @@ impl ModelError {
 
 impl From<reqwest::Error> for ModelError {
     fn from(err: reqwest::Error) -> Self {
+        // A reqwest timeout error carries no duration, so no number is reported here;
+        // the host already knows the configured timeout it passed to the request.
         if err.is_timeout() {
-            ModelError::Timeout(Duration::from_secs(30)) // Default timeout
+            ModelError::Timeout
         } else if err.is_connect() {
             ModelError::Connection("provider connection failed".to_string())
         } else if let Some(status) = err.status() {
@@ -254,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_is_retryable() {
-        assert!(ModelError::Timeout(Duration::from_secs(30)).is_retryable());
+        assert!(ModelError::Timeout.is_retryable());
         assert!(ModelError::rate_limited(None).is_retryable());
         assert!(ModelError::Connection("failed".into()).is_retryable());
         assert!(ModelError::http(500, "Server error").is_retryable());
@@ -274,7 +278,7 @@ mod tests {
         let err = ModelError::rate_limited(None);
         assert_eq!(err.retry_after(), None);
 
-        let err = ModelError::Timeout(Duration::from_secs(30));
+        let err = ModelError::Timeout;
         assert_eq!(err.retry_after(), None);
     }
 
@@ -293,7 +297,7 @@ mod tests {
                 message: marker.to_string(),
                 code: Some(marker.to_string()),
             },
-            ModelError::Timeout(Duration::from_secs(7)),
+            ModelError::Timeout,
             ModelError::RateLimited {
                 retry_after: Some(Duration::from_secs(9)),
             },
@@ -344,5 +348,49 @@ mod tests {
         assert!(!diagnostic.contains(marker));
         assert!(!diagnostic.contains("/private"));
         assert!(!diagnostic.contains(&address.to_string()));
+    }
+
+    /// A reqwest timeout carries no duration, so the mapped error never reports one: whatever
+    /// request timeout was configured, the diagnostic stays the same value-free sentence and
+    /// never asserts a number of seconds.
+    #[tokio::test]
+    async fn reqwest_timeouts_do_not_report_a_fabricated_duration() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else {
+                    continue;
+                };
+                // Read the request, then hold the connection open without ever writing a
+                // response head so the client's configured request timeout fires.
+                use std::io::Read as _;
+                let mut buffer = [0u8; 8192];
+                while stream.read(&mut buffer).unwrap_or(0) > 0 {
+                    let _ = buffer;
+                }
+            }
+        });
+
+        for configured in [Duration::from_millis(80), Duration::from_millis(160)] {
+            let error = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(format!("http://{address}/v1/chat/completions"))
+                .timeout(configured)
+                .send()
+                .await
+                .unwrap_err();
+            assert!(error.is_timeout(), "expected a timeout: {error:?}");
+            let diagnostic = ModelError::from(error).to_string();
+            assert_eq!(diagnostic, "Model request timed out");
+            assert!(
+                !diagnostic.chars().any(|c| c.is_ascii_digit()),
+                "diagnostic asserted a duration: {diagnostic}"
+            );
+        }
+        drop(server);
     }
 }

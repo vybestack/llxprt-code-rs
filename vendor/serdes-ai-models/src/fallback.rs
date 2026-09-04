@@ -46,7 +46,7 @@ impl RetryOn {
             RetryOn::AnyError => true,
             RetryOn::RateLimits => matches!(error, ModelError::RateLimited { .. }),
             RetryOn::Transient => match error {
-                ModelError::Timeout(_) | ModelError::Connection(_) | ModelError::Network(_) => true,
+                ModelError::Timeout | ModelError::Connection(_) | ModelError::Network(_) => true,
                 ModelError::Http { status, .. } => *status >= 500,
                 _ => false,
             },
@@ -305,7 +305,6 @@ mod tests {
     use serdes_ai_core::{FinishReason, ModelResponsePart};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::Duration;
 
     /// A mock model that can fail with configurable errors.
     struct FailingMockModel {
@@ -357,7 +356,7 @@ mod tests {
                 ModelError::RateLimited { retry_after } => Err(ModelError::RateLimited {
                     retry_after: *retry_after,
                 }),
-                ModelError::Timeout(d) => Err(ModelError::Timeout(*d)),
+                ModelError::Timeout => Err(ModelError::Timeout),
                 ModelError::Connection(msg) => Err(ModelError::Connection(msg.clone())),
                 ModelError::Authentication(msg) => Err(ModelError::Authentication(msg.clone())),
                 ModelError::Http {
@@ -456,15 +455,15 @@ mod tests {
         // AnyError retries on everything
         assert!(RetryOn::AnyError.should_retry(&ModelError::api("test")));
         assert!(RetryOn::AnyError.should_retry(&ModelError::rate_limited(None)));
-        assert!(RetryOn::AnyError.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
+        assert!(RetryOn::AnyError.should_retry(&ModelError::Timeout));
 
         // RateLimits only retries on rate limit errors
         assert!(RetryOn::RateLimits.should_retry(&ModelError::rate_limited(None)));
         assert!(!RetryOn::RateLimits.should_retry(&ModelError::api("test")));
-        assert!(!RetryOn::RateLimits.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
+        assert!(!RetryOn::RateLimits.should_retry(&ModelError::Timeout));
 
         // Transient retries on timeout, connection, network, and 5xx errors
-        assert!(RetryOn::Transient.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
+        assert!(RetryOn::Transient.should_retry(&ModelError::Timeout));
         assert!(RetryOn::Transient.should_retry(&ModelError::Connection("failed".into())));
         assert!(RetryOn::Transient.should_retry(&ModelError::Network("failed".into())));
         assert!(RetryOn::Transient.should_retry(&ModelError::http(500, "Server error")));
@@ -687,7 +686,7 @@ mod tests {
     #[tokio::test]
     async fn test_fallback_retry_on_transient() {
         // First model fails with timeout (transient)
-        let model1 = FailingMockModel::new("model1", ModelError::Timeout(Duration::from_secs(30)));
+        let model1 = FailingMockModel::new("model1", ModelError::Timeout);
         let model2 = SucceedingMockModel::new("model2", "response2");
 
         let call_count1 = model1.call_count.clone();
@@ -747,7 +746,7 @@ mod tests {
     #[tokio::test]
     async fn test_fallback_three_models() {
         let model1 = FailingMockModel::new("model1", ModelError::rate_limited(None));
-        let model2 = FailingMockModel::new("model2", ModelError::Timeout(Duration::from_secs(30)));
+        let model2 = FailingMockModel::new("model2", ModelError::Timeout);
         let model3 = SucceedingMockModel::new("model3", "response3");
 
         let call_count1 = model1.call_count.clone();

@@ -10,6 +10,11 @@
 //! URL that is not a loopback address; HTTPS (any host) and loopback HTTP stay allowed,
 //! and remote `http://` is rejected without the opt-in.
 //!
+//! Credential-less mode: a profile whose base URL is loopback and that carries no
+//! `auth-key`/`auth-keyfile` resolves to the empty key. Local OpenAI-compatible servers
+//! (LM Studio, ollama, llama.cpp server) accept any or no key, so neither the file-profile
+//! refusal nor an ambient `settings.json` read applies to them.
+//!
 //! Keys are only ever held inside [`ModelConfig`] and are never logged or persisted.
 
 use crate::profile::{std_profile_dir, ModelParams, Profile};
@@ -285,11 +290,14 @@ mod serde_ai_core_model_settings {
 /// Parse and validate a base URL for the OpenAI chat-completions path.
 ///
 /// Returns the normalized URL string. The URL must be an absolute `http://` or
-/// `https://` URL with a host and no userinfo (including a password-only `:password@host`
-/// form), and its path must be one of the accepted base forms:
-/// empty, `/`, `/v1`, `/v1/`, or ending exactly in `/chat/completions`
-/// (trailing slashes aside). Any arbitrary path prefix is rejected with
-/// [`ModelError::InvalidEndpoint`]; the host refuses it before a request is made.
+/// `https://` URL with a host, no userinfo (including a password-only `:password@host`
+/// form), and no query or fragment. The path may be any sequence of nested path segments
+/// (empty, `/`, `/v1`, `/api/paas/v4`, `/serverless/v1`, ...): real OpenAI-compatible
+/// providers publish versioned and nested bases, so the rule constrains the shape of the
+/// path, not a fixed spelling list. A path that carries the `/chat/completions` suffix in
+/// anything but the two documented full-route spellings refuses, as does an empty path
+/// segment, so the suffix is never doubled or nested; both refusals are
+/// [`ModelError::InvalidEndpoint`] and precede any request.
 pub fn parse_base_url(raw: &str) -> Result<String, ModelError> {
     if raw.len() > crate::redact::MAX_ENDPOINT_BYTES {
         return Err(ModelError::InvalidEndpoint(ENDPOINT_CAP.to_string()));
@@ -320,12 +328,32 @@ pub fn parse_base_url(raw: &str) -> Result<String, ModelError> {
         return Ok(u.to_string());
     }
     let path = u.path().trim_end_matches('/');
-    if path == "/v1" || path == "/chat/completions" || path == "/v1/chat/completions" {
+    // The documented full-route spellings are kept verbatim; every other base has the
+    // single `/chat/completions` suffix appended by the route joiner.
+    if path == "/chat/completions" || path == "/v1/chat/completions" {
         return Ok(u.to_string());
     }
-    Err(ModelError::InvalidEndpoint(
-        "unsupported or invalid endpoint".to_string(),
-    ))
+    // A path that carries the API suffix anywhere else (for example
+    // `/inference/v1/chat/completions` or `/chat/completions/v1`) never reaches the
+    // route joiner, which would nest or double the suffix.
+    if path.contains("/chat/completions") {
+        return Err(ModelError::InvalidEndpoint(
+            "unsupported or invalid endpoint".to_string(),
+        ));
+    }
+    // `path` starts with `/`, so the first split element is always empty and is skipped.
+    // `.`/`..` segments never appear here: `url` normalizes them away while parsing.
+    if path
+        .strip_prefix('/')
+        .unwrap_or(path)
+        .split('/')
+        .any(str::is_empty)
+    {
+        return Err(ModelError::InvalidEndpoint(
+            "unsupported or invalid endpoint".to_string(),
+        ));
+    }
+    Ok(u.to_string())
 }
 
 /// A fixed, path-free message for an over-limit endpoint string. The over-limit value
@@ -378,7 +406,8 @@ impl ModelConfig {
     /// Resolve a full model config from a profile.
     ///
     /// `from_file` marks a `--profile-load` profile: when it carries no
-    /// `auth-key`/`auth-keyfile` it fails rather than touching `settings.json`.
+    /// `auth-key`/`auth-keyfile` and its base URL is not loopback it fails rather than
+    /// touching `settings.json`.
     pub fn from_profile(
         profile: &Profile,
         from_file: bool,
@@ -421,13 +450,17 @@ impl ModelConfig {
         validate_base_url(&policy_url)?;
         check_http_policy(&policy_url, allow_insecure_http)?;
 
-        // Credential policy (class 3): the fixed value-free refusal for a named
-        // secure-store reference, after endpoint validation (class 2).
-        if profile.ephemeral.auth_key_name {
-            return Err(ModelError::UnsupportedSetting(
-                crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string(),
-            ));
-        }
+        // Credential policy (class 3): a named provider key resolves through the
+        // credential env selector then the secure store, after endpoint validation
+        // (class 2). The name is a credential surface; the fixed value-free refusal
+        // below is the only thing that travels when neither layer holds the key.
+        let named_key = profile
+            .ephemeral
+            .auth_key_name
+            .as_deref()
+            .map(crate::model_api::provider_keys::resolve_named_key)
+            .transpose()
+            .map_err(|error| ModelError::UnsupportedSetting(error.to_string()))?;
 
         // Target settings (class 6): unsupported keys, non-`auto`/`openai` tool
         // formats, and a dsflash variant selected on an OpenAI Vercel Chat target.
@@ -456,7 +489,11 @@ impl ModelConfig {
             ));
         }
 
-        let api_key = resolve_api_key(profile, from_file, config_root)?;
+        let api_key = if let Some(key) = named_key {
+            key
+        } else {
+            resolve_api_key(profile, from_file, config_root)?
+        };
 
         let timeout = profile
             .ephemeral
@@ -487,6 +524,26 @@ pub(crate) fn resolve_api_key(
     from_file: bool,
     config_root: &std::path::Path,
 ) -> Result<String, ModelError> {
+    let Some(api_key) = resolve_api_key_opt(profile, from_file, config_root)? else {
+        return Ok(String::new());
+    };
+    if api_key.len() > crate::redact::MAX_KEY_BYTES {
+        return Err(ModelError::CredentialRejected(
+            crate::redact::KEY_CAP_MESSAGE.to_string(),
+        ));
+    }
+    Ok(api_key)
+}
+
+/// Resolve the credential for a profile, or `None` when the profile is credential-less
+/// by construction: a loopback endpoint with no `auth-key`/`auth-keyfile` fields. Local
+/// OpenAI-compatible servers take any or no key, so the empty key travels (the transport
+/// still sends an `Authorization` header only when a key is present).
+fn resolve_api_key_opt(
+    profile: &Profile,
+    from_file: bool,
+    config_root: &std::path::Path,
+) -> Result<Option<String>, ModelError> {
     let keyfile = profile
         .ephemeral
         .auth_keyfile_orig
@@ -502,19 +559,22 @@ pub(crate) fn resolve_api_key(
         if key.trim().is_empty() {
             return Err(ModelError::NoAuth);
         }
-        key.to_string()
+        Some(key.to_string())
     } else if let Some(path) = keyfile {
-        read_credential_path(path)?
+        Some(read_credential_path(path)?)
+    } else if profile
+        .ephemeral
+        .base_url
+        .as_ref()
+        .map(|url| classify_loopback(url.full()))
+        .unwrap_or(false)
+    {
+        None
     } else if from_file {
         return Err(ModelError::NoProfileAuth);
     } else {
-        resolve_settings_api_key(&profile.provider, config_root)?
+        Some(resolve_settings_api_key(&profile.provider, config_root)?)
     };
-    if api_key.len() > crate::redact::MAX_KEY_BYTES {
-        return Err(ModelError::CredentialRejected(
-            crate::redact::KEY_CAP_MESSAGE.to_string(),
-        ));
-    }
     Ok(api_key)
 }
 

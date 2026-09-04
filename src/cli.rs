@@ -20,20 +20,12 @@ use std::path::PathBuf;
 mod run;
 pub use run::run_profiled;
 
+/// Re-exported exit code type (defined in the leaf `envelope` module).
+pub use crate::envelope::Code;
+
 /// The maximum number of bytes read from stdin before the prompt is rejected. The cap is
 /// applied **while reading**, not after allocation.
 const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
-
-/// Exit codes exposed to the OS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Code {
-    Usage = 2,
-    Config = 3,
-    Session = 4,
-    Model = 5,
-    Turn = 6,
-    Profiling = 7,
-}
 
 /// CLI arguments. Doc comments surface in `--help`.
 #[derive(Debug, Clone, Parser)]
@@ -281,33 +273,55 @@ pub fn exit_code(outcome: &Result<RunOutcome, AppError>) -> i32 {
 
 /// Best-effort session id for error payloads: the validated `--session` value in argv.
 pub fn session_hint() -> String {
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    session_hint_from(std::env::args_os().skip(1))
+}
+
+fn session_hint_from(args: impl IntoIterator<Item = std::ffi::OsString>) -> String {
+    let args: Vec<std::ffi::OsString> = args.into_iter().collect();
     let mut i = 0;
     while i < args.len() {
-        let raw = args[i].to_string_lossy().into_owned();
-        if let Some(v) = raw.strip_prefix("--session=") {
-            if crate::session::is_safe_component(v) {
-                return v.to_string();
-            }
+        let raw = args[i].to_string_lossy();
+        if raw == "--" {
+            break;
         }
-        if raw == "--session" {
-            if let Some(v) = args.get(i + 1) {
-                let v = v.to_string_lossy().into_owned();
-                if crate::session::is_safe_component(&v) {
-                    return v;
+        if let Some(value) = raw.strip_prefix("--session=") {
+            if crate::session::is_safe_component(value) {
+                return value.to_string();
+            }
+        } else if raw == "--session" {
+            if let Some(value) = args.get(i + 1) {
+                let value = value.to_string_lossy();
+                if crate::session::is_safe_component(&value) {
+                    return value.into_owned();
                 }
             }
         }
         i += 1;
     }
-    "default".to_string()
+    SessionId::fresh().id
+}
+
+fn has_session_argument(args: &[std::ffi::OsString]) -> bool {
+    args.iter()
+        .take_while(|argument| *argument != "--")
+        .any(|argument| {
+            let argument = argument.to_string_lossy();
+            argument == "--session" || argument.starts_with("--session=")
+        })
 }
 
 /// Try-parse the CLI args, turning usage errors into a JSON error object. `--help` and
 /// `--version` are protocol exceptions and exit 0 here (Clap prints them).
-pub fn parse_args_fallback() -> Args {
+pub fn parse_args_fallback(session_hint: &str) -> Args {
     use clap::Parser;
-    match Args::try_parse() {
+    let mut argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if !has_session_argument(&argv[1..]) {
+        argv.splice(
+            1..1,
+            [std::ffi::OsString::from("--session"), session_hint.into()],
+        );
+    }
+    match Args::try_parse_from(argv) {
         Ok(a) => a,
         Err(e) => {
             use clap::error::ErrorKind;
@@ -315,12 +329,11 @@ pub fn parse_args_fallback() -> Args {
                 let _ = e.print();
                 std::process::exit(0);
             }
-            let session = crate::cli::session_hint();
             let _ = e;
             print!(
                 "{}",
                 String::from_utf8_lossy(
-                    &Envelope::error(session, "usage", "invalid arguments").to_line()
+                    &Envelope::error(session_hint, "usage", "invalid arguments").to_line()
                 )
             );
             std::process::exit(2);
@@ -462,5 +475,53 @@ mod turn_time_tests {
     #[test]
     fn turn_time_rejects_overflow() {
         assert!(parse_turn_time((u64::MAX.to_string() + "h").as_str()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_session_argument, session_hint_from, Args};
+    use clap::Parser as _;
+    use std::ffi::OsString;
+
+    #[test]
+    fn omitted_session_gets_a_fresh_valid_hint() {
+        let first = session_hint_from(Vec::<OsString>::new());
+        let second = session_hint_from(Vec::<OsString>::new());
+        assert_ne!(first, second);
+        assert!(crate::session::SessionId::parse(&first).is_ok());
+        assert!(crate::session::SessionId::parse(&second).is_ok());
+    }
+
+    #[test]
+    fn explicit_default_is_preserved() {
+        let arguments = vec![OsString::from("--session"), OsString::from("default")];
+        assert_eq!(session_hint_from(arguments.clone()), "default");
+        assert!(has_session_argument(&arguments));
+
+        let args = Args::try_parse_from(["llxprt-code-rs", "--session", "default"]).unwrap();
+        assert_eq!(args.session, "default");
+    }
+
+    #[test]
+    fn session_arguments_after_end_of_options_are_not_options() {
+        for arguments in [
+            vec![
+                OsString::from("--"),
+                OsString::from("--session"),
+                OsString::from("named"),
+            ],
+            vec![OsString::from("--"), OsString::from("--session=named")],
+        ] {
+            assert!(!has_session_argument(&arguments));
+        }
+    }
+
+    #[test]
+    fn invalid_explicit_session_does_not_leak_into_error_envelope_hint() {
+        let arguments = vec![OsString::from("--session=../escape")];
+        let hint = session_hint_from(arguments);
+        assert_ne!(hint, "../escape");
+        assert!(crate::session::SessionId::parse(&hint).is_ok());
     }
 }

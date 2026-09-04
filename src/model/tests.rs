@@ -31,10 +31,16 @@ fn load_err(json: &serde_json::Value, name: &str, allow_insecure: bool) -> Strin
     .unwrap_err()
     .to_string()
 }
-/// The **public** strict validator accepts a bare origin, `/v1`, and the chat-route
-/// forms (the full URL, including its path, is what is validated) with a host and
-/// no userinfo/query/fragment, rejects a nested path, userinfo, query, and
-/// fragment, and that rejection always stays sanitized/value-free.
+/// The rendered credential-policy failure for an unresolvable named provider key,
+/// as `from_profile_in` reports it (issue 6).
+const NAMED_KEY_RESOLUTION_FAILURE: &str =
+    "auth-key-name could not be resolved; set LLXPRT_PROVIDER_KEY_<NAME> or store the key under the llxprt-code-provider-keys secure-store account";
+/// The **public** strict validator accepts a bare origin, `/v1`, the chat-route
+/// forms, and nested provider prefixes such as z.ai's `/api/paas/v4` or FriendliGLM's
+/// `/serverless/v1` (the full URL, including its path, is what is validated) with a host
+/// and no userinfo/query/fragment, rejects a path that repeats the API suffix, an
+/// empty path segment, userinfo, query, and fragment, and that rejection always stays
+/// sanitized/value-free.
 #[test]
 fn public_validate_base_url_full_url_routes_and_value_free_errors() {
     for raw in [
@@ -44,6 +50,9 @@ fn public_validate_base_url_full_url_routes_and_value_free_errors() {
         "https://api.example.com/v1/",
         "https://api.example.com/chat/completions",
         "https://api.example.com/v1/chat/completions",
+        "https://api.z.ai/api/paas/v4",
+        "https://api.friendli.ai/serverless/v1",
+        "https://api.example.com/api/paas/v4/",
     ] {
         let url = crate::profile::RedactedUrl::from_unvalidated(raw);
         let cfg = crate::model::ModelConfig {
@@ -63,12 +72,13 @@ fn public_validate_base_url_full_url_routes_and_value_free_errors() {
         assert!(cfg.validate_url().is_ok(), "validate_url must accept {raw}");
     }
     for raw in [
-        "https://api.example.com/inference/v1",
         "https://user@api.example.com/v1",
         "https://:pass@api.example.com",
         "https://api.example.com/v1?key=secret",
         "https://api.example.com/v1#frag",
         "https://api.example.com/inference/v1/chat/completions",
+        "https://api.example.com/chat/completions/v1",
+        "https://api.example.com/api//paas/v4",
     ] {
         let url = crate::profile::RedactedUrl::from_unvalidated(raw);
         let cfg = crate::model::ModelConfig {
@@ -81,8 +91,9 @@ fn public_validate_base_url_full_url_routes_and_value_free_errors() {
             model_params: None,
             context_limit: None,
         };
-        let err = validate_base_url(url.full())
-            .expect_err("a nested/userinfo/query/fragment URL must be rejected");
+        let err = validate_base_url(url.full()).expect_err(
+            "a repeated-suffix/dot-segment/userinfo/query/fragment URL must be rejected",
+        );
         assert!(
             !err.to_string().contains("api.example.com"),
             "the error must stay value-free: {err}"
@@ -93,9 +104,9 @@ fn public_validate_base_url_full_url_routes_and_value_free_errors() {
             "validate_url must reject {raw}"
         );
     }
-    // The **display** form hides the path, so a URL whose full path is an
-    // unsupported nested route must be rejected by the public validator (this is
-    // the finding: the redacted display used to hide it).
+    // The **display** form hides the path, so a URL whose full path repeats the API
+    // suffix must be rejected by the public validator (this is the finding: the
+    // redacted display used to hide it).
     assert!(validate_base_url("https://api.example.com/inference/v1/chat/completions").is_err());
 }
 
@@ -215,6 +226,14 @@ fn parse_base_url_scheme_host_rules() {
     assert!(parse_base_url("https://api.example.com/v1").is_ok());
     assert!(parse_base_url("ftp://127.0.0.1/x").is_err());
     assert!(parse_base_url("127.0.0.1:8080").is_err());
+    // Real OpenAI-compatible bases use versioned/nested prefixes.
+    assert!(parse_base_url("https://api.z.ai/api/paas/v4").is_ok());
+    assert!(parse_base_url("https://api.friendli.ai/serverless/v1").is_ok());
+    assert!(parse_base_url("https://api.example.com/step_plan/v1/").is_ok());
+    // A path that repeats the API suffix, or an empty path segment, refuses.
+    assert!(parse_base_url("https://api.example.com/v1/chat/completions/x").is_err());
+    assert!(parse_base_url("https://api.example.com/api/paas/v4//x").is_err());
+    assert!(parse_base_url("https://api.example.com/api//paas/v4").is_err());
     assert!(classify_loopback("http://[::1]:8080/v1"));
     assert!(classify_loopback("http://localhost:8080/v1"));
     assert!(!classify_loopback("http://23.183.40.76:8080/v1"));
@@ -272,12 +291,13 @@ fn unknown_output_setting_fails() {
 /// settings > key resolution).
 #[test]
 fn configuration_errors_precede_credential_resolution_in_fixed_order() {
-    // Nested path (class 2) outranks the keyfile read.
+    // Nested path (class 2) outranks the keyfile read: a path that carries the API
+    // suffix in a non-terminal position refuses before credentials.
     let nested = serde_json::json!({
         "provider": "openai",
         "model": "m",
         "ephemeralSettings": {
-            "base-url": "https://api.example.com/nested/path",
+            "base-url": "https://api.example.com/chat/completions/v1",
             "auth-keyfile": "~/definitely-missing.key"
         }
     });
@@ -300,24 +320,22 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
         "insecure http base-url requires --allow-insecure-http"
     );
 
-    // Credential policy (class 3) precedes target-settings rejection
-    // (class 6): ordinary Chat settings without a discriminator are
-    // reported only when no named secure-store reference is present.
+    // Credential policy (class 3) precedes other settings rejection: the
+    // unresolvable named key is reported before an unsupported setting, whether
+    // that is an ordinary Chat no-op without a discriminator or a structural
+    // marker.
     let both = serde_json::json!({
         "provider": "openai",
         "model": "m",
         "ephemeralSettings": {
             "base-url": "https://api.example.com/v1",
-            "auth-key-name": "marker",
+            "auth-key-name": "ordering-unresolved-marker",
             "shell-replacement": true
         }
     });
     assert_eq!(
         load_err(&both, "ordering", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // Unsupported-key rejection (class 6) precedes the keyfile read; the
@@ -422,9 +440,17 @@ fn vercel_chat_rejects_the_dsflash_variant_before_credentials() {
     );
 }
 
-/// The friendliglm ladder: the installed shape rejects on its arbitrary
-/// route prefix first; each rung peels one cause until the settings-accepted
-/// shape parses and builds a dsflash ModelConfig.
+/// The friendliglm ladder: the installed shape keeps its documented
+/// `/serverless/v1` prefix (a nested base that no longer refuses), so the named
+/// secure-store reference is the first failure; each rung peels one cause until
+/// the settings-accepted shape parses and builds a dsflash ModelConfig.
+fn ladder_error(profile_value: &serde_json::Value, name: &str) -> String {
+    let profile = parse_profile_value(profile_value, name).unwrap();
+    crate::model::ModelConfig::from_profile_in(&profile, false, false, std::path::Path::new("."))
+        .unwrap_err()
+        .to_string()
+}
+
 #[test]
 fn friendliglm_ladder_first_failures_in_order() {
     let installed: serde_json::Value = serde_json::from_str(include_str!(
@@ -432,70 +458,34 @@ fn friendliglm_ladder_first_failures_in_order() {
     ))
     .unwrap();
 
-    // Rung 1 (installed): the /serverless/v1 route is an arbitrary path
-    // prefix; that refuses before the named secure-store reference.
-    let profile = parse_profile_value(&installed, "friendliglm").unwrap();
-    let err = crate::model::ModelConfig::from_profile_in(
-        &profile,
-        false,
-        false,
-        std::path::Path::new("."),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, crate::model::ModelError::InvalidEndpoint(_)),
-        "{err}"
-    );
-
-    // Rung 2: rewrite the route to /v1 (host preserved); the named
-    // secure-store reference now refuses first.
-    let mut rung2 = installed.clone();
-    rung2["ephemeralSettings"]["base-url"] = serde_json::json!("https://api.friendli.ai/v1");
-    let profile = parse_profile_value(&rung2, "friendliglm").unwrap();
-    let err = crate::model::ModelConfig::from_profile_in(
-        &profile,
-        false,
-        false,
-        std::path::Path::new("."),
-    )
-    .unwrap_err()
-    .to_string();
+    // Rung 1 (installed): the nested /serverless/v1 base resolves as an
+    // endpoint, and the unresolvable named key refuses first.
     assert_eq!(
-        err,
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        ladder_error(&installed, "friendliglm"),
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
-    // Rung 3: drop auth-key-name; the unsupported model parameter is now the
-    // first failure (`max_tokens` is the accepted max-output alias, not an
-    // unsupported key).
-    let mut rung3 = rung2.clone();
-    rung3["ephemeralSettings"]
+    // Rung 2: drop auth-key-name; `max_tokens` folds into the max-output cap,
+    // so the unsupported model parameter `parse_reasoning` is the first failure.
+    let mut rung2 = installed.clone();
+    rung2["ephemeralSettings"]
         .as_object_mut()
         .unwrap()
         .remove("auth-key-name");
-    let profile = parse_profile_value(&rung3, "friendliglm").unwrap();
-    let err = crate::model::ModelConfig::from_profile_in(
-        &profile,
-        false,
-        false,
-        std::path::Path::new("."),
-    )
-    .unwrap_err()
-    .to_string();
-    assert_eq!(err, "unsupported profile setting(s): parse_reasoning");
+    assert_eq!(
+        ladder_error(&rung2, "friendliglm"),
+        "unsupported profile setting(s): parse_reasoning"
+    );
 
-    // Rung 4: drop the unsupported model parameter; the dsflash
-    // discriminator survives and the config resolves with an inline key.
-    let mut rung4 = rung3.clone();
-    rung4["modelParams"]
+    // Rung 3: drop parse_reasoning too; the dsflash discriminator survives and
+    // the config resolves with an inline key.
+    let mut rung3 = rung2.clone();
+    rung3["modelParams"]
         .as_object_mut()
         .unwrap()
         .remove("parse_reasoning");
-    rung4["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
-    let profile = parse_profile_value(&rung4, "friendliglm").unwrap();
+    rung3["ephemeralSettings"]["auth-key"] = serde_json::json!("inline-test-key");
+    let profile = parse_profile_value(&rung3, "friendliglm").unwrap();
     let config = crate::model::ModelConfig::from_profile_in(
         &profile,
         false,
@@ -506,6 +496,11 @@ fn friendliglm_ladder_first_failures_in_order() {
     // The accepted rung carries the single resolved max-output cap: the
     // `modelParams.max_tokens` spelling folds into `max_output_tokens`.
     assert_eq!(config.max_output_tokens, Some(32_000));
+    assert_eq!(
+        config.base_url.full().trim_end_matches('/'),
+        "https://api.friendli.ai/serverless/v1",
+        "the nested documented base is preserved for the transport"
+    );
     let kwargs = config
         .model_params
         .as_ref()
@@ -629,10 +624,7 @@ fn marker_profiles_fail_on_their_first_structural_cause() {
         serde_json::from_str(include_str!("../../tests/fixtures/profiles/qwen38.json")).unwrap();
     assert_eq!(
         load_err(&qwen38, "qwen38", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // qwen38-mi300x carries the ordinary set on a plaintext remote endpoint; with
@@ -767,7 +759,7 @@ fn file_profile_uses_local_keyfile_and_no_settings_fallback() {
     let inner = crate::profile::Profile {
         ephemeral: crate::profile::EphemeralSettings {
             base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                "http://127.0.0.1:1/v1",
+                "https://api.example.com/v1",
             )),
             auth_keyfile_orig: Some(local.display().to_string()),
             ..Default::default()
@@ -780,7 +772,7 @@ fn file_profile_uses_local_keyfile_and_no_settings_fallback() {
     let inner = crate::profile::Profile {
         ephemeral: crate::profile::EphemeralSettings {
             base_url: Some(crate::profile::RedactedUrl::from_unvalidated(
-                "http://127.0.0.1:1/v1",
+                "https://api.example.com/v1",
             )),
             auth_keyfile_orig: None,
             ..Default::default()
@@ -808,11 +800,98 @@ fn openai_responses_uses_the_openai_settings_keyfile_fallback() {
     profile.provider = "openai-responses".to_string();
     profile.ephemeral.auth_key = None;
     profile.ephemeral.auth_keyfile_orig = None;
+    profile.ephemeral.base_url = Some(crate::profile::RedactedUrl::from_unvalidated(
+        "https://api.openai.com/v1",
+    ));
 
     assert_eq!(
         super::resolve_api_key(&profile, false, dir.path()).unwrap(),
         "sk-responses"
     );
+}
+
+/// A loopback endpoint accepts a profile with no credentials at all: local
+/// OpenAI-compatible servers (LM Studio, ollama, llama.cpp server) take any or no
+/// key, so the resolver resolves to the empty key and no keyfile is read.
+#[test]
+fn loopback_profile_without_credentials_resolves_an_empty_key() {
+    for (from_file, endpoint) in [
+        (true, "http://127.0.0.1:1234/v1"),
+        (true, "http://localhost:1234/v1"),
+        (false, "http://[::1]:1234/v1"),
+    ] {
+        let profile = parse_profile_value(
+            &serde_json::json!({
+                "provider": "openai",
+                "model": "qwen/lm-studio",
+                "ephemeralSettings": { "base-url": endpoint }
+            }),
+            "loopback",
+        )
+        .unwrap();
+        let config = crate::model::ModelConfig::from_profile_in(
+            &profile,
+            from_file,
+            false,
+            std::path::Path::new("/definitely-no-settings"),
+        )
+        .unwrap_or_else(|e| panic!("{endpoint}: {e}"));
+        assert!(config.api_key.is_empty(), "{endpoint}");
+        assert!(config.keyfile_path.is_none(), "{endpoint}");
+        assert!(config.secret_values().is_empty(), "{endpoint}");
+    }
+}
+
+/// A loopback base URL never changes the refusal for a *missing* keyfile: the
+/// credential-less mode applies only when the profile carries no credential fields.
+#[test]
+fn loopback_with_an_unreadable_keyfile_still_fails() {
+    let profile = parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "base-url": "http://127.0.0.1:1234/v1",
+                "auth-keyfile": "/definitely-missing.key"
+            }
+        }),
+        "loopback",
+    )
+    .unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(
+            &profile,
+            true,
+            false,
+            std::path::Path::new("."),
+        ),
+        Err(crate::model::ModelError::KeyfileUnreadable(_))
+    ));
+}
+
+/// A non-loopback endpoint keeps requiring a key: `settings.json` with no
+/// keyfile for the provider still refuses, and a file profile without its own
+/// credentials keeps its fixed refusal.
+#[test]
+fn remote_endpoints_still_require_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
+    let remote = serde_json::json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": { "base-url": "https://api.example.com/v1" }
+    });
+    let profile = parse_profile_value(&remote, "remote").unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(&profile, false, false, dir.path(),)
+            .unwrap_err(),
+        crate::model::ModelError::NoKeyfile
+    ));
+    let profile = parse_profile_value(&remote, "remote").unwrap();
+    assert!(matches!(
+        crate::model::ModelConfig::from_profile_in(&profile, true, false, dir.path(),).unwrap_err(),
+        crate::model::ModelError::NoProfileAuth
+    ));
 }
 
 #[test]

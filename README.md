@@ -107,16 +107,25 @@ Key precedence (matches llxprt-code):
 3. `settings.json` → `providerKeyfiles[provider]` (OpenAI and Anthropic; `openaivercel`
    also falls back to `openai`).
 
-`ephemeralSettings.auth-key-name` is a named **secure-store** reference, never a keyfile
-path. Public API-key profiles reject it with a fixed value-free refusal: the name is never
-treated as a path and no filesystem access is attempted for it. Anthropic profiles use the Messages API, append `/v1/messages` to their configured base URL,
+`ephemeralSettings.auth-key-name` names a provider key, never a keyfile path. It resolves
+through the credential env selector `LLXPRT_PROVIDER_KEY_<NAME>` (the uppercased name with
+`-` and `.` folded to `_`) and then the secure store (service `llxprt-code-provider-keys`,
+account `<name>`; the native keychain on macOS). A name neither layer holds fails with a
+fixed value-free refusal: the name is never treated as a path and no filesystem access is
+attempted for it. Anthropic profiles use the Messages API, append `/v1/messages` to their configured base URL,
 and authenticate with `x-api-key` plus `anthropic-version: 2023-06-01` (not bearer auth).
 Codex is separate. On macOS it loads the native Codex OAuth credential from Keychain and does
 not use API-key profile fields.
 
-A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile`; it
-never falls back to ambient `settings.json` credentials. The resolved key lives only in
-[`ModelConfig`] and is never logged or persisted.
+A profile with a **loopback** base URL and no `auth-key`/`auth-keyfile` is credential-less:
+local OpenAI-compatible servers (LM Studio, ollama, llama.cpp server) take any or no key,
+so the resolved key is empty and neither the file-profile refusal nor `settings.json` is
+consulted. The transport then sends no `Authorization` header at all. An explicit credential field still resolves (and a missing keyfile still
+refuses), and every non-loopback endpoint keeps requiring a key.
+
+A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile` unless its
+base URL is loopback; it never falls back to ambient `settings.json` credentials. The
+resolved key lives only in [`ModelConfig`] and is never logged or persisted.
 
 ## Insecure HTTP gate
 
@@ -218,10 +227,15 @@ tool layer. Nonzero exits are reported to the model so it can repair the code.
 ## Base URL, endpoint routes, and `top_k`
 
 Endpoint routes are target-qualified. Chat Completions accepts an origin, `/v1`,
-`/chat/completions`, or `/v1/chat/completions`; public Responses accepts an origin, `/v1`,
-`/responses`, or `/v1/responses`. One trailing slash is allowed. Each form normalizes to
-exactly one API suffix. Arbitrary path prefixes fail with a fixed `model-config` error before
-credential lookup or a request. Userinfo, query, and fragment are rejected. The redacted
+`/chat/completions`, `/v1/chat/completions`, or any nested path prefix that is a prefix of
+the final route, such as z.ai's `/api/paas/v4` or FriendliGLM's `/serverless/v1`; one
+trailing slash is allowed, a bare origin keeps the documented `/v1/chat/completions` route,
+and a declared path prefix keeps that prefix and appends `/chat/completions` to it. Public
+Responses accepts an origin, `/v1`, `/responses`, or `/v1/responses`. Each form normalizes
+to exactly one API suffix. A base whose path already repeats the chat/completions
+suffix, or that carries an empty path segment, fails with a fixed
+`model-config` error before credential lookup or a request. Userinfo, query, and fragment are
+rejected. The redacted
 `scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
 `top_k` field, so a profile that sets it is rejected instead of being silently dropped.
 
@@ -372,6 +386,10 @@ containing explicit function or complexity-bearing syntax also fail closed.
 The limits cannot be raised or bypassed through command-line options, baselines, allowlists,
 per-file exceptions, or suppressions. Syntax, prohibited macro expansion, or source traversal
 errors fail the gate.
+
+`cargo xtask coupling-check` is a read-only, deterministic production-module coupling gate. It discovers every public and private top-level module declared by `src/lib.rs` (including brace-bodied inline modules), recursively scans each module's production Rust files, and reports dependencies, cyclic strongly connected components, and the exact deterministic minimum feedback arc set. `xtask/coupling-ledger.tsv` records owned burn-down debt; it is not a suppression list. Every current feedback edge needs a row, and every row must remain in the current feedback set or be removed as stale debt.
+
+CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
 
 ## Source release bundle
 

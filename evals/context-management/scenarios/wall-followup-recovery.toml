@@ -25,3 +25,7 @@ fixture = "tool-output-block.txt"
 [assertions]
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
 required_answer_tokens = ["CTXEVAL-FACT-B4E1"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 20000

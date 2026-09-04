@@ -125,7 +125,7 @@ pub struct ModelAdapter {
 pub struct ModelErrorAdapter {
     pub key: &'static str,
     pub message: String,
-    pub code: crate::cli::Code,
+    pub code: crate::envelope::Code,
 }
 
 impl std::fmt::Display for ModelErrorAdapter {
@@ -149,7 +149,7 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         return Err(ModelErrorAdapter {
             key: "base-url",
             message: "base-url must not be empty".into(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     // The base URL and the resolved key both carry fixed caps, enforced before the
@@ -161,14 +161,14 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         return Err(ModelErrorAdapter {
             key: "base-url",
             message: crate::redact::ENDPOINT_CAP_MESSAGE.to_string(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     if config.api_key.len() > crate::redact::MAX_KEY_BYTES {
         return Err(ModelErrorAdapter {
             key: "auth-key",
             message: crate::redact::KEY_CAP_MESSAGE.to_string(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     let timeout = config
@@ -220,25 +220,22 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
     })
 }
 
-/// The chat-completions route for a profile base URL: a bare origin or trailing slash
-/// maps to `/v1/chat/completions`, `/v1` (with or without a trailing slash) maps
-/// to `/v1/chat/completions`, and an already-ending `/chat/completions` stays
-/// untouched (never doubled). No arbitrary path prefix reaches here:
-/// [`crate::model::validate_base_url`] rejected it before the request.
+/// The chat-completions route for a profile base URL: an already-ending `/chat/completions`
+/// stays untouched (never doubled), a bare origin keeps the documented `/v1` route, and
+/// every declared path prefix (`/v1`, `/api/paas/v4`, `/serverless/v1`, ...) appends the
+/// single `/chat/completions` suffix to that prefix.
+/// [`crate::model::validate_base_url`] rejected a path that already carries the API
+/// suffix, so it never reaches here to be doubled.
 pub fn chat_route(base: &str) -> String {
-    let trimmed = base.trim_end_matches('/');
-    let t = if trimmed.ends_with('/') {
-        trimmed.trim_end_matches('/')
-    } else {
-        trimmed
-    };
+    let t = base.trim_end_matches('/');
     if t.ends_with("/chat/completions") {
-        t.to_string()
-    } else if t.ends_with("/v1") {
-        format!("{t}/chat/completions")
-    } else {
-        format!("{t}/v1/chat/completions")
+        return t.to_string();
     }
+    let authority_start = t.find("://").map(|i| i + 3).unwrap_or(0);
+    if !t[authority_start..].contains('/') {
+        return format!("{t}/v1/chat/completions");
+    }
+    format!("{t}/chat/completions")
 }
 
 /// The fixed cap (bytes) for a base URL. [`crate::model::parse_base_url`] applies
