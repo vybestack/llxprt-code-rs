@@ -155,6 +155,93 @@ fn codex_loop_detection_cannot_be_silently_ignored() {
     );
 }
 
+/// Chat and Responses share `parse_ephemeral_primary`, so the exact-`false`
+/// contract holds on both paths: `true` rejects (never a silent ignore) and a
+/// non-boolean rejects with the value-free boolean error.
+#[test]
+fn loop_detection_rejects_true_and_non_booleans_on_the_chat_path() {
+    let base = json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": {"loopDetectionEnabled": false}
+    });
+    let profile = parse_profile_value(&base, "chat-loop").unwrap();
+    assert_eq!(profile.ephemeral.loop_detection_enabled, Some(false));
+
+    let mut enabled = base.clone();
+    enabled["ephemeralSettings"]["loopDetectionEnabled"] = json!(true);
+    assert_eq!(
+        parse_profile_value(&enabled, "chat-loop").unwrap_err(),
+        "profile \"chat-loop\": loop detection is not supported by this runtime"
+    );
+
+    let mut typed = base.clone();
+    typed["ephemeralSettings"]["loopDetectionEnabled"] = json!("false");
+    assert_eq!(
+        parse_profile_value(&typed, "chat-loop").unwrap_err(),
+        "profile \"chat-loop\": 'loopDetectionEnabled' must be a boolean"
+    );
+}
+
+/// `streaming` stays inert metadata but is still an enum: exactly `enabled` or
+/// `disabled` parse, anything else rejects with a value-free bounded error, and
+/// the prompt-note cap no longer applies to this key.
+#[test]
+fn streaming_is_a_bounded_enum() {
+    let base = json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": {}
+    });
+    for value in [json!("enabled"), json!("disabled")] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let parsed = parse_profile_value(&profile, "stream")
+            .unwrap_or_else(|error| panic!("{value}: {error}"));
+        assert_eq!(
+            parsed.ephemeral.streaming.as_deref(),
+            Some(value.as_str().unwrap_or_default())
+        );
+    }
+    // String spellings that are not the exact enum members reject with the
+    // bounded enum error (never the prompt-note cap, never a value echo).
+    for value in [json!("Enabled"), json!("always"), json!("")] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let error = parse_profile_value(&profile, "stream").unwrap_err();
+        assert!(
+            !error.contains(&value.to_string()),
+            "error must stay value-free: {error}"
+        );
+        assert_eq!(
+            error,
+            "profile \"stream\": 'streaming' must be enabled or disabled"
+        );
+    }
+    // Non-strings are type errors (also value-free), never a silent ignore.
+    for value in [json!(1), json!(true), json!({ "mode": "enabled" })] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let error = parse_profile_value(&profile, "stream").unwrap_err();
+        assert!(
+            !error.contains(&value.to_string()),
+            "error must stay value-free: {error}"
+        );
+        assert_eq!(error, "profile \"stream\": 'streaming' must be a string");
+    }
+
+    // An over-long spelling is an enum rejection, not the prompt-note cap.
+    let mut long = base.clone();
+    long["ephemeralSettings"]["streaming"] = json!(format!(
+        "{}!",
+        "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES)
+    ));
+    assert_eq!(
+        parse_profile_value(&long, "stream").unwrap_err(),
+        "profile \"stream\": 'streaming' must be enabled or disabled"
+    );
+}
+
 /// objects when present, and each known scalar field must have the right type. Every
 /// bound field stays error-on-wrong-type, never a silent ignore.
 #[test]

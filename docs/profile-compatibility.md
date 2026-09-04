@@ -205,7 +205,7 @@ Duplicate definitions:
 | `dsflash.json` | openai | in-scope installed openai |
 | `fable.json` | anthropic | in-scope installed anthropic |
 | `fable5.json` | anthropic | in-scope installed anthropic |
-| `friendliglm.json` | openai | in-scope installed openai |
+| `friendliglm.json` | openai | in-scope installed openai (arbitrary route prefix rejects (endpoint class) before the named secure-store reference) |
 | `glm52-runpod.json` | openai | in-scope installed openai |
 | `glm52-vast.json` | openai | in-scope installed openai |
 | `glm52selfhost.json` | openai | in-scope installed openai |
@@ -222,18 +222,18 @@ Duplicate definitions:
 | `ollamakimi.json` | openai | in-scope installed openai |
 | `ollamaqwen3coder.json` | openai | in-scope installed openai |
 | `openai-profile.json` | openai | in-scope installed openai |
-| `ornith-runpod.json` | openai | in-scope installed openai |
+| `ornith-runpod.json` | openai | in-scope installed openai (missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.stream-idle-timeout-ms) |
 | `parasailglm.json` | openai | in-scope installed openai |
 | `prod-env.json` | anthropic | in-scope installed anthropic |
-| `qwen38-mi300x.json` | openai | in-scope installed openai |
-| `qwen38.json` | openai | in-scope installed openai |
+| `qwen38-mi300x.json` | openai | in-scope installed openai (missing modelParams.chat_template_kwargs discriminator names ephemeralSettings.shell-replacement) |
+| `qwen38.json` | openai | in-scope installed openai (named secure-store reference rejects before the structural dsflash gate) |
 | `simulation-test.json` | openai | in-scope installed openai |
 | `smol3-mlx.json` | openai | in-scope installed openai |
 | `stepfun-37.json` | openai | in-scope installed openai |
 | `tilde-test.json` | anthropic | in-scope installed anthropic |
 | `update-test.json` | openai | in-scope installed openai |
 | `wrong-perms.json` | openai | in-scope installed openai |
-| `zai.json` | anthropic | in-scope installed anthropic |
+| `zai.json` | anthropic | in-scope installed anthropic (named secure-store reference rejects after Anthropic Messages target resolution) |
 
 ## Load-balancer shapes (3 rows; out of target construction scope)
 

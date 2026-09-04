@@ -68,10 +68,10 @@ pub(super) fn parse(
     })
 }
 
-/// Standard Chat and all Responses targets reject dsflash-only behavior
-/// (PLAN.md): any surviving flag/prompt-note key or typed dsflash marker field
-/// would be silently inert on this transport. BTreeSet ordering keeps the
-/// diagnostic deterministic and names each key once.
+/// Standard Chat and all Responses targets reject dsflash-only and other inert
+/// behavior-only settings (PLAN.md): any surviving flag/prompt-note key or typed
+/// marker field would be silently inert on this transport. BTreeSet ordering
+/// keeps the diagnostic deterministic and names each key once.
 fn reject_inert_dsflash_settings(
     ephemeral: &EphemeralSettings,
     model_params: &ModelParams,
@@ -101,13 +101,19 @@ fn reject_inert_dsflash_settings(
     if ephemeral.reasoning_strip_from_context_none {
         inert.insert("ephemeralSettings.reasoning.stripFromContext".to_string());
     }
+    if ephemeral.loop_detection_enabled.is_some() {
+        inert.insert("ephemeralSettings.loopDetectionEnabled".to_string());
+    }
+    if ephemeral.streaming.is_some() {
+        inert.insert("ephemeralSettings.streaming".to_string());
+    }
     if model_params.chat_template_kwargs.is_some() {
         inert.insert("modelParams.chat_template_kwargs".to_string());
     }
     if !inert.is_empty() {
         let keys = inert.into_iter().collect::<Vec<_>>().join(", ");
         return Err(format!(
-            "profile {name:?}: dsflash-only setting(s) {keys} are unsupported for OpenAI Responses"
+            "profile {name:?}: behavior-only setting(s) {keys} are unsupported for OpenAI Responses"
         ));
     }
     Ok(())

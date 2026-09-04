@@ -302,8 +302,9 @@ pub struct EphemeralSettings {
     pub max_turns_per_prompt: Option<i64>,
     /// `ephemeralSettings.maxToolCallsPerPrompt`: `-1` = unlimited, else `1..=512`.
     pub max_tool_calls_per_prompt: MaxToolCalls,
-    /// `ephemeralSettings.loopDetectionEnabled`: accepted exact metadata; this
-    /// runtime's loop detection is not configurable from a profile.
+    /// `ephemeralSettings.loopDetectionEnabled`: exact `false` is accepted
+    /// metadata; `true` and non-boolean values reject, because this runtime's
+    /// loop detection is not configurable from a profile.
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
@@ -316,9 +317,10 @@ pub struct EphemeralSettings {
     pub prompt_notes: BTreeMap<String, String>,
     /// Unsupported keys that would change output if ignored.
     pub unsupported: Vec<String>,
-    /// `ephemeralSettings.streaming`: the sibling enum value, accepted as inert
-    /// metadata. This runtime always sends non-streaming Chat Completions, so the
-    /// value is never forwarded and never selects a transport mode.
+    /// `ephemeralSettings.streaming`: the sibling enum member (`enabled` or
+    /// `disabled`), accepted as inert metadata. This runtime always sends
+    /// non-streaming Chat Completions, so the value is never forwarded and never
+    /// selects a transport mode; any other spelling rejects at parse time.
     pub streaming: Option<String>,
     /// Validated `tools.disabled` entries (deprecated `disabled-tools` alias merged).
     /// Registered Rust tools never appear here (the parser rejects them); the names
@@ -639,14 +641,30 @@ fn parse_ephemeral_primary(
             settings.max_turns_per_prompt = Some(n);
         }
         "loopDetectionEnabled" => {
-            settings.loop_detection_enabled = Some(bool_value(value, name, key)?);
+            // Exact false only: this runtime's loop detection is not configurable
+            // from a profile, so `true` (or any non-boolean) is refused rather
+            // than silently ignored. Same value-free bounded error as Codex.
+            if !value.is_boolean() {
+                return Err(format!("profile {name:?}: '{key}' must be a boolean"));
+            }
+            if value.as_bool() == Some(true) {
+                return Err(format!(
+                    "profile {name:?}: loop detection is not supported by this runtime"
+                ));
+            }
+            settings.loop_detection_enabled = Some(false);
         }
         "streaming" => {
-            let note = required_string(value, name, key)?;
-            if !note.is_empty() && note.len() > crate::redact::MAX_PROMPT_NOTE_BYTES {
-                return Err(crate::redact::PROMPT_NOTE_CAP_MESSAGE.to_string());
+            // The sibling enum is inert here (this runtime always sends
+            // non-streaming Chat Completions), but the value must still be one of
+            // the registry's enum members so a typo cannot be silently accepted.
+            let value = required_string(value, name, key)?;
+            if !matches!(value, "enabled" | "disabled") {
+                return Err(format!(
+                    "profile {name:?}: '{key}' must be enabled or disabled"
+                ));
             }
-            settings.streaming = Some(note.to_string());
+            settings.streaming = Some(value.to_string());
         }
         "maxToolCallsPerPrompt" => {
             settings.max_tool_calls_per_prompt = MaxToolCalls::parse(value, name)?;

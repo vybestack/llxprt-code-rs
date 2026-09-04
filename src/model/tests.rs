@@ -268,8 +268,8 @@ fn unknown_output_setting_fails() {
 }
 
 /// PLAN.md line 38: every configuration error class outranks credential
-/// resolution, in a fixed order (endpoint > credential policy > structural
-/// dsflash gate > target settings > key resolution).
+/// resolution, in a fixed order (endpoint > credential policy > target
+/// settings > key resolution).
 #[test]
 fn configuration_errors_precede_credential_resolution_in_fixed_order() {
     // Nested path (class 2) outranks the keyfile read.
@@ -300,9 +300,9 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
         "insecure http base-url requires --allow-insecure-http"
     );
 
-    // Credential policy (class 3) precedes the structural gate (class 4):
-    // markers without a discriminator are reported only when no named
-    // secure-store reference is present.
+    // Credential policy (class 3) precedes target-settings rejection
+    // (class 6): ordinary Chat settings without a discriminator are
+    // reported only when no named secure-store reference is present.
     let both = serde_json::json!({
         "provider": "openai",
         "model": "m",
@@ -320,8 +320,8 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
         )
     );
 
-    // The structural gate (class 4) precedes unsupported-key rejection
-    // (class 6), which in turn precedes the keyfile read.
+    // Unsupported-key rejection (class 6) precedes the keyfile read; the
+    // ordinary Chat settings above no longer gate anything by themselves.
     let marker_and_unsupported = serde_json::json!({
         "provider": "openai",
         "model": "m",
