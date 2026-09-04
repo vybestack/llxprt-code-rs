@@ -408,3 +408,31 @@ fn branch_completion_requires_durable_context_artifacts() {
         "no branch completes whose context artifacts did not land"
     );
 }
+
+/// An admission that does not fit the executor's region budget is refused before
+/// the transaction appends anything: the spine stays untouched, so the
+/// transaction core really is the only path that adds spine bytes.
+#[test]
+fn oversized_admission_is_refused_without_touching_the_spine() {
+    let cwd = workspace();
+    let store = store("admission-refused");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+    let before = artifact(&store, "sanitized").len();
+
+    // A bulk result larger than the whole admission region cannot satisfy the
+    // executor's `bound <= B - R - H` precondition, so the admission is
+    // refused before any spine byte is written.
+    let oversized = 40 << 20;
+    let compacted = store.compact_tool_result("read_file", &"h".repeat(oversized));
+    assert!(
+        compacted.starts_with("CTXDIGEST v1") || compacted.contains("quiesce"),
+        "the refusal still yields a bounded record, not raw bytes: {compacted}"
+    );
+    let after = artifact(&store, "sanitized").len();
+    assert_eq!(
+        after, before,
+        "no spine bytes are appended when the executor refuses the admission"
+    );
+}

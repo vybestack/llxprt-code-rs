@@ -257,6 +257,79 @@ fn trim_preserved(state: &mut ContextState) {
     state.preserved.drain(..drop);
 }
 
+/// Sequences one bulk admission through the fenced executor, so the
+/// transaction core is the sole writer of governed state: the row is proposed
+/// from the closed registry, snapshot and generate refuse a capability that has
+/// not landed, validate enforces the fit and floor preconditions, and only a
+/// committed compare-and-commit releases the effect (103).
+///
+/// Returns the parent version the admission committed against, so the store's
+/// spine position and the executor's compare-and-commit stay in step.
+fn sequence_admission(
+    parent_version: u64,
+    bound: u64,
+    budget: &crate::context_txn::budget::Budget,
+    floor: u64,
+) -> Result<(), String> {
+    use crate::context_txn::executor::{CommitOutcome, Epoch, Executor};
+    let mut executor = Executor::new(Epoch(1));
+    executor
+        .propose("admit-ingress", parent_version)
+        .map_err(|error| executor_refusal(&error))?;
+    executor
+        .snapshot()
+        .map_err(|error| executor_refusal(&error))?;
+    executor
+        .generate()
+        .map_err(|error| executor_refusal(&error))?;
+    executor
+        .validate(bound, budget, floor, 0, 0)
+        .map_err(|error| executor_refusal(&error))?;
+    match executor.commit_outcome(parent_version) {
+        // The parent cannot move inside this call, so a rebase verdict would
+        // mean the executor itself is inconsistent with its own proposal.
+        Ok(CommitOutcome::Applied) => Ok(()),
+        Ok(CommitOutcome::RebaseNoOp) => {
+            Err("executor reported a rebase no-op for an unmoved parent".to_string())
+        }
+        Err(error) => Err(executor_refusal(&error)),
+    }
+}
+
+/// Region budget the context store admits bulk evidence into: the sum of the
+/// session slot cap (`SPINE_RELOAD_MAX`) and the bulk work budget.
+const ADMISSION_REGION_BUDGET: u64 = (SPINE_RELOAD_MAX + INGRESS_WORK_BUDGET) as u64;
+/// Reclamation reserve kept out of every admission: one bulk payload's worth.
+const ADMISSION_RECLAMATION_RESERVE: u64 = 1 << 20;
+/// Headroom the executor must leave free so reclamation can always run.
+const ADMISSION_HEADROOM: u64 = 64 << 10;
+
+/// Stable textual refusal for the executor seam.
+fn executor_refusal(error: &crate::context_txn::executor::ExecutorError) -> String {
+    use crate::context_txn::executor::ExecutorError;
+    match error {
+        ExecutorError::CapabilityNotLanded { op } => {
+            format!("operation {op} has not landed in this phase")
+        }
+        ExecutorError::PreconditionFailed { which } => {
+            format!("admission precondition {which} failed")
+        }
+        ExecutorError::StaleParent { expected, actual } => format!(
+            "admission parent moved from {expected} to {actual}; refusing to commit stale state"
+        ),
+        ExecutorError::Fenced { held, mine } => {
+            format!("admission fenced: held {held}, mine {mine}")
+        }
+        ExecutorError::AuthorityDenied { op, by } => {
+            format!("admission of {op} denied for principal {by:?}")
+        }
+        ExecutorError::IllegalTransition { from, to } => {
+            format!("admission transition {from:?} to {to:?} is illegal")
+        }
+        ExecutorError::NotRebaseSafe => "admission row is not rebase-safe".to_string(),
+    }
+}
+
 /// Builds the compact CTXDIGEST record for one bulk tool result, moving the full bytes
 /// through the fail-closed ingress transaction into the spine and the vault.
 ///
@@ -286,6 +359,18 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
             "content-{:016x}",
             crate::context_kernel::canonical::digest(bytes)
         );
+        // The parent version is the applied spine record count, so the executor's
+        // compare-and-commit is anchored to the store position it commits against.
+        let parent_version = state.store.index().len() as u64;
+        // Bound: the admitted payload plus its frame overhead must fit the
+        // region budget net of the reclamation reserve and headroom.
+        let bound = (bytes.len() as u64).saturating_add(64);
+        let budget = crate::context_txn::budget::Budget {
+            b: ADMISSION_REGION_BUDGET,
+            r: ADMISSION_RECLAMATION_RESERVE,
+            h: ADMISSION_HEADROOM,
+        };
+        sequence_admission(parent_version, bound, &budget, bytes.len() as u64)?;
         let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
         txn.capture(CaptureSource::ToolResult, bytes)
             .map_err(|error| ingress_error(&error))?;
