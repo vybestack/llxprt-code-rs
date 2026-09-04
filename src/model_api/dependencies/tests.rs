@@ -1,6 +1,8 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use crate::config::ConfigHomeRoot;
 use crate::model_api::credentials::{CodexCredential, CredentialError};
 
 struct FixedClock(i64);

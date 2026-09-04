@@ -1,33 +1,8 @@
-use std::path::{Path, PathBuf};
+use crate::config::ConfigHomeRoot;
 use std::sync::Arc;
 
 use super::credentials::{Clock, CredentialSource};
 use super::target::{ModelApi, ModelTarget, ProviderId, TransportKind};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ConfigHomeRoot(PathBuf);
-
-impl ConfigHomeRoot {
-    pub(crate) fn discover() -> Result<Self, String> {
-        Self::from_path(crate::profile::std_profile_dir()?)
-    }
-
-    fn from_path(path: PathBuf) -> Result<Self, String> {
-        if path.as_os_str().is_empty() || !path.is_absolute() {
-            return Err("configuration home must be a nonempty absolute path".to_string());
-        }
-        Ok(Self(path))
-    }
-
-    pub(crate) fn as_path(&self) -> &Path {
-        &self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(path: PathBuf) -> Result<Self, String> {
-        Self::from_path(path)
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConstructorKind {

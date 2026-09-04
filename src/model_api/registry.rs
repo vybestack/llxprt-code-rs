@@ -351,10 +351,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::config::ConfigHomeRoot;
     use crate::model_api::credentials::{
         parse_credential, Clock, CodexCredential, CredentialError, CredentialSource,
     };
-    use crate::model_api::dependencies::ConfigHomeRoot;
 
     struct FixedClock;
 
