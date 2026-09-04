@@ -482,10 +482,10 @@ fn v2_store_for_the_flow() -> (Vec<u8>, EventLog, Sequencer) {
     let key = VaultKey::from(raw);
     let mut v2_store = ContextStore::open(&key);
     v2_store
-        .sanitized_append("v2-record-a", &[1_u8; 16])
+        .sanitized_append(Some("v2-record-a"), &[1_u8; 16])
         .unwrap();
     v2_store
-        .sanitized_append("v2-record-b", &[2_u8; 16])
+        .sanitized_append(Some("v2-record-b"), &[2_u8; 16])
         .unwrap();
     let v2_bytes = v2_store.spine_bytes();
 
