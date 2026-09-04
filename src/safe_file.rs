@@ -219,10 +219,8 @@ mod tests {
         };
         publish_artifact(&dir, "big", &[0u8; 64], open).unwrap();
         let error = read_artifact(&dir, "big", 8).unwrap_err();
-        assert!(
-            matches!(error, ArtifactError::OverBound { max, .. } if max == 8),
-            "the read bound is a typed failure: {error}"
-        );
+        let max_is_8 = matches!(error, ArtifactError::OverBound { max: 8, .. });
+        assert!(max_is_8, "the read bound is a typed failure: {error}");
     }
 
     #[test]

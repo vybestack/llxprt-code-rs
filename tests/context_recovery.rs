@@ -501,13 +501,15 @@ fn checkpoint_digests_cover_exactly_the_content_they_name() {
         );
         applied_seen.push(applied);
     }
-    // The lines enumerate every record prefix of the published spine: 0..=N in
-    // order, so a reopened store can find a verifiable line for any prefix it
-    // recovers, and the last line names the whole published generation.
+    // F2: publication is LINEAR, not quadratic. Each publication renders
+    // exactly ONE line at the current position -- never one line per applied
+    // record prefix -- so the line count tracks publications, not records^2.
+    // The single line still names the whole published generation, so a
+    // reopened store verifies its recovered spine against content that exists.
     assert_eq!(
         applied_seen,
-        (0..=frames.len() as u64).collect::<Vec<u64>>(),
-        "checkpoint lines enumerate every record prefix"
+        vec![frames.len() as u64],
+        "one publication renders exactly one checkpoint line at the current position"
     );
     // The last line names the whole published spine: a reopened store verifies
     // the recovered spine against content that actually exists.
@@ -872,4 +874,157 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
         String::from_utf8_lossy(&sanitized).contains("unexpected trailing frame"),
         "the preserved exact span is still addressable after redaction"
     );
+}
+
+/// F1: a restart preserves BOTH durable policy journals.
+///
+/// Process A publishes `events.log` and `rewrite-journal.log`; a second
+/// `recover_context_state` (the same seam a later process runs) reloads them
+/// and a republished pair carries the previous process's records ahead of the
+/// new ones, never a fresh controller's empty logs (issue 102).
+#[test]
+fn restart_preserves_the_policy_event_log_and_rewrite_journal() {
+    let cwd = workspace();
+    let first = store("journal-survival");
+    run_bulk_turn(&first, &cwd, "a.txt", "c0");
+    let events_a = artifact(&first, "events.log");
+    let journal_a = artifact(&first, "rewrite-journal.log");
+    let events_lines_a = nonempty_lines(&events_a);
+    let entry_lines_a = entry_lines(&journal_a);
+    assert!(
+        !events_lines_a.is_empty(),
+        "process A recorded at least one policy event"
+    );
+
+    // Process B reopens the same session and writes its own records.
+    let second = reopen(&first);
+    run_bulk_turn(&second, &cwd, "b.txt", "c1");
+    let events_b = artifact(&second, "events.log");
+    let journal_b = artifact(&second, "rewrite-journal.log");
+    let events_lines_b = nonempty_lines(&events_b);
+    let entry_lines_b = entry_lines(&journal_b);
+
+    // The recovered event log comes back AHEAD of the new records: the first
+    // lines are byte-identical to process A's, and the republished log is
+    // strictly longer than the one it recovered.
+    assert!(
+        events_lines_b.len() > events_lines_a.len(),
+        "the republished event log carries the recovered records ahead of the new ones: {} <= {}",
+        events_lines_b.len(),
+        events_lines_a.len()
+    );
+    let prefix = &events_lines_b[..events_lines_a.len()];
+    assert_eq!(
+        prefix, &events_lines_a[..],
+        "the republished event log preserves process A's records byte for byte, ahead of the new ones"
+    );
+    for (before, after) in events_lines_a.iter().zip(prefix.iter()) {
+        assert_eq!(before, after, "each recovered event line is unchanged");
+    }
+
+    // The rewrite journal likewise survives: every entry line process A wrote
+    // is still present in process B's republished journal, in the same order.
+    let mut remaining = entry_lines_b.clone();
+    for wanted in &entry_lines_a {
+        let at = remaining
+            .iter()
+            .position(|line| line == wanted)
+            .expect("a recovered rewrite-journal entry survives the restart");
+        remaining.remove(at);
+    }
+    assert_eq!(
+        remaining.len(),
+        entry_lines_b.len() - entry_lines_a.len(),
+        "only the new generation's entries were appended"
+    );
+
+    // Each journal line stays parseable JSON with the fields a later process
+    // reloads, so the survival is a real recovery, not a copy.
+    for line in &entry_lines_b {
+        let value: serde_json::Value =
+            serde_json::from_str(line).expect("each journal entry is one JSON object");
+        let has_source = value.get("source").is_some();
+        assert!(has_source, "each journal entry names its source");
+        let has_logical_time = value.get("logical_time").is_some();
+        assert!(
+            has_logical_time,
+            "each journal entry names the logical time it reached"
+        );
+    }
+}
+
+/// F2: publication stays LINEAR in the spine, never quadratic.
+///
+/// Each publication renders exactly ONE durable checkpoint line at the current
+/// position -- never one line per applied record -- so N records across P
+/// publications cost P lines total, not O(records^2). A quadratic renderer
+/// would emit one line per record prefix on every publication, so the line
+/// count after a restart would exceed the recovered lines plus one.
+#[test]
+fn publication_writes_one_checkpoint_line_per_generation() {
+    let cwd = workspace();
+    let first = store("checkpoint-linear");
+    run_bulk_turn(&first, &cwd, "a.txt", "c0");
+    let first_lines = checkpoint_line_count(&first);
+    assert_eq!(
+        first_lines, 1,
+        "one publication renders exactly one checkpoint line"
+    );
+
+    // A restarted process recovers the previous line and renders exactly one
+    // more: 2 publications total, 2 lines, independent of the record count.
+    let second = reopen(&first);
+    run_bulk_turn(&second, &cwd, "b.txt", "c1");
+    let second_lines = checkpoint_line_count(&second);
+    assert_eq!(
+        second_lines,
+        first_lines + 1,
+        "the republished checkpoints artifact carries the recovered line plus exactly one new line, not O(records^2) lines"
+    );
+
+    // A third generation keeps the invariant: one more line, no more.
+    let third = reopen(&second);
+    run_bulk_turn(&third, &cwd, "c.txt", "c2");
+    let third_lines = checkpoint_line_count(&third);
+    assert_eq!(
+        third_lines,
+        second_lines + 1,
+        "each generation adds exactly one checkpoint line, so publication stays linear"
+    );
+
+    // The recovered lines come back byte for byte and in order, so the artifact
+    // is an append-only history instead of a re-rendered prefix set.
+    let third_text = artifact(&third, "checkpoints");
+    let recovered = &third_text[..];
+    let second_text = artifact(&second, "checkpoints");
+    let second_is_prefix = recovered.starts_with(&second_text);
+    assert!(
+        second_is_prefix,
+        "the previous generation's checkpoint lines are preserved byte for byte, ahead of the new line"
+    );
+}
+
+/// The non-empty lines of a newline-delimited artifact, in order.
+fn nonempty_lines(bytes: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.to_string())
+        .collect()
+}
+
+/// The entry lines of `rewrite-journal.log`, skipping the derived `report`.
+fn entry_lines(journal: &[u8]) -> Vec<String> {
+    nonempty_lines(journal)
+        .into_iter()
+        .filter(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).unwrap_or_default();
+            value.get("report").is_none()
+        })
+        .collect()
+}
+
+/// The number of non-empty durable checkpoint lines a session published.
+fn checkpoint_line_count(store: &SessionStore) -> usize {
+    nonempty_lines(&artifact(store, "checkpoints")).len()
 }

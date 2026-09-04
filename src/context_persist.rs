@@ -2,7 +2,6 @@
 //! state it keeps, and the `context/` artifacts it publishes. Pure moves from
 //! `session.rs`; the session store keeps one-line wrappers at the old call sites.
 
-use std::path::Path;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -32,6 +31,12 @@ pub(crate) const SPINE_RELOAD_MAX: usize = 32 << 20;
 pub(crate) const VAULT_RELOAD_MAX: usize = 8 << 20;
 /// Read bound for a reloaded context manifest.
 pub(crate) const MANIFEST_RELOAD_MAX: usize = 1 << 20;
+/// Read bound for a reloaded policy event log.
+pub(crate) const EVENTS_RELOAD_MAX: usize = 8 << 20;
+/// Read bound for a reloaded rewrite journal.
+pub(crate) const JOURNAL_RELOAD_MAX: usize = 8 << 20;
+/// Read bound for reloaded durable checkpoint lines.
+pub(crate) const CHECKPOINT_RELOAD_MAX: usize = 8 << 20;
 
 /// Lazily opened phase-2 context store with its filter registry and quiesce state.
 pub(crate) struct ContextState {
@@ -41,12 +46,17 @@ pub(crate) struct ContextState {
     pub(crate) detail: Option<String>,
     pub(crate) preserved: Vec<String>,
     pub(crate) policy: crate::context_policy::runtime::ProposalOnlyController,
+    /// Durable checkpoint lines a previous process published, reloaded on
+    /// recovery so a republished `checkpoints` artifact preserves them ahead
+    /// of this generation's own line instead of truncating them away
+    /// (issue 102 restart).
+    pub(crate) recovered_checkpoints: Option<Vec<u8>>,
 }
 
 /// Durable context-store facts the CLI envelope re-reads after the run.
 #[derive(Serialize)]
-struct ContextManifest<'a> {
-    mode: &'a str,
+pub(crate) struct ContextManifest<'a> {
+    pub(crate) mode: &'a str,
     pub(crate) quiesce: Option<&'a str>,
     pub(crate) detail: Option<&'a str>,
     /// Every rule and vocabulary version the session adopted, oldest first.
@@ -60,16 +70,18 @@ struct ContextManifest<'a> {
 
 /// Owned form of [`ContextManifest`] used when reloading it from disk.
 #[derive(serde::Deserialize)]
-struct PersistedManifest {
-    mode: String,
-    quiesce: Option<String>,
-    detail: Option<String>,
-    rules: Vec<crate::context_ingress::filter::FilterRules>,
-    vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
-    #[allow(dead_code)]
-    terminal_outcome: Option<String>,
+pub(crate) struct PersistedManifest {
+    pub(crate) mode: String,
+    pub(crate) quiesce: Option<String>,
+    pub(crate) detail: Option<String>,
+    pub(crate) rules: Vec<crate::context_ingress::filter::FilterRules>,
+    pub(crate) vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
+    /// Durable terminal outcome the previous process reached: recovery reads it
+    /// back and restores the controller's terminal branch, so a restarted
+    /// session resumes the branch it had recorded instead of reopening as live.
+    pub(crate) terminal_outcome: Option<String>,
     #[serde(default)]
-    preserved: Vec<String>,
+    pub(crate) preserved: Vec<String>,
 }
 
 /// One durable checkpoint line: what a crash-safe publication actually
@@ -83,21 +95,25 @@ struct PersistedManifest {
 /// carried a digest of content that did not exist at that checkpoint: the line
 /// could not be verified against the state it describes (108).
 #[derive(Serialize)]
-struct DurableCheckpoint {
+pub(crate) struct DurableCheckpoint {
     /// Applied spine records at checkpoint time.
-    applied: u64,
+    pub(crate) applied: u64,
     /// Encoded byte length of the first `applied` spine records.
-    spine_len: u64,
+    pub(crate) spine_len: u64,
     /// Digest of the encoded first `applied` spine records.
-    spine_digest: u64,
+    pub(crate) spine_digest: u64,
     /// Policy logical time that produced the checkpoint.
-    logical_time: u64,
+    pub(crate) logical_time: u64,
 }
 
 impl DurableCheckpoint {
     /// The checkpoint for `applied` records, digested over exactly the prefix
     /// the line names.
-    fn at(spine: &crate::context_store::spine::Spine, applied: u64, logical_time: u64) -> Self {
+    pub(crate) fn at(
+        spine: &crate::context_store::spine::Spine,
+        applied: u64,
+        logical_time: u64,
+    ) -> Self {
         let covered = encoded_spine_prefix(spine, applied);
         Self {
             applied,
@@ -115,7 +131,10 @@ impl DurableCheckpoint {
 ///
 /// `applied` is clamped to the record count; the result is always the encoding
 /// of a whole number of frames, never a partial frame.
-fn encoded_spine_prefix(spine: &crate::context_store::spine::Spine, applied: u64) -> Vec<u8> {
+pub(crate) fn encoded_spine_prefix(
+    spine: &crate::context_store::spine::Spine,
+    applied: u64,
+) -> Vec<u8> {
     let records = spine.records();
     let applied = (applied as usize).min(records.len());
     let mut out = Vec::new();
@@ -142,7 +161,9 @@ fn entropy_u64() -> u64 {
 /// except through this 0600 artifact; restarts reopen the same key so sealed
 /// vault slots stay readable while no other session can derive them (issue
 /// #101; platform-keychain derivation stays a later phase).
-fn ensure_vault_key(store: &SessionStore) -> Result<crate::context_store::vault::VaultKey, String> {
+pub(crate) fn ensure_vault_key(
+    store: &SessionStore,
+) -> Result<crate::context_store::vault::VaultKey, String> {
     const KEY_FILE: &str = "context-vault-key";
     const KEY_LEN: usize = 32;
     match crate::safe_file::read_artifact(&store.dir, KEY_FILE, KEY_LEN) {
@@ -176,7 +197,7 @@ fn ensure_vault_key(store: &SessionStore) -> Result<crate::context_store::vault:
     }
 }
 
-fn new_context_state(key: crate::context_store::vault::VaultKey) -> ContextState {
+pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> ContextState {
     ContextState {
         store: crate::context_store::store::ContextStore::open(&key),
         filters: crate::context_ingress::filter::FilterRegistry::new(),
@@ -184,127 +205,8 @@ fn new_context_state(key: crate::context_store::vault::VaultKey) -> ContextState
         detail: None,
         preserved: Vec::new(),
         policy: crate::context_policy::runtime::ProposalOnlyController::default(),
+        recovered_checkpoints: None,
     }
-}
-
-/// Reopens the durable `context/` artifacts of a previous process into a live
-/// [`ContextState`]: the sanitized spine is re-framed and integrity-checked as a
-/// whole (a corrupt frame is a typed error, never a silent truncation), the
-/// vault snapshot restores its slots so restored handles read back, and the
-/// manifest restores mode, quiesce state, and the preserved-span window.
-/// Missing artifacts mean a fresh store; a corrupt artifact is a typed error
-/// surfaced to the caller instead of a degraded restart (issue #102).
-pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState, String> {
-    let key = ensure_vault_key(store)?;
-    let dir = match context_dir(store) {
-        Ok(dir) => dir,
-        Err(_) => return Ok(new_context_state(key)),
-    };
-    let spine_bytes = match crate::safe_file::read_artifact(&dir, "sanitized", SPINE_RELOAD_MAX) {
-        Ok(bytes) => bytes,
-        // Absent by kind, not by substring: only `NotFound` means no previous
-        // store. An unreadable sanitized spine fails recovery instead of
-        // silently returning a fresh empty store (issue 102).
-        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {
-            return Ok(new_context_state(key));
-        }
-        Err(error) => return Err(format!("context spine unreadable: {error}")),
-    };
-    let mut state = new_context_state(key);
-    state
-        .store
-        .load_spine_typed(&spine_bytes)
-        .map_err(|error| format!("context spine corrupt: {error:?}"))?;
-    match crate::safe_file::read_artifact(&dir, "vault", VAULT_RELOAD_MAX) {
-        Ok(bytes) => {
-            let snapshot: crate::context_store::vault::VaultSnapshot =
-                serde_json::from_slice(&bytes)
-                    .map_err(|error| format!("context vault corrupt: {error}"))?;
-            state
-                .store
-                .restore_vault(snapshot)
-                .map_err(|error| format!("context vault refused restore: {error:?}"))?;
-        }
-        // A missing vault snapshot is legal (no quarantine ever
-        // happened); an unreadable one fails recovery, so sealed
-        // evidence is never silently reset away (issue 102).
-        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {}
-        Err(error) => return Err(format!("context vault unreadable: {error}")),
-    }
-    // A present manifest restores mode, quiesce state, the preserved window,
-    // and the filter version histories. Its absence is a fresh session;
-    // an unreadable manifest fails recovery (issue 102).
-    match crate::safe_file::read_artifact(&dir, "manifest.json", MANIFEST_RELOAD_MAX) {
-        Ok(bytes) => {
-            let manifest: PersistedManifest = serde_json::from_slice(&bytes)
-                .map_err(|error| format!("context manifest corrupt: {error}"))?;
-            // Historical filter versions reload with the store so a version named by
-            // a durable digest keeps resolving after a restart (issue #118).
-            state
-                .filters
-                .restore_histories(manifest.rules.clone())
-                .map_err(|_| "context manifest filter rules are not relaxations".to_string())?;
-            state
-                .filters
-                .restore_vocabulary_snapshots(manifest.vocabularies.clone())
-                .map_err(|_| "context manifest vocabularies are not additions".to_string())?;
-            if manifest.mode == "read-only" {
-                state
-                    .store
-                    .set_mode(crate::context_store::store::StoreMode::ReadOnly);
-            } else if manifest.mode == "unavailable" {
-                state
-                    .store
-                    .set_mode(crate::context_store::store::StoreMode::Unavailable);
-            }
-            state.quiesce = manifest.quiesce;
-            state.detail = manifest.detail;
-            state.preserved = manifest.preserved;
-        }
-        // A missing manifest is a fresh session (no filter history yet); an
-        // unreadable one fails recovery instead of being read as absence
-        // (issue 102).
-        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {}
-        Err(error) => return Err(format!("context manifest unreadable: {error}")),
-    }
-    Ok(state)
-}
-
-/// Stable textual refusal for the external context store seam.
-fn context_store_error(error: &crate::context_store::store::StoreError) -> String {
-    match error {
-        crate::context_store::store::StoreError::Spine(_) => "spine refused the write".to_string(),
-        crate::context_store::store::StoreError::Vault(_) => "vault refused the write".to_string(),
-        crate::context_store::store::StoreError::Blocked(_) => {
-            "store mode refused the write".to_string()
-        }
-    }
-}
-
-/// Stable textual refusal for the ingress transaction seam.
-fn ingress_error(error: &crate::context_ingress::ingress::IngressError) -> String {
-    match error {
-        crate::context_ingress::ingress::IngressError::Capture(_) => {
-            "capture refused the payload".to_string()
-        }
-        crate::context_ingress::ingress::IngressError::Coverage { sanitized_len } => {
-            format!("segmentation did not cover {sanitized_len} sanitized bytes")
-        }
-        crate::context_ingress::ingress::IngressError::StoreBlocked { mode } => {
-            format!("store mode {mode} refused ingress")
-        }
-    }
-}
-
-/// Writes one context artifact through the crash-safe publication primitive: payload to
-/// a dot-prefixed temporary file inside `context/`, fsync on the payload, a
-/// same-directory rename over the final name, then an fsync on the directory. A crash
-/// anywhere leaves either the old or the new artifact (issue #120).
-fn write_artifact(dir: &openat::Dir, _root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
-    crate::safe_file::publish_artifact(dir, name, bytes, |dir, name, flags, mode| {
-        open_regular_at(dir, name, flags, mode)
-    })
-    .map_err(|error| format!("publish context artifact {name} failed: {error}"))
 }
 
 /// Keeps the preserved-span window bounded across pre-entry compaction calls.
@@ -393,8 +295,6 @@ fn executor_refusal(error: &crate::context_txn::executor::ExecutorError) -> Stri
 /// digest, never a vault slot handle, so a later re-derivation of the same call produces
 /// byte-identical records and replay comparisons stay exact.
 fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<String, String> {
-    use crate::context_ingress::capture::CaptureSource;
-    use crate::context_ingress::ingress::IngressTxn;
     let started = Instant::now();
     let pressure = normalized_pressure(bytes.len());
     let proposal = state.policy.propose_bulk(tool, bytes.len(), pressure);
@@ -402,78 +302,7 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
         state.policy.abort_bulk(proposal);
         return Err("policy governor quiesced before bulk admission".to_string());
     }
-    let result = (|| {
-        state
-            .store
-            .begin_state_advancing_turn()
-            .map_err(|blocked| match blocked {
-                crate::context_store::store::StoreBlocked::Mode { mode } => {
-                    format!("store mode {mode} refused the turn")
-                }
-            })?;
-        let handle = format!(
-            "content-{:016x}",
-            crate::context_kernel::canonical::digest(bytes)
-        );
-        // The parent version is the applied spine record count, so the executor's
-        // compare-and-commit is anchored to the store position it commits against.
-        let parent_version = state.store.index().len() as u64;
-        // Bound: the admitted payload plus its frame overhead must fit the
-        // region budget net of the reclamation reserve and headroom.
-        let bound = (bytes.len() as u64).saturating_add(64);
-        let budget = crate::context_txn::budget::Budget {
-            b: ADMISSION_REGION_BUDGET,
-            r: ADMISSION_RECLAMATION_RESERVE,
-            h: ADMISSION_HEADROOM,
-        };
-        sequence_admission(parent_version, bound, &budget, bytes.len() as u64)?;
-        let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
-        txn.capture(CaptureSource::ToolResult, bytes)
-            .map_err(|error| ingress_error(&error))?;
-        // The transaction's own exempt append (and vault reference on
-        // quarantine) are the only durable results of this ingestion; the raw
-        // input bytes are never written again (issue #100).
-        let records = txn
-            .commit(&mut state.store)
-            .map_err(|error| ingress_error(&error))?;
-        let record = records
-            .first()
-            .ok_or_else(|| "ingress committed no records".to_string())?;
-        let spine = record
-            .spine
-            .as_ref()
-            .ok_or_else(|| "ingress committed no sanitized record".to_string())?;
-        let payload = IngressPayload {
-            handle: spine.handle.clone(),
-            ranges: vec![spine.range.clone()],
-            bytes: record.sanitized.clone(),
-            segments: record.segments.clone(),
-        };
-        // The verdict rules what the caller receives: PassVerbatim returns the
-        // sanitized bytes themselves, DropBulk a drop stub, and only Digest
-        // yields the CTXDIGEST substitution (issue #118).
-        match state
-            .filters
-            .verdict(tool, &payload.segments, payload.bytes.len())
-        {
-            RuleVerdict::PassVerbatim => Ok(String::from_utf8_lossy(&payload.bytes).into_owned()),
-            RuleVerdict::DropBulk => Ok(format!(
-                "CTXDROP v1 tool={tool} bytes={} handle={}\n",
-                payload.bytes.len(),
-                payload.handle
-            )),
-            RuleVerdict::Digest => {
-                let digest = state.filters.digest(
-                    tool,
-                    &payload.handle,
-                    payload.ranges.clone(),
-                    &payload.bytes,
-                    &payload.segments,
-                );
-                Ok(digest_record(state, tool, &payload, &handle, &digest))
-            }
-        }
-    })();
+    let result = ingest_bulk_committed(state, tool, bytes);
     match result {
         Ok(record) => {
             let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
@@ -489,6 +318,91 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
         Err(reason) => {
             state.policy.abort_bulk(proposal);
             Err(reason)
+        }
+    }
+}
+
+/// Runs one bulk-result ingestion through the store and renders the caller's
+/// record for it: the admitted payload, the filter verdict that rules what the
+/// caller receives, and the digested or verbatim bytes.
+///
+/// Every failure here is returned, never swallowed; the caller decides whether
+/// the admission aborts the bulk proposal.
+fn ingest_bulk_committed(
+    state: &mut ContextState,
+    tool: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    use crate::context_ingress::capture::CaptureSource;
+    use crate::context_ingress::ingress::IngressTxn;
+    state
+        .store
+        .begin_state_advancing_turn()
+        .map_err(|blocked| match blocked {
+            crate::context_store::store::StoreBlocked::Mode { mode } => {
+                format!("store mode {mode} refused the turn")
+            }
+        })?;
+    let handle = format!(
+        "content-{:016x}",
+        crate::context_kernel::canonical::digest(bytes)
+    );
+    // The parent version is the applied spine record count, so the executor's
+    // compare-and-commit is anchored to the store position it commits against.
+    let parent_version = state.store.index().len() as u64;
+    // Bound: the admitted payload plus its frame overhead must fit the
+    // region budget net of the reclamation reserve and headroom.
+    let bound = (bytes.len() as u64).saturating_add(64);
+    let budget = crate::context_txn::budget::Budget {
+        b: ADMISSION_REGION_BUDGET,
+        r: ADMISSION_RECLAMATION_RESERVE,
+        h: ADMISSION_HEADROOM,
+    };
+    sequence_admission(parent_version, bound, &budget, bytes.len() as u64)?;
+    let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
+    txn.capture(CaptureSource::ToolResult, bytes)
+        .map_err(|error| ingress_error(&error))?;
+    // The transaction's own exempt append (and vault reference on
+    // quarantine) are the only durable results of this ingestion; the raw
+    // input bytes are never written again (issue 128).
+    let records = txn
+        .commit(&mut state.store)
+        .map_err(|error| ingress_error(&error))?;
+    let record = records
+        .first()
+        .ok_or_else(|| "ingress committed no records".to_string())?;
+    let spine = record
+        .spine
+        .as_ref()
+        .ok_or_else(|| "ingress committed no sanitized record".to_string())?;
+    let payload = IngressPayload {
+        handle: spine.handle.clone(),
+        ranges: vec![spine.range.clone()],
+        bytes: record.sanitized.clone(),
+        segments: record.segments.clone(),
+    };
+    // The verdict rules what the caller receives: PassVerbatim returns the
+    // sanitized bytes themselves, DropBulk a drop stub, and only Digest
+    // yields the CTXDIGEST substitution (issue 128).
+    match state
+        .filters
+        .verdict(tool, &payload.segments, payload.bytes.len())
+    {
+        RuleVerdict::PassVerbatim => Ok(String::from_utf8_lossy(&payload.bytes).into_owned()),
+        RuleVerdict::DropBulk => Ok(format!(
+            "CTXDROP v1 tool={tool} bytes={} handle={}\n",
+            payload.bytes.len(),
+            payload.handle
+        )),
+        RuleVerdict::Digest => {
+            let digest = state.filters.digest(
+                tool,
+                &payload.handle,
+                payload.ranges.clone(),
+                &payload.bytes,
+                &payload.segments,
+            );
+            Ok(digest_record(state, tool, &payload, &handle, &digest))
         }
     }
 }
@@ -800,101 +714,6 @@ pub(crate) fn context_dir(store: &SessionStore) -> Result<openat::Dir, StoreErro
     ensure_private_subdir(&store.dir, "context")
 }
 
-/// Writes the sanitized spine, the vault snapshot, and the manifest under `context/`.
-pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Result<(), String> {
-    let dir =
-        context_dir(store).map_err(|error| format!("open context directory failed: {error}"))?;
-    let root = store.session_dir.join("context");
-    write_artifact(&dir, &root, "sanitized", &state.store.spine_bytes())?;
-    let vault = serde_json::to_vec(&state.store.vault_snapshot())
-        .map_err(|error| format!("encode vault snapshot failed: {error}"))?;
-    write_artifact(&dir, &root, "vault", &vault)?;
-    let events = state
-        .policy
-        .events()
-        .iter()
-        .map(serde_json::to_string)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("encode policy event failed: {error}"))?
-        .join("\n");
-    write_artifact(&dir, &root, "events.log", events.as_bytes())?;
-    // One durable checkpoint line per publication, each stamped over EXACTLY
-    // the content it names: the first `applied` spine records, encoded. The
-    // spine encoding is hoisted before this publication, so the checkpoint
-    // lines and the `sanitized` artifact they verify are the same generation
-    // (108).
-    //
-    // The prefix a reloaded store recovers from `sanitized` is the encoding of
-    // its first N records, so a checkpoint naming N records carries the length
-    // and digest of that same prefix: a reopened store can verify its recovered
-    // spine against the last line it claims to resume from.
-    let spine = state.store.spine_ref();
-    let records = spine.records().len() as u64;
-    let logical_time = state.policy.logical_time();
-    let mut checkpoints = String::new();
-    // Enumerate the record positions of this generation: one line per prefix,
-    // 0..=records, so every line names a real position and the last line names
-    // the whole published spine. An empty spine still checkpoints its empty
-    // prefix, so a publication always carries at least one verifiable line.
-    for applied in 0..=records {
-        let checkpoint = DurableCheckpoint::at(spine, applied, logical_time);
-        checkpoints.push_str(
-            &serde_json::to_string(&checkpoint)
-                .map_err(|error| format!("encode checkpoint failed: {error}"))?,
-        );
-        checkpoints.push('\n');
-    }
-    write_artifact(&dir, &root, "checkpoints", checkpoints.as_bytes())?;
-    let mut journal = String::new();
-    for entry in state.policy.journal().entries() {
-        let line = serde_json::json!({
-            "source": entry.source,
-            "tokens_reclaimed": entry.tokens_reclaimed,
-            "invalidation_cost": entry.invalidation_cost,
-            "logical_time": entry.logical_time,
-            "wall_elapsed_us": entry.wall_elapsed_us,
-            "amortized": entry.amortized,
-        });
-        journal.push_str(&line.to_string());
-        journal.push('\n');
-    }
-    let report = state.policy.cache_report();
-    journal.push_str(
-        &serde_json::json!({
-            "report": {
-                "hit_rate": report.hit_rate,
-                "armed_hit_rate": report.armed_hit_rate,
-                "disarmed_hit_rate": report.disarmed_hit_rate,
-                "invalidation_cost_per_event": report.invalidation_cost_per_event,
-                "known_invalidation_cost_events": report.known_cost_events,
-                "unknown_invalidation_cost_events": report.unknown_cost_events,
-                "threshold_passes": report.threshold_passes,
-                "threshold_denials": report.threshold_denials,
-                "armed_rewrites": report.armed_rewrites,
-                "disarmed_rewrites": report.disarmed_rewrites,
-                "economic_gate_suspensions": report.economic_gate_suspensions,
-                "forced_flushes": report.forced_flushes,
-            }
-        })
-        .to_string(),
-    );
-    journal.push('\n');
-    write_artifact(&dir, &root, "rewrite-journal.log", journal.as_bytes())?;
-    let manifest = ContextManifest {
-        mode: state.store.mode().name(),
-        quiesce: state.quiesce.as_deref(),
-        detail: state.detail.as_deref(),
-        rules: state.filters.rules_history(),
-        vocabularies: state.filters.vocabulary_snapshots(),
-        terminal_outcome: state.policy.terminal_outcome(),
-        preserved: &state.preserved,
-    };
-    let bytes = serde_json::to_vec(&manifest)
-        .map_err(|error| format!("encode context manifest failed: {error}"))?;
-    write_artifact(&dir, &root, "manifest.json", &bytes)?;
-    Ok(())
-}
-
 /// Best-effort in-place manifest update when an atomic replace is impossible.
 pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState) {
     let manifest = ContextManifest {
@@ -924,3 +743,15 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
     let _ = file.write_all(&bytes);
     let _ = file.sync_all();
 }
+
+/// One-line wrappers so the session store keeps its old call sites while the
+/// reload and publication halves live in their own modules.
+pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Result<(), String> {
+    crate::context_publish::persist_context(store, state)
+}
+
+pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState, String> {
+    crate::context_recover::recover_context_state(store)
+}
+
+pub(crate) use crate::context_recover::{context_store_error, ingress_error};
