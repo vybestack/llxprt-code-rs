@@ -4,15 +4,19 @@
 //! byte-identical typed state and an identical hash. Every input to structure is an
 //! event; nothing about a projection can reach back into the reducer.
 
-use crate::context_kernel::canonical::{digest, Digest, Sink};
+use crate::context_kernel::canonical::{Digest, HashScope, Sink};
 use crate::context_kernel::events::{
-    structural_lane, EventKind, EventLog, OperationClass, RecordedEvent,
+    structural_lane, AppendSource, EventKind, EventLog, OperationClass, RecordedEvent,
 };
 use crate::context_kernel::ir::{
-    normalize, slice_into, ConversationIr, Item, ItemId, Region, StoreRange,
+    covers_exactly, normalize, slice_into, ConversationIr, IrError, Item, ItemId, ItemNamespace,
+    Region, SegmentClaim, SplitContract, SplitNamespace, StoreRange,
 };
-use crate::context_kernel::lanes::{LanePolicyRegistry, PolicyError, LANE_POLICY_LATEST_VERSION};
+use crate::context_kernel::lanes::{
+    Lane, LanePolicyRegistry, PolicyError, LANE_POLICY_LATEST_VERSION,
+};
 use crate::context_kernel::legality::QuotingConvention;
+use crate::context_kernel::migration::{V2, V3};
 use crate::context_kernel::scopes::{ScopeError, ScopeId, ScopeRegistry};
 
 /// Log window read by the scope-idleness predicate.
@@ -71,6 +75,22 @@ pub enum ReducerError {
         /// Version carried by the event.
         event: u64,
     },
+    /// An append named a scope no scope-open event opened. Scopes are created
+    /// only by logged lifecycle events; the reducer never invents one.
+    UnknownScope {
+        /// Scope the append named.
+        id: ScopeId,
+    },
+    /// An operation named an item-identifier namespace that does not exist.
+    UnknownNamespace {
+        /// Namespace discriminant carried by the operation.
+        found: u64,
+    },
+    /// A migration selection named a context-store version no migration defines.
+    MigrationTarget {
+        /// Store version carried by the selection.
+        found: u64,
+    },
 }
 
 /// Fully typed state: everything the projection is derived from.
@@ -84,11 +104,14 @@ pub struct TypedState {
     pub lane_policy_registry: LanePolicyRegistry,
     /// Compare-and-commit version of this state.
     pub version: u64,
-    /// Canonical hash of the state.
+    /// Canonical hash of the state, computed inside [`HashScope::State`].
     pub state_hash: Digest,
     /// Context-store version the log was written under.
     pub store_version: u64,
-    /// Store version selected by a committed migration, if any.
+    /// Store version selected by a committed migration, if any. The selection
+    /// never rewrites `store_version`: a log is framed under one version for its
+    /// whole life, and the selection event is the durable record that readers
+    /// switch to the newly built generation.
     pub selected_store_version: Option<u64>,
     /// Items protected from reclamation.
     pub pins: Vec<ItemId>,
@@ -102,6 +125,8 @@ pub struct TypedState {
     pub store_mode: u64,
     /// Whether the store quiesced against an unwritable mode.
     pub quiesced: bool,
+    /// Scope the log was opened under; every event names this scope or a child.
+    pub session_scope: ScopeId,
     /// Next free offset on the store spine.
     next_offset: u64,
     /// Identities of events already folded, for deduplication.
@@ -111,7 +136,7 @@ pub struct TypedState {
 impl TypedState {
     /// Builds the state an empty log folds into.
     pub fn genesis(idleness_window: u64, store_version: u64) -> Self {
-        let mut state = Self {
+        Self {
             conversation_ir: ConversationIr::new(),
             scope_registry: ScopeRegistry::new(idleness_window),
             lane_policy_registry: LanePolicyRegistry::resolve(INITIAL_VERSION)
@@ -126,11 +151,10 @@ impl TypedState {
             vocabulary_version: VOCABULARY_LATEST_VERSION,
             store_mode: 1,
             quiesced: false,
+            session_scope: 0,
             next_offset: 0,
             applied: Vec::new(),
-        };
-        state.state_hash = Reducer::new(idleness_window).hash(&state);
-        state
+        }
     }
 
     /// Whether an event identity has already been folded.
@@ -207,11 +231,13 @@ impl Reducer {
         Ok(())
     }
 
-    /// Canonical hash of a state.
+    /// Canonical hash of a state, inside the state hash scope. The scope keeps a
+    /// state hash from ever being compared or chained against an event checksum or
+    /// a store-build checksum.
     pub fn hash(&self, state: &TypedState) -> Digest {
         let mut sink = Sink::new();
         state.encode(&mut sink);
-        digest(&sink.finish())
+        HashScope::State.digest(&sink.finish())
     }
 
     fn apply(&self, state: &mut TypedState, event: &RecordedEvent) -> Result<(), ReducerError> {
@@ -220,7 +246,8 @@ impl Reducer {
                 source,
                 sanitized,
                 scope,
-            } => apply_append(state, event, source, sanitized, *scope),
+                claims,
+            } => apply_append(state, event, source, sanitized, *scope, claims),
             EventKind::Ledger { .. } => Ok(()),
             EventKind::OperationCommit {
                 class,
@@ -232,28 +259,101 @@ impl Reducer {
     }
 }
 
+/// Appends items derived from the append: one item per recorded claim, with each
+/// item's lane decided by its own claim's structural class and falling back to
+/// the structural lane of the source only when the claim carries no class. An
+/// append with no recorded claims is the pre-segmentation append: it is one claim
+/// over the whole payload, so its lane is the source fallback.
+///
+/// Identifiers come from the IR's own append mint, never from the event sequence.
+/// One append can mint several identifiers while the log's sequences are strictly
+/// consecutive, so minting from the sequence would hand a multi-claim append
+/// identifiers that the next event's append re-mints. The mint raises the append
+/// watermark once per minted identifier, and only when the append commits, so
+/// no later mint ever repeats one and a refused append spends nothing.
+///
+/// The append is atomic: every item is minted and validated before any of them
+/// reaches the caller's state, so a refusal on any claim leaves the state
+/// byte-identical to the state before the event. Either every claim of the append
+/// lands or none does.
 fn apply_append(
     state: &mut TypedState,
     event: &RecordedEvent,
-    source: &crate::context_kernel::events::AppendSource,
+    source: &AppendSource,
     sanitized: &[u8],
     scope: ScopeId,
+    claims: &[SegmentClaim],
 ) -> Result<(), ReducerError> {
-    let length = sanitized.len() as u64;
-    let provenance = vec![StoreRange {
-        offset: state.next_offset,
-        length,
-    }];
-    state.next_offset += length;
-    attribute(state, scope, event.sequence)?;
-    let id = ItemId::new(event.sequence);
-    let lane = structural_lane(source);
-    let item = Item::new(id, lane, provenance, scope);
-    state
+    let claims = claims_of(claims, sanitized, event.sequence)?;
+    // Stage the whole append first: identifiers are derived from the append
+    // watermark without raising it, and uniqueness is checked against the IR,
+    // before any item reaches the caller's state. Nothing before the commit
+    // mutates the state, so a refusal leaves it exactly as it was.
+    let watermark = state
         .conversation_ir
-        .insert(item)
-        .map_err(ReducerError::Ir)?;
+        .namespace_watermark(ItemNamespace::Append);
+    let fallback = structural_lane(source);
+    let mut staged: Vec<Item> = Vec::with_capacity(claims.len());
+    for (index, claim) in claims.iter().enumerate() {
+        let id = ItemId::append(watermark + index as u64);
+        if state
+            .conversation_ir
+            .items()
+            .iter()
+            .any(|item| item.id() == id)
+        {
+            return Err(ReducerError::Ir(IrError::DuplicateItem { id: id.value() }));
+        }
+        let provenance = vec![StoreRange {
+            offset: state.next_offset + claim.span.offset,
+            length: claim.span.length,
+        }];
+        let lane = claim
+            .class
+            .map(Lane::for_structural_class)
+            .unwrap_or(fallback);
+        staged.push(Item::new(id, lane, provenance, scope));
+    }
+    // Every claim minted: the append commits as one transition, watermark included.
+    attribute(state, scope, event.sequence)?;
+    let last = ItemId::append(watermark + claims.len() as u64 - 1);
+    state.conversation_ir.note_minted_id(last);
+    for item in staged {
+        state
+            .conversation_ir
+            .insert(item)
+            .map_err(ReducerError::Ir)?;
+    }
+    state.next_offset += sanitized.len() as u64;
     Ok(())
+}
+/// Claims an append records, normalized. An empty claim list is the whole payload
+/// as one unclassified claim; a claim list that does not cover `sanitized`
+/// exactly is a typed refusal, because a partial claim list would silently drop
+/// bytes from the typed state.
+fn claims_of(
+    claims: &[SegmentClaim],
+    sanitized: &[u8],
+    sequence: u64,
+) -> Result<Vec<SegmentClaim>, ReducerError> {
+    if claims.is_empty() {
+        return Ok(vec![SegmentClaim {
+            span: StoreRange {
+                offset: 0,
+                length: sanitized.len() as u64,
+            },
+            class: None,
+        }]);
+    }
+    let payload = [StoreRange {
+        offset: 0,
+        length: sanitized.len() as u64,
+    }];
+    let spans: Vec<StoreRange> = claims.iter().map(|claim| claim.span).collect();
+    if !covers_exactly(&spans, &payload) {
+        return Err(ReducerError::Ir(IrError::ClaimsDontCover { sequence }));
+    }
+    Ok(claims.to_vec())
 }
 
 fn apply_operation(
@@ -270,64 +370,63 @@ fn apply_operation(
                 .scope_registry
                 .open(subject, parent, event.sequence)
                 .map_err(ReducerError::Scope)?;
+            if state.session_scope == 0 {
+                state.session_scope = subject;
+            }
+            Ok(())
         }
-        OperationClass::ScopeCloseByEvent => {
-            state
-                .scope_registry
-                .close_by_event(subject, event.sequence)
-                .map_err(ReducerError::Scope)?;
-        }
-        OperationClass::ScopeCloseByDeclaration => {
-            state
-                .scope_registry
-                .close_by_declaration(subject, event.sequence)
-                .map_err(ReducerError::Scope)?;
-        }
-        OperationClass::Resegment => resegment(state, subject, argument)?,
-        OperationClass::Place => place(state, subject, argument)?,
-        OperationClass::Unplace => {
-            state
-                .conversation_ir
-                .unplace(ItemId::new(subject))
-                .map_err(ReducerError::Ir)?;
-        }
+        OperationClass::ScopeCloseByEvent => state
+            .scope_registry
+            .close_by_event(subject, event.sequence)
+            .map_err(ReducerError::Scope),
+        OperationClass::ScopeCloseByDeclaration => state
+            .scope_registry
+            .close_by_declaration(subject, event.sequence)
+            .map_err(ReducerError::Scope),
+        OperationClass::Resegment => resegment(state, subject, argument),
+        OperationClass::Place => place(state, subject, argument),
+        OperationClass::Unplace => state
+            .conversation_ir
+            .unplace(ItemId::new(subject))
+            .map_err(ReducerError::Ir),
         OperationClass::Pin => {
             let id = ItemId::new(subject);
             if !state.pins.contains(&id) {
                 state.pins.push(id);
             }
+            Ok(())
         }
         OperationClass::Unpin => {
             state.pins.retain(|pin| pin.value() != subject);
+            Ok(())
         }
-        OperationClass::LanePolicyUpdate => update_policy(state, subject, argument)?,
-        OperationClass::MigrationSelect => {
-            state.selected_store_version = Some(subject);
-            state.store_version = subject;
-        }
-        OperationClass::AdmitIngress => admit_ingress(state, event, subject, argument)?,
+        OperationClass::LanePolicyUpdate => update_policy(state, subject, argument),
+        OperationClass::MigrationSelect => select_migration(state, subject),
+        OperationClass::AdmitIngress => admit_ingress(state, event, subject, argument),
         OperationClass::Sanitize | OperationClass::Import | OperationClass::IndexRebuild => {
-            return Err(not_landed(class));
+            Err(not_landed(class))
         }
-        OperationClass::Redact => redact_item(state, subject)?,
+        OperationClass::Redact => redact_item(state, subject),
         OperationClass::RuleUpdate => commit_registry(
             state,
             subject,
             argument,
             FILTER_RULE_LATEST_VERSION,
             |state: &mut TypedState| &mut state.filter_rule_version,
-        )?,
+        ),
         OperationClass::VocabularyUpdate => commit_registry(
             state,
             subject,
             argument,
             VOCABULARY_LATEST_VERSION,
             |state: &mut TypedState| &mut state.vocabulary_version,
-        )?,
-        OperationClass::StoreMode => commit_store_mode(state, subject)?,
-        OperationClass::QuiesceUnwritable => state.quiesced = true,
+        ),
+        OperationClass::StoreMode => commit_store_mode(state, subject),
+        OperationClass::QuiesceUnwritable => {
+            state.quiesced = true;
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 /// Admits an ingress transaction: the argument is the sanitized byte length, the
@@ -342,7 +441,7 @@ fn admit_ingress(
     attribute(state, subject, event.sequence)
 }
 
-/// Moves an item to the vault side: unplaced and unpinned, byte provenance kept.
+/// Moves an item to the vault side: store-only and unpinned, byte provenance kept.
 fn redact_item(state: &mut TypedState, subject: u64) -> Result<(), ReducerError> {
     state.pins.retain(|pin| pin.value() != subject);
     state
@@ -392,6 +491,26 @@ fn commit_store_mode(state: &mut TypedState, subject: u64) -> Result<(), Reducer
     Ok(())
 }
 
+/// Commits a migration selection. The selection is recorded in
+/// `selected_store_version` and `store_version` is left alone: the log keeps its
+/// framing version, so a v2 log with a selection followed by another v2-framed
+/// event replays exactly as it was written.
+fn select_migration(state: &mut TypedState, subject: u64) -> Result<(), ReducerError> {
+    if subject != V2 && subject != V3 {
+        return Err(ReducerError::MigrationTarget { found: subject });
+    }
+    state.selected_store_version = Some(subject);
+    Ok(())
+}
+
+/// Logged resegment: the event carries the requested part count in `argument`,
+/// and the split runs under the fresh contract, so children mint split-namespace
+/// identifiers independent of the append sequence and no later append can collide
+/// with them. A parent whose provenance holds one recorded range is refined by the
+/// event itself: the parts it names become the new claim boundaries. A parent with
+/// several recorded ranges carries claims that already exist, so its parts must be
+/// exactly those claims, whole and one per child: a request for a different part
+/// count would have to cut a claim in two, and is refused.
 fn resegment(state: &mut TypedState, subject: u64, argument: u64) -> Result<(), ReducerError> {
     let id = ItemId::new(subject);
     let parent = state
@@ -400,10 +519,26 @@ fn resegment(state: &mut TypedState, subject: u64, argument: u64) -> Result<(), 
         .map_err(ReducerError::Ir)?
         .clone();
     let parts = argument.max(1) as usize;
-    let ranges = normalize(&parent.provenance);
+    let claims = normalize(&parent.provenance);
+    let mut ranges: Vec<Vec<StoreRange>> = Vec::new();
+    if claims.len() > 1 {
+        if claims.len() != parts {
+            return Err(ReducerError::Ir(IrError::ClaimBoundary { id: subject }));
+        }
+        for claim in &claims {
+            ranges.push(vec![*claim]);
+        }
+    } else {
+        ranges = slice_into(&claims, parts);
+    }
+    let contract = SplitContract {
+        namespace: SplitNamespace::Fresh,
+        parts,
+        split_points: ranges.iter().map(Vec::len).collect(),
+    };
     state
         .conversation_ir
-        .split(id, slice_into(&ranges, parts))
+        .split(id, ranges, &contract)
         .map_err(ReducerError::Ir)?;
     state.next_offset = state.next_offset.max(parent.byte_range.end());
     Ok(())
@@ -415,8 +550,7 @@ fn place(state: &mut TypedState, subject: u64, argument: u64) -> Result<(), Redu
     state
         .conversation_ir
         .place(ItemId::new(subject), region)
-        .map_err(ReducerError::Ir)?;
-    Ok(())
+        .map_err(ReducerError::Ir)
 }
 
 fn update_policy(state: &mut TypedState, subject: u64, argument: u64) -> Result<(), ReducerError> {
@@ -438,13 +572,14 @@ fn update_policy(state: &mut TypedState, subject: u64, argument: u64) -> Result<
     Ok(())
 }
 
+/// Attributes an item to an existing, open scope. An unknown scope is a typed
+/// refusal: the reducer never invents a scope an event did not open.
 fn attribute(state: &mut TypedState, scope: ScopeId, sequence: u64) -> Result<(), ReducerError> {
-    match state.scope_registry.attribute_item(scope, sequence) {
-        Ok(()) => Ok(()),
-        Err(ScopeError::UnknownScope { id }) => state
-            .scope_registry
-            .open(id, None, sequence)
-            .map_err(ReducerError::Scope),
-        Err(error) => Err(ReducerError::Scope(error)),
-    }
+    state
+        .scope_registry
+        .attribute_item(scope, sequence)
+        .map_err(|error| match error {
+            ScopeError::UnknownScope { id } => ReducerError::UnknownScope { id },
+            other => ReducerError::Scope(other),
+        })
 }
