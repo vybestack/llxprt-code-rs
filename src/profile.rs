@@ -866,14 +866,12 @@ fn parse_model_params(
     for (k, v) in &map {
         match k.as_str() {
             "temperature" => {
-                let f = v
-                    .as_f64()
+                let f = numeric_setting(v)
                     .ok_or_else(|| format!("profile {name:?}: 'temperature' must be a number"))?;
                 m.temperature = Some(f);
             }
             "top_p" | "topP" => {
-                let f = v
-                    .as_f64()
+                let f = numeric_setting(v)
                     .ok_or_else(|| format!("profile {name:?}: '{k}' must be a number"))?;
                 m.top_p = Some(f);
             }
@@ -940,6 +938,19 @@ fn btree(map: &serde_json::Map<String, serde_json::Value>) -> BTreeMap<String, s
 
 fn nonneg_u64(v: &serde_json::Value) -> Option<u64> {
     v.as_u64()
+}
+
+/// A numeric sampling setting: a JSON number, or a numeric string such as `"1"`
+/// or `".95"`, which the TS llxprt-code accepts for `modelParams`. `f64` parsing
+/// already rejects padded or trailing junk, and non-finite spellings are a wrong
+/// type here rather than a value.
+fn numeric_setting(v: &serde_json::Value) -> Option<f64> {
+    let parsed = match v {
+        serde_json::Value::Number(n) => n.as_f64()?,
+        serde_json::Value::String(text) => text.parse::<f64>().ok()?,
+        _ => return None,
+    };
+    parsed.is_finite().then_some(parsed)
 }
 
 /// Is the profile's parsed URL a plaintext HTTP one (used for the opt-in gate)? Only
