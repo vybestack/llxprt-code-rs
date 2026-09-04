@@ -590,10 +590,6 @@ fn id_fits_provenance(id: ItemId, provenance: &[StoreRange]) -> bool {
 pub enum SplitNamespace {
     /// Children mint from the split namespace, independent of append ids.
     Fresh,
-    /// Children keep the parent's append namespace. The mint still draws from the
-    /// split counter, so an inherited identifier that would collide with a
-    /// recorded append is refused instead of silently reused.
-    Inherit,
 }
 
 /// The resegment contract: the namespace children mint from, the expected part
