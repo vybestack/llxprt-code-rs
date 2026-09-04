@@ -286,8 +286,10 @@ fn parse_max_output(
         "max-output",
         "maxOutputTokens",
         "max_output_tokens",
+        "max-output-tokens",
         "maxTokens",
         "max_tokens",
+        "max-tokens",
     ];
     let mut selected = None;
     for map in [ephemeral, params] {

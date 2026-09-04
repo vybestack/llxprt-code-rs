@@ -957,3 +957,57 @@ fn openai_responses_rejects_inapplicable_and_conflicting_settings() {
         );
     }
 }
+
+#[test]
+fn openai_responses_folds_kebab_max_output_tokens_model_params() {
+    let profile = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses"},
+            "modelParams": {"max-output-tokens": 8192}
+        }),
+        "responses",
+    )
+    .unwrap();
+    assert_eq!(profile.ephemeral.max_output_tokens, Some(8192));
+}
+
+#[test]
+fn openai_responses_folds_kebab_max_tokens_model_params() {
+    let profile = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses"},
+            "modelParams": {"max-tokens": 8192}
+        }),
+        "responses",
+    )
+    .unwrap();
+    assert_eq!(profile.ephemeral.max_output_tokens, Some(8192));
+}
+
+#[test]
+fn openai_responses_rejects_disagreeing_max_output_model_params() {
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses", "maxOutput": 4096},
+            "modelParams": {"max-output-tokens": 5000}
+        }),
+        "responses",
+    )
+    .expect_err("disagreeing max-output model params must reject");
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses", "max_output_tokens": 4096},
+            "modelParams": {"max-tokens": 5000}
+        }),
+        "responses",
+    )
+    .expect_err("disagreeing max-output aliases must reject");
+}
