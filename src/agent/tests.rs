@@ -230,7 +230,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
     let _ = rr;
     assert_eq!(e.key, "turn-budget");
     assert!(e.message.contains("assistant content"), "{}", e.message);
-    assert_eq!(e.code, crate::cli::Code::Model);
+    assert_eq!(e.code, crate::envelope::Code::Model);
     let snap = st.snapshot().unwrap();
     let b = snap.branches[0].clone();
     assert_eq!(b.lifecycle, Lifecycle::Failed);

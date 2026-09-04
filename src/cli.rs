@@ -20,20 +20,12 @@ use std::path::PathBuf;
 mod run;
 pub use run::run_profiled;
 
+/// Re-exported exit code type (defined in the leaf `envelope` module).
+pub use crate::envelope::Code;
+
 /// The maximum number of bytes read from stdin before the prompt is rejected. The cap is
 /// applied **while reading**, not after allocation.
 const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
-
-/// Exit codes exposed to the OS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Code {
-    Usage = 2,
-    Config = 3,
-    Session = 4,
-    Model = 5,
-    Turn = 6,
-    Profiling = 7,
-}
 
 /// CLI arguments. Doc comments surface in `--help`.
 #[derive(Debug, Clone, Parser)]
