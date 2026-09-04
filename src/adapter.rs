@@ -125,7 +125,7 @@ pub struct ModelAdapter {
 pub struct ModelErrorAdapter {
     pub key: &'static str,
     pub message: String,
-    pub code: crate::cli::Code,
+    pub code: crate::envelope::Code,
 }
 
 impl std::fmt::Display for ModelErrorAdapter {
@@ -149,7 +149,7 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         return Err(ModelErrorAdapter {
             key: "base-url",
             message: "base-url must not be empty".into(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     // The base URL and the resolved key both carry fixed caps, enforced before the
@@ -161,14 +161,14 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         return Err(ModelErrorAdapter {
             key: "base-url",
             message: crate::redact::ENDPOINT_CAP_MESSAGE.to_string(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     if config.api_key.len() > crate::redact::MAX_KEY_BYTES {
         return Err(ModelErrorAdapter {
             key: "auth-key",
             message: crate::redact::KEY_CAP_MESSAGE.to_string(),
-            code: crate::cli::Code::Config,
+            code: crate::envelope::Code::Config,
         });
     }
     let timeout = config

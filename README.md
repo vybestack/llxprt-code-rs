@@ -373,6 +373,10 @@ The limits cannot be raised or bypassed through command-line options, baselines,
 per-file exceptions, or suppressions. Syntax, prohibited macro expansion, or source traversal
 errors fail the gate.
 
+`cargo xtask coupling-check` is a read-only, deterministic production-module coupling gate. It discovers every public and private top-level module declared by `src/lib.rs` (including brace-bodied inline modules), recursively scans each module's production Rust files, and reports dependencies, cyclic strongly connected components, and the exact deterministic minimum feedback arc set. `xtask/coupling-ledger.tsv` records owned burn-down debt; it is not a suppression list. Every current feedback edge needs a row, and every row must remain in the current feedback set or be removed as stale debt.
+
+CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball

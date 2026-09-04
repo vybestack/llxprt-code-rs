@@ -5,7 +5,7 @@
 //! migrated store, because selection is an event in the log and v3 is only selected
 //! once the private build is complete.
 
-use crate::context_kernel::canonical::{digest, Digest, Sink};
+use crate::context_kernel::canonical::{Digest, HashScope, Sink};
 use crate::context_kernel::events::{EventKind, EventLog, OperationClass};
 use crate::context_kernel::ir::StoreRange;
 
@@ -161,9 +161,11 @@ impl PrivateBuild {
         }
     }
 
-    /// Marks the build complete with the checksum of the built bytes.
+    /// Marks the build complete with the checksum of the built bytes, computed
+    /// inside the store-build scope so it is never equated with an event-chain
+    /// checksum or a state hash.
     pub fn complete_with(&mut self, bytes: &[u8]) {
-        self.built_checksum = Some(digest(bytes));
+        self.built_checksum = Some(HashScope::StoreBuild.digest(bytes));
         self.complete = true;
     }
 
@@ -183,7 +185,8 @@ impl PrivateBuild {
 pub struct Publication {
     /// Version the publication switched readers to.
     pub store_version: u64,
-    /// Checksum of the private build the publication adopted.
+    /// Checksum of the private build the publication adopted, inside the
+    /// store-build hash scope.
     pub built_checksum: Digest,
     /// Whether the publication happened.
     pub published: bool,
@@ -200,11 +203,236 @@ impl Publication {
         })
     }
 
-    /// Encodes the publication into `sink`.
+    /// Whether `bytes` is the build the publication adopted, verified inside the
+    /// store-build hash scope.
+    pub fn verify_build(&self, bytes: &[u8]) -> bool {
+        HashScope::StoreBuild.digest(bytes) == self.built_checksum
+    }
+
+    /// Encodes the publication into `sink`, with a byte-order mark between the
+    /// header and the scoped value.
     pub fn encode(&self, sink: &mut Sink) {
         sink.tag("publication");
         sink.int(self.store_version);
+        sink.byte_order_mark();
         sink.int(self.built_checksum);
+        sink.flag(self.published);
+    }
+}
+
+/// One store generation, typed by how it is identified. The two generations of a
+/// migration live in different hash scopes: a committed generation is identified
+/// by the chain over its recorded events, and a private build is identified by a
+/// checksum over its bytes, computed inside [`HashScope::StoreBuild`]. A value
+/// from one scope never verifies in the other, so corruption in one generation
+/// cannot invalidate the other's identity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Generation {
+    /// The committed generation readers resolve.
+    Committed {
+        /// Context-store version of the generation.
+        store_version: u64,
+        /// Bytes the generation covers.
+        bytes: u64,
+        /// Chain value over the generation's recorded events.
+        chain: Digest,
+    },
+    /// A completed private build, invisible to readers until the swap.
+    Built {
+        /// Context-store version the build targets.
+        store_version: u64,
+        /// Bytes the build covers.
+        bytes: u64,
+        /// Checksum over the built bytes, inside the store-build scope.
+        checksum: Digest,
+    },
+}
+
+impl Generation {
+    /// Context-store version of the generation.
+    pub fn store_version(self) -> u64 {
+        match self {
+            Generation::Committed { store_version, .. } => store_version,
+            Generation::Built { store_version, .. } => store_version,
+        }
+    }
+
+    /// Bytes the generation covers.
+    pub fn bytes(self) -> u64 {
+        match self {
+            Generation::Committed { bytes, .. } | Generation::Built { bytes, .. } => bytes,
+        }
+    }
+
+    /// Hash scope the generation's identity lives in.
+    pub fn scope(self) -> HashScope {
+        match self {
+            Generation::Committed { .. } => HashScope::EventChain,
+            Generation::Built { .. } => HashScope::StoreBuild,
+        }
+    }
+}
+
+/// Which failure a publication step refuses with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PublicationError {
+    /// The inactive slot held no completed build to swap in.
+    NoBuildPending,
+    /// The inactive slot already held a completed build.
+    BuildPending,
+    /// A generation was offered to a slot whose contract it does not satisfy.
+    SlotContract {
+        /// Scope the slot requires.
+        expected: HashScope,
+        /// Scope the offered generation carries.
+        found: HashScope,
+    },
+    /// The publication already committed; a publication happens at most once.
+    AlreadyPublished,
+}
+
+/// The two storage slots of a migration. Exactly one slot is active; a build is
+/// written into the inactive slot and an explicit swap moves visibility, so a
+/// crash between the write and the swap leaves the committed generation active.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SlotPair {
+    active: Generation,
+    inactive: Option<Generation>,
+    published: bool,
+}
+
+impl SlotPair {
+    /// Frames the slot pair of an unmigrated store: the committed generation is
+    /// active and the inactive slot is free.
+    pub fn genesis(store_version: u64, bytes: u64, chain: Digest) -> Self {
+        Self {
+            active: Generation::Committed {
+                store_version,
+                bytes,
+                chain,
+            },
+            inactive: None,
+            published: false,
+        }
+    }
+
+    /// The generation readers resolve.
+    pub fn active(&self) -> &Generation {
+        &self.active
+    }
+
+    /// A landed build awaiting the swap, if any.
+    pub fn inactive(&self) -> Option<&Generation> {
+        self.inactive.as_ref()
+    }
+
+    /// Whether the swap already happened.
+    pub fn published(&self) -> bool {
+        self.published
+    }
+
+    /// Writes a completed build into the inactive slot. Visibility is untouched:
+    /// a crash here leaves the committed generation active. The slot accepts only
+    /// a build whose identity is inside the store-build scope.
+    pub fn land(&mut self, build: Generation) -> Result<(), PublicationError> {
+        if self.inactive.is_some() {
+            return Err(PublicationError::BuildPending);
+        }
+        if build.scope() != HashScope::StoreBuild {
+            return Err(PublicationError::SlotContract {
+                expected: HashScope::StoreBuild,
+                found: build.scope(),
+            });
+        }
+        self.inactive = Some(build);
+        Ok(())
+    }
+
+    /// Discards a landed build without swapping, so a failed qualification can be
+    /// retried; the committed generation is untouched.
+    pub fn discard(&mut self) -> Result<(), PublicationError> {
+        if self.inactive.is_none() {
+            return Err(PublicationError::NoBuildPending);
+        }
+        self.inactive = None;
+        Ok(())
+    }
+
+    /// The atomic visibility transition: the landed build becomes the committed
+    /// generation, carrying the selection event's chain value, and the retired
+    /// generation moves to the inactive slot. A crash before this call leaves the
+    /// old generation active; the call itself happens at most once.
+    pub fn swap(&mut self, selection_chain: Digest) -> Result<Generation, PublicationError> {
+        if self.published {
+            return Err(PublicationError::AlreadyPublished);
+        }
+        let build = match self.inactive.take() {
+            Some(build) => build,
+            None => return Err(PublicationError::NoBuildPending),
+        };
+        let retired = std::mem::replace(
+            &mut self.active,
+            Generation::Committed {
+                store_version: build.store_version(),
+                bytes: build.bytes(),
+                chain: selection_chain,
+            },
+        );
+        self.inactive = Some(retired);
+        self.published = true;
+        Ok(build)
+    }
+}
+
+/// Durable record of a completed publication. The two identities it carries are
+/// computed in different hash scopes: the build checksum identifies the published
+/// bytes inside the store-build scope, and the selection chain is the event-chain
+/// value the committed selection event continues. Recovery verifies each field in
+/// its own scope, so a corrupted field refuses verification without invalidating
+/// the other scope's evidence.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MigrationDescriptor {
+    /// Store version the publication switched readers to.
+    pub store_version: u64,
+    /// Checksum over the published bytes, inside the store-build scope.
+    pub build_checksum: Digest,
+    /// Event-chain value the selection event commits to.
+    pub selection_chain: Digest,
+    /// Whether the publication committed.
+    pub published: bool,
+}
+
+impl MigrationDescriptor {
+    /// Seals the descriptor of a completed publication.
+    pub fn seal(store_version: u64, build_checksum: Digest, selection_chain: Digest) -> Self {
+        Self {
+            store_version,
+            build_checksum,
+            selection_chain,
+            published: true,
+        }
+    }
+
+    /// Whether `bytes` is the published generation, verified inside the
+    /// store-build scope.
+    pub fn verify_build(&self, bytes: &[u8]) -> bool {
+        HashScope::StoreBuild.digest(bytes) == self.build_checksum
+    }
+
+    /// Whether `log` is the log the selection committed, verified inside the
+    /// event-chain scope.
+    pub fn verify_chain(&self, log: &EventLog) -> bool {
+        log.head_checksum() == self.selection_chain
+    }
+
+    /// Encodes the descriptor into `sink`, with a byte-order mark between the
+    /// header and the two scoped values.
+    pub fn encode(&self, sink: &mut Sink) {
+        sink.tag("migration-descriptor");
+        sink.int(self.store_version);
+        sink.byte_order_mark();
+        sink.int(self.build_checksum);
+        sink.int(self.selection_chain);
         sink.flag(self.published);
     }
 }

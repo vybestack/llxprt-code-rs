@@ -9,10 +9,27 @@ use crate::context_kernel::reducer::{
 };
 use crate::context_store::ops::StoreOperation;
 
+/// Appends an event, returning its sequence. Append identifiers are minted from
+/// the IR's counter, so tests that need to name a folded item count the log's
+/// append events instead of reusing the sequence.
 fn append(kind: EventKind, sequencer: &mut Sequencer, log: &mut EventLog) -> u64 {
     let event = sequencer.append(kind, log.store_version());
-    log.append(event.clone()).ok();
+    log.append(event.clone()).unwrap();
     event.sequence
+}
+
+/// Identifier the fold mints for the log's `index`-th append event, zero-based.
+fn append_item_id(log: &EventLog, index: usize) -> ItemId {
+    let appends = log
+        .events()
+        .iter()
+        .filter(|event| matches!(event.kind, EventKind::Append { .. }))
+        .count();
+    assert!(
+        index < appends,
+        "the log holds fewer appends than the index"
+    );
+    ItemId::new(index as u64)
 }
 
 fn user(text: &str, scope: u64) -> EventKind {
@@ -20,6 +37,7 @@ fn user(text: &str, scope: u64) -> EventKind {
         source: AppendSource::User,
         sanitized: text.as_bytes().to_vec(),
         scope,
+        claims: Vec::new(),
     }
 }
 
@@ -82,24 +100,35 @@ fn admit_ingress_advances_the_spine_cursor_and_attributes_the_scope() {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
     append(
+        op(OperationClass::ScopeOpen, 7, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(
         op(OperationClass::AdmitIngress, 7, 10),
         &mut sequencer,
         &mut log,
     );
-    let item = append(user("sanitized payload", 7), &mut sequencer, &mut log);
+    append(user("sanitized payload", 7), &mut sequencer, &mut log);
     let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
-    let admitted = state.conversation_ir.item(ItemId::new(item)).unwrap();
+    let admitted = state.conversation_ir.item(append_item_id(&log, 0)).unwrap();
     assert_eq!(
         admitted.provenance[0].offset, 10,
         "the admission advances the spine cursor"
     );
-    assert_eq!(state.applied_len(), 2);
+    assert_eq!(state.applied_len(), 3);
 }
 
 fn redact_log(redact: bool) -> (EventLog, u64) {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
-    let item = append(user("secret span", 1), &mut sequencer, &mut log);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("secret span", 1), &mut sequencer, &mut log);
+    let item = append_item_id(&log, 0).value();
     append(
         op(OperationClass::Place, item, Region::Notes.rank()),
         &mut sequencer,
@@ -124,6 +153,7 @@ fn redact_unplaces_and_unpins_while_keeping_the_item() {
     let with = Reducer::new(IDLENESS_WINDOW).fold(&redacted).unwrap();
     assert!(with.pins.is_empty(), "a vaulted item keeps no pin");
     assert!(with.conversation_ir.item(ItemId::new(item)).is_ok());
+    assert_eq!(item, 0, "the first append mints the first append id");
     assert_ne!(
         with.state_hash, without.state_hash,
         "redact is a real transition"
@@ -220,11 +250,17 @@ fn phase2_rows_replay_and_dedup_deterministically() {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(1);
     append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(
         op(OperationClass::AdmitIngress, 1, 10),
         &mut sequencer,
         &mut log,
     );
-    let item = append(user("payload", 1), &mut sequencer, &mut log);
+    append(user("payload", 1), &mut sequencer, &mut log);
+    let item = append_item_id(&log, 0).value();
     append(
         op(OperationClass::Place, item, Region::Notes.rank()),
         &mut sequencer,

@@ -8,6 +8,17 @@ use schemars::{generate::SchemaSettings, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Exit codes exposed to the OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Code {
+    Usage = 2,
+    Config = 3,
+    Session = 4,
+    Model = 5,
+    Turn = 6,
+    Profiling = 7,
+}
+
 /// Immutable identifier for the initial stdout wire contract.
 pub const SCHEMA_ID: &str =
     "https://github.com/vybestack/llxprt-code-rs/schemas/stdout-envelope-v1";

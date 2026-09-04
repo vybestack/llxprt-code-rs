@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use xtask::release::{run_release_fixtures, run_release_gates, run_source_bundle};
-use xtask::{run_gate, Gate};
+use xtask::{coupling, run_gate, Gate};
 
 fn main() -> ExitCode {
     match real_main() {
@@ -22,6 +22,8 @@ fn real_main() -> Result<(), String> {
     match command.as_str() {
         "loc" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Loc)),
         "complexity" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Complexity)),
+        "coupling-check" => parse_coupling_args(&remaining)
+            .and_then(|options| coupling::run_with_options(&root, &options)),
         "quality" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::All)),
         "lint" => no_args(&remaining).and_then(|()| run_lint(&root)),
         "release-gates" => no_args(&remaining).and_then(|()| run_release_gates(&root)),
@@ -79,6 +81,41 @@ fn check_schema_bytes(path: &Path, generated: &[u8]) -> Result<(), String> {
     }
 }
 
+fn parse_coupling_args(args: &[String]) -> Result<coupling::CheckOptions, String> {
+    let mut options = coupling::CheckOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--base-ref" => {
+                if options.base_ref.is_some() {
+                    return Err("--base-ref may be supplied only once".into());
+                }
+                index += 1;
+                let value = args.get(index).ok_or("--base-ref requires a value")?;
+                if value.is_empty() || value.starts_with('-') {
+                    return Err("--base-ref requires a non-option value".into());
+                }
+                options.base_ref = Some(value.clone());
+            }
+            "--accept-new-coupling" if !options.accept_new_coupling => {
+                options.accept_new_coupling = true;
+            }
+            "--owner-check" if !options.owner_check => options.owner_check = true,
+            "--accept-new-coupling" => return Err("duplicate --accept-new-coupling".into()),
+            "--owner-check" => return Err("duplicate --owner-check".into()),
+            other => return Err(format!("unexpected coupling-check argument: {other}")),
+        }
+        index += 1;
+    }
+    if options.accept_new_coupling && options.base_ref.is_none() {
+        return Err("--accept-new-coupling requires --base-ref <REF>".into());
+    }
+    if options.accept_new_coupling && !options.owner_check {
+        return Err("--accept-new-coupling requires --owner-check".into());
+    }
+    Ok(options)
+}
+
 fn no_args(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         Ok(())
@@ -88,7 +125,7 @@ fn no_args(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
+    "usage: cargo xtask <lint|quality|loc|complexity|coupling-check [--base-ref REF] [--owner-check] [--accept-new-coupling]|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
         .to_string()
 }
 
@@ -234,5 +271,57 @@ mod schema_tests {
         assert!(check_schema_bytes(&path, b"generated\n").is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"current\n");
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn coupling_arguments_accept_only_explicit_forms() {
+        assert_eq!(
+            parse_coupling_args(&[]).unwrap(),
+            coupling::CheckOptions::default()
+        );
+        let options = parse_coupling_args(&[
+            "--base-ref".into(),
+            "origin/main".into(),
+            "--owner-check".into(),
+        ])
+        .unwrap();
+        assert_eq!(options.base_ref.as_deref(), Some("origin/main"));
+        assert!(options.owner_check);
+        assert!(!options.accept_new_coupling);
+        assert!(parse_coupling_args(&["--base-ref".into()]).is_err());
+        assert!(parse_coupling_args(&["--base-ref".into(), "".into()]).is_err());
+        assert!(parse_coupling_args(&["--base-ref".into(), "--owner-check".into()]).is_err());
+        assert!(parse_coupling_args(&[
+            "--base-ref".into(),
+            "HEAD".into(),
+            "--base-ref".into(),
+            "HEAD^".into(),
+        ])
+        .is_err());
+        assert!(parse_coupling_args(&["--owner-check".into(), "--owner-check".into()]).is_err());
+        assert!(parse_coupling_args(&[
+            "--accept-new-coupling".into(),
+            "--accept-new-coupling".into(),
+        ])
+        .is_err());
+        assert!(parse_coupling_args(&["--unknown".into()]).is_err());
+        assert!(parse_coupling_args(&["--accept-new-coupling".into()]).is_err());
+        assert!(
+            parse_coupling_args(&["--owner-check".into(), "--accept-new-coupling".into(),])
+                .is_err()
+        );
+        assert!(parse_coupling_args(&[
+            "--base-ref".into(),
+            "HEAD".into(),
+            "--accept-new-coupling".into(),
+        ])
+        .is_err());
+        let accepted = parse_coupling_args(&[
+            "--accept-new-coupling".into(),
+            "--owner-check".into(),
+            "--base-ref".into(),
+            "HEAD".into(),
+        ])
+        .unwrap();
+        assert!(accepted.accept_new_coupling && accepted.owner_check);
     }
 }
