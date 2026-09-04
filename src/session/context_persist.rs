@@ -1,6 +1,7 @@
 //! Phase-2 context persistence: the bulk-result digest seam, the context-store
-//! state it keeps, and the `context/` artifacts it publishes. Pure moves from
-//! `session.rs`; the session store keeps one-line wrappers at the old call sites.
+//! state it keeps, and the `context/` artifacts it publishes. This is the
+//! phase-2 context persistence submodule of the session store: it lives under
+//! `src/session/` so the session module owns the context-store coupling gate.
 
 use std::path::Path;
 use std::time::Instant;

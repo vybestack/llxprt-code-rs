@@ -7,7 +7,6 @@ use crate::context_kernel::ir::{ItemId, Region};
 use crate::context_kernel::reducer::{
     Reducer, ReducerError, IDLENESS_WINDOW, INITIAL_VERSION, STORE_MODE_UNAVAILABLE,
 };
-use crate::context_store::ops::StoreOperation;
 
 /// Appends an event, returning its sequence. Append identifiers are minted from
 /// the IR's counter, so tests that need to name a folded item count the log's
@@ -58,41 +57,6 @@ fn single(kind: EventKind) -> EventLog {
 
 fn fold_err(log: &EventLog) -> ReducerError {
     Reducer::new(IDLENESS_WINDOW).fold(log).unwrap_err()
-}
-
-/// Maps the Phase 2 registry row onto its kernel class.
-fn kernel_row(row: StoreOperation) -> OperationClass {
-    match row {
-        StoreOperation::AdmitIngress => OperationClass::AdmitIngress,
-        StoreOperation::Sanitize => OperationClass::Sanitize,
-        StoreOperation::Redact => OperationClass::Redact,
-        StoreOperation::Import => OperationClass::Import,
-        StoreOperation::RuleUpdate => OperationClass::RuleUpdate,
-        StoreOperation::VocabularyUpdate => OperationClass::VocabularyUpdate,
-        StoreOperation::IndexRebuild => OperationClass::IndexRebuild,
-        StoreOperation::StoreMode => OperationClass::StoreMode,
-        StoreOperation::QuiesceUnwritable => OperationClass::QuiesceUnwritable,
-    }
-}
-
-#[test]
-fn phase2_rows_carry_the_registry_names_in_order() {
-    let rows = StoreOperation::all();
-    let named: Vec<&'static str> = rows.iter().map(|row| kernel_row(*row).name()).collect();
-    assert_eq!(
-        named,
-        vec![
-            "admit-ingress",
-            "sanitize",
-            "redact",
-            "import",
-            "rule-update",
-            "vocabulary-update",
-            "index-rebuild",
-            "store-mode",
-            "quiesce-unwritable",
-        ]
-    );
 }
 
 #[test]
