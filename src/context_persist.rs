@@ -74,17 +74,58 @@ struct PersistedManifest {
 
 /// One durable checkpoint line: what a crash-safe publication actually
 /// recorded, so a reopened store can verify its recovered spine against the
-/// checkpoint it claims to resume from (issue #102).
+/// checkpoint it claims to resume from.
+///
+/// The digest is computed over **exactly the content the line claims**: the
+/// first `applied` spine records, encoded, which is the same prefix a reloaded
+/// store recovers from those records. The old code stamped every line with the
+/// digest and length of the whole final spine, so a line naming `applied = k`
+/// carried a digest of content that did not exist at that checkpoint: the line
+/// could not be verified against the state it describes (108).
 #[derive(Serialize)]
 struct DurableCheckpoint {
     /// Applied spine records at checkpoint time.
     applied: u64,
-    /// Encoded spine byte length at checkpoint time.
+    /// Encoded byte length of the first `applied` spine records.
     spine_len: u64,
-    /// Digest of the encoded spine bytes the checkpoint covers.
+    /// Digest of the encoded first `applied` spine records.
     spine_digest: u64,
     /// Policy logical time that produced the checkpoint.
     logical_time: u64,
+}
+
+impl DurableCheckpoint {
+    /// The checkpoint for `applied` records, digested over exactly the prefix
+    /// the line names.
+    fn at(spine: &crate::context_store::spine::Spine, applied: u64, logical_time: u64) -> Self {
+        let covered = encoded_spine_prefix(spine, applied);
+        Self {
+            applied,
+            spine_len: covered.len() as u64,
+            spine_digest: crate::context_kernel::canonical::digest(&covered),
+            logical_time,
+        }
+    }
+}
+
+/// Encodes exactly the first `applied` spine records: the same content a
+/// reloaded store recovers from that many records, so a checkpoint's
+/// `spine_len` and `spine_digest` describe content that actually exists at the
+/// checkpoint's position (108).
+///
+/// `applied` is clamped to the record count; the result is always the encoding
+/// of a whole number of frames, never a partial frame.
+fn encoded_spine_prefix(spine: &crate::context_store::spine::Spine, applied: u64) -> Vec<u8> {
+    let records = spine.records();
+    let applied = (applied as usize).min(records.len());
+    let mut out = Vec::new();
+    for record in records.iter().take(applied) {
+        let bytes = spine.record_bytes(record);
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+        out.extend_from_slice(&record.content_digest.to_le_bytes());
+    }
+    out
 }
 
 /// Draws one 64-bit word from the std entropy pool (OS-seeded per-process keys).
@@ -116,10 +157,13 @@ fn ensure_vault_key(store: &SessionStore) -> Result<crate::context_store::vault:
             let key = crate::context_store::vault::VaultKey::from_slice(&bytes);
             Ok(*key)
         }
-        Err(message) => {
-            if !message.contains("open artifact context-vault-key failed") {
-                return Err(message);
-            }
+        // Only a genuine absence mints a key: classified by `ErrorKind` at
+        // the open call site, never by matching the rendered message. Any
+        // other failure (a symlinked name, EACCES, ENOTDIR, EMFILE) is a
+        // typed error surfaced to the caller, so it can never mint a fresh
+        // key over an unreadable artifact and destroy every sealed slot
+        // (issue 102).
+        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {
             let mut key = [0u8; KEY_LEN];
             for chunk in key.chunks_mut(8) {
                 chunk.copy_from_slice(&entropy_u64().to_le_bytes()[..chunk.len()]);
@@ -128,6 +172,7 @@ fn ensure_vault_key(store: &SessionStore) -> Result<crate::context_store::vault:
                 .map_err(|error| format!("publish context vault key failed: {error}"))?;
             Ok(crate::context_store::vault::VaultKey::from(key))
         }
+        Err(error) => Err(format!("context vault key artifact unreadable: {error}")),
     }
 }
 
@@ -157,10 +202,13 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
     };
     let spine_bytes = match crate::safe_file::read_artifact(&dir, "sanitized", SPINE_RELOAD_MAX) {
         Ok(bytes) => bytes,
-        Err(message) if message.contains("open artifact sanitized failed") => {
+        // Absent by kind, not by substring: only `NotFound` means no previous
+        // store. An unreadable sanitized spine fails recovery instead of
+        // silently returning a fresh empty store (issue 102).
+        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {
             return Ok(new_context_state(key));
         }
-        Err(message) => return Err(format!("context spine unreadable: {message}")),
+        Err(error) => return Err(format!("context spine unreadable: {error}")),
     };
     let mut state = new_context_state(key);
     state
@@ -177,39 +225,47 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
                 .restore_vault(snapshot)
                 .map_err(|error| format!("context vault refused restore: {error:?}"))?;
         }
-        Err(message) if message.contains("open artifact vault failed") => {}
-        Err(message) => return Err(format!("context vault unreadable: {message}")),
+        // A missing vault snapshot is legal (no quarantine ever
+        // happened); an unreadable one fails recovery, so sealed
+        // evidence is never silently reset away (issue 102).
+        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {}
+        Err(error) => return Err(format!("context vault unreadable: {error}")),
     }
-    let mut filters_restored = false;
-    if let Ok(bytes) = crate::safe_file::read_artifact(&dir, "manifest.json", MANIFEST_RELOAD_MAX) {
-        let manifest: PersistedManifest = serde_json::from_slice(&bytes)
-            .map_err(|error| format!("context manifest corrupt: {error}"))?;
-        // Historical filter versions reload with the store so a version named by
-        // a durable digest keeps resolving after a restart (issue #118).
-        state
-            .filters
-            .restore_histories(manifest.rules.clone())
-            .map_err(|_| "context manifest filter rules are not relaxations".to_string())?;
-        state
-            .filters
-            .restore_vocabulary_snapshots(manifest.vocabularies.clone())
-            .map_err(|_| "context manifest vocabularies are not additions".to_string())?;
-        filters_restored = true;
-        if manifest.mode == "read-only" {
+    // A present manifest restores mode, quiesce state, the preserved window,
+    // and the filter version histories. Its absence is a fresh session;
+    // an unreadable manifest fails recovery (issue 102).
+    match crate::safe_file::read_artifact(&dir, "manifest.json", MANIFEST_RELOAD_MAX) {
+        Ok(bytes) => {
+            let manifest: PersistedManifest = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("context manifest corrupt: {error}"))?;
+            // Historical filter versions reload with the store so a version named by
+            // a durable digest keeps resolving after a restart (issue #118).
             state
-                .store
-                .set_mode(crate::context_store::store::StoreMode::ReadOnly);
-        } else if manifest.mode == "unavailable" {
+                .filters
+                .restore_histories(manifest.rules.clone())
+                .map_err(|_| "context manifest filter rules are not relaxations".to_string())?;
             state
-                .store
-                .set_mode(crate::context_store::store::StoreMode::Unavailable);
+                .filters
+                .restore_vocabulary_snapshots(manifest.vocabularies.clone())
+                .map_err(|_| "context manifest vocabularies are not additions".to_string())?;
+            if manifest.mode == "read-only" {
+                state
+                    .store
+                    .set_mode(crate::context_store::store::StoreMode::ReadOnly);
+            } else if manifest.mode == "unavailable" {
+                state
+                    .store
+                    .set_mode(crate::context_store::store::StoreMode::Unavailable);
+            }
+            state.quiesce = manifest.quiesce;
+            state.detail = manifest.detail;
+            state.preserved = manifest.preserved;
         }
-        state.quiesce = manifest.quiesce;
-        state.detail = manifest.detail;
-        state.preserved = manifest.preserved;
-    }
-    if !filters_restored {
-        return Err("context manifest is missing: filter versions cannot be restored".to_string());
+        // A missing manifest is a fresh session (no filter history yet); an
+        // unreadable one fails recovery instead of being read as absence
+        // (issue 102).
+        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {}
+        Err(error) => return Err(format!("context manifest unreadable: {error}")),
     }
     Ok(state)
 }
@@ -523,13 +579,19 @@ fn memory_quiesce_record(tool: &str, result: &str) -> String {
 /// Replaces every bulk tool result with a deterministic digest record after moving the
 /// full bytes through the fail-closed ingress transaction into the spine and the vault.
 ///
-/// Results already compacted pre-entry are below the bulk threshold and are skipped, so
-/// the checkpoint seam never digests the same bytes twice.
+/// Results already compacted pre-entry are strictly below the bulk threshold and are
+/// skipped, so the checkpoint seam never digests the same bytes twice (119).
 fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> Result<(), String> {
+    // Strictly below the threshold skips the seam: a result of exactly
+    // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so it must be
+    // digested like any other bulk result. This is the same at-or-above
+    // comparison the filter verdict uses (`total >= rules.size_floor`),
+    // so the checkpoint seam and the filter can never disagree about the
+    // boundary (119).
     for round in rounds.iter_mut() {
         for call in round.calls.iter_mut() {
             let bytes = call.result.as_bytes();
-            if bytes.len() <= BULK_RESULT_BYTES {
+            if bytes.len() < BULK_RESULT_BYTES {
                 continue;
             }
             call.result = ingest_bulk(state, &call.name, bytes)?;
@@ -611,14 +673,21 @@ pub(crate) fn context_exchange(
 ///
 /// Bulk results are digested here, ahead of the request list, so the request that
 /// carries the result to the provider stays small and the pre-send wall guard never
-/// sees raw bulk bytes. Results below the bulk threshold are returned unchanged and
-/// touch no store state.
+/// sees raw bulk bytes. Results strictly below the bulk threshold are returned
+/// unchanged and touch no store state; a result exactly at the threshold is bulk
+/// evidence and is digested (119).
 ///
 /// A store or artifact failure never fails the turn: the record is still compact
 /// (computed in memory), the run is marked quiesce, and the marker is persisted
 /// best-effort where it stays readable when only `context/` is unwritable.
 pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> String {
-    if result.len() <= BULK_RESULT_BYTES {
+    // Strictly below the threshold skips the seam: a result of exactly
+    // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so the pre-entry seam
+    // digests it like any other bulk result and the request list never carries
+    // raw bulk bytes. The comparison matches the filter verdict's
+    // `total >= rules.size_floor` and the checkpoint seam, so all three agree
+    // on the boundary (119).
+    if result.len() < BULK_RESULT_BYTES {
         return result.to_string();
     }
     let Ok(mut guard) = store.context.lock() else {
@@ -749,21 +818,29 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         .map_err(|error| format!("encode policy event failed: {error}"))?
         .join("\n");
     write_artifact(&dir, &root, "events.log", events.as_bytes())?;
-    // One durable checkpoint line per publication: the applied record count and
-    // spine length the store checkpoint recorded, the digest of the spine bytes
-    // it covers, and the policy logical time that produced it. A reopened store
-    // can verify the recovered spine against the last line (issue #102).
-    let spine_bytes = state.store.spine_bytes();
+    // One durable checkpoint line per publication, each stamped over EXACTLY
+    // the content it names: the first `applied` spine records, encoded. The
+    // spine encoding is hoisted before this publication, so the checkpoint
+    // lines and the `sanitized` artifact they verify are the same generation
+    // (108).
+    //
+    // The prefix a reloaded store recovers from `sanitized` is the encoding of
+    // its first N records, so a checkpoint naming N records carries the length
+    // and digest of that same prefix: a reopened store can verify its recovered
+    // spine against the last line it claims to resume from.
+    let spine = state.store.spine_ref();
+    let records = spine.records().len() as u64;
+    let logical_time = state.policy.logical_time();
     let mut checkpoints = String::new();
-    for (index, event) in state.policy.events().iter().enumerate() {
+    // Enumerate the record positions of this generation: one line per prefix,
+    // 0..=records, so every line names a real position and the last line names
+    // the whole published spine. An empty spine still checkpoints its empty
+    // prefix, so a publication always carries at least one verifiable line.
+    for applied in 0..=records {
+        let checkpoint = DurableCheckpoint::at(spine, applied, logical_time);
         checkpoints.push_str(
-            &serde_json::to_string(&DurableCheckpoint {
-                applied: index as u64,
-                spine_len: spine_bytes.len() as u64,
-                spine_digest: crate::context_kernel::canonical::digest(&spine_bytes),
-                logical_time: event.logical_time,
-            })
-            .map_err(|error| format!("encode checkpoint failed: {error}"))?,
+            &serde_json::to_string(&checkpoint)
+                .map_err(|error| format!("encode checkpoint failed: {error}"))?,
         );
         checkpoints.push('\n');
     }

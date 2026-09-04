@@ -102,6 +102,16 @@ impl Spine {
         self.recovered_tails
     }
 
+    /// The stored bytes of one record, exactly as `encode` frames them.
+    ///
+    /// Checkpoint digests are computed over a record prefix, so the prefix
+    /// encoder and `encode` must agree byte for byte on what one record is.
+    pub fn record_bytes(&self, record: &SpineRecord) -> &[u8] {
+        let start = record.range.start as usize;
+        let end = record.range.end as usize;
+        &self.bytes[start..end]
+    }
+
     /// Appends sanitized bytes; the spine is append-only, so no range ever moves.
     pub fn append(&mut self, handle: &str, bytes: &[u8]) -> Range<u64> {
         let start = self.bytes.len() as u64;

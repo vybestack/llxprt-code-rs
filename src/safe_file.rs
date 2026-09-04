@@ -57,32 +57,111 @@ pub(crate) fn publish_artifact(
     handle.sync_all()
 }
 
+/// Why an artifact read failed, classified from the raw errno at the call site
+/// so "absent" is never confused with "unreadable" (issue 102).
+///
+/// `NotFound` is the ONLY absence verdict: every other failure (a symlinked
+/// name, `EACCES`, `ENOTDIR`, `EMFILE`, a non-regular or over-bound artifact,
+/// a failed read) is a distinct typed failure the caller must surface instead
+/// of silently minting fresh state over it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactError {
+    /// The name does not exist under the directory: a fresh store is legal.
+    NotFound { name: String },
+    /// The name exists but could not be opened: never treated as absence.
+    Unopenable {
+        name: String,
+        kind: std::io::ErrorKind,
+    },
+    /// The name opened but is not a regular file.
+    NotRegular { name: String },
+    /// The read itself failed.
+    Unreadable {
+        name: String,
+        kind: std::io::ErrorKind,
+    },
+    /// The artifact exceeded its read bound.
+    OverBound { name: String, max: usize },
+    /// The artifact name is not a valid C string.
+    BadName { name: String },
+}
+
+impl std::fmt::Display for ArtifactError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArtifactError::NotFound { name } => write!(f, "artifact {name} not found"),
+            ArtifactError::Unopenable { name, kind } => {
+                write!(f, "open artifact {name} failed: {kind}")
+            }
+            ArtifactError::NotRegular { name } => {
+                write!(f, "artifact {name} is not a regular file")
+            }
+            ArtifactError::Unreadable { name, kind } => {
+                write!(f, "read artifact {name} failed: {kind}")
+            }
+            ArtifactError::OverBound { name, max } => {
+                write!(f, "artifact {name} exceeds the read bound {max}")
+            }
+            ArtifactError::BadName { name } => write!(f, "artifact name {name} is invalid"),
+        }
+    }
+}
+
+impl std::error::Error for ArtifactError {}
+
 /// Reads one regular file through an already-open directory descriptor with
 /// `O_NOFOLLOW`, enforcing a read bound so a corrupted or hostile artifact
-/// cannot force an unbounded allocation.
-pub(crate) fn read_artifact(dir: &openat::Dir, name: &str, max: usize) -> Result<Vec<u8>, String> {
+/// cannot force an unbounded allocation. Failures are typed from the raw errno,
+/// so only `ArtifactError::NotFound` means the artifact is absent (issue 102).
+pub(crate) fn read_artifact(
+    dir: &openat::Dir,
+    name: &str,
+    max: usize,
+) -> Result<Vec<u8>, ArtifactError> {
     use std::io::Read as _;
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
 
     let flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
-    let cstring = std::ffi::CString::new(name)
-        .map_err(|_| format!("artifact name {name} is not a valid C string"))?;
+    let cstring = std::ffi::CString::new(name).map_err(|_| ArtifactError::BadName {
+        name: name.to_string(),
+    })?;
     let fd = unsafe { libc::openat(dir.as_raw_fd(), cstring.as_ptr(), flags, 0o600) };
     if fd < 0 {
         let error = std::io::Error::last_os_error();
-        return Err(format!("open artifact {name} failed: {error}"));
+        // Classify by the raw errno at the open call site: only ENOENT
+        // is absence (a fresh store or a first key); every other
+        // failure - a symlinked name with O_NOFOLLOW, EACCES, ENOTDIR,
+        // EMFILE, ... - is an unreadable artifact the caller must
+        // surface, never a silent reset (issue 102).
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return Err(ArtifactError::NotFound {
+                name: name.to_string(),
+            });
+        }
+        return Err(ArtifactError::Unopenable {
+            name: name.to_string(),
+            kind: error.kind(),
+        });
     }
     // SAFETY: the descriptor is owned from here on and `File` closes it on drop.
     let file = unsafe { std::fs::File::from(std::os::fd::OwnedFd::from_raw_fd(fd)) };
     if !file.metadata().map(|meta| meta.is_file()).unwrap_or(false) {
-        return Err(format!("artifact {name} is not a regular file"));
+        return Err(ArtifactError::NotRegular {
+            name: name.to_string(),
+        });
     }
     let mut bytes = Vec::new();
     file.take((max as u64) + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("read artifact {name} failed: {error}"))?;
+        .map_err(|error| ArtifactError::Unreadable {
+            name: name.to_string(),
+            kind: error.kind(),
+        })?;
     if bytes.len() > max {
-        return Err(format!("artifact {name} exceeds the read bound {max}"));
+        return Err(ArtifactError::OverBound {
+            name: name.to_string(),
+            max,
+        });
     }
     Ok(bytes)
 }
@@ -140,7 +219,10 @@ mod tests {
         };
         publish_artifact(&dir, "big", &[0u8; 64], open).unwrap();
         let error = read_artifact(&dir, "big", 8).unwrap_err();
-        assert!(error.contains("exceeds the read bound"), "{error}");
+        assert!(
+            matches!(error, ArtifactError::OverBound { max, .. } if max == 8),
+            "the read bound is a typed failure: {error}"
+        );
     }
 
     #[test]

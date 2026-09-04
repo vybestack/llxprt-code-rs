@@ -441,6 +441,351 @@ fn oversized_admission_is_refused_without_touching_the_spine() {
     );
 }
 
+/// Every durable checkpoint line is digested over EXACTLY the content it names.
+///
+/// A checkpoint line's `applied` field counts the store records its generation had
+/// applied, so the line's `spine_len` and `spine_digest` must describe exactly the
+/// encoding of the first `applied` spine records. The old code stamped every line
+/// with the digest and length of the whole final spine, so a line naming
+/// `applied = k` claimed content that did not exist at that checkpoint and could
+/// never be verified against the state it describes (108).
+///
+/// The spine is hoisted before the checkpoint lines are rendered, so the lines and
+/// the published `sanitized` artifact are the same generation: a reopened store can
+/// verify its recovered spine against the last line it claims to resume from.
+#[test]
+fn checkpoint_digests_cover_exactly_the_content_they_name() {
+    let cwd = workspace();
+    let first = store("checkpoint-digest");
+    run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
+
+    // One publication is one generation: read the spine and its checkpoints
+    // from the same store state.
+    let spine = artifact(&first, "sanitized");
+    let checkpoints = artifact(&first, "checkpoints");
+    let lines: Vec<&[u8]> = checkpoints.split(|byte| *byte == b'\n').collect();
+    assert!(
+        lines.iter().any(|line| !line.is_empty()),
+        "the run recorded at least one checkpoint line"
+    );
+
+    let frames = frame_list(&spine);
+    let mut applied_seen: Vec<u64> = Vec::new();
+    for line in lines.iter() {
+        if line.is_empty() {
+            continue;
+        }
+        let checkpoint: serde_json::Value =
+            serde_json::from_slice(line).expect("each checkpoint line is one JSON object");
+        let applied = checkpoint["applied"].as_u64().expect("applied is set");
+        let spine_len = checkpoint["spine_len"].as_u64().expect("spine_len is set");
+        let spine_digest = checkpoint["spine_digest"]
+            .as_u64()
+            .expect("spine_digest is set");
+        assert!(
+            (applied as usize) <= frames.len(),
+            "a checkpoint names at most the records that exist: {applied} > {}",
+            frames.len()
+        );
+        // The claimed content is the encoding of exactly `applied` records.
+        let prefix = encoded_prefix(&frames, applied as usize);
+        assert_eq!(
+            spine_len,
+            prefix.len() as u64,
+            "spine_len is the encoded length of the {applied}-record prefix the line names"
+        );
+        assert_eq!(
+            spine_digest,
+            fnv1a64(&prefix),
+            "spine_digest covers exactly the {applied}-record prefix the line names"
+        );
+        applied_seen.push(applied);
+    }
+    // The lines enumerate every record prefix of the published spine: 0..=N in
+    // order, so a reopened store can find a verifiable line for any prefix it
+    // recovers, and the last line names the whole published generation.
+    assert_eq!(
+        applied_seen,
+        (0..=frames.len() as u64).collect::<Vec<u64>>(),
+        "checkpoint lines enumerate every record prefix"
+    );
+    // The last line names the whole published spine: a reopened store verifies
+    // the recovered spine against content that actually exists.
+    let last_line = *lines
+        .iter()
+        .rev()
+        .find(|line| !line.is_empty())
+        .expect("a non-empty checkpoint line exists");
+    let last: serde_json::Value = serde_json::from_slice(last_line).unwrap();
+    assert_eq!(
+        last["applied"].as_u64().unwrap() as usize,
+        frames.len(),
+        "the final checkpoint names every record of the published spine"
+    );
+    let whole = encoded_prefix(&frames, frames.len());
+    assert_eq!(
+        last["spine_len"].as_u64().unwrap(),
+        whole.len() as u64,
+        "the final checkpoint length is the whole published spine"
+    );
+    assert_eq!(
+        last["spine_digest"].as_u64().unwrap(),
+        fnv1a64(&whole),
+        "the final checkpoint digest covers the whole published spine"
+    );
+
+    // A second publication on the recovered store keeps the same contract: the
+    // hoisted spine is re-read before the lines are rendered, so the two
+    // generations never disagree.
+    let second = reopen(&first);
+    std::fs::write(cwd.join("second.txt"), "r".repeat(64 * 1024)).unwrap();
+    let round = LlmResult {
+        text: "reading".into(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "read_file".into(),
+            args_json: r#"{"path":"second.txt"}"#.to_string(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let second_turn = reserved(&second, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(
+        Box::new(MockBackend::new(vec![round, result("done")])),
+        &cwd,
+    );
+    a.run(&second, &second_turn)
+        .expect("the restarted turn runs on the recovered store");
+    let spine2 = artifact(&second, "sanitized");
+    let checkpoints2 = artifact(&second, "checkpoints");
+    let frames2 = frame_list(&spine2);
+    assert!(
+        frames2.len() > frames.len(),
+        "the second publication added spine records"
+    );
+    let mut last_applied = 0u64;
+    for line in checkpoints2.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let checkpoint: serde_json::Value =
+            serde_json::from_slice(line).expect("each checkpoint line is one JSON object");
+        let applied = checkpoint["applied"].as_u64().unwrap();
+        let prefix = encoded_prefix(&frames2, applied as usize);
+        assert_eq!(
+            checkpoint["spine_len"].as_u64().unwrap(),
+            prefix.len() as u64,
+            "the second generation's lines still name their own prefix"
+        );
+        assert_eq!(
+            checkpoint["spine_digest"].as_u64().unwrap(),
+            fnv1a64(&prefix),
+            "the second generation's lines still digest their own prefix"
+        );
+        last_applied = last_applied.max(applied);
+    }
+    assert_eq!(
+        last_applied as usize,
+        frames2.len(),
+        "the second generation's final line names every record it published"
+    );
+}
+
+/// The spine's framed records, exactly as `Spine::encode` frames them.
+fn frame_list(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        assert!(cursor + 4 <= bytes.len(), "checkpoint spine frame is short");
+        let len = u32::from_le_bytes([
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
+        ]) as usize;
+        assert!(
+            cursor + 4 + len + 8 <= bytes.len(),
+            "checkpoint spine frame overruns"
+        );
+        out.push(bytes[cursor..cursor + 4 + len + 8].to_vec());
+        cursor += 4 + len + 8;
+    }
+    out
+}
+
+/// The encoding of the first `applied` framed records.
+fn encoded_prefix(frames: &[Vec<u8>], applied: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    for frame in frames.iter().take(applied) {
+        out.extend_from_slice(frame);
+    }
+    out
+}
+
+/// FNV-1a 64-bit, the same canonical digest the durable checkpoint lines carry.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// A tool result of exactly the bulk threshold is bulk evidence at BOTH compaction
+/// seams: the pre-entry `compact_tool_result` seam (`<` keeps it) and the checkpoint
+/// seam's `digest_bulk_results` (`<` keeps it). The old code used `<=`, so a result of
+/// exactly `BULK_RESULT_BYTES` rode the request list and the transcript as raw bytes and
+/// was skipped by the checkpoint seam, which disagrees with the filter verdict's
+/// at-or-above floor (119).
+#[test]
+fn a_result_exactly_at_the_bulk_threshold_compacts() {
+    let cwd = workspace();
+    let store = store("at-threshold");
+    // One bulk turn first, so the store exists and the spine is non-empty.
+    run_bulk_turn(&store, &cwd, "bulk.txt", "c0");
+    let spine_before = artifact(&store, "sanitized").len();
+    assert!(spine_before > 0, "the bulk turn left spine evidence");
+
+    // Exactly 1024 bytes: the threshold itself, not one byte above it.
+    let exactly = "x".repeat(1024);
+    assert_eq!(exactly.len(), 1024);
+    let compacted = store.compact_tool_result("read_file", &exactly);
+    // The record is no longer the raw payload: the threshold result was
+    // admitted through the transaction and replaced by its digest record.
+    assert_ne!(
+        compacted, exactly,
+        "a result exactly at the threshold is digested, never returned raw"
+    );
+    // The threshold result was admitted: the spine grew by the payload.
+    let spine_after = artifact(&store, "sanitized").len();
+    assert!(
+        spine_after > spine_before,
+        "a result exactly at the threshold is bulk evidence at the compaction seam: {spine_before} -> {spine_after}"
+    );
+
+    // One byte BELOW the threshold stays verbatim: the boundary is at-or-above,
+    // so only strictly-smaller results skip the seam.
+    let below = "y".repeat(1023);
+    let untouched_before = artifact(&store, "sanitized").len();
+    let verbatim = store.compact_tool_result("read_file", &below);
+    assert_eq!(
+        verbatim, below,
+        "a strictly smaller result is returned verbatim"
+    );
+    assert_eq!(
+        artifact(&store, "sanitized").len(),
+        untouched_before,
+        "a strictly smaller result touches no store state"
+    );
+}
+
+/// An unreadable (chmod 000 or symlinked) sanitized spine is an integrity failure, not
+/// a silent reset: the restarted session must refuse to advance instead of minting a
+/// fresh empty store over the unreadable evidence (issue 102).
+#[test]
+fn unreadable_spine_fails_recovery_instead_of_resetting() {
+    let cwd = workspace();
+    let first = store("unreadable-spine");
+    run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
+    let spine_before = std::fs::read(first.session_dir.join("context").join("sanitized")).unwrap();
+    assert!(
+        !spine_before.is_empty(),
+        "the first run left durable spine evidence"
+    );
+
+    // chmod 000 the spine: open must fail with a kind other than NotFound.
+    let spine = first.session_dir.join("context").join("sanitized");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spine, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let second = reopen(&first);
+    let second_turn = reserved(&second, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let refused = a.run(&second, &second_turn);
+    let error =
+        refused.expect_err("an unreadable spine must fail the turn instead of silently resetting");
+    assert!(
+        error.to_string().contains("context spine unreadable"),
+        "the failure names the unreadable spine, not another cause: {error}"
+    );
+    // The unreadable spine is never overwritten or truncated: the file keeps
+    // its original size and permissions.
+    let meta = std::fs::metadata(&spine).expect("the spine artifact still exists");
+    assert_eq!(
+        meta.len() as usize,
+        spine_before.len(),
+        "the unreadable spine is never overwritten or truncated"
+    );
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spine, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+
+/// A symlinked vault artifact must fail recovery, never be read as absence: the
+/// sealed slots stay sealed and no fresh vault is minted over them (issue 102).
+#[test]
+fn symlinked_vault_artifact_fails_recovery() {
+    let cwd = workspace();
+    let first = store("symlink-vault");
+    run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
+    let vault_before = std::fs::read(first.session_dir.join("context").join("vault")).unwrap();
+    assert!(!vault_before.is_empty(), "the vault snapshot is durable");
+
+    // Replace the vault artifact with a symlink: O_NOFOLLOW makes open fail
+    // with a kind that is not NotFound, so recovery must refuse.
+    let vault = first.session_dir.join("context").join("vault");
+    let target = first.session_dir.join("context").join("vault-real");
+    std::fs::rename(&vault, &target).unwrap();
+    std::os::unix::fs::symlink("vault-real", &vault).unwrap();
+
+    let second = reopen(&first);
+    let second_turn = reserved(&second, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let refused = a.run(&second, &second_turn);
+    let error =
+        refused.expect_err("a symlinked vault artifact must fail the turn, not read as absence");
+    assert!(
+        error.to_string().contains("context vault unreadable"),
+        "the failure names the unreadable vault artifact: {error}"
+    );
+}
+
+/// A symlinked vault KEY artifact must never be treated as absence: no fresh key is
+/// minted over it, so sealed slots are never silently destroyed (issue 102).
+#[test]
+fn symlinked_vault_key_artifact_never_mints_a_fresh_key() {
+    let cwd = workspace();
+    let first = store("symlink-vault-key");
+    run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
+    let key_path = first.session_dir.join("context-vault-key");
+    let key_before = std::fs::read(&key_path).unwrap();
+    assert_eq!(key_before.len(), 32, "the vault key artifact exists");
+
+    // Symlink the key artifact: opening it with O_NOFOLLOW fails with a kind
+    // other than NotFound, so the key seam must surface the failure instead
+    // of minting a NEW key over it.
+    let target = first.session_dir.join("context-vault-key-real");
+    std::fs::rename(&key_path, &target).unwrap();
+    std::os::unix::fs::symlink("context-vault-key-real", &key_path).unwrap();
+
+    let second = reopen(&first);
+    let second_turn = reserved(&second, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let refused = a.run(&second, &second_turn);
+    assert!(
+        refused.is_err(),
+        "a symlinked vault key must fail the turn, not mint a fresh key"
+    );
+    // The key artifact is still the symlink: no fresh key was published over it.
+    let after = std::fs::read(&key_path);
+    assert!(
+        after.is_err() || after.unwrap() == key_before,
+        "the vault key artifact was never replaced by a fresh mint"
+    );
+}
+
 /// A production-path secret corpus never lands unscanned: routing bulk results
 /// through the ingress transaction means the redactor's substitutions are the
 /// only bytes the sanitized spine and the vault ever see (issue #100: production

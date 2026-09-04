@@ -221,6 +221,15 @@ impl ContextStore {
         self.spine.encode()
     }
 
+    /// Read-only view of the spine itself.
+    ///
+    /// Durable checkpoint lines are digested over a record prefix, so the
+    /// publication seam needs the spine's own record list, not just its
+    /// encoding.
+    pub fn spine_ref(&self) -> &crate::context_store::spine::Spine {
+        &self.spine
+    }
+
     /// Replaces the spine from encoded bytes, rebuilding the index.
     ///
     /// Returns the corrupt-tail count of the loaded spine.
