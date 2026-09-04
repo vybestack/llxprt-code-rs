@@ -77,7 +77,11 @@ fn workspace() -> PathBuf {
 
 /// Opens a unique session store inside the shared root.
 fn store(id: &str) -> SessionStore {
-    let sid = SessionId::parse(id).unwrap();
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    // Session ids must be unique per store: a shared root means two live
+    // stores with the same id contend for the same session lock.
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let sid = SessionId::parse(&format!("{id}-{n}")).unwrap();
     SessionStore::load_at(&sid, &root()).expect("open store")
 }
 
@@ -434,5 +438,93 @@ fn oversized_admission_is_refused_without_touching_the_spine() {
     assert_eq!(
         after, before,
         "no spine bytes are appended when the executor refuses the admission"
+    );
+}
+
+/// A production-path secret corpus never lands unscanned: routing bulk results
+/// through the ingress transaction means the redactor's substitutions are the
+/// only bytes the sanitized spine and the vault ever see (issue #100: production
+/// redaction bypass). The corpus is the same one the component tests use, padded above
+/// the bulk threshold so the pre-entry compaction seam exercises it.
+#[test]
+fn production_secret_corpus_never_reaches_the_durable_artifacts() {
+    const SECRET: &str = "CTXEVAL-SECRET-A1B2C3D4E5";
+    let cwd = workspace();
+    let store = store("prod-secret-corpus");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+
+    // The corpus marker is a detector class the redactor replaces in place;
+    // padding below the threshold would skip the compaction seam entirely.
+    let payload = format!(
+        "marker: {SECRET}\nexact error span: bytes 4096..4131 \"unexpected trailing frame\"\n{}",
+        "noise line 0000\n".repeat(96)
+    );
+    assert!(payload.len() > 1024, "the corpus is bulk evidence");
+    let compacted = store.compact_tool_result("read_file", &payload);
+    assert!(
+        compacted.starts_with("CTXDIGEST v1 tool=read_file "),
+        "the bulk corpus is digested on the production path: {compacted}"
+    );
+    assert!(
+        !compacted.contains(SECRET),
+        "the compact record carries no unscanned secret"
+    );
+
+    // Every durable context artifact and the session log stay free of the
+    // secret: the spine holds the sanitized bytes only, and the vault holds
+    // the quarantined payload sealed, never in the clear.
+    let sanitized = artifact(&store, "sanitized");
+    assert!(
+        !String::from_utf8_lossy(&sanitized).contains(SECRET),
+        "the sanitized spine never holds an unscanned secret"
+    );
+    let vault = artifact(&store, "vault");
+    assert!(
+        !String::from_utf8_lossy(&vault).contains(SECRET),
+        "the vault artifact is ciphertext, never the plaintext secret"
+    );
+    let events = artifact(&store, "events.log");
+    assert!(
+        !String::from_utf8_lossy(&events).contains(SECRET),
+        "the policy event log never names a secret"
+    );
+    let journal = artifact(&store, "rewrite-journal.log");
+    assert!(
+        !String::from_utf8_lossy(&journal).contains(SECRET),
+        "the rewrite journal never carries a secret"
+    );
+    let manifest = artifact(&store, "manifest.json");
+    assert!(
+        !String::from_utf8_lossy(&manifest).contains(SECRET),
+        "the manifest never carries a secret"
+    );
+    // Both session-state slots are scanned: the durable state is the
+    // transcript the next process would replay.
+    for name in ["session.json", "session.alt.json"] {
+        let path = store.session_dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+        let state = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !state.contains(SECRET),
+            "{name} never carries an unscanned secret"
+        );
+    }
+    let quiesce = store.session_dir.join("context-quiesce.json");
+    if quiesce.exists() {
+        let marker = std::fs::read_to_string(&quiesce).unwrap();
+        assert!(
+            !marker.contains(SECRET),
+            "the quiesce marker never carries a secret"
+        );
+    }
+    // The sanitized evidence the redactor produced is still reachable, so the
+    // secret was replaced in place rather than dropped.
+    assert!(
+        String::from_utf8_lossy(&sanitized).contains("unexpected trailing frame"),
+        "the preserved exact span is still addressable after redaction"
     );
 }
