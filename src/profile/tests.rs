@@ -156,6 +156,93 @@ fn codex_loop_detection_cannot_be_silently_ignored() {
     );
 }
 
+/// Chat and Responses share `parse_ephemeral_primary`, so the exact-`false`
+/// contract holds on both paths: `true` rejects (never a silent ignore) and a
+/// non-boolean rejects with the value-free boolean error.
+#[test]
+fn loop_detection_rejects_true_and_non_booleans_on_the_chat_path() {
+    let base = json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": {"loopDetectionEnabled": false}
+    });
+    let profile = parse_profile_value(&base, "chat-loop").unwrap();
+    assert_eq!(profile.ephemeral.loop_detection_enabled, Some(false));
+
+    let mut enabled = base.clone();
+    enabled["ephemeralSettings"]["loopDetectionEnabled"] = json!(true);
+    assert_eq!(
+        parse_profile_value(&enabled, "chat-loop").unwrap_err(),
+        "profile \"chat-loop\": loop detection is not supported by this runtime"
+    );
+
+    let mut typed = base.clone();
+    typed["ephemeralSettings"]["loopDetectionEnabled"] = json!("false");
+    assert_eq!(
+        parse_profile_value(&typed, "chat-loop").unwrap_err(),
+        "profile \"chat-loop\": 'loopDetectionEnabled' must be a boolean"
+    );
+}
+
+/// `streaming` stays inert metadata but is still an enum: exactly `enabled` or
+/// `disabled` parse, anything else rejects with a value-free bounded error, and
+/// the prompt-note cap no longer applies to this key.
+#[test]
+fn streaming_is_a_bounded_enum() {
+    let base = json!({
+        "provider": "openai",
+        "model": "m",
+        "ephemeralSettings": {}
+    });
+    for value in [json!("enabled"), json!("disabled")] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let parsed = parse_profile_value(&profile, "stream")
+            .unwrap_or_else(|error| panic!("{value}: {error}"));
+        assert_eq!(
+            parsed.ephemeral.streaming.as_deref(),
+            Some(value.as_str().unwrap_or_default())
+        );
+    }
+    // String spellings that are not the exact enum members reject with the
+    // bounded enum error (never the prompt-note cap, never a value echo).
+    for value in [json!("Enabled"), json!("always"), json!("")] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let error = parse_profile_value(&profile, "stream").unwrap_err();
+        assert!(
+            !error.contains(&value.to_string()),
+            "error must stay value-free: {error}"
+        );
+        assert_eq!(
+            error,
+            "profile \"stream\": 'streaming' must be enabled or disabled"
+        );
+    }
+    // Non-strings are type errors (also value-free), never a silent ignore.
+    for value in [json!(1), json!(true), json!({ "mode": "enabled" })] {
+        let mut profile = base.clone();
+        profile["ephemeralSettings"]["streaming"] = value.clone();
+        let error = parse_profile_value(&profile, "stream").unwrap_err();
+        assert!(
+            !error.contains(&value.to_string()),
+            "error must stay value-free: {error}"
+        );
+        assert_eq!(error, "profile \"stream\": 'streaming' must be a string");
+    }
+
+    // An over-long spelling is an enum rejection, not the prompt-note cap.
+    let mut long = base.clone();
+    long["ephemeralSettings"]["streaming"] = json!(format!(
+        "{}!",
+        "x".repeat(crate::redact::MAX_PROMPT_NOTE_BYTES)
+    ));
+    assert_eq!(
+        parse_profile_value(&long, "stream").unwrap_err(),
+        "profile \"stream\": 'streaming' must be enabled or disabled"
+    );
+}
+
 /// objects when present, and each known scalar field must have the right type. Every
 /// bound field stays error-on-wrong-type, never a silent ignore.
 #[test]
@@ -440,12 +527,50 @@ fn reasoning_effort_enforces_prompt_note_cap() {
     assert_eq!(error, crate::redact::PROMPT_NOTE_CAP_MESSAGE);
 }
 
+/// The ordinary sibling settings parse as inert Standard Chat fields: each is
+/// typed exactly as the sibling registry declares it and none reaches the wire.
+fn assert_ordinary_chat_settings_are_inert(name: &str, profile: &crate::profile::Profile) {
+    assert!(
+        profile.model_params.chat_template_kwargs.is_none(),
+        "{name}: no discriminator means the Standard variant"
+    );
+    assert!(profile.ephemeral.unsupported.is_empty(), "{name}");
+    assert!(profile.ephemeral.shell_replacement.is_some(), "{name}");
+    assert_eq!(profile.ephemeral.stream_idle_timeout_ms, Some(0), "{name}");
+    assert_eq!(profile.ephemeral.reasoning_enabled, Some(true), "{name}");
+    assert_eq!(
+        profile.ephemeral.reasoning_include_in_response,
+        Some(true),
+        "{name}"
+    );
+    assert_eq!(
+        profile.ephemeral.reasoning_include_in_context,
+        Some(true),
+        "{name}"
+    );
+    assert!(
+        profile.ephemeral.reasoning_strip_from_context_none,
+        "{name}"
+    );
+    assert_eq!(
+        profile.ephemeral.streaming.as_deref(),
+        Some("enabled"),
+        "{name}"
+    );
+    assert_eq!(profile.ephemeral.max_turns_per_prompt, Some(-1), "{name}");
+    assert_eq!(
+        profile.ephemeral.loop_detection_enabled,
+        Some(false),
+        "{name}"
+    );
+}
+
 #[test]
 fn dsflash_variant_is_structural_and_names_never_select() {
-    // Markers without the discriminator parse under ANY name (typed fields) and
-    // defer the fixed class-4 diagnostic naming the lexicographically first
-    // normalized marker path.
-    for name in ["dsflash-mi300x", "ordinary-profile", "qwen38"] {
+    // Markers without the discriminator parse under ANY name as Standard Chat
+    // inert host-side settings; nothing defers a diagnostic and nothing is
+    // forwarded. These are exactly the ordinary sibling keys issue 7 names.
+    for name in ["dsflash-mi300x", "ordinary-profile", "qwen38", "glm52-vast"] {
         let profile = parse_profile_value(
             &json!({
                 "provider": "openai",
@@ -456,22 +581,20 @@ fn dsflash_variant_is_structural_and_names_never_select() {
                     "reasoning.enabled": true,
                     "reasoning.includeInResponse": true,
                     "reasoning.includeInContext": true,
-                    "reasoning.stripFromContext": "none"
+                    "reasoning.stripFromContext": "none",
+                    "streaming": "enabled",
+                    "maxTurnsPerPrompt": -1,
+                    "loopDetectionEnabled": false
                 }
             }),
             name,
         )
         .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert_eq!(
-            profile.chat_missing_discriminator.as_deref(),
-            Some("ephemeralSettings.reasoning.enabled"),
-            "{name}: lexicographically first marker"
-        );
-        assert!(profile.model_params.chat_template_kwargs.is_none());
+        assert_ordinary_chat_settings_are_inert(name, &profile);
     }
 
     // The discriminator selects the dsflash variant under any name: parse
-    // succeeds, the marker diagnostic is gone, and the typed fields survive.
+    // succeeds and the typed fields survive.
     for name in ["dsflash-mi300x", "renamed-profile"] {
         let profile = parse_profile_value(
             &json!({
@@ -483,7 +606,6 @@ fn dsflash_variant_is_structural_and_names_never_select() {
             name,
         )
         .unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert!(profile.chat_missing_discriminator.is_none(), "{name}");
         let kwargs = profile
             .model_params
             .chat_template_kwargs
@@ -503,7 +625,6 @@ fn dsflash_variant_is_structural_and_names_never_select() {
         "plain-name",
     )
     .unwrap();
-    assert!(kwargs_only.chat_missing_discriminator.is_none());
     assert!(kwargs_only
         .model_params
         .chat_template_kwargs
@@ -875,4 +996,58 @@ fn openai_responses_rejects_inapplicable_and_conflicting_settings() {
             "{value}"
         );
     }
+}
+
+#[test]
+fn openai_responses_folds_kebab_max_output_tokens_model_params() {
+    let profile = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses"},
+            "modelParams": {"max-output-tokens": 8192}
+        }),
+        "responses",
+    )
+    .unwrap();
+    assert_eq!(profile.ephemeral.max_output_tokens, Some(8192));
+}
+
+#[test]
+fn openai_responses_folds_kebab_max_tokens_model_params() {
+    let profile = parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses"},
+            "modelParams": {"max-tokens": 8192}
+        }),
+        "responses",
+    )
+    .unwrap();
+    assert_eq!(profile.ephemeral.max_output_tokens, Some(8192));
+}
+
+#[test]
+fn openai_responses_rejects_disagreeing_max_output_model_params() {
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses", "maxOutput": 4096},
+            "modelParams": {"max-output-tokens": 5000}
+        }),
+        "responses",
+    )
+    .expect_err("disagreeing max-output model params must reject");
+    parse_profile_value(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6",
+            "ephemeralSettings": {"apiMode": "responses", "max_output_tokens": 4096},
+            "modelParams": {"max-tokens": 5000}
+        }),
+        "responses",
+    )
+    .expect_err("disagreeing max-output aliases must reject");
 }

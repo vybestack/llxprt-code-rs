@@ -4199,7 +4199,7 @@
       "key": "loopDetectionEnabled",
       "classification": "host-applied",
       "owner": "common",
-      "note": "exact false accepted; other values reject"
+      "note": "exact false accepted; true and non-booleans reject"
     },
     {
       "key": "toolCallLoopThreshold",
@@ -4311,9 +4311,9 @@
     },
     {
       "key": "streaming",
-      "classification": "rejected",
+      "classification": "exact-compatibility-metadata",
       "owner": "common",
-      "note": "fixed rejection of streaming"
+      "note": "exact enum enabled|disabled metadata; never selects a transport mode"
     },
     {
       "key": "compression-threshold",

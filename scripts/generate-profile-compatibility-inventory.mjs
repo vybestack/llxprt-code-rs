@@ -537,7 +537,7 @@ function buildClassificationTable() {
   add('context-limit', host, common, 'host context limit; Codex exact 262144 predicate');
   add('contextLimit', host, common, 'ephemeralSettings.contextLimit alias');
   add('maxTurnsPerPrompt', host, common, 'effective round cap: -1 or 1..=32');
-  add('loopDetectionEnabled', host, common, 'exact false accepted; other values reject');
+  add('loopDetectionEnabled', host, common, 'exact false accepted; true and non-booleans reject');
   add('toolCallLoopThreshold', rej, common, 'rejected');
   add('contentLoopThreshold', rej, common, 'rejected');
   add('retries', rej, common, 'rejected');
@@ -556,7 +556,7 @@ function buildClassificationTable() {
   add('disabled-tools', host, common, 'alias of tools.disabled; equality required');
   add('tools.allowed', meta, common, 'empty array only; nonempty allowlist rejects');
   add('shell-replacement', rej, ds, 'dsflash boolean metadata; sibling string values allowlist/all/none/true/false reject');
-  add('streaming', rej, common, 'fixed rejection of streaming');
+  add('streaming', meta, common, 'exact enum enabled|disabled metadata; never selects a transport mode');
   add('compression-threshold', rej, common, 'rejected');
   add('compression.strategy', rej, common, 'rejected');
   add('compression.profile', rej, common, 'rejected');
@@ -812,8 +812,9 @@ function stagedLadderBuilders() {
       base: 'chutesk2streaming.json',
       name: 'chutesk2streaming.streaming-only.synthetic.json',
       build: (r) => {
-        // Streaming-only: every dsflash marker is removed so the unsupported
-        // `streaming` key is the first (class 6) failure without a discriminator.
+        // Streaming-only: every dsflash marker is removed so the `streaming` key
+        // stands alone; it is exact inert enum metadata, so no discriminator is
+        // required and no variant is selected.
         const es = { ...(r.ephemeralSettings ?? {}) };
         for (const k of [
           'shell-replacement',
@@ -998,7 +999,9 @@ function renderMarkdown(artifact) {
   push('| fixture | provider | expected disposition |');
   push('| --- | --- | --- |');
   for (const r of artifact.profiles.installedInScope) {
-    push(`| \`${r.file}\` | ${r.provider} | ${r.expectedDisposition.stage} |`);
+    const d = r.expectedDisposition;
+    const out = d.firstFailure ? `${d.stage} (${d.firstFailure})` : d.stage;
+    push(`| \`${r.file}\` | ${r.provider} | ${out} |`);
   }
   push();
   push(`## Load-balancer shapes (${c.loadBalancer} rows; out of target construction scope)`);

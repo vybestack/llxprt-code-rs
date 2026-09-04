@@ -109,7 +109,8 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
     fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     // The loopback never validates credentials; the inline value is a synthetic marker so
     // the CLI never touches a native credential store or a real provider. Only profile
-    // keys this CLI accepts for a plain loopback Chat provider are emitted:
+    // keys this CLI accepts for a plain loopback Chat provider are emitted; the
+    // ordinary sibling settings are inert here, so only the applied ones are sent.
     // `stream-idle-timeout-ms` is dsflash-only and would be rejected as model-config.
     // The effective context limit comes from the scenario's arm-specific runtime config
     // (GAP-H7): arm selection must change installed runtime behavior, not just a label.

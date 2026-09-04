@@ -92,9 +92,27 @@ fn openai_responses_rejects_dsflash_only_settings_under_any_name() {
         assert_eq!(
             parse_profile_value(&with_markers, name).unwrap_err(),
             format!(
-                "profile \"{name}\": dsflash-only setting(s) \
+                "profile \"{name}\": behavior-only setting(s) \
                  ephemeralSettings.shell-replacement, \
                  ephemeralSettings.stream-idle-timeout-ms are unsupported for \
+                 OpenAI Responses"
+            )
+        );
+    }
+
+    // The exact Chat metadata keys stay inert-refused on Responses too: even the
+    // accepted spellings (`false`, `enabled`) would be silently ignored here, so
+    // the Responses path names both keys instead of accepting them.
+    let mut with_chat_only = base.clone();
+    with_chat_only["ephemeralSettings"]["loopDetectionEnabled"] = json!(false);
+    with_chat_only["ephemeralSettings"]["streaming"] = json!("enabled");
+    for name in ["dsflash", "responses"] {
+        assert_eq!(
+            parse_profile_value(&with_chat_only, name).unwrap_err(),
+            format!(
+                "profile \"{name}\": behavior-only setting(s) \
+                 ephemeralSettings.loopDetectionEnabled, \
+                 ephemeralSettings.streaming are unsupported for \
                  OpenAI Responses"
             )
         );
