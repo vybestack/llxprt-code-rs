@@ -9,8 +9,8 @@ use crate::context_kernel::events::{
     structural_lane, AppendSource, EventKind, EventLog, OperationClass, RecordedEvent,
 };
 use crate::context_kernel::ir::{
-    covers_exactly, normalize, slice_into, ConversationIr, IrError, Item, ItemId, Region,
-    SegmentClaim, SplitContract, SplitNamespace, StoreRange,
+    covers_exactly, normalize, slice_into, ConversationIr, IrError, Item, ItemId, ItemNamespace,
+    Region, SegmentClaim, SplitContract, SplitNamespace, StoreRange,
 };
 use crate::context_kernel::lanes::{
     Lane, LanePolicyRegistry, PolicyError, LANE_POLICY_LATEST_VERSION,
@@ -263,9 +263,19 @@ impl Reducer {
 /// item's lane decided by its own claim's structural class and falling back to
 /// the structural lane of the source only when the claim carries no class. An
 /// append with no recorded claims is the pre-segmentation append: it is one claim
-/// over the whole payload, so its lane is the source fallback. Identifiers are
-/// the append namespace value of the event sequence plus the claim index, so
-/// replays cannot invent either.
+/// over the whole payload, so its lane is the source fallback.
+///
+/// Identifiers come from the IR's own append mint, never from the event sequence.
+/// One append can mint several identifiers while the log's sequences are strictly
+/// consecutive, so minting from the sequence would hand a multi-claim append
+/// identifiers that the next event's append re-mints. The mint raises the append
+/// watermark once per minted identifier, and only when the append commits, so
+/// no later mint ever repeats one and a refused append spends nothing.
+///
+/// The append is atomic: every item is minted and validated before any of them
+/// reaches the caller's state, so a refusal on any claim leaves the state
+/// byte-identical to the state before the event. Either every claim of the append
+/// lands or none does.
 fn apply_append(
     state: &mut TypedState,
     event: &RecordedEvent,
@@ -275,19 +285,40 @@ fn apply_append(
     claims: &[SegmentClaim],
 ) -> Result<(), ReducerError> {
     let claims = claims_of(claims, sanitized, event.sequence)?;
-    attribute(state, scope, event.sequence)?;
+    // Stage the whole append first: identifiers are derived from the append
+    // watermark without raising it, and uniqueness is checked against the IR,
+    // before any item reaches the caller's state. Nothing before the commit
+    // mutates the state, so a refusal leaves it exactly as it was.
+    let watermark = state
+        .conversation_ir
+        .namespace_watermark(ItemNamespace::Append);
     let fallback = structural_lane(source);
+    let mut staged: Vec<Item> = Vec::with_capacity(claims.len());
     for (index, claim) in claims.iter().enumerate() {
+        let id = ItemId::append(watermark + index as u64);
+        if state
+            .conversation_ir
+            .items()
+            .iter()
+            .any(|item| item.id() == id)
+        {
+            return Err(ReducerError::Ir(IrError::DuplicateItem { id: id.value() }));
+        }
         let provenance = vec![StoreRange {
             offset: state.next_offset + claim.span.offset,
             length: claim.span.length,
         }];
-        let id = ItemId::append(event.sequence + index as u64);
         let lane = claim
             .class
             .map(Lane::for_structural_class)
             .unwrap_or(fallback);
-        let item = Item::new(id, lane, provenance, scope);
+        staged.push(Item::new(id, lane, provenance, scope));
+    }
+    // Every claim minted: the append commits as one transition, watermark included.
+    attribute(state, scope, event.sequence)?;
+    let last = ItemId::append(watermark + claims.len() as u64 - 1);
+    state.conversation_ir.note_minted_id(last);
+    for item in staged {
         state
             .conversation_ir
             .insert(item)
@@ -296,7 +327,6 @@ fn apply_append(
     state.next_offset += sanitized.len() as u64;
     Ok(())
 }
-
 /// Claims an append records, normalized. An empty claim list is the whole payload
 /// as one unclassified claim; a claim list that does not cover `sanitized`
 /// exactly is a typed refusal, because a partial claim list would silently drop

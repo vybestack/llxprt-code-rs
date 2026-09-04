@@ -50,6 +50,29 @@ fn user(text: &str, scope: u64) -> EventKind {
     }
 }
 
+/// Spans a segmented claim list must carry: consecutive offsets over `payload`,
+/// so the claims cover the append exactly.
+fn contiguous(payload: &[u8], part_lengths: &[u64]) -> Vec<SegmentClaim> {
+    let mut offset = 0_u64;
+    let mut claims = Vec::with_capacity(part_lengths.len());
+    for length in part_lengths {
+        claims.push(SegmentClaim {
+            span: StoreRange {
+                offset,
+                length: *length,
+            },
+            class: None,
+        });
+        offset += length;
+    }
+    assert_eq!(
+        offset as usize,
+        payload.len(),
+        "the claims must cover the payload exactly"
+    );
+    claims
+}
+
 fn tool(call_id: &str, tool: &str, scope: u64) -> EventKind {
     EventKind::Append {
         source: AppendSource::ToolResult {
@@ -99,7 +122,11 @@ fn sample_log(store_version: u64) -> EventLog {
     log
 }
 
-fn placed_state() -> TypedState {
+/// Builds a state with two placed items and returns it with their identifiers. The
+/// subject an operation names is an item identifier, which the IR's append mint
+/// assigns in the order the log appends; the helper reports the minted values so
+/// the log's event sequences and the items' identifiers stay independent.
+fn placed_log_items(second: EventKind) -> (TypedState, ItemId, ItemId) {
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
     let mut log = EventLog::new(V2);
     append(
@@ -108,41 +135,27 @@ fn placed_state() -> TypedState {
         &mut log,
     );
     append(user("head", 1), &mut sequencer, &mut log);
-    append(user("body", 1), &mut sequencer, &mut log);
+    append(second, &mut sequencer, &mut log);
     append(
-        op(OperationClass::Place, 2, Region::Head.rank()),
+        op(OperationClass::Place, 0, Region::Head.rank()),
         &mut sequencer,
         &mut log,
     );
     append(
-        op(OperationClass::Place, 3, Region::Body.rank()),
+        op(OperationClass::Place, 1, Region::Body.rank()),
         &mut sequencer,
         &mut log,
     );
-    Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap()
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    (state, ItemId::append(0), ItemId::append(1))
+}
+
+fn placed_state() -> TypedState {
+    placed_log_items(user("body", 1)).0
 }
 
 fn state_for_legality() -> TypedState {
-    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
-    let mut log = EventLog::new(V2);
-    append(
-        op(OperationClass::ScopeOpen, 1, 0),
-        &mut sequencer,
-        &mut log,
-    );
-    append(user("head", 1), &mut sequencer, &mut log);
-    append(tool("call-1", "read", 1), &mut sequencer, &mut log);
-    append(
-        op(OperationClass::Place, 2, Region::Head.rank()),
-        &mut sequencer,
-        &mut log,
-    );
-    append(
-        op(OperationClass::Place, 3, Region::Body.rank()),
-        &mut sequencer,
-        &mut log,
-    );
-    Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap()
+    placed_log_items(tool("call-1", "read", 1)).0
 }
 
 fn pairing_contract(paired: bool) -> RenderContract {
@@ -165,7 +178,11 @@ fn reducer_folds_total_order() {
         .iter()
         .map(|item| item.id().value())
         .collect();
-    assert_eq!(ids, vec![3, 4], "append events become items in log order");
+    assert_eq!(
+        ids,
+        vec![0, 1],
+        "append events become items in log order, minted by the append counter"
+    );
     assert_eq!(state.conversation_ir.items()[0].lane, Lane::Constitutional);
     assert_eq!(state.conversation_ir.items()[1].lane, Lane::Evidential);
 }
@@ -1343,7 +1360,160 @@ fn unsegmented_append_falls_back_to_the_source_lane() {
         Lane::Constitutional,
         "the documented fallback is the source lane"
     );
-    assert_eq!(state.conversation_ir.items()[0].id(), ItemId::append(2));
+    assert_eq!(
+        state.conversation_ir.items()[0].id(),
+        ItemId::append(0),
+        "the first append of the log mints the first append identifier, not the event sequence"
+    );
+}
+
+/// GREEN: a segmented append mints one identifier per claim from the IR's own
+/// append mint, so the next event's append never re-mints one. Minting from the
+/// event sequence would collide, because sequences are strictly consecutive while
+/// one append mints as many identifiers as it has claims.
+#[test]
+fn segmented_appends_followed_by_other_appends_never_collide() {
+    let payload = b"0123456789abcdefghijklmn"; // 24 bytes
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    // A three-claim append: three identifiers minted for one event.
+    append(
+        EventKind::Append {
+            source: AppendSource::User,
+            sanitized: payload.to_vec(),
+            scope: 1,
+            claims: contiguous(payload, &[8, 8, 8]),
+        },
+        &mut sequencer,
+        &mut log,
+    );
+    // Ordinary, unsegmented appends that follow: each mints one identifier whose
+    // value the segmented append already used had the mint borrowed the sequence.
+    append(user("second append", 1), &mut sequencer, &mut log);
+    append(user("third append", 1), &mut sequencer, &mut log);
+    append(
+        EventKind::Append {
+            source: AppendSource::Assistant,
+            sanitized: b"a fourth payload".to_vec(),
+            scope: 1,
+            claims: contiguous(b"a fourth payload", &[9, 7]),
+        },
+        &mut sequencer,
+        &mut log,
+    );
+
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(
+        state.conversation_ir.len(),
+        7,
+        "three claims, then one, one, and two"
+    );
+    let ids: Vec<ItemId> = state
+        .conversation_ir
+        .items()
+        .iter()
+        .map(|item| item.id())
+        .collect();
+    let unique: std::collections::BTreeSet<ItemId> = ids.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "every minted identifier is distinct, including across consecutive events"
+    );
+    assert_eq!(
+        ids,
+        vec![
+            ItemId::append(0),
+            ItemId::append(1),
+            ItemId::append(2),
+            ItemId::append(3),
+            ItemId::append(4),
+            ItemId::append(5),
+            ItemId::append(6),
+        ],
+        "the mint raises the watermark once per identifier, never reusing one"
+    );
+    assert_eq!(
+        state
+            .conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+        7,
+        "the watermark counts every minted identifier"
+    );
+    // Provenance still covers the spine without overlap.
+    let units: u64 = state
+        .conversation_ir
+        .items()
+        .iter()
+        .map(|item| item.units())
+        .sum();
+    assert_eq!(units, 24 + 13 + 12 + 16);
+}
+
+/// GREEN: a fold that refuses one claim of an append leaves the state untouched:
+/// no item of that append lands, not even the claims that minted cleanly. The
+/// refused append is one whose second claim cannot become an item, so the refusal
+/// happens after the first claim minted.
+#[test]
+fn a_refused_append_leaves_the_state_untouched() {
+    let payload = b"0123456789abcdefghij"; // 20 bytes
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("landed", 1), &mut sequencer, &mut log);
+    let before = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    assert_eq!(before.conversation_ir.len(), 1);
+
+    // An append whose second claim names an append-namespace id over no bytes, so
+    // the claim cannot become an item: the append is refused on its second claim
+    // while its first claim minted cleanly.
+    let mut refused = EventKind::Append {
+        source: AppendSource::User,
+        sanitized: payload.to_vec(),
+        scope: 1,
+        claims: contiguous(payload, &[10, 10]),
+    };
+    if let EventKind::Append { claims, .. } = &mut refused {
+        claims[1].span.length = 0;
+    }
+    let refused_event = sequencer.append(refused, log.store_version());
+    log.append(refused_event).unwrap();
+
+    let error = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap_err();
+    assert!(
+        matches!(error, ReducerError::Ir(IrError::ClaimsDontCover { .. })),
+        "the refusal is the claim list, not a different defect: {error:?}"
+    );
+    // The state the refused append reached is byte-identical to the state before.
+    let untouched = Reducer::new(IDLENESS_WINDOW).fold(&log.prefix(2)).unwrap();
+    assert_eq!(
+        encode_state(&untouched),
+        encode_state(&before),
+        "a refused append leaves no partially applied claims behind"
+    );
+    assert_eq!(
+        untouched.conversation_ir.len(),
+        before.conversation_ir.len(),
+        "no claim of the refused append landed"
+    );
+    assert_eq!(
+        untouched
+            .conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+        before
+            .conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+        "the append watermark is not spent by a refused append"
+    );
 }
 
 /// GREEN: claims that do not cover the append are refused, not silently re-covered.
@@ -1429,12 +1599,13 @@ fn reducer_resegment_refines_a_single_claim_into_atomic_children() {
         &mut log,
     );
     let payload = b"0123456789abcdefghijklmn"; // 24 bytes
-    let item = append(
+    append(
         user(std::str::from_utf8(payload).unwrap(), 1),
         &mut sequencer,
         &mut log,
-    )
-    .sequence;
+    );
+    // The first append mints the first append identifier.
+    let item = 0;
     append(
         op(OperationClass::Resegment, item, 3),
         &mut sequencer,
@@ -1526,19 +1697,23 @@ fn interleaved_appends_and_logged_resegments_never_collide() {
         &mut sequencer,
         &mut log,
     );
-    let first = append(user("first append", 1), &mut sequencer, &mut log).sequence;
+    // Subjects are item identifiers, which the append mint assigns in log order:
+    // 0, 1, 2 for the three appends, independent of the sequences they carry.
+    let first = 0;
+    append(user("first append", 1), &mut sequencer, &mut log);
     append(
         op(OperationClass::Resegment, first, 2),
         &mut sequencer,
         &mut log,
     );
-    let second = append(user("second append", 1), &mut sequencer, &mut log).sequence;
+    let second = 1;
+    append(user("second append", 1), &mut sequencer, &mut log);
     append(
         op(OperationClass::Resegment, second, 2),
         &mut sequencer,
         &mut log,
     );
-    let third = append(user("third append", 1), &mut sequencer, &mut log).sequence;
+    append(user("third append", 1), &mut sequencer, &mut log);
     let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
     let ids: Vec<ItemId> = state
         .conversation_ir
@@ -1560,8 +1735,8 @@ fn interleaved_appends_and_logged_resegments_never_collide() {
         .collect();
     assert_eq!(
         append_ids,
-        vec![third],
-        "the surviving append identifier is the event sequence, untouched by split mints"
+        vec![2],
+        "the surviving append identifier is untouched by split mints"
     );
     let split_ids: Vec<u64> = ids
         .iter()
