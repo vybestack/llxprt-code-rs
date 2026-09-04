@@ -204,13 +204,13 @@ impl Executor {
         Ok(self.current.clone().expect("txn present after propose"))
     }
 
-    /// Generate effect artifacts (durable). Rows owned by a later phase stop
-    /// here with a typed `capability_not_landed` verdict.
+    /// Generate effect artifacts (durable). Rows through Phase 4 are landed;
+    /// rows owned by a later phase stop with a typed verdict.
     pub fn generate(&mut self) -> Result<Txn, ExecutorError> {
         self.step(TxnState::Generated)?;
         let txn = self.current.clone().expect("txn present after propose");
         let row = operation::find(txn.op).expect("registered");
-        if row.owner_phase != 3 {
+        if row.owner_phase > 4 {
             return Err(ExecutorError::CapabilityNotLanded { op: txn.op });
         }
         Ok(txn)

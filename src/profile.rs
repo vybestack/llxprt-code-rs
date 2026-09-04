@@ -8,9 +8,11 @@
 //! must be JSON objects when present, and every known field must have the right scalar
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
+mod anthropic;
 mod codex;
 mod openai_responses;
 mod parsing;
+mod provider_settings;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -64,6 +66,7 @@ pub struct Profile {
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
     pub(crate) target: crate::model_api::target::ModelTarget,
+    pub(crate) anthropic_settings: Option<crate::model_api::settings::AnthropicSettingsDraft>,
     pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
     pub(crate) openai_responses_settings:
         Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
@@ -470,40 +473,14 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let (
+    let provider_settings::ParsedProviderSettings {
         ephemeral,
         model_params,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
-    ) = if provider_id == crate::model_api::target::ProviderId::Codex {
-        let parsed = codex::parse(obj, name, model.clone())?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            Some(parsed.draft),
-            None,
-            None,
-        )
-    } else if target.api == crate::model_api::target::ModelApi::Responses {
-        let parsed = openai_responses::parse(obj, name)?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            None,
-            Some(parsed.draft),
-            None,
-        )
-    } else {
-        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
-        (
-            ephemeral,
-            model_params,
-            None,
-            None,
-            chat_missing_discriminator,
-        )
-    };
+    } = provider_settings::parse(obj, name, &model, provider_id, &target)?;
 
     Ok(Profile {
         name: name.to_string(),
@@ -512,6 +489,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model_params,
         ephemeral,
         target,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
