@@ -58,6 +58,13 @@ impl Sink {
         self.buffer.push(u8::from(value));
     }
 
+    /// Appends one distinguished byte that separates a header from a body whose
+    /// own encoding starts with a length, so a tag rename cannot make one record
+    /// canonically collide with another.
+    pub fn byte_order_mark(&mut self) {
+        self.buffer.push(0xff);
+    }
+
     /// Appends a length-prefixed byte string.
     pub fn blob(&mut self, value: &[u8]) {
         self.int(value.len() as u64);
@@ -67,5 +74,46 @@ impl Sink {
     /// Consumes the sink and returns the canonical bytes.
     pub fn finish(self) -> Vec<u8> {
         self.buffer
+    }
+}
+
+/// Scope of a digest. Every digest is computed inside exactly one scope, so values
+/// from different scopes can never be compared or chained across: an event-chain
+/// checksum, a state hash, and a store-build checksum are different kinds of value
+/// even over identical bytes. A migration publication carries values from more than
+/// one scope and must never equate them.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum HashScope {
+    /// Checksum chain over recorded events.
+    EventChain,
+    /// Canonical hash of a typed state.
+    State,
+    /// Checksum over a privately built store generation.
+    StoreBuild,
+}
+
+impl HashScope {
+    fn salt(self) -> &'static [u8] {
+        match self {
+            HashScope::EventChain => b"hash-scope:event-chain",
+            HashScope::State => b"hash-scope:state",
+            HashScope::StoreBuild => b"hash-scope:store-build",
+        }
+    }
+
+    /// Digest of `bytes` inside this scope.
+    pub fn digest(self, bytes: &[u8]) -> Digest {
+        let mut salted = self.salt().to_vec();
+        salted.extend_from_slice(bytes);
+        digest(&salted)
+    }
+
+    /// Chains `previous` into a fresh digest over `bytes`, inside this scope, so
+    /// each value commits to its predecessor and a rewritten prefix is detectable.
+    pub fn chain(self, previous: Digest, bytes: &[u8]) -> Digest {
+        let mut salted = self.salt().to_vec();
+        salted.extend_from_slice(&previous.to_le_bytes());
+        salted.extend_from_slice(bytes);
+        digest(&salted)
     }
 }
