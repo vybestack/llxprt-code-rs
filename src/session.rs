@@ -919,7 +919,7 @@ impl SessionStore {
         if branch.lifecycle != Lifecycle::Pending
             || branch.owner != reserved.owner
             || branch.turn != reserved.turn
-            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+            || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
             || branch.lease_expiry <= now_secs()
         {
             return Err(StoreError::Stale);
@@ -938,7 +938,7 @@ impl SessionStore {
             .find(|branch| branch.branch_id == reserved.branch_id)
             .ok_or(StoreError::Stale)?;
         if branch.turn != reserved.turn
-            || branch.digest != crate::agent::prompt_digest(&reserved.prompt)
+            || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
         {
             return Err(StoreError::Stale);
         }

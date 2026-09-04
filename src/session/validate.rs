@@ -137,7 +137,7 @@ impl SessionState {
                 )));
             }
         }
-        if crate::agent::prompt_digest(&branch.prompt) != branch.digest {
+        if crate::limits::prompt_digest(&branch.prompt) != branch.digest {
             return Err(branch_corrupt(branch, "prompt digest mismatch"));
         }
         Ok(())
@@ -235,7 +235,7 @@ impl SessionState {
                 }
             }
         }
-        if branch.summary.len() > crate::agent::MAX_TURN_ASSISTANT_BYTES {
+        if branch.summary.len() > crate::limits::MAX_TURN_ASSISTANT_BYTES {
             return Err(branch_corrupt(branch, "summary exceeds its byte cap"));
         }
         if branch.error.len() > crate::redact::MAX_ERROR_TEXT_BYTES {
@@ -298,19 +298,19 @@ impl SessionState {
                 self.validate_mapped_response_size(branch, mapped_bytes)?;
             }
         }
-        if assistant_bytes > crate::agent::MAX_TURN_ASSISTANT_BYTES {
+        if assistant_bytes > crate::limits::MAX_TURN_ASSISTANT_BYTES {
             return Err(branch_corrupt(
                 branch,
                 "assistant transcript exceeds its byte cap",
             ));
         }
-        if argument_bytes > crate::agent::MAX_TURN_ARGS_BYTES {
+        if argument_bytes > crate::limits::MAX_TURN_ARGS_BYTES {
             return Err(branch_corrupt(
                 branch,
                 "tool arguments exceed their byte cap",
             ));
         }
-        if result_bytes > crate::agent::MAX_TURN_OUTPUT_BYTES {
+        if result_bytes > crate::limits::MAX_TURN_OUTPUT_BYTES {
             return Err(branch_corrupt(branch, "tool results exceed their byte cap"));
         }
         Ok(())
@@ -321,7 +321,7 @@ impl SessionState {
         branch: &BranchRecord,
         mapped_bytes: usize,
     ) -> Result<(), StoreError> {
-        if mapped_bytes > crate::agent::MAX_RESPONSE_BYTES {
+        if mapped_bytes > crate::limits::MAX_RESPONSE_BYTES {
             Err(branch_corrupt(
                 branch,
                 "mapped response exceeds the model response byte cap",
@@ -340,10 +340,10 @@ impl SessionState {
         if call.id.is_empty() || !ids.insert(call.id.as_str()) {
             return Err(branch_corrupt(branch, "empty or duplicate tool call id"));
         }
-        if call.id.len() > crate::agent::MAX_TOOL_CALL_ID_BYTES {
+        if call.id.len() > crate::limits::MAX_TOOL_CALL_ID_BYTES {
             return Err(branch_corrupt(branch, "tool call id exceeds its byte cap"));
         }
-        if call.name.len() > crate::agent::MAX_TOOL_NAME_BYTES {
+        if call.name.len() > crate::limits::MAX_TOOL_NAME_BYTES {
             return Err(branch_corrupt(branch, "tool name exceeds its byte cap"));
         }
         if !crate::tools::is_known_tool_name(&call.name) {
