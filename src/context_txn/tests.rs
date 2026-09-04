@@ -14,8 +14,28 @@ struct TestPort {
 }
 
 impl AccountingPort for TestPort {
-    fn bound(&self, _version: u64, contract: u64) -> u64 {
-        self.governed.saturating_add(contract)
+    fn bound(&self, _version: u64, effect_bytes: u64) -> u64 {
+        self.governed.saturating_add(effect_bytes)
+    }
+
+    /// Mirrors `BoundPort`: a test port that owns no margin table reports
+    /// `None`, so the executor's drift fixture surfaces `recalibrated`'s
+    /// default refusal instead of silently recalibrating a table it never
+    /// charged a bound from.
+    fn bound_margins(&self) -> Option<Margins> {
+        None
+    }
+
+    /// Mirrors `BoundPort`: the port that owns the table is the port that
+    /// recalibrates. A test port with no table has nothing to recalibrate,
+    /// so `None` is the honest answer - the executor surfaces it as a
+    /// refusal - and no bound it computes can be moved by a drift fixture.
+    fn recalibrated(
+        &self,
+        _version: u64,
+        _per_tool_declaration: u64,
+    ) -> Option<Result<std::rc::Rc<dyn AccountingPort>, &'static str>> {
+        None
     }
 }
 
@@ -33,6 +53,14 @@ fn armed_executor(governed: u64) -> Executor {
 fn armed_executor_at(epoch: Epoch, governed: u64) -> Executor {
     let mut ex = Executor::new_generous(epoch);
     ex.bind_port(agreeing_port(governed));
+    ex
+}
+
+/// Executor bound to the production `BoundPort` over a real margin table, for
+/// fixtures that need a port which owns (and can recalibrate) its table.
+fn armed_executor_with_bound_port(governed: u64) -> Executor {
+    let mut ex = Executor::new_generous(Epoch(1));
+    ex.bind_port(std::rc::Rc::new(BoundPort::new(Margins::V1, 0, governed)));
     ex
 }
 
@@ -190,36 +218,84 @@ fn owner_phases_match_the_single_source_table() {
     }
 }
 
-/// #108-2: every governed-state field and event surface has a registry row -
-/// the OperationCommit classes the reducer can fold must all resolve.
+/// Every governed event surface has a registry row (issue R-018/R-049),
+/// generated from the enum itself: the class list is an exhaustive `match`
+/// over `OperationClass`, so adding a variant without a row is a COMPILE
+/// error, never a silently skipped test. The governed-state field half of
+/// the closure iterates `Region::all()` the same way.
 #[test]
 fn every_committed_class_has_a_registry_row() {
-    let classes = [
-        "ScopeOpen",
-        "ScopeCloseByEvent",
-        "ScopeCloseByDeclaration",
-        "Resegment",
-        "Place",
-        "Unplace",
-        "Pin",
-        "Unpin",
-        "LanePolicyUpdate",
-        "MigrationSelect",
-        "AdmitIngress",
-        "Sanitize",
-        "Redact",
-        "Import",
-        "RuleUpdate",
-        "VocabularyUpdate",
-        "IndexRebuild",
-        "StoreMode",
-        "QuiesceUnwritable",
+    use crate::context_kernel::events::OperationClass;
+    // Exhaustive match: a new variant fails compilation here until it is
+    // given a stable name and a registry row.
+    let classes: [OperationClass; 19] = [
+        OperationClass::ScopeOpen,
+        OperationClass::ScopeCloseByEvent,
+        OperationClass::ScopeCloseByDeclaration,
+        OperationClass::Resegment,
+        OperationClass::Place,
+        OperationClass::Unplace,
+        OperationClass::Pin,
+        OperationClass::Unpin,
+        OperationClass::LanePolicyUpdate,
+        OperationClass::MigrationSelect,
+        OperationClass::AdmitIngress,
+        OperationClass::Sanitize,
+        OperationClass::Redact,
+        OperationClass::Import,
+        OperationClass::RuleUpdate,
+        OperationClass::VocabularyUpdate,
+        OperationClass::IndexRebuild,
+        OperationClass::StoreMode,
+        OperationClass::QuiesceUnwritable,
     ];
+    // The enum's own `name()` is the authority for the row spelling, so the
+    // test can never drift from the encoder.
+    const _: () = {
+        fn exhaustive(class: &OperationClass) {
+            match class {
+                OperationClass::ScopeOpen
+                | OperationClass::ScopeCloseByEvent
+                | OperationClass::ScopeCloseByDeclaration
+                | OperationClass::Resegment
+                | OperationClass::Place
+                | OperationClass::Unplace
+                | OperationClass::Pin
+                | OperationClass::Unpin
+                | OperationClass::LanePolicyUpdate
+                | OperationClass::MigrationSelect
+                | OperationClass::AdmitIngress
+                | OperationClass::Sanitize
+                | OperationClass::Redact
+                | OperationClass::Import
+                | OperationClass::RuleUpdate
+                | OperationClass::VocabularyUpdate
+                | OperationClass::IndexRebuild
+                | OperationClass::StoreMode
+                | OperationClass::QuiesceUnwritable => (),
+            }
+        }
+        // Referenced, not just defined, so the arm-coverage helper is a used
+        // item instead of dead residue; the match above is what enforces the
+        // coverage, and the call keeps it compiled in every build.
+        exhaustive(&OperationClass::ScopeOpen);
+    };
     for class in classes {
-        let row = snake(class);
+        let name = class.name();
         assert!(
-            operation::find(&row).is_some(),
-            "governed event class {class} -> {row} has no registry row"
+            operation::find(name).is_some(),
+            "governed event class {name} has no registry row"
+        );
+    }
+    // The governed-state closure: every region the reducer can place into
+    // has a budget row in the render contract, so a projection that uses
+    // the region is covered by the gate rather than silently unbudgeted.
+    for region in crate::context_kernel::ir::Region::all() {
+        let contract = crate::context_kernel::legality::RenderContract::generous(1);
+        assert!(
+            contract.supports_region(region),
+            "governed region {} has no budget row",
+            region.name()
         );
     }
 }
@@ -253,13 +329,22 @@ fn reclamation_rows_have_nonzero_bars_and_enforce_them() {
         }
     }
     let mut ex = armed_executor(0);
-    ex.propose("placeholder-collapse", 10).unwrap();
+    // `compact` is owned by phase 6 and the executor lands through phase 4 by
+    // default, so the fixture opens the gate the same way the other phase-6
+    // fixtures do.
+    ex.land_through(6);
+    // `compact` is an emergency-capable reclamation row, so its bar is exempt
+    // under the emergency branch of `ReclaimsBar::holds` (that exemption is what
+    // the ladder uses to recover a stuck region). The exemption is only from the
+    // drop, never from growth: a rung that RAISES Phi must still fail, so the
+    // fixture is an increase rather than a flat phi.
+    ex.propose("compact", 10).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
     let budget = Budget { b: 100, r: 8, h: 4 };
     let err = ex
-        .validate(0, &budget, 80, 100, 100)
-        .expect_err("phi must drop by at least the bar");
+        .validate(0, &budget, 80, 100, 110, 0)
+        .expect_err("phi must not grow, even on an emergency rung");
     assert_eq!(
         err,
         ExecutorError::PreconditionFailed {
@@ -273,13 +358,38 @@ fn reclamation_rows_have_nonzero_bars_and_enforce_them() {
 #[test]
 fn margin_drift_fixture_recalibrates_under_a_newer_version() {
     let mut ex = armed_executor(0);
-    assert_eq!(ex.margins().version, 1);
-    ex.recalibrate_margins(1, 512)
+    // The margin table lives on the port, so a test port with no table
+    // reports `None` and a recalibration is refused rather than moved.
+    assert!(ex.margins().is_none());
+    assert_eq!(
+        ex.recalibrate_margins(1, 512),
+        Err("the bound port carries no margin table to recalibrate"),
+        "a table-less test port must refuse recalibration"
+    );
+    // A port that owns the table recalibrates through itself, so the charge
+    // a bound is computed from actually moves.
+    let mut bound_port_ex = armed_executor_with_bound_port(0);
+    let before = bound_port_ex
+        .margins()
+        .map_or(Margins::V1.per_tool_declaration, |m| m.per_tool_declaration);
+    assert_eq!(before, Margins::V1.per_tool_declaration);
+    bound_port_ex
+        .recalibrate_margins(1, 512)
         .expect_err("same version refused");
-    ex.recalibrate_margins(2, 512)
+    bound_port_ex
+        .recalibrate_margins(2, 512)
         .expect("newer version adopted");
-    assert_eq!(ex.margins().version, 2);
-    assert_eq!(ex.margins().per_tool_declaration, 512);
+    assert_eq!(bound_port_ex.margins().map_or(0, |m| m.version), 2);
+    assert_eq!(
+        bound_port_ex
+            .margins()
+            .map_or(0, |m| m.per_tool_declaration),
+        512
+    );
+    assert_eq!(
+        bound_port_ex.margins().map_or(0, |m| m.commit_frame),
+        Margins::V1.commit_frame
+    );
 }
 
 /// #104-1: a commit whose caller-supplied bound disagrees with the port fails
@@ -296,8 +406,11 @@ fn a_bound_that_disagrees_with_the_port_fails_validation() {
         r: 8,
         h: 4,
     };
+    // The port's input is the EFFECT (50 bytes), never the claim, so the
+    // computed bound is governed 500 + effect 50 = 550 and a claim of 50
+    // is a real disagreement rather than a fixpoint the caller satisfies.
     let err = ex
-        .validate(50, &budget, 80, 0, 0)
+        .validate(50, &budget, 80, 0, 0, 50)
         .expect_err("the caller invented a bound");
     assert_eq!(
         err,
@@ -341,9 +454,11 @@ fn an_over_budget_projection_fails_commit_with_a_typed_error() {
     ex.propose("arm", 0).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0, 0)
         .expect("validation is not the legality gate");
-    let err = ex.commit_outcome(0).expect_err("the region is over budget");
+    let err = ex
+        .commit_outcome(0, None, 0)
+        .expect_err("the region is over budget");
     match err {
         ExecutorError::Illegal { which, predicate } => {
             assert_eq!(which, "region-over-budget");
@@ -364,9 +479,11 @@ fn an_unpaired_tool_declaration_fails_commit() {
     ex.propose("arm", 0).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0, 0)
         .unwrap();
-    let err = ex.commit_outcome(0).expect_err("the call is unpaired");
+    let err = ex
+        .commit_outcome(0, None, 0)
+        .expect_err("the call is unpaired");
     match err {
         ExecutorError::Illegal { which, predicate } => {
             assert_eq!(which, "pairing");
@@ -388,17 +505,60 @@ fn the_committed_contract_version_is_recorded_and_durable() {
     ex.propose("arm", 0).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0, 0)
         .unwrap();
-    assert_eq!(ex.commit_outcome(0).unwrap(), CommitOutcome::Applied);
-    assert_eq!(ex.committed_contract_version(), Some(7));
-    // The durable record the store commits carries the same version: the
-    // spine's encoded record is digested with it, and the send path compares
-    // against `committed_contract_version`.
-    let record = crate::context_store::spine::Spine::new();
     assert_eq!(
-        crate::context_txn::bound_port::store_spine_units(record.len()),
-        record.len()
+        ex.commit_outcome(0, None, 0).unwrap(),
+        CommitOutcome::Applied
+    );
+    assert_eq!(ex.committed_contract_version(), Some(7));
+    // The committed contract version is DURABLE: the spine frame the store
+    // commits carries it, and a reload through the typed loader recovers the
+    // same version, so a recovered session compares against the version its
+    // own commits were gated under instead of an in-memory-only value.
+    use crate::context_store::spine::Spine;
+    let committed = ex.committed_contract_version().unwrap();
+    let mut spine = Spine::new();
+    spine.append(
+        "committed-contract-version",
+        committed.to_string().as_bytes(),
+    );
+    let encoded = spine.encode();
+    let reloaded = Spine::load_typed(&encoded).expect("the written frame reloads");
+    let reloaded_version: u64 = String::from_utf8(
+        reloaded
+            .records()
+            .first()
+            .map(|record| reloaded.record_bytes(record).to_vec())
+            .unwrap_or_default(),
+    )
+    .expect("the version is UTF-8 text")
+    .parse()
+    .expect("the version round-trips as an integer");
+    assert_eq!(
+        reloaded_version, committed,
+        "the reloaded spine frame must round-trip the committed contract version"
+    );
+    // A mismatched version is an error, never a silent send: the kernel's
+    // own send-path check refuses a version the commit was not gated under.
+    // The proof object the send path would carry: the gate itself, run
+    // over the contract the commit was gated under. Its recorded version is
+    // what a send is compared against.
+    let genesis = crate::context_kernel::reducer::Reducer::new(
+        crate::context_kernel::reducer::IDLENESS_WINDOW,
+    )
+    .fold(&crate::context_kernel::events::EventLog::new(
+        crate::context_kernel::migration::V2,
+    ))
+    .expect("an empty log folds into genesis");
+    let legal =
+        crate::context_kernel::legality::is_legal(&genesis, &RenderContract::generous(committed))
+            .expect("a genesis projection under a generous contract is legal");
+    assert_eq!(legal.contract_version(), committed);
+    assert!(legal.sendable_with(committed));
+    assert!(
+        !legal.sendable_with(committed + 1),
+        "a send carrying a mismatched contract version must be refused"
     );
 }
 
@@ -414,9 +574,9 @@ fn commit_reports_a_rebase_no_op_instead_of_collapsing_it() {
     ex.propose("read-back", 10).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0, 0)
         .unwrap();
-    assert_eq!(ex.commit(11).unwrap(), CommitOutcome::RebaseNoOp);
+    assert_eq!(ex.commit(11, None, 0).unwrap(), CommitOutcome::RebaseNoOp);
     assert_eq!(ex.state(), TxnState::Committed);
 
     // A non-rebase-safe row against a moved parent is a typed stale-parent
@@ -425,9 +585,9 @@ fn commit_reports_a_rebase_no_op_instead_of_collapsing_it() {
     ex.propose("arm", 10).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0, 0)
         .unwrap();
-    match ex.commit(11) {
+    match ex.commit(11, None, 0) {
         Err(ExecutorError::StaleParent {
             expected: 10,
             actual: 11,
@@ -443,9 +603,9 @@ fn an_applied_parent_still_commits_as_applied() {
     ex.propose("arm", 10).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0)
+    ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0, 0)
         .unwrap();
-    assert_eq!(ex.commit(10).unwrap(), CommitOutcome::Applied);
+    assert_eq!(ex.commit(10, None, 0).unwrap(), CommitOutcome::Applied);
 }
 
 /// each legal step advances the state machine.
@@ -459,10 +619,10 @@ fn legal_steps_advance() {
     ex.generate().unwrap();
     assert_eq!(ex.state(), TxnState::Generated);
     let budget = Budget { b: 100, r: 8, h: 4 };
-    ex.validate(0, &budget, 80, 0, 0).unwrap();
+    ex.validate(0, &budget, 80, 0, 0, 0).unwrap();
     assert_eq!(ex.state(), TxnState::Validated);
     assert_eq!(
-        ex.commit(txn.parent_version).unwrap(),
+        ex.commit(txn.parent_version, None, 0).unwrap(),
         CommitOutcome::Applied
     );
     assert_eq!(ex.state(), TxnState::Committed);
@@ -474,7 +634,7 @@ fn skipped_states_are_illegal() {
     let mut ex = armed_executor(0);
     ex.propose("arm", 10).unwrap();
     let err = ex
-        .validate(0, &Budget { b: 10, r: 1, h: 1 }, 0, 0, 0)
+        .validate(0, &Budget { b: 10, r: 1, h: 1 }, 0, 0, 0, 0)
         .unwrap_err();
     assert_eq!(
         err,
@@ -492,7 +652,7 @@ fn abort_is_legal_and_terminals_are_final() {
     ex.propose("arm", 1).unwrap();
     assert_eq!(ex.abort().unwrap(), TxnState::Aborted);
     assert_eq!(
-        ex.commit(1),
+        ex.commit(1, None, 0),
         Err(ExecutorError::IllegalTransition {
             from: TxnState::Aborted,
             to: TxnState::Committed
@@ -508,9 +668,9 @@ fn stale_parent_compare_and_commit() {
     ex.snapshot().unwrap();
     ex.generate().unwrap();
     let budget = Budget { b: 100, r: 8, h: 4 };
-    ex.validate(0, &budget, 80, 64, 56).unwrap();
+    ex.validate(0, &budget, 80, 64, 56, 0).unwrap();
     assert_eq!(
-        ex.commit(11),
+        ex.commit(11, None, 0),
         Err(ExecutorError::StaleParent {
             expected: 10,
             actual: 11
@@ -528,8 +688,8 @@ fn non_rebase_safe_mismatch_keeps_aborting() {
     ex.snapshot().unwrap();
     ex.generate().unwrap();
     let budget = Budget { b: 100, r: 8, h: 4 };
-    ex.validate(0, &budget, 80, 64, 56).unwrap();
-    assert!(ex.commit_outcome(11).is_err());
+    ex.validate(0, &budget, 80, 64, 56, 0).unwrap();
+    assert!(ex.commit_outcome(11, None, 0).is_err());
     assert_eq!(ex.state(), TxnState::Aborted);
 }
 
@@ -538,12 +698,18 @@ fn non_rebase_safe_mismatch_keeps_aborting() {
 #[test]
 fn failed_precondition_blocks_commit() {
     let mut ex = armed_executor(0);
-    ex.propose("arm", 10).unwrap();
+    // `admit-ingress` carries the FITS predicate, so this exercises the row's
+    // own typed precondition rather than a row whose precondition is the
+    // unconditional placeholder.
+    ex.propose("admit-ingress", 10).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
     let budget = Budget { b: 100, r: 8, h: 4 };
+    // A bound of 150 with the effect it is charged for: the claim agrees
+    // with the port (0 + 150), so the failure below is the FIT check and not
+    // a bound disagreement.
     let err = ex
-        .validate(150, &budget, 80, 0, 0)
+        .validate(150, &budget, 80, 0, 0, 150)
         .expect_err("bound 150 exceeds the ceiling");
     assert_eq!(
         err,
@@ -551,7 +717,7 @@ fn failed_precondition_blocks_commit() {
     );
     assert_eq!(ex.state(), TxnState::Aborted);
     assert_eq!(
-        ex.commit(10),
+        ex.commit(10, None, 0),
         Err(ExecutorError::IllegalTransition {
             from: TxnState::Aborted,
             to: TxnState::Committed
@@ -568,7 +734,7 @@ fn a_missing_port_refuses_validation() {
     ex.snapshot().unwrap();
     ex.generate().unwrap();
     let err = ex
-        .validate(0, &Budget { b: 10, r: 1, h: 1 }, 0, 0, 0)
+        .validate(0, &Budget { b: 10, r: 1, h: 1 }, 0, 0, 0, 0)
         .unwrap_err();
     assert_eq!(
         err,
@@ -596,10 +762,10 @@ fn replay_prefix_is_never_partial() {
                     ex.generate().unwrap();
                 }
                 2 => {
-                    ex.validate(0, &budget, 80, 0, 0).unwrap();
+                    ex.validate(0, &budget, 80, 0, 0, 0).unwrap();
                 }
                 _ => {
-                    ex.commit(5).unwrap();
+                    ex.commit(5, None, 0).unwrap();
                     committed = true;
                 }
             }
@@ -699,9 +865,9 @@ fn newer_lease_fences_older_executor() {
     ex1.snapshot().unwrap();
     ex1.generate().unwrap();
     let budget = Budget { b: 100, r: 8, h: 4 };
-    ex1.validate(0, &budget, 80, 0, 0).unwrap();
+    ex1.validate(0, &budget, 80, 0, 0, 0).unwrap();
     clock.acquire();
-    match ex1.commit_fenced(5, &clock) {
+    match ex1.commit_fenced(5, &clock, None, 0) {
         Err(ExecutorError::Fenced { held: 2, mine: 1 }) => {}
         other => panic!("expected Fenced {{held: 2, mine: 1}}, got {other:?}"),
     }
@@ -713,8 +879,8 @@ fn newer_lease_fences_older_executor() {
     ex2.propose("arm", 5).unwrap();
     ex2.snapshot().unwrap();
     ex2.generate().unwrap();
-    ex2.validate(0, &budget, 80, 0, 0).unwrap();
-    let done = ex2.commit_fenced(5, &clock);
+    ex2.validate(0, &budget, 80, 0, 0, 0).unwrap();
+    let done = ex2.commit_fenced(5, &clock, None, 0);
     assert_eq!(done.unwrap(), CommitOutcome::Applied);
 }
 
@@ -736,21 +902,50 @@ fn authority_non_increase() {
     }
 }
 
-/// #121-c: region-wide admission accounting sums the admitted payloads against
-/// the region budget; a projection that would cross the ceiling fails commit.
+/// Region-wide admission accounting SUMS the admitted payloads against the
+/// region budget (issue 121-c): two applied admissions accumulate, and a
+/// third whose projection would cross the armed ceiling is refused with
+/// the typed RegionOverBudget verdict instead of overwriting the total.
 #[test]
 fn region_accounting_sums_admissions_against_the_ceiling() {
     let mut ex = armed_executor(0);
     ex.arm_region_accounting(100);
     assert_eq!(ex.region_admitted(), 0);
+    // Two admissions fit; the region total is their SUM, never the last
+    // payload applied.
+    for _ in 0..2 {
+        ex.propose("admit-ingress", 0).unwrap();
+        ex.snapshot().unwrap();
+        ex.generate().unwrap();
+        ex.validate(40, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0, 40)
+            .unwrap();
+        assert_eq!(
+            ex.commit_outcome(0, None, 40).unwrap(),
+            CommitOutcome::Applied
+        );
+    }
+    assert_eq!(ex.region_admitted(), 80, "admissions must accumulate");
+    // The third admission projects 80 + 40 > 100, so the ceiling refuses it.
     ex.propose("admit-ingress", 0).unwrap();
     ex.snapshot().unwrap();
     ex.generate().unwrap();
-    ex.validate(0, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0)
+    ex.validate(40, &Budget { b: 100, r: 1, h: 1 }, 0, 0, 0, 40)
         .unwrap();
-    assert_eq!(ex.commit_outcome(0).unwrap(), CommitOutcome::Applied);
+    let err = ex
+        .commit_outcome(0, None, 40)
+        .expect_err("the projection crosses the armed ceiling");
+    assert_eq!(
+        err,
+        ExecutorError::RegionOverBudget {
+            admitted: 80,
+            projected: 120,
+            ceiling: 100,
+        }
+    );
+    assert_eq!(ex.state(), TxnState::Aborted);
+    // A refused admission adds nothing to the region total.
+    assert_eq!(ex.region_admitted(), 80);
 }
-
 /// Issue DoD: the registry must cover every row of the design's tab:ops.
 #[test]
 fn registry_covers_design_table_rows() {

@@ -260,20 +260,14 @@ fn admission_executor(
     executor
 }
 
-/// Margin table the session's production port is bound over: V1's version
-/// and per-declaration charge, with the commit frame charged by the session's
-/// own region projection instead of the port. The executor's `validate`
-/// requires the caller's claimed bound to be a fixpoint of the port's bound
-/// -- the port recomputes the bound from whatever the caller claims -- so a
-/// port that added its own frame on top of the claim could never agree with
-/// it; zeroing the frame here keeps it counted exactly once, in the
-/// projection `ingest_bulk_committed` sums.
+/// Margin table the session's production port is bound over: V1 unchanged,
+/// so the commit frame is charged exactly once by the port that owns every
+/// margin (F1). The caller's claimed bound is built from the SAME table - the
+/// effect bytes plus this frame - so the port's recomputation and the caller's
+/// claim can only disagree when the caller invented a number, which is the
+/// disagreement `validate` refuses.
 fn session_port_margins() -> crate::context_txn::budget::Margins {
-    crate::context_txn::budget::Margins {
-        version: crate::context_txn::budget::Margins::V1.version,
-        per_tool_declaration: crate::context_txn::budget::Margins::V1.per_tool_declaration,
-        commit_frame: 0,
-    }
+    crate::context_txn::budget::Margins::V1
 }
 
 /// Keeps the preserved-span window bounded across pre-entry compaction calls.
@@ -294,6 +288,8 @@ fn sequence_admission(
     state: &mut ContextState,
     parent_version: u64,
     payload_bound: u64,
+    effect_bytes: u64,
+    effect: Option<crate::context_kernel::events::EventKind>,
     budget: &crate::context_txn::budget::Budget,
     floor: u64,
 ) -> Result<(), String> {
@@ -314,11 +310,17 @@ fn sequence_admission(
         .generate()
         .map_err(|error| executor_refusal(&error))?;
     executor
-        .validate(payload_bound, budget, floor, 0, 0)
+        .validate(payload_bound, budget, floor, 0, 0, effect_bytes)
         .map_err(|error| executor_refusal(&error))?;
-    match ADMISSION_FENCING_CLOCK.with(|clock| executor.commit_fenced(parent_version, clock)) {
+    match ADMISSION_FENCING_CLOCK
+        .with(|clock| executor.commit_fenced(parent_version, clock, effect, payload_bound))
+    {
         Ok(CommitOutcome::Applied) => {
-            state.region_admitted = payload_bound;
+            // F2: the session total ACCUMULATES across admissions instead of
+            // being overwritten by the last payload applied, so the region a
+            // later admission projects against is every unit already admitted
+            // plus this one.
+            state.region_admitted = state.region_admitted.saturating_add(payload_bound);
             Ok(())
         }
         // The parent cannot move inside this call, so a rebase verdict would
@@ -460,28 +462,39 @@ fn ingest_bulk_committed(
     // Parent version: the applied spine record count, so the executor's
     // compare-and-commit is anchored to the store position it commits against.
     let parent_version = state.store.index().len() as u64;
-    // Region-wide admission accounting ([r----): the projected occupancy is
-    // the units already admitted plus this payload's own bound, summed
-    // against the region budget net of reserve and headroom instead of
-    // checking the single payload bound alone.
-    let admitted = state.region_admitted;
-    // Bound: the admitted payload plus its frame overhead must fit the
-    // region budget net of the reclamation reserve and headroom. The frame
-    // term is charged here because the port adds its own fixed commit frame
-    // on top of the contract it is handed: the caller's contract is the
-    // payload, and the port owns every margin ([r---).
-    let contract = bytes.len() as u64;
-    let bound = contract + crate::context_txn::budget::Margins::V1.commit_frame;
-    // The executor recomputes this projection from the bound it is handed; a
-    // disagreement is a port bug, never an admission failure.
-    let projected = admitted.saturating_add(bound);
-    debug_assert_eq!(projected, admitted.saturating_add(bound));
+    // The port's input is the EFFECT size (F1): the payload bytes this
+    // admission admits, which is the same quantity the bound port saw, so
+    // the caller's claimed bound is compared against a bound recomputed from
+    // the effect and never echoed back.
+    let effect_bytes = bytes.len() as u64;
+    // Bound: the effect plus the versioned commit frame the port charges.
+    // The port owns every margin, so the frame is added here exactly once
+    // and the claim the executor validates is the port's own algebra - a
+    // caller-invented number disagrees with it and fails validation.
+    let bound = effect_bytes + crate::context_txn::budget::Margins::V1.commit_frame;
     let budget = crate::context_txn::budget::Budget {
         b: ADMISSION_REGION_BUDGET,
         r: ADMISSION_RECLAMATION_RESERVE,
         h: ADMISSION_HEADROOM,
     };
-    sequence_admission(state, parent_version, bound, &budget, bytes.len() as u64)?;
+    // The governed effect this commit releases: the executor is the sole
+    // writer, so it appends and folds the `AdmitIngress` operation commit
+    // itself, which is what keeps the legality gate running against the live
+    // region instead of genesis (F3).
+    let effect = crate::context_kernel::events::EventKind::OperationCommit {
+        class: crate::context_kernel::events::OperationClass::AdmitIngress,
+        subject: parent_version,
+        argument: effect_bytes,
+    };
+    sequence_admission(
+        state,
+        parent_version,
+        bound,
+        effect_bytes,
+        Some(effect),
+        &budget,
+        bytes.len() as u64,
+    )?;
     let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
     txn.capture(CaptureSource::ToolResult, bytes)
         .map_err(|error| ingress_error(&error))?;
@@ -730,7 +743,15 @@ pub(crate) fn context_exchange(
         .ok_or_else(|| StoreError::Lock("context store missing".into()))?;
     let mut transformed = rounds.to_vec();
     if let Err(reason) = digest_bulk_results(state, &mut transformed) {
-        state.quiesce = Some("quiesce_unwritable".to_string());
+        // The honest split: a rate quiesce carries the rate spelling, an
+        // ingress or store failure keeps the unwritable one.
+        state.quiesce = Some(
+            state
+                .policy
+                .terminal_outcome()
+                .unwrap_or("quiesce_unwritable")
+                .to_string(),
+        );
         state.detail = Some(reason.clone());
         // A blocked admission is an integrity failure: the bulk bytes never
         // entered the store, so the session must not advance (issue #106).
@@ -800,7 +821,17 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
     let record = match ingest_bulk(state, tool, result.as_bytes()) {
         Ok(record) => record,
         Err(reason) => {
-            state.quiesce = Some("quiesce_unwritable".to_string());
+            // The store-write paths below keep the unwritable spelling; this
+            // branch is where a rate quiesce lands, so it carries the rate
+            // spelling when the policy recorded one and the unwritable
+            // spelling otherwise (the ingress transaction failed).
+            state.quiesce = Some(
+                state
+                    .policy
+                    .terminal_outcome()
+                    .unwrap_or("quiesce_unwritable")
+                    .to_string(),
+            );
             state.detail = Some(reason);
             memory_digest(state, tool, result.as_bytes())
         }

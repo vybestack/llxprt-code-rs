@@ -181,8 +181,15 @@ impl ProposalOnlyController {
         // #107-1: a rate quiesce is its own terminal, distinct from an
         // unwritable store; #107-6: an ordinary disarmed completion is not a
         // terminal at all, so it records no terminal outcome.
-        if digest_admission == Admission::Quiesce || self.governor.state().quiescing {
-            self.terminal_outcome = Some("quiesce_unwritable");
+        if digest_admission == Admission::Quiesce {
+            // The quota's own refusal is the rate terminal: the caller never
+            // touched the store on this path, so the write-failure branch
+            // must not be recorded for it.
+            self.terminal_outcome = Some("quiesce_rate");
+        } else if self.governor.state().quiescing {
+            // A quiescing governor is the same rate refusal carried over
+            // from an earlier window, so it keeps the rate terminal too.
+            self.terminal_outcome = Some("quiesce_rate");
         } else if armed_after {
             // An ordinary armed completion is not a terminal at all: the
             // episode keeps running and wrap-up can still be recorded.
@@ -224,6 +231,9 @@ impl ProposalOnlyController {
     /// #107-1: a rate quiesce is terminal in its own right and is not
     /// overridden, and neither is an unwritable quiesce.
     pub fn wrap_up(&mut self, wrap_up_cost: u64, available: u64, writable: bool) {
+        // Only the write-failure branch is sticky here: a rate quiesce is a
+        // terminal in its own right, but a later explicit wrap-up that can
+        // actually be written supersedes it rather than wedging the session.
         if self.terminal_outcome == Some("quiesce_unwritable") {
             return;
         }
@@ -293,10 +303,13 @@ impl ProposalOnlyController {
     /// Restores the terminal outcome a previous process recorded in its
     /// manifest, so a restarted session resumes the branch it had reached
     /// instead of silently reopening as a live session (issue 102 restart).
-    /// Quiescence is never upgraded: a restored `quiesce_unwritable` stays even
-    /// if a later wrap-up would have written a softer branch.
+    /// Quiescence is never upgraded: a restored `quiesce_unwritable` or
+    /// `quiesce_rate` stays even if a later wrap-up would have written a
+    /// softer branch.
     pub fn restore_terminal_outcome(&mut self, outcome: &'static str) {
-        if self.terminal_outcome == Some("quiesce_unwritable") {
+        if self.terminal_outcome == Some("quiesce_unwritable")
+            || self.terminal_outcome == Some("quiesce_rate")
+        {
             return;
         }
         self.terminal_outcome = Some(outcome);

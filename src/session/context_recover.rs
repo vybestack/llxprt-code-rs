@@ -240,9 +240,10 @@ fn load_rewrite_journal(bytes: &[u8]) -> Result<RecoveredJournal, String> {
 
 /// Maps a reloaded manifest terminal outcome back to its stable name; an
 /// unknown name is left unset rather than rewritten into a made-up branch.
-fn recover_terminal_outcome(outcome: Option<String>) -> Option<&'static str> {
+pub(crate) fn recover_terminal_outcome(outcome: Option<String>) -> Option<&'static str> {
     match outcome.as_deref() {
         Some("quiesce_unwritable") => Some("quiesce_unwritable"),
+        Some("quiesce_rate") => Some("quiesce_rate"),
         Some("wrap_up") => Some("wrap_up"),
         Some("disarm") => Some("disarm"),
         _ => None,

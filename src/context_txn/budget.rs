@@ -70,12 +70,35 @@ impl Margins {
 /// * **conservative** - the port never under-reports a bound, so a passing
 ///   fit check implies the real consumption also fits.
 pub trait AccountingPort {
-    /// Conservative bound for `version` under `contract`, in budget units.
-    fn bound(&self, version: u64, contract: u64) -> u64;
+    /// Conservative bound for the commit's **effect size** under the margin
+    /// table validated at `version`, in budget units.
+    ///
+    /// The input is the effect, never the caller's own bound claim: `validate`
+    /// compares the claim against the value returned here, so the comparison
+    /// is a real disagreement test and not a fixpoint the caller can satisfy
+    /// by construction (#104-1).
+    fn bound(&self, version: u64, effect_bytes: u64) -> u64;
+
+    /// The margin table this port charges, if it owns one. A port with no
+    /// table reports `None`; the executor reports that instead of a dead
+    /// field nothing computes from (#104-3).
+    fn bound_margins(&self) -> Option<Margins> {
+        None
+    }
+
+    /// A clone of this port carrying the margin table recalibrated to
+    /// `version` (#104-3). The default refuses: a port with no table has
+    /// nothing to recalibrate, and a recalibration that moves no bound is what
+    /// the finding forbids.
+    fn recalibrated(
+        &self,
+        version: u64,
+        per_tool_declaration: u64,
+    ) -> Option<Result<std::rc::Rc<dyn AccountingPort>, &'static str>>;
 }
 
 /// Region budget triple.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Budget {
     /// Region budget.
     pub b: u64,

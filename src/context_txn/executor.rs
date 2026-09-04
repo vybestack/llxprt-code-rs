@@ -190,6 +190,11 @@ pub enum CommitOutcome {
 /// commits against is folded here, from the events the session's admissions
 /// appended, so `M` and the bound come from governed state and not from the
 /// caller (#104).
+///
+/// A failed admission is recovered by the next `propose` (#121-b): a refused
+/// admission must not wedge the session for the rest of its lifetime, so
+/// `propose` is legal from `Aborted` exactly as from `Committed`, and it
+/// clears the aborted flag before the new transaction begins.
 #[derive(Clone)]
 pub struct Executor {
     epoch: Epoch,
@@ -198,7 +203,6 @@ pub struct Executor {
     current: Option<Txn>,
     aborted: bool,
     port: Option<std::rc::Rc<dyn AccountingPort>>,
-    margins: Margins,
     contract: RenderContract,
     log: EventLog,
     typed: TypedState,
@@ -224,7 +228,6 @@ impl Executor {
             current: None,
             aborted: false,
             port: None,
-            margins: Margins::V1,
             contract,
             log,
             typed,
@@ -247,21 +250,46 @@ impl Executor {
         self.port = Some(port);
     }
 
-    /// The versioned margin table the executor charges (#104-3). Usage
-    /// reconciliation against a measured number is blocked by #80; what is
-    /// landed is the versioning plus the drift fixture.
-    pub fn margins(&self) -> Margins {
-        self.margins
+    /// The bound the bound port computes for an effect of `effect_bytes` over
+    /// `governed` units already committed (#104-1). The caller's claim is
+    /// built here - from the same port `validate` asks - so the two can only
+    /// disagree if the caller invents a number.
+    pub fn port_bound(&self, governed: u64, effect_bytes: u64) -> Option<u64> {
+        let port = self.port.as_deref()?;
+        let version = port
+            .bound_margins()
+            .map_or(Margins::V1.version, |margins| margins.version);
+        let _ = governed;
+        Some(port.bound(version, effect_bytes))
+    }
+
+    /// The versioned margin table the executor's bound is computed from
+    /// (#104-3). Usage reconciliation against a measured number is blocked by
+    /// #80; what is landed is the versioning plus the drift fixture. The table
+    /// lives on the port - the one place a bound is computed from - so the
+    /// value a drift fixture recalibrates is the value `validate` charges; a
+    /// table no computation reads is what #104-3 forbids.
+    pub fn margins(&self) -> Option<Margins> {
+        self.port.as_deref().and_then(AccountingPort::bound_margins)
     }
 
     /// Recalibrates the margin table on detected drift (#104-3): the version
     /// must be strictly newer, so replay never silently adopts a newer table.
+    /// The recalibration is routed through the port that computes the bound,
+    /// so it moves every later bound rather than a field nothing reads.
     pub fn recalibrate_margins(
         &mut self,
         version: u64,
         per_tool_declaration: u64,
     ) -> Result<(), &'static str> {
-        self.margins = self.margins.recalibrate(version, per_tool_declaration)?;
+        let port = self
+            .port
+            .clone()
+            .ok_or("a margin-drift fixture needs a bound port that owns the table")?;
+        let recalibrated = port
+            .recalibrated(version, per_tool_declaration)
+            .ok_or("the bound port carries no margin table to recalibrate")?;
+        self.port = Some(recalibrated?);
         Ok(())
     }
 
@@ -285,16 +313,19 @@ impl Executor {
     }
 
     /// Arms region-wide admission accounting (#121-c): `ceiling` is the region
-    /// budget net of reserve and headroom; every applied admission's projected
-    /// occupancy is summed against it.
+    /// budget net of reserve and headroom, and every applied admission's
+    /// projected occupancy (the accumulated total plus its own bound) is
+    /// compared against it. The accumulated total is *preserved* across
+    /// admissions: the session owns one executor, so re-arming the ceiling must
+    /// not silently restart the region it is accounting.
     pub fn arm_region_accounting(&mut self, ceiling: u64) {
         self.region_ceiling = Some(ceiling);
-        self.region_admitted = 0;
     }
 
-    /// Units already admitted into the region (#121-c).
-    pub fn region_admitted(&self) -> u64 {
-        self.region_admitted
+    /// Resets the region total to zero, for a caller that starts a fresh
+    /// region (a recovered session that reopens the durable artifacts).
+    pub fn reset_region_accounting(&mut self) {
+        self.region_admitted = 0;
     }
 
     /// Test-only: folds one placed item into the governed state so the
@@ -366,7 +397,14 @@ impl Executor {
         if operation::find(op).is_none() {
             return Err(ExecutorError::CapabilityNotLanded { op });
         }
-        if self.state != TxnState::Proposed && self.state != TxnState::Committed {
+        // A refused admission must not wedge the executor for the rest of the
+        // session (#121-b): `Aborted` is recoverable by the next proposal,
+        // exactly as `Committed` is, because a failed validate can never be
+        // repaired in place - only superseded by a fresh transaction.
+        if self.state != TxnState::Proposed
+            && self.state != TxnState::Committed
+            && self.state != TxnState::Aborted
+        {
             return Err(ExecutorError::IllegalTransition {
                 from: self.state,
                 to: TxnState::Proposed,
@@ -422,15 +460,23 @@ impl Executor {
 
     /// Record verdicts and enforce the universal preconditions centrally.
     ///
-    /// #104: the bound comes from the bound [`AccountingPort`], never from
+    /// #104-1: the bound comes from the bound [`AccountingPort`], never from
     /// the caller. `claimed_bound` is what the caller believes the commit
-    /// costs; it must equal the port's computed bound or validation fails
-    /// with [`ExecutorError::BoundDisagrees`]. `m` is the protection floor
-    /// and must still satisfy `M + R + H <= B`, and the reclamation bar is
-    /// checked against the row's registered (nonzero) bar.
+    /// costs and `effect_bytes` is the size of the effect itself; the port
+    /// derives the bound from its own inputs (governed units, the declared
+    /// tool surface, the effect bytes and the versioned commit frame), so a
+    /// caller-invented number disagrees with the computed bound and fails
+    /// validation with [`ExecutorError::BoundDisagrees`]. `m` is the
+    /// protection floor and must still satisfy `M + R + H <= B`.
+    ///
+    /// #108-3: the row's typed precondition is evaluated here, over the
+    /// governed facts the executor already holds - the projected occupancy,
+    /// the budget triple and the row's reclamation potential - so the
+    /// predicate a row declares is the predicate that is enforced. The
+    /// reclamation bar (#104-4) is carried by the row's own predicate.
     ///
     /// Any failure leaves the transaction dead: a failed validate can never
-    /// be repaired in place, so the only next legal step is `abort`.
+    /// be repaired in place, so the only next legal step is a fresh proposal.
     pub fn validate(
         &mut self,
         claimed_bound: u64,
@@ -438,6 +484,7 @@ impl Executor {
         m: u64,
         phi_pre: u64,
         phi_post: u64,
+        effect_bytes: u64,
     ) -> Result<Txn, ExecutorError> {
         self.step(TxnState::Validated)?;
         let txn = self.current.clone().expect("txn present after propose");
@@ -448,7 +495,12 @@ impl Executor {
                 which: "bound-port-missing",
             });
         };
-        let computed = port.bound(self.typed.store_version, claimed_bound);
+        // The port's input is the effect size, never the caller's claim, so
+        // the disagreement below is a real check and not a fixpoint.
+        let version = port
+            .bound_margins()
+            .map_or(Margins::V1.version, |m| m.version);
+        let computed = port.bound(version, effect_bytes);
         if computed != claimed_bound {
             self.fail();
             return Err(ExecutorError::BoundDisagrees {
@@ -456,9 +508,23 @@ impl Executor {
                 computed,
             });
         }
-        if !budget::fits(computed, budget) {
+        // #108-4: the row's emergency flag is consumed here, as part of the
+        // facts its typed precondition is evaluated over. An emergency rung
+        // is exempt from the bar but may never raise `Phi`.
+        let facts = operation::PreconditionFacts {
+            parent_version: txn.parent_version,
+            projected: computed,
+            budget: *budget,
+            phi_pre,
+            phi_post,
+            bar: row.bar,
+            emergency: row.emergency,
+        };
+        if !row.precondition.holds(&facts) {
             self.fail();
-            return Err(ExecutorError::PreconditionFailed { which: "fit-bound" });
+            return Err(ExecutorError::PreconditionFailed {
+                which: precondition_name(row),
+            });
         }
         if !budget::feasible(m, budget) {
             self.fail();
@@ -466,22 +532,33 @@ impl Executor {
                 which: "protection-floor",
             });
         }
-        if row.reclamation && !budget::net_reclaim_ok(phi_pre, phi_post, row.bar) {
-            self.fail();
-            return Err(ExecutorError::PreconditionFailed {
-                which: "reclamation-bar",
-            });
-        }
         Ok(txn)
     }
 
-    /// Compare-and-commit with the legality gate (#105): `is_legal` runs over
-    /// the folded governed state against the executor's render contract
-    /// before the parent check, so an over-budget projection or an unpaired
-    /// tool declaration fails commit with a typed legality error. The
-    /// contract version the gate accepted is recorded on the executor so the
-    /// durable record and the send path can compare against it.
-    pub fn commit_outcome(&mut self, actual_parent: u64) -> Result<CommitOutcome, ExecutorError> {
+    /// Compare-and-commit with the legality gate (#105): `is_legal` runs
+    /// over the **live** folded governed state against the executor's render
+    /// contract before the parent check, so an over-budget projection or an
+    /// unpaired tool declaration fails commit with a typed legality error.
+    ///
+    /// `effect` is the governed event the commit releases (the executor is the
+    /// sole writer, so it appends the `OperationCommit` and `Append` events
+    /// itself, and folds them into the state the *next* commit is gated
+    /// against); passing `None` commits without appending, which is what a
+    /// caller that has no governed effect for the row uses. The contract
+    /// version the gate accepted is recorded on the executor so the durable
+    /// record and the send path can compare against it.
+    ///
+    /// #121-c: region accounting accumulates. Every applied admission adds its
+    /// validated bound to the region total, and the ceiling check compares the
+    /// *projected* occupancy (the accumulated total plus this bound) against
+    /// the armed ceiling, so a region fills up across admissions instead of
+    /// being checked against the last payload alone.
+    pub fn commit_outcome(
+        &mut self,
+        actual_parent: u64,
+        effect: Option<crate::context_kernel::events::EventKind>,
+        payload_bound: u64,
+    ) -> Result<CommitOutcome, ExecutorError> {
         if !self.state.can_transition(TxnState::Committed) {
             return Err(ExecutorError::IllegalTransition {
                 from: self.state,
@@ -490,6 +567,9 @@ impl Executor {
         }
         let txn = self.current.clone().expect("txn present after propose");
         let row = operation::find(txn.op).expect("registered");
+        // The gate runs against the folded state the executor holds, which is
+        // the state its own committed events built up: the live admission
+        // totals, not genesis.
         if let Err(violation) = is_legal(&self.typed, &self.contract) {
             self.fail();
             return Err(illegality(violation));
@@ -510,25 +590,64 @@ impl Executor {
         }
         if let Some(ceiling) = self.region_ceiling {
             let admitted = self.region_admitted;
-            if admitted > ceiling {
+            let projected = admitted.saturating_add(payload_bound);
+            if projected > ceiling {
                 self.fail();
                 return Err(ExecutorError::RegionOverBudget {
                     admitted,
-                    projected: admitted,
+                    projected,
                     ceiling,
                 });
             }
         }
+        // Applied: the executor appends the governed event it releases and
+        // folds it into the state the next commit is gated against, so the
+        // legality gate sees the region it is actually admitting into (#105).
+        if let Some(kind) = effect {
+            self.append_effect(kind);
+        }
+        self.region_admitted = self.region_admitted.saturating_add(payload_bound);
         self.state = TxnState::Committed;
         self.contract_version = Some(self.contract.version);
         Ok(CommitOutcome::Applied)
     }
 
+    /// Appends the governed event an applied commit releases and folds it into
+    /// the executor's own typed state, so the next commit is gated against the
+    /// state this one produced (#105).
+    fn append_effect(&mut self, kind: crate::context_kernel::events::EventKind) {
+        use crate::context_kernel::events::Sequencer;
+        let mut sequencer = Sequencer::continuing(&self.log, self.epoch.0, 1_000);
+        let event = sequencer.append(kind, self.log.store_version());
+        self.log.append(event).expect("the commit log continues");
+        Reducer::new(IDLENESS_WINDOW)
+            .fold_from(&mut self.typed, &self.log)
+            .expect("the commit log folds");
+    }
+
+    /// Units already admitted into the region this session (#121-c). The
+    /// total accumulates across applied admissions; a refused admission adds
+    /// nothing.
+    pub fn region_admitted(&self) -> u64 {
+        self.region_admitted
+    }
+
+    /// Adds `units` to the region total, for callers that account a commit the
+    /// executor released (#121-c). The ceiling check still runs at commit.
+    pub fn admit_region_units(&mut self, units: u64) {
+        self.region_admitted = self.region_admitted.saturating_add(units);
+    }
+
     /// Compare-and-commit, reporting the outcome. A [`CommitOutcome::RebaseNoOp`]
     /// is returned to the caller, never collapsed into a committed state
     /// (#121-a): the caller must not report a no-op as applied progress.
-    pub fn commit(&mut self, actual_parent: u64) -> Result<CommitOutcome, ExecutorError> {
-        self.commit_outcome(actual_parent)
+    pub fn commit(
+        &mut self,
+        actual_parent: u64,
+        effect: Option<crate::context_kernel::events::EventKind>,
+        payload_bound: u64,
+    ) -> Result<CommitOutcome, ExecutorError> {
+        self.commit_outcome(actual_parent, effect, payload_bound)
     }
 
     /// Fenced compare-and-commit: a newer lease epoch fences us out
@@ -538,6 +657,8 @@ impl Executor {
         &mut self,
         actual_parent: u64,
         clock: &FencingClock,
+        effect: Option<crate::context_kernel::events::EventKind>,
+        payload_bound: u64,
     ) -> Result<CommitOutcome, ExecutorError> {
         if clock.latest() > self.epoch.0 {
             self.fail();
@@ -546,7 +667,7 @@ impl Executor {
                 mine: self.epoch.0,
             });
         }
-        self.commit(actual_parent)
+        self.commit(actual_parent, effect, payload_bound)
     }
 
     /// Authority non-increase: the acting principal must be the row's
@@ -584,6 +705,17 @@ impl Executor {
     /// Current state (for property tests).
     pub fn state(&self) -> TxnState {
         self.state
+    }
+}
+
+/// Stable refusal name for the typed precondition that failed, so a rejected
+/// validation names the predicate the row declared (#108-3) instead of a
+/// generic one.
+fn precondition_name(row: &operation::Operation) -> &'static str {
+    if row.reclamation {
+        "reclamation-bar"
+    } else {
+        "fit-bound"
     }
 }
 

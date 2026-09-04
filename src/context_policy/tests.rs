@@ -498,6 +498,107 @@ fn runtime_failed_proposal_quiesces_and_wrap_up_cannot_override_it() {
     assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
 }
 
+/// Drives the controller's own governor into a rate quiesce the way
+/// production does: every window admits at the quota while reclaiming one
+/// byte, so `predicate_holds` keeps failing, the quota tightens to the floor,
+/// and the governor quiesces (`governor_violation_tightens_floor_then_quiesces`
+/// proves the same walk on the bare governor). The completion after that is
+/// refused by the quiescing quota itself, which is what records the rate
+/// terminal as its own event instead of a write failure.
+fn drive_governor_to_rate_quiesce(
+    policy: &mut crate::context_policy::runtime::ProposalOnlyController,
+) {
+    let mut window = 0;
+    while !policy.governor().state().quiescing {
+        window += 1;
+        assert!(
+            window < 64,
+            "the governor must tighten to the floor and then quiesce"
+        );
+        let quota = policy.governor().state().quota;
+        let bytes = vec![b'x'; quota as usize + 1];
+        let proposal = policy.propose_bulk("read_file", bytes.len(), 1.0);
+        policy.complete_bulk(proposal, &bytes, quota as usize, 1.0, 7);
+    }
+    assert!(policy.governor().state().at_floor);
+    // The next admission is refused by the quiescing quota, so the caller never
+    // touches the store on this path: the rate terminal is the quota's refusal.
+    let bytes = vec![b'x'; 8];
+    let proposal = policy.propose_bulk("read_file", bytes.len(), 1.0);
+    policy.complete_bulk(proposal, &bytes, 8, 1.0, 7);
+}
+
+/// A rate quiesce and an unwritable quiesce are DIFFERENT terminals, and both
+/// survive recovery: the rate branch is the quota's own refusal and the
+/// unwritable branch is a store write failure, so a durable consumer can tell
+/// them apart.
+#[test]
+fn rate_and_unwritable_quiesce_are_distinct_terminals_and_both_recover() {
+    // Force the rate refusal the way production reaches it: each window admits
+    // right at the quota while reclaiming a single byte, so the admission
+    // predicate keeps failing, the quota walks down to the floor, and the
+    // governor quiesces. The NEXT completion is then refused by the quota
+    // itself, never by the store.
+    let mut policy = crate::context_policy::runtime::ProposalOnlyController::default();
+    drive_governor_to_rate_quiesce(&mut policy);
+    assert_eq!(
+        policy
+            .events()
+            .last()
+            .expect("a quiesced completion is still an event")
+            .operation,
+        "quiesce-rate"
+    );
+    assert_ne!(
+        policy.terminal_outcome(),
+        Some("quiesce_unwritable"),
+        "the rate terminal must differ from the write-failure terminal"
+    );
+
+    // Both terminals survive the recovery mapping unchanged.
+    assert_eq!(
+        crate::session::context_recover::recover_terminal_outcome(Some("quiesce_rate".to_string())),
+        Some("quiesce_rate")
+    );
+    assert_eq!(
+        crate::session::context_recover::recover_terminal_outcome(Some(
+            "quiesce_unwritable".to_string()
+        )),
+        Some("quiesce_unwritable")
+    );
+    // A name nobody records is left unset rather than rewritten.
+    assert_eq!(
+        crate::session::context_recover::recover_terminal_outcome(Some("made-up".to_string())),
+        None
+    );
+
+    // wrap_up refuses only the unwritable branch: a session that hit the rate
+    // ceiling can still be finalized when the store is writable and the
+    // wrap-up fits, which is what makes the two terminals honest.
+    let mut rate = crate::context_policy::runtime::ProposalOnlyController::default();
+    drive_governor_to_rate_quiesce(&mut rate);
+    assert_eq!(rate.terminal_outcome(), Some("quiesce_rate"));
+    rate.wrap_up(0, u64::MAX, true);
+    assert_eq!(rate.terminal_outcome(), Some("wrap_up"));
+    // The unwritable branch stays refused, as before.
+    let mut wedged = crate::context_policy::runtime::ProposalOnlyController::default();
+    let proposal = wedged.propose_bulk("read_file", 2048, 1.0);
+    wedged.abort_bulk(proposal);
+    wedged.wrap_up(0, u64::MAX, true);
+    assert_eq!(wedged.terminal_outcome(), Some("quiesce_unwritable"));
+    // A restored rate terminal is durable across the restore mapping itself:
+    // the policy keeps it (it is not None and not rewritten), and a durable
+    // consumer can tell it from `quiesce_unwritable`. `wrap_up` refuses only
+    // the write-failure branch, so an explicit writable wrap-up is still
+    // recorded on top of it - the split is about WHICH refusal happened, not
+    // about wedging a writable store.
+    let mut restored = crate::context_policy::runtime::ProposalOnlyController::default();
+    restored.restore_terminal_outcome("quiesce_rate");
+    assert_eq!(restored.terminal_outcome(), Some("quiesce_rate"));
+    restored.wrap_up(0, u64::MAX, true);
+    assert_eq!(restored.terminal_outcome(), Some("wrap_up"));
+}
+
 #[test]
 fn reachable_armed_states_have_terminal_or_reclaim_action() {
     let state = ProgressState::new(4, 2);
