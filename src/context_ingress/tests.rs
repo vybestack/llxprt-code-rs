@@ -759,3 +759,81 @@ fn commit_validates_every_slot_before_any_append() {
         "the spine holds exactly the admitted bytes, nothing more"
     );
 }
+
+/// The store state is re-checked AFTER the exempt append, on both the sanitized and
+/// the vaulted branches: a sink that admits writes at entry but stops admitting them
+/// during the append cannot have the transaction's records reported as admitted
+/// against it. The recorded pre-check alone does not cover a store that flips mode
+/// mid-append (issue 129).
+#[test]
+fn store_state_is_rechecked_after_the_durable_append() {
+    /// Sink that starts writable and stops admitting after the first append.
+    struct FlippingSink {
+        spine: Vec<u8>,
+        vault: Vec<(String, Vec<u8>)>,
+        /// Set by `sanitized_append`, read by `mode`.
+        flipped: std::cell::Cell<bool>,
+    }
+    impl FlippingSink {
+        fn new() -> Self {
+            Self {
+                spine: Vec::new(),
+                vault: Vec::new(),
+                flipped: std::cell::Cell::new(false),
+            }
+        }
+    }
+    impl IngressSink for FlippingSink {
+        fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
+            let start = self.spine.len() as u64;
+            self.spine.extend_from_slice(bytes);
+            // The append is durable from here; the store then stops admitting.
+            self.flipped.set(true);
+            Ok(SpinePlacement {
+                handle: format!("ingress-{:016x}", bytes.len()),
+                range: start..(self.spine.len() as u64),
+            })
+        }
+        fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
+            let handle = format!("vault-{}", self.vault.len());
+            self.vault.push((reason.to_string(), raw.to_vec()));
+            Ok(handle)
+        }
+        fn mode(&self) -> &'static str {
+            if self.flipped.get() {
+                "read-only"
+            } else {
+                "normal"
+            }
+        }
+    }
+
+    // Sanitized branch: the pre-check passed, the append landed, and the
+    // post-append re-check refuses to report the record as admitted.
+    let mut flipping = FlippingSink::new();
+    let mut txn = IngressTxn::new(1 << 20, 1 << 20);
+    txn.capture(CaptureSource::ToolResult, &corpus()).unwrap();
+    let error = txn.commit(&mut flipping).unwrap_err();
+    assert!(
+        matches!(error, IngressError::StoreBlocked { mode: "read-only" }),
+        "a store that stops admitting mid-append must be a typed refusal, got {error:?}"
+    );
+    assert!(
+        !flipping.spine.is_empty(),
+        "the append was already durable when the re-check fired"
+    );
+
+    // Vaulted branch: a tiny work budget forces the payload to the vault, the
+    // placeholder append flips the store, and the same re-check refuses.
+    let mut vaulting = FlippingSink::new();
+    let mut quarantined = IngressTxn::new(1 << 20, 1);
+    quarantined
+        .capture(CaptureSource::ToolResult, &corpus())
+        .unwrap();
+    let error = quarantined.commit(&mut vaulting).unwrap_err();
+    assert!(
+        matches!(error, IngressError::StoreBlocked { mode: "read-only" }),
+        "the vaulted branch re-checks store state too, got {error:?}"
+    );
+    assert_eq!(vaulting.vault.len(), 1, "the vault write did happen first");
+}

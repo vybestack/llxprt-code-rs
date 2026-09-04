@@ -191,9 +191,7 @@ impl IngressTxn {
         &mut self,
         sink: &mut dyn IngressSink,
     ) -> Result<Vec<IngressRecord>, IngressError> {
-        if sink.mode() != "normal" {
-            return Err(IngressError::StoreBlocked { mode: sink.mode() });
-        }
+        store_is_admitting(sink)?;
         // Validate every slot first, so a rejected payload leaves the spine
         // byte-identical to before the attempt (all-or-nothing admission):
         // a coverage failure in any slot appends nothing at all.
@@ -208,6 +206,11 @@ impl IngressTxn {
                 .extend(record.secret_digests.iter().copied());
             records.push(record);
         }
+        // Every slot has now landed durably. The mode checked at entry says
+        // nothing about the store's state after the last exempt append, so the
+        // transaction refuses to report success against a store that stopped
+        // admitting writes mid-flight (issue 129).
+        store_is_admitting(sink)?;
         Ok(records)
     }
 
@@ -304,17 +307,19 @@ impl IngressTxn {
         }
     }
 
-    /// Appends `bytes` to the spine and validates the placement: order is
-    /// durable append first, segmentation second, and pure validation
-    /// (coverage) already ran in `commit`, so a rejected payload leaves the
-    /// spine byte-identical to before the attempt.
+    /// Appends `bytes` to the spine, then re-checks store state and the placement.
     ///
-    /// Durable sanitized append first, segmentation second: the record is
-    /// addressable before any consumer sees it, and segmentation is
-    /// re-derivable deterministically from the stored bytes. The pure
-    /// validation (coverage) already ran in `commit` before this append, so
-    /// a rejected payload leaves the spine byte-identical to before the
-    /// attempt (regression guard).
+    /// `commit` already ran the pure validation pass over every slot and checked
+    /// the store mode before any side effect, so this helper can assume the bytes
+    /// are admissible; it still refuses, after the fact, a store that changed
+    /// state during the append, a placement that landed zero spine bytes, or a
+    /// segmentation that does not cover the stored bytes exactly. That
+    /// post-append re-check is a belt-and-braces refusal, not an all-or-nothing
+    /// guarantee: the exempt append is already durable when it fires, so by this
+    /// point a rejected payload has left its bytes in the spine and the caller
+    /// must fail the turn rather than roll the spine back. The pre-append
+    /// validation in `commit` is what actually keeps the spine byte-identical
+    /// for a rejected payload.
     fn place_on_spine(
         sink: &mut dyn IngressSink,
         bytes: &[u8],
@@ -324,6 +329,10 @@ impl IngressTxn {
             .map_err(|e| IngressError::StoreBlocked {
                 mode: leak_mode(&e),
             })?;
+        // The mode was checked before the append, but a store that flips to a
+        // non-writable state during the append leaves the placement's validity
+        // unproven, so the durable state is re-checked after the write.
+        store_is_admitting(sink)?;
         if placement.range.is_empty() {
             return Err(IngressError::EmptyPreservedSpine);
         }
@@ -337,7 +346,12 @@ impl IngressTxn {
     }
 }
 
-fn vault_placeholder(reason: VaultReason, byte_len: usize) -> Vec<u8> {
+/// Builds the byte-length-stable placeholder the sanitized spine records for a payload
+/// the redactor quarantined into the vault.
+///
+/// Shared by the ingress transaction's vaulted branch and the store-free digest fallback,
+/// so both paths emit the same placeholder bytes for the same quarantine (issue 130).
+pub(crate) fn vault_placeholder(reason: VaultReason, byte_len: usize) -> Vec<u8> {
     let label = format!("[vaulted:{}:{}bytes]", reason.name(), byte_len);
     let mut placeholder = label.into_bytes();
     placeholder.resize(byte_len.max(1), b'-');
@@ -374,5 +388,19 @@ fn leak_mode(message: &str) -> &'static str {
         "unavailable"
     } else {
         "blocked"
+    }
+}
+
+/// Refuses unless the sink still reports a store that admits writes.
+///
+/// Used before the first durable call and again after every durable write: a store
+/// that moved to `read-only` or `unavailable` mid-transaction must not have the
+/// transaction's records reported as successfully admitted against it.
+fn store_is_admitting(sink: &dyn IngressSink) -> Result<(), IngressError> {
+    let mode = sink.mode();
+    if mode == "normal" {
+        Ok(())
+    } else {
+        Err(IngressError::StoreBlocked { mode })
     }
 }

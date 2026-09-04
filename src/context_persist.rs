@@ -7,7 +7,10 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::context_ingress::filter::RuleVerdict;
-use crate::context_ingress::ingress::IngressPayload;
+use crate::context_ingress::ingress::{vault_placeholder, IngressPayload};
+use crate::context_ingress::redactor::{RedactionOutcome, Redactor};
+use crate::context_ingress::segment::segment;
+use crate::context_kernel::canonical::digest;
 use crate::session::{
     ensure_private_subdir, open_regular_at, RoundRecord, SessionStore, StoreError,
 };
@@ -288,6 +291,16 @@ fn executor_refusal(error: &crate::context_txn::executor::ExecutorError) -> Stri
     }
 }
 
+/// The content-stable digest key for the bytes a bulk result carries.
+///
+/// Both the durable-append path (`ingest_bulk_committed`) and the in-memory fallback
+/// (`memory_digest`) derive their `content-` key from this one function, so the
+/// content-addressed handle and the sanitized-bytes record can never disagree about
+/// which bytes they name (issue 131).
+fn content_digest_handle(bytes: &[u8]) -> String {
+    format!("content-{:016x}", digest(bytes))
+}
+
 /// Builds the compact CTXDIGEST record for one bulk tool result, moving the full bytes
 /// through the fail-closed ingress transaction into the spine and the vault.
 ///
@@ -343,10 +356,7 @@ fn ingest_bulk_committed(
                 format!("store mode {mode} refused the turn")
             }
         })?;
-    let handle = format!(
-        "content-{:016x}",
-        crate::context_kernel::canonical::digest(bytes)
-    );
+    let handle = content_digest_handle(bytes);
     // The parent version is the applied spine record count, so the executor's
     // compare-and-commit is anchored to the store position it commits against.
     let parent_version = state.store.index().len() as u64;
@@ -413,24 +423,44 @@ fn normalized_pressure(bytes: usize) -> f64 {
 
 /// The same record shape computed entirely in memory: no store, no vault, no artifacts.
 ///
-/// Used when the store refuses the write, so a bulk result still never rides the request
-/// list as raw bytes even though nothing was committed.
+/// Used when the store refuses the write, so a bulk result still never rides the
+/// request list as raw bytes even though nothing was committed.
+///
+/// The bytes are sanitized first, on exactly the same terms as the append path: the
+/// same redactor runs, a vault verdict produces the same byte-length-stable
+/// placeholder, and the verdict, digest, and any verbatim return all consume only the
+/// sanitized bytes. Nothing this function emits is derived from unsanitized content
+/// (issue 130).
 fn memory_digest(state: &mut ContextState, tool: &str, bytes: &[u8]) -> String {
-    let handle = format!(
-        "content-{:016x}",
-        crate::context_kernel::canonical::digest(bytes)
-    );
+    let sanitized = sanitize_for_digest(bytes);
+    let segments = segment(&sanitized);
+    let handle = content_digest_handle(&sanitized);
     let payload = IngressPayload {
         handle: handle.clone(),
         ranges: Vec::new(),
-        bytes: bytes.to_vec(),
-        segments: Vec::new(),
+        bytes: sanitized.clone(),
+        segments: segments.clone(),
     };
-    if state.filters.verdict(tool, &[], bytes.len()) == RuleVerdict::PassVerbatim {
-        return String::from_utf8_lossy(bytes).into_owned();
+    if state.filters.verdict(tool, &segments, sanitized.len()) == RuleVerdict::PassVerbatim {
+        return String::from_utf8_lossy(&sanitized).into_owned();
     }
-    let digest = state.filters.digest(tool, &handle, Vec::new(), bytes, &[]);
+    let digest = state
+        .filters
+        .digest(tool, &handle, Vec::new(), &sanitized, &segments);
     digest_record(state, tool, &payload, &handle, &digest)
+}
+
+/// Redacts `bytes` for a store-free digest, or replaces them with the vault placeholder.
+///
+/// The durable append path gets this behavior from `IngressTxn`; this helper gives the
+/// in-memory fallback the same treatment so the two paths cannot disagree about what the
+/// caller is allowed to see (issue 130).
+fn sanitize_for_digest(bytes: &[u8]) -> Vec<u8> {
+    let redactor = Redactor::with_budget(INGRESS_WORK_BUDGET);
+    match redactor.redact(bytes) {
+        RedactionOutcome::Sanitized { bytes, .. } => bytes,
+        RedactionOutcome::Vaulted { reason, byte_len } => vault_placeholder(reason, byte_len),
+    }
 }
 
 /// Renders one CTXDIGEST v1 record and folds its preserved spans into the manifest state.

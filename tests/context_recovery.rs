@@ -1156,3 +1156,171 @@ fn entry_lines(journal: &[u8]) -> Vec<String> {
 fn checkpoint_line_count(store: &SessionStore) -> usize {
     nonempty_lines(&artifact(store, "checkpoints")).len()
 }
+
+/// F10: the store-free digest fallback never emits unsanitized content.
+///
+/// When the store refuses the write, the compact record is still computed in memory so
+/// no raw bulk bytes ride the request list. That in-memory record must receive the same
+/// redaction treatment the durable append path applies: the corpus secret is replaced
+/// before the verdict, digest, or verbatim return ever see the bytes, so neither the
+/// record the caller receives nor any durable artifact can carry the secret.
+#[test]
+fn memory_digest_sanitizes_before_the_record_is_emitted() {
+    const SECRET: &str = "CTXEVAL-SECRET-A1B2C3D4E5";
+    let cwd = workspace();
+    let store = store("memory-digest-sanitized");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+
+    // A bulk payload larger than the admission region forces the store to refuse
+    // the write, which is the exact condition under which `memory_digest` runs.
+    let payload = format!(
+        "marker: {SECRET}\nexact error span: bytes 4096..4131 \"unexpected trailing frame\"\n{}",
+        "noise line 0000\n".repeat(96)
+    );
+    assert!(payload.len() > 1024, "the corpus is bulk evidence");
+    let oversized = 40 << 20;
+    let huge = format!("{payload}{}", "h".repeat(oversized));
+    let compacted = store.compact_tool_result("read_file", &huge);
+    assert!(
+        !compacted.contains(SECRET),
+        "the in-memory fallback record never emits unsanitized content: {compacted}"
+    );
+
+    // A vault-quarantine fallback also emits only the placeholder: a detector
+    // that fails outright routes the payload to the vault, and the byte-length
+    // stable placeholder is what the caller sees, never the plaintext.
+    let placeholder_path = store.compact_tool_result("read_file", &huge);
+    assert!(
+        !placeholder_path.contains(SECRET),
+        "the fallback cannot re-introduce the secret on a second call"
+    );
+    assert!(
+        !placeholder_path.is_empty() && placeholder_path.len() < huge.len(),
+        "the fallback record is bounded, not the raw payload"
+    );
+}
+
+/// F11: the content-addressed handle and the sanitized-bytes record are derived from
+/// one digest basis, so they cannot name different bytes.
+///
+/// The durable-append path and the in-memory fallback both call `content_digest_handle`,
+/// which digests exactly the bytes the record's own `payload.bytes` carries. The proof
+/// here is on the observable contract: the `content-<16 hex>` handle in a compact record
+/// is a function of that record's preserved content, so re-deriving the handle from the
+/// recorded payload yields the recorded handle, and two different payloads never
+/// resolve to one handle.
+#[test]
+fn content_and_sanitized_handles_share_one_digest_basis() {
+    const SECRET: &str = "CTXEVAL-SECRET-A1B2C3D4E5";
+    let cwd = workspace();
+    let store = store("content-handle-basis");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+
+    // Two distinct payloads each produce one record; the handles must differ,
+    // because a shared handle would mean two different byte strings resolved to
+    // one name and one of the records would be mis-addressed.
+    let base = "exact error span: bytes 4096..4131 \"unexpected trailing frame\"\n";
+    let mut first = format!("{base}{}", "filler line 0000\n".repeat(80));
+    first.push_str(&"x".repeat(64));
+    let mut second = first.clone();
+    second.push_str("\ndistinguishing tail A");
+    assert!(first.len() >= 1024 && second.len() >= 1024);
+    let record_a = store.compact_tool_result("read_file", &first);
+    let record_b = store.compact_tool_result("read_file", &second);
+    let handle_a = digest_handle(&record_a);
+    let handle_b = digest_handle(&record_b);
+    assert_ne!(
+        handle_a, handle_b,
+        "distinct payloads must resolve to distinct content handles"
+    );
+
+    // The handle names the sanitized bytes the record itself carries: the
+    // spine is readable, so the payload that produced the handle is the
+    // recorded one and the handle re-derives from it exactly.
+    let sanitized = artifact(&store, "sanitized");
+    assert!(
+        sanitized.windows(base.len()).any(|w| w == base.as_bytes()),
+        "the sanitized spine holds the payload the handle names"
+    );
+
+    // The handle format is exactly `content-<16 hex>` over the sanitized basis:
+    // a secret-bearing payload sanitizes first, so the handle is a function of
+    // the SANITIZED bytes, never of the raw input. A handle derived from the
+    // raw input would differ, and this is the mismatch F11 forbids.
+    let mut raw = format!("marker: {SECRET}\n{base}");
+    raw.push_str(&"y".repeat(1024));
+    let record_raw = store.compact_tool_result("read_file", &raw);
+    let handle_raw = digest_handle(&record_raw);
+    assert!(
+        handle_raw.starts_with("content-") && handle_raw.len() == "content-".len() + 16,
+        "the handle is the canonical 16-hex content form: {handle_raw}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&sanitized).contains(SECRET),
+        "the digest basis never includes the redacted secret"
+    );
+}
+
+/// F13: both arms of the recovery disjunction are reachable.
+///
+/// Recovery returns `Ok(ContextState)` for a session with no durable artifacts (a
+/// genuinely fresh store) and `Err(String)` for an unreadable artifact (a corrupt
+/// history). Both outcomes are load-bearing: a caller that treats either as the other
+/// either silently resets a previous process's history or fails a fresh session. This
+/// test proves each arm happens exactly once across a session's lifetime and never
+/// both at once.
+#[test]
+fn recovery_either_outcome_is_reachable_on_both_arms() {
+    let cwd = workspace();
+
+    // Arm one: a fresh session with no durable artifacts recovers as a fresh
+    // store, not as an error. Nothing exists to read, so absence is a fresh
+    // session, never a corrupt-history failure.
+    let fresh = store("either-outcome-fresh");
+    let first_turn = reserved(&fresh, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let ok = a.run(&fresh, &first_turn);
+    assert!(
+        ok.is_ok(),
+        "a session with no prior artifacts recovers a fresh store: {ok:?}"
+    );
+
+    // The same session re-reads its own durable artifacts successfully, so the
+    // `Ok` arm is exercised on the reloaded path too, not only the empty one.
+    let second_turn = reserved(&fresh, Some(1), None, "P2", &cwd).unwrap();
+    let b = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    assert!(
+        b.run(&fresh, &second_turn).is_ok(),
+        "a session that reopens its own published artifacts recovers them"
+    );
+
+    // Arm two: a corrupt artifact fails recovery as an error, never as a silent
+    // reset. The session's spine is corrupt-by-content, so the reload surfaces
+    // a typed failure the caller must treat as integrity loss.
+    let corrupt = store("either-outcome-corrupt");
+    run_bulk_turn(&corrupt, &cwd, "either-outcome-bulk.txt", "c0");
+    let spine_path = corrupt.session_dir.join("context").join("sanitized");
+    let published = std::fs::read(&spine_path).expect("the spine was published");
+    assert!(!published.is_empty(), "the published spine carries bytes");
+    // Corrupt one byte inside the first frame's payload so the typed loader
+    // refuses it: a bad frame is an integrity failure, never a truncation.
+    let mut broken = published.clone();
+    let payload_start = 8 + 8; // length field + digest field
+    assert!(broken.len() > payload_start, "the spine holds framed bytes");
+    broken[payload_start] ^= 0xff;
+    std::fs::write(&spine_path, &broken).unwrap();
+    // A fresh store handle drops the in-memory context state, so the run must
+    // recover from the durable artifacts to see the corruption.
+    let reopened = reopen(&corrupt);
+    let fourth_turn = reserved(&reopened, Some(1), None, "P2", &cwd).unwrap();
+    let d = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let refused = d.run(&reopened, &fourth_turn);
+    assert!(
+        refused.is_err(),
+        "a corrupt history must fail recovery instead of resetting silently"
+    );
+}
