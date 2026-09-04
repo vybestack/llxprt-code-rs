@@ -130,7 +130,10 @@ fn error_server() -> ErrorServer {
 }
 
 fn run_bounded(mut command: Command) -> Output {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = command.spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -263,10 +266,48 @@ fn hostile_usage_session_still_emits_a_schema_valid_envelope() {
         serde_json::from_slice(include_bytes!("../docs/envelope.schema.json")).unwrap();
     let validator = jsonschema::draft202012::new(&schema).unwrap();
     let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(envelope["session_id"], "default");
+    let session_id = envelope["session_id"].as_str().unwrap();
+    assert!(
+        session_id.starts_with("session-"),
+        "usage envelope should use a fresh fallback session id, got {session_id:?}"
+    );
     assert!(
         validator.is_valid(&envelope),
         "usage envelope failed published schema: {:?}",
         validator.iter_errors(&envelope).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn omitted_session_with_end_of_options_keeps_generated_identity_in_error_envelope() {
+    let root = tempfile::tempdir().unwrap();
+    let output = invoke(root.path(), &["--"]);
+    assert_error(&output, Code::Config as i32);
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session_id = envelope["session_id"].as_str().unwrap();
+    assert!(llxprt_code_rs::session::SessionId::parse(session_id).is_ok());
+    assert!(session_id.starts_with("session-"));
+    assert!(session_id[8..]
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+}
+
+#[test]
+fn session_shaped_text_after_end_of_options_does_not_select_envelope_session() {
+    for trailing in [
+        vec!["--", "--session", "named"],
+        vec!["--", "--session=named"],
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let output = invoke(root.path(), &trailing);
+        assert_error(&output, 2);
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session_id = envelope["session_id"].as_str().unwrap();
+        assert_ne!(session_id, "named");
+        assert!(llxprt_code_rs::session::SessionId::parse(session_id).is_ok());
+        assert!(session_id.starts_with("session-"));
+        assert!(session_id[8..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    }
 }

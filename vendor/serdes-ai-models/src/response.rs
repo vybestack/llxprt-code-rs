@@ -337,7 +337,7 @@ mod tests {
         let response = chunked_response(vec![b"partial".to_vec()], true).await;
         assert!(matches!(
             read_bounded(response, 64).await,
-            Err(ModelError::Timeout(_))
+            Err(ModelError::Timeout)
         ));
     }
 
@@ -382,7 +382,7 @@ mod tests {
         let items = stream_bounded(response, 64).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].as_ref().unwrap().as_ref(), b"partial");
-        assert!(matches!(items[1], Err(ModelError::Timeout(_))));
+        assert!(matches!(items[1], Err(ModelError::Timeout)));
     }
 
     #[test]

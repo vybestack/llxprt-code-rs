@@ -1,6 +1,6 @@
 //! Rewrite journal, amortization gates, flush epochs, and conditional cache reports.
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RewriteEntry {
     pub source: u64,
     pub tokens_reclaimed: u64,
@@ -99,6 +99,35 @@ impl RewriteJournal {
     }
     pub fn entries(&self) -> &[RewriteEntry] {
         &self.entries
+    }
+
+    /// Restores one durable journal entry a previous process recorded, so a
+    /// republished journal carries the previous records ahead of the new ones
+    /// instead of replacing them (issue 102 restart).
+    ///
+    /// The entry's own counters are folded into the running report the same
+    /// way `record` folds a live entry, so a restored journal still yields a
+    /// report a later publication can render faithfully.
+    pub fn restore_entry(&mut self, entry: RewriteEntry) {
+        let cost = entry.invalidation_cost;
+        self.report.rewrite_events = self.report.rewrite_events.saturating_add(1);
+        match cost {
+            Some(cost) => {
+                self.report.invalidation_total =
+                    self.report.invalidation_total.saturating_add(cost);
+                self.report.known_cost_events = self.report.known_cost_events.saturating_add(1);
+            }
+            None => {
+                self.report.unknown_cost_events = self.report.unknown_cost_events.saturating_add(1);
+            }
+        }
+        if entry.amortized {
+            self.report.disarmed_rewrites = self.report.disarmed_rewrites.saturating_add(1);
+        } else {
+            self.report.armed_rewrites = self.report.armed_rewrites.saturating_add(1);
+        }
+        self.entries.push(entry);
+        self.refresh_report();
     }
 
     pub fn observe_access(&mut self, hit: bool, armed: bool) {

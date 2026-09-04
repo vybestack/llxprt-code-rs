@@ -3993,9 +3993,9 @@
     },
     {
       "key": "auth-key-name",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "fixed unsupported-credential-source diagnostic"
+      "note": "named provider-key credential source; resolves from the credential env selector then the secure store"
     },
     {
       "key": "base-url",

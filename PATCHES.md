@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `6efd93ad3e40a53a72f600d04800389d790ce3d1c8435f3460b4717c0228b07f`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `8c9e9759e5b9c0a49e8346cd94c7e2cfb83b787857ddc47248838845ee59ecc7`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -206,6 +206,23 @@ provider and stops forwarding `max_tokens` for it. The wire contract is pinned o
 `codex_http_wire_contract_streams_without_store_or_cap_and_replays_input` (asserting per-turn body
 shape and full replay) and `codex_http_rejects_non_sse_success_body` (a JSON 200 without SSE is an
 error, not an empty turn).
+
+## Patch 11 - reqwest timeout diagnostics carry no fabricated duration
+(`vendor/serdes-ai-models/src/error.rs`, `ModelError::Timeout` + `From<reqwest::Error>`)
+
+`From<reqwest::Error>` previously mapped every reqwest timeout to
+`ModelError::Timeout(Duration::from_secs(30))` under a "Default timeout" comment. That default was
+never the configured one: a host request timeout such as the 900-second `stream-first-response-timeout-ms`
+value still fired, but the diagnostic read "Model request timed out after 30s", misdirecting
+operators. reqwest exposes `is_timeout()` only and carries no elapsed duration, so the variant
+drops the payload and the fixed `Display` reports `Model request timed out` with no number; the
+configured request timeout stays the single source of truth in the host configuration.
+`is_retryable` and `retry_after` keep their existing timeout behavior, and the retry-policy
+`RetryOn` matching only drops the now-absent payload. The mapping is pinned by the vendored
+`reqwest_timeouts_do_not_report_a_fabricated_duration` regression (a silent loopback server and
+two distinct configured timeouts must both yield the same value-free sentence) and the host
+`tests/provider.rs` `timed_out_transport_reports_no_duration` regression (the real adapter with a
+150 ms request timeout against a silent loopback provider).
 
 ## Tests
 

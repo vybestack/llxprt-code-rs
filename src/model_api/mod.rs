@@ -3,6 +3,7 @@ pub(crate) mod credentials;
 pub(crate) mod dependencies;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_keychain;
+pub(crate) mod provider_keys;
 pub(crate) mod registry;
 mod responses_backend;
 pub(crate) mod settings;

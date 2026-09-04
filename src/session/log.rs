@@ -1,5 +1,7 @@
 //! Framed append-only transaction encoding and segment I/O.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 use sha2::{Digest as _, Sha256};
 use std::io::{Seek as _, Write as _};

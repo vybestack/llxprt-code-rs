@@ -12291,7 +12291,7 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..ed83d1c 100644
+index 58b6fc1..211c904 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
 @@ -2,13 +2,10 @@
@@ -12318,12 +12318,17 @@ index 58b6fc1..ed83d1c 100644
      Api {
          /// Error message.
          message: String,
-@@ -28,68 +24,102 @@ pub enum ModelError {
+@@ -27,69 +23,105 @@ pub enum ModelError {
+         code: Option<String>,
      },
  
-     /// Request timeout.
+-    /// Request timeout.
 -    #[error("Request timeout after {0:?}")]
-     Timeout(Duration),
+-    Timeout(Duration),
++    /// Request timeout. No duration is carried: reqwest reports only that a timeout
++    /// fired, so the configured request timeout stays the single source of truth in the
++    /// host configuration.
++    Timeout,
  
      /// Rate limited by the API.
 -    #[error("Rate limited, retry after {retry_after:?}")]
@@ -12398,7 +12403,7 @@ index 58b6fc1..ed83d1c 100644
 +        match self {
 +            Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
 +            Self::Api { .. } => f.write_str("Model API error"),
-+            Self::Timeout(duration) => write!(f, "Model request timed out after {duration:?}"),
++            Self::Timeout => f.write_str("Model request timed out"),
 +            Self::RateLimited { retry_after } => {
 +                write!(f, "Model request rate limited (retry after {retry_after:?})")
 +            }
@@ -12448,9 +12453,24 @@ index 58b6fc1..ed83d1c 100644
  }
  
  impl ModelError {
-@@ -202,15 +232,15 @@ impl From<reqwest::Error> for ModelError {
+@@ -97,7 +129,7 @@ impl ModelError {
+     #[must_use]
+     pub fn is_retryable(&self) -> bool {
+         match self {
+-            ModelError::Timeout(_) => true,
++            ModelError::Timeout => true,
+             ModelError::RateLimited { .. } => true,
+             ModelError::Connection(_) => true,
+             ModelError::Http { status, .. } => *status >= 500,
+@@ -199,18 +231,20 @@ impl ModelError {
+ 
+ impl From<reqwest::Error> for ModelError {
+     fn from(err: reqwest::Error) -> Self {
++        // A reqwest timeout error carries no duration, so no number is reported here;
++        // the host already knows the configured timeout it passed to the request.
          if err.is_timeout() {
-             ModelError::Timeout(Duration::from_secs(30)) // Default timeout
+-            ModelError::Timeout(Duration::from_secs(30)) // Default timeout
++            ModelError::Timeout
          } else if err.is_connect() {
 -            ModelError::Connection(err.to_string())
 +            ModelError::Connection("provider connection failed".to_string())
@@ -12467,7 +12487,22 @@ index 58b6fc1..ed83d1c 100644
          }
      }
  }
-@@ -249,11 +279,70 @@ mod tests {
+@@ -224,7 +258,7 @@ mod tests {
+ 
+     #[test]
+     fn test_is_retryable() {
+-        assert!(ModelError::Timeout(Duration::from_secs(30)).is_retryable());
++        assert!(ModelError::Timeout.is_retryable());
+         assert!(ModelError::rate_limited(None).is_retryable());
+         assert!(ModelError::Connection("failed".into()).is_retryable());
+         assert!(ModelError::http(500, "Server error").is_retryable());
+@@ -244,16 +278,119 @@ mod tests {
+         let err = ModelError::rate_limited(None);
+         assert_eq!(err.retry_after(), None);
+ 
+-        let err = ModelError::Timeout(Duration::from_secs(30));
++        let err = ModelError::Timeout;
+         assert_eq!(err.retry_after(), None);
      }
  
      #[test]
@@ -12488,7 +12523,7 @@ index 58b6fc1..ed83d1c 100644
 +                message: marker.to_string(),
 +                code: Some(marker.to_string()),
 +            },
-+            ModelError::Timeout(Duration::from_secs(7)),
++            ModelError::Timeout,
 +            ModelError::RateLimited {
 +                retry_after: Some(Duration::from_secs(9)),
 +            },
@@ -12541,13 +12576,102 @@ index 58b6fc1..ed83d1c 100644
 +        assert!(!diagnostic.contains(marker));
 +        assert!(!diagnostic.contains("/private"));
 +        assert!(!diagnostic.contains(&address.to_string()));
++    }
++
++    /// A reqwest timeout carries no duration, so the mapped error never reports one: whatever
++    /// request timeout was configured, the diagnostic stays the same value-free sentence and
++    /// never asserts a number of seconds.
++    #[tokio::test]
++    async fn reqwest_timeouts_do_not_report_a_fabricated_duration() {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
++        let server = std::thread::spawn(move || {
++            for stream in listener.incoming() {
++                let Ok(mut stream) = stream else {
++                    continue;
++                };
++                // Read the request, then hold the connection open without ever writing a
++                // response head so the client's configured request timeout fires.
++                use std::io::Read as _;
++                let mut buffer = [0u8; 8192];
++                while stream.read(&mut buffer).unwrap_or(0) > 0 {
++                    let _ = buffer;
++                }
++            }
++        });
++
++        for configured in [Duration::from_millis(80), Duration::from_millis(160)] {
++            let error = reqwest::Client::builder()
++                .redirect(reqwest::redirect::Policy::none())
++                .no_proxy()
++                .build()
++                .unwrap()
++                .get(format!("http://{address}/v1/chat/completions"))
++                .timeout(configured)
++                .send()
++                .await
++                .unwrap_err();
++            assert!(error.is_timeout(), "expected a timeout: {error:?}");
++            let diagnostic = ModelError::from(error).to_string();
++            assert_eq!(diagnostic, "Model request timed out");
++            assert!(
++                !diagnostic.chars().any(|c| c.is_ascii_digit()),
++                "diagnostic asserted a duration: {diagnostic}"
++            );
++        }
++        drop(server);
      }
  }
 diff --git a/vendor/serdes-ai-models/src/fallback.rs b/vendor/serdes-ai-models/src/fallback.rs
-index 3e91b26..4f15953 100644
+index 3e91b26..8e9a275 100644
 --- a/vendor/serdes-ai-models/src/fallback.rs
 +++ b/vendor/serdes-ai-models/src/fallback.rs
-@@ -616,8 +616,13 @@ mod tests {
+@@ -46,7 +46,7 @@ impl RetryOn {
+             RetryOn::AnyError => true,
+             RetryOn::RateLimits => matches!(error, ModelError::RateLimited { .. }),
+             RetryOn::Transient => match error {
+-                ModelError::Timeout(_) | ModelError::Connection(_) | ModelError::Network(_) => true,
++                ModelError::Timeout | ModelError::Connection(_) | ModelError::Network(_) => true,
+                 ModelError::Http { status, .. } => *status >= 500,
+                 _ => false,
+             },
+@@ -305,7 +305,6 @@ mod tests {
+     use serdes_ai_core::{FinishReason, ModelResponsePart};
+     use std::sync::atomic::{AtomicUsize, Ordering};
+     use std::sync::Arc;
+-    use std::time::Duration;
+ 
+     /// A mock model that can fail with configurable errors.
+     struct FailingMockModel {
+@@ -357,7 +356,7 @@ mod tests {
+                 ModelError::RateLimited { retry_after } => Err(ModelError::RateLimited {
+                     retry_after: *retry_after,
+                 }),
+-                ModelError::Timeout(d) => Err(ModelError::Timeout(*d)),
++                ModelError::Timeout => Err(ModelError::Timeout),
+                 ModelError::Connection(msg) => Err(ModelError::Connection(msg.clone())),
+                 ModelError::Authentication(msg) => Err(ModelError::Authentication(msg.clone())),
+                 ModelError::Http {
+@@ -456,15 +455,15 @@ mod tests {
+         // AnyError retries on everything
+         assert!(RetryOn::AnyError.should_retry(&ModelError::api("test")));
+         assert!(RetryOn::AnyError.should_retry(&ModelError::rate_limited(None)));
+-        assert!(RetryOn::AnyError.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
++        assert!(RetryOn::AnyError.should_retry(&ModelError::Timeout));
+ 
+         // RateLimits only retries on rate limit errors
+         assert!(RetryOn::RateLimits.should_retry(&ModelError::rate_limited(None)));
+         assert!(!RetryOn::RateLimits.should_retry(&ModelError::api("test")));
+-        assert!(!RetryOn::RateLimits.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
++        assert!(!RetryOn::RateLimits.should_retry(&ModelError::Timeout));
+ 
+         // Transient retries on timeout, connection, network, and 5xx errors
+-        assert!(RetryOn::Transient.should_retry(&ModelError::Timeout(Duration::from_secs(30))));
++        assert!(RetryOn::Transient.should_retry(&ModelError::Timeout));
+         assert!(RetryOn::Transient.should_retry(&ModelError::Connection("failed".into())));
+         assert!(RetryOn::Transient.should_retry(&ModelError::Network("failed".into())));
+         assert!(RetryOn::Transient.should_retry(&ModelError::http(500, "Server error")));
+@@ -616,8 +615,13 @@ mod tests {
  
          assert!(result.is_err());
          let err = result.unwrap_err();
@@ -12563,6 +12687,24 @@ index 3e91b26..4f15953 100644
      }
  
      #[tokio::test]
+@@ -682,7 +686,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_fallback_retry_on_transient() {
+         // First model fails with timeout (transient)
+-        let model1 = FailingMockModel::new("model1", ModelError::Timeout(Duration::from_secs(30)));
++        let model1 = FailingMockModel::new("model1", ModelError::Timeout);
+         let model2 = SucceedingMockModel::new("model2", "response2");
+ 
+         let call_count1 = model1.call_count.clone();
+@@ -742,7 +746,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_fallback_three_models() {
+         let model1 = FailingMockModel::new("model1", ModelError::rate_limited(None));
+-        let model2 = FailingMockModel::new("model2", ModelError::Timeout(Duration::from_secs(30)));
++        let model2 = FailingMockModel::new("model2", ModelError::Timeout);
+         let model3 = SucceedingMockModel::new("model3", "response3");
+ 
+         let call_count1 = model1.call_count.clone();
 diff --git a/vendor/serdes-ai-models/src/google/model.rs b/vendor/serdes-ai-models/src/google/model.rs
 index e93c5c0..fc05acb 100644
 --- a/vendor/serdes-ai-models/src/google/model.rs
@@ -15794,7 +15936,7 @@ index 5a4761d..e8950e4 100644
  }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..5daddf9
+index 0000000..55012d9
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
 @@ -0,0 +1,454 @@
@@ -16137,7 +16279,7 @@ index 0000000..5daddf9
 +        let response = chunked_response(vec![b"partial".to_vec()], true).await;
 +        assert!(matches!(
 +            read_bounded(response, 64).await,
-+            Err(ModelError::Timeout(_))
++            Err(ModelError::Timeout)
 +        ));
 +    }
 +
@@ -16182,7 +16324,7 @@ index 0000000..5daddf9
 +        let items = stream_bounded(response, 64).collect::<Vec<_>>().await;
 +        assert_eq!(items.len(), 2);
 +        assert_eq!(items[0].as_ref().unwrap().as_ref(), b"partial");
-+        assert!(matches!(items[1], Err(ModelError::Timeout(_))));
++        assert!(matches!(items[1], Err(ModelError::Timeout)));
 +    }
 +
 +    #[test]

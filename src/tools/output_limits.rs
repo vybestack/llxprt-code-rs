@@ -8,4 +8,4 @@
 pub const MAX_SHELL_OUTPUT_DEFAULT: usize = 32 * 1024;
 /// Default cap on one tool result. The aggregate turn-output budget remains the single
 /// owner of this value; production also limits each call by the bytes left in that budget.
-pub const MAX_TOOL_OUTPUT_DEFAULT: usize = crate::agent::MAX_TURN_OUTPUT_BYTES;
+pub const MAX_TOOL_OUTPUT_DEFAULT: usize = crate::limits::MAX_TURN_OUTPUT_BYTES;

@@ -10,6 +10,7 @@ pub mod context_kernel;
 pub mod envelope;
 pub mod grade;
 pub mod harness;
+pub mod limits;
 pub mod memory_profile;
 pub mod model;
 mod model_api;
@@ -21,7 +22,6 @@ pub mod session;
 pub mod tools;
 
 pub mod context_ingress;
-pub mod context_persist;
 pub mod context_policy;
 pub mod context_store;
 pub mod context_txn;

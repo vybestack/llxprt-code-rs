@@ -10,7 +10,7 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
@@ -256,7 +256,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
     const MAX_HEADER_BYTES: usize = 64 * 1024;
     const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
 
-    let mut reader = std::io::BufReader::new(stream);
+    let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut request = Vec::new();
     let mut content_length = 0usize;
     loop {
@@ -298,6 +298,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
     let header_len = request.len();
     request.resize(header_len + content_length, 0);
     reader.read_exact(&mut request[header_len..])?;
+    drop(reader);
     Ok(request)
 }
 
@@ -529,6 +530,114 @@ fn openai_redirects_never_reach_the_redirect_target() {
 /// reflected 33 MiB provider error body yields a bounded one-JSON stdout, exit 5, a
 /// failed session, and no pending branch. The reflected marker near the truncation
 /// boundary must never survive (scrub runs before the 8192-byte bound).
+#[test]
+fn omitted_session_is_fresh_and_matches_its_directory() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            let body = br#"{"error":{"message":"provider stopped"}}"#;
+            write!(stream, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+
+    let home = tempfile::tempdir().unwrap();
+    let profile_dir = home.path().join("profiles");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(profile_dir.join("loop.json"), format!(r#"{{"provider":"openai","model":"test-model","ephemeralSettings":{{"base-url":"http://127.0.0.1:{port}","auth-key":"test"}}}}"#)).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let run = || {
+        let output = bin()
+            .args(["--profile", "loop", "--prompt", "hello"])
+            .env("LLXPRT_CONFIG_HOME", home.path())
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5));
+        assert_eq!(
+            output.stdout.iter().filter(|&&byte| byte == b'\n').count(),
+            1
+        );
+        let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session_id = envelope["session_id"].as_str().unwrap().to_string();
+        assert!(home
+            .path()
+            .join("code-rs-sessions")
+            .join(&session_id)
+            .is_dir());
+        session_id
+    };
+
+    let first = run();
+    let second = run();
+    assert_ne!(first, second);
+    server.join().unwrap();
+}
+
+#[test]
+fn explicit_default_session_resumes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            let body = br#"{"error":{"message":"provider stopped"}}"#;
+            write!(stream, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+        }
+    });
+
+    let home = tempfile::tempdir().unwrap();
+    let profile_dir = home.path().join("profiles");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(profile_dir.join("loop.json"), format!(r#"{{"provider":"openai","model":"test-model","ephemeralSettings":{{"base-url":"http://127.0.0.1:{port}","auth-key":"test"}}}}"#)).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    for _ in 0..2 {
+        let output = bin()
+            .args([
+                "--profile",
+                "loop",
+                "--session",
+                "default",
+                "--prompt",
+                "hello",
+            ])
+            .env("LLXPRT_CONFIG_HOME", home.path())
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5));
+        let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(envelope["session_id"], "default");
+    }
+    assert!(home
+        .path()
+        .join("code-rs-sessions")
+        .join("default")
+        .is_dir());
+    server.join().unwrap();
+}
+
 #[test]
 #[cfg(unix)]
 fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
@@ -939,6 +1048,121 @@ fn openai_responses_replays_function_history_to_final_completion() {
         .to_string()
         .contains("loopback complete"));
 }
+
+fn spawn_anthropic_request_server() -> (
+    String,
+    std::sync::mpsc::Receiver<Value>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind Anthropic server");
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "timed out waiting for Anthropic request"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept Anthropic request: {error}"),
+            }
+        };
+        let request = read_http_request(&mut stream).expect("read Anthropic request");
+        assert!(request.starts_with(b"POST /v1/messages HTTP/1.1\r\n"));
+        let body_start = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("request header terminator")
+            + 4;
+        sender
+            .send(serde_json::from_slice(&request[body_start..]).expect("Anthropic JSON request"))
+            .unwrap();
+
+        let body = r#"{"id":"msg-loopback","type":"message","role":"assistant","content":[{"type":"text","text":"loopback complete"}],"model":"claude-loopback","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    });
+    (format!("http://{address}"), receiver, thread)
+}
+
+fn has_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key(key) || object.values().any(|value| has_key(value, key))
+        }
+        Value::Array(array) => array.iter().any(|value| has_key(value, key)),
+        _ => false,
+    }
+}
+
+#[test]
+fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
+    for (name, prompt_caching) in [("default", None), ("disabled", Some("off"))] {
+        let workspace = tempfile::tempdir().unwrap();
+        let profiles = workspace.path().join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let (base_url, request_rx, server) = spawn_anthropic_request_server();
+        let mut ephemeral = serde_json::json!({
+            "base-url": base_url,
+            "auth-key": "loopback-key"
+        });
+        if let Some(setting) = prompt_caching {
+            ephemeral["prompt-caching"] = Value::String(setting.to_owned());
+        }
+        let profile = serde_json::json!({
+            "provider": "anthropic",
+            "model": "claude-loopback",
+                "ephemeralSettings": ephemeral,
+        });
+        std::fs::write(
+            profiles.join(format!("{name}.json")),
+            serde_json::to_vec_pretty(&profile).unwrap(),
+        )
+        .unwrap();
+
+        let output = bin()
+            .env("LLXPRT_CONFIG_HOME", workspace.path())
+            .arg("--profile")
+            .arg(name)
+            .arg("--session")
+            .arg(format!("issue81-cache-{name}"))
+            .arg("--cwd")
+            .arg(workspace.path())
+            .arg("-p")
+            .arg("Reply with loopback complete")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name} process failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive Anthropic request");
+        server.join().unwrap();
+
+        if prompt_caching.is_none() {
+            assert_eq!(request["system"][0]["cache_control"]["type"], "ephemeral");
+        } else {
+            assert!(!has_key(&request, "cache_control"), "request: {request}");
+        }
+    }
+}
+
 /// Whether `needle` appears anywhere inside `haystack`.
 fn contains(h: &[u8], needle: &[u8]) -> bool {
     h.windows(needle.len()).any(|w| w == needle)

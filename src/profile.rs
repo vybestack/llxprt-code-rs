@@ -8,9 +8,11 @@
 //! must be JSON objects when present, and every known field must have the right scalar
 //! type. A wrong-typed or non-object value is a parsing error, never a silent ignore.
 
+mod anthropic;
 mod codex;
 mod openai_responses;
 mod parsing;
+mod provider_settings;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -64,6 +66,7 @@ pub struct Profile {
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
     pub(crate) target: crate::model_api::target::ModelTarget,
+    pub(crate) anthropic_settings: Option<crate::model_api::settings::AnthropicSettingsDraft>,
     pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
     pub(crate) openai_responses_settings:
         Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
@@ -318,10 +321,10 @@ pub struct EphemeralSettings {
     /// Registered Rust tools never appear here (the parser rejects them); the names
     /// that remain refer to host-side tools this runtime does not register.
     pub disabled_tools: Vec<String>,
-    /// `auth-key-name` presence: a named secure-store reference, deferred to
-    /// credential-policy rejection (class 3) so endpoint validation (class 2)
-    /// reports first.
-    pub auth_key_name: bool,
+    /// `auth-key-name`: the named provider key reference (an env selector and a
+    /// secure-store account). The name is a credential surface: it is held for
+    /// resolution and never rendered (see [`Profile::auth_key_name`]).
+    pub(crate) auth_key_name: Option<String>,
     /// Dsflash marker fields, structurally typed: presence makes the profile a
     /// dsflash candidate regardless of its name.
     pub shell_replacement: Option<bool>,
@@ -356,7 +359,7 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)
             .field("disabled_tools", &self.disabled_tools)
-            .field("auth_key_name", &self.auth_key_name)
+            .field("auth_key_name", &self.auth_key_name.is_some())
             .field("shell_replacement", &self.shell_replacement)
             .field("stream_idle_timeout_ms", &self.stream_idle_timeout_ms)
             .field("reasoning_enabled", &self.reasoning_enabled)
@@ -393,6 +396,13 @@ const MODELPARAM_OUTPUT_AFFECTING: &[&str] = &[
 ];
 
 impl Profile {
+    /// The named provider key reference from `ephemeralSettings.auth-key-name`, if
+    /// present. The value names a credential, so it only ever feeds resolution; it is
+    /// never rendered, logged, or echoed in an error.
+    pub fn auth_key_name(&self) -> Option<&str> {
+        self.ephemeral.auth_key_name.as_deref()
+    }
+
     /// Load and parse a profile from a file path.
     pub fn load_file(path: &Path) -> Result<Profile, String> {
         use std::io::Read as _;
@@ -470,40 +480,14 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         obj.get("ephemeralSettings"),
         name,
     )?;
-    let (
+    let provider_settings::ParsedProviderSettings {
         ephemeral,
         model_params,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
-    ) = if provider_id == crate::model_api::target::ProviderId::Codex {
-        let parsed = codex::parse(obj, name, model.clone())?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            Some(parsed.draft),
-            None,
-            None,
-        )
-    } else if target.api == crate::model_api::target::ModelApi::Responses {
-        let parsed = openai_responses::parse(obj, name)?;
-        (
-            parsed.ephemeral,
-            parsed.model_params,
-            None,
-            Some(parsed.draft),
-            None,
-        )
-    } else {
-        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
-        (
-            ephemeral,
-            model_params,
-            None,
-            None,
-            chat_missing_discriminator,
-        )
-    };
+    } = provider_settings::parse(obj, name, &model, provider_id, &target)?;
 
     Ok(Profile {
         name: name.to_string(),
@@ -512,6 +496,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model_params,
         ephemeral,
         target,
+        anthropic_settings,
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
@@ -685,11 +670,25 @@ fn parse_ephemeral_credentials(
     name: &str,
 ) -> Result<bool, String> {
     match key {
-        "auth-key-name" => {
-            // Validate the shape now, defer the fixed refusal to credential-policy
-            // time so endpoint validation (class 2) reports first.
-            required_string(value, name, key)?;
-            settings.auth_key_name = true;
+        "auth-key-name" | "authKeyName" | "apiKeyName" | "api-key-name" => {
+            // The name is stored for resolution (an env selector and a secure-store
+            // account), never rendered; its shape is validated here and its bytes are
+            // bounded and NUL-free so no control material reaches resolution.
+            let name_value = required_string(value, name, key)?;
+            if name_value.trim().is_empty()
+                || name_value.len() > crate::redact::MAX_KEY_NAME_BYTES
+                || name_value.as_bytes().contains(&0)
+            {
+                return Err(crate::redact::KEY_NAME_CAP_MESSAGE.to_string());
+            }
+            if settings
+                .auth_key_name
+                .as_deref()
+                .is_some_and(|existing| existing != name_value)
+            {
+                return Err(format!("profile {name}: conflicting auth-key-name aliases"));
+            }
+            settings.auth_key_name = Some(name_value.to_string());
         }
         "auth-keyfile" | "authKeyfile" | "apiKeyfile" | "api-keyfile" => {
             let path = required_string(value, name, key)?;
@@ -848,12 +847,6 @@ fn required_string<'a>(
         .ok_or_else(|| format!("profile {name:?}: '{key}' must be a string"))
 }
 
-/// A fixed, value-free refusal for `auth-key-name`: it names a credential in a secure
-/// store this standalone binary has no client for. The name is a credential surface; its
-/// bytes never travel, and the profile fails during parsing, never by opening a file.
-pub const AUTH_KEY_NAME_UNSUPPORTED_MESSAGE: &str =
-    "auth-key-name is a named secure-store reference; this binary has no secure-store client";
-
 /// Never echo a keyfile path whole: keep its final component (a key name such as
 /// `provider_key` is not a secret path disclosure) but drop every leading directory, since a
 /// keyfile sitting under a public project path could be the only disclosure that matters. If
@@ -888,14 +881,12 @@ fn parse_model_params(
     for (k, v) in &map {
         match k.as_str() {
             "temperature" => {
-                let f = v
-                    .as_f64()
+                let f = numeric_setting(v)
                     .ok_or_else(|| format!("profile {name:?}: 'temperature' must be a number"))?;
                 m.temperature = Some(f);
             }
             "top_p" | "topP" => {
-                let f = v
-                    .as_f64()
+                let f = numeric_setting(v)
                     .ok_or_else(|| format!("profile {name:?}: '{k}' must be a number"))?;
                 m.top_p = Some(f);
             }
@@ -962,6 +953,19 @@ fn btree(map: &serde_json::Map<String, serde_json::Value>) -> BTreeMap<String, s
 
 fn nonneg_u64(v: &serde_json::Value) -> Option<u64> {
     v.as_u64()
+}
+
+/// A numeric sampling setting: a JSON number, or a numeric string such as `"1"`
+/// or `".95"`, which the TS llxprt-code accepts for `modelParams`. `f64` parsing
+/// already rejects padded or trailing junk, and non-finite spellings are a wrong
+/// type here rather than a value.
+fn numeric_setting(v: &serde_json::Value) -> Option<f64> {
+    let parsed = match v {
+        serde_json::Value::Number(n) => n.as_f64()?,
+        serde_json::Value::String(text) => text.parse::<f64>().ok()?,
+        _ => return None,
+    };
+    parsed.is_finite().then_some(parsed)
 }
 
 /// Is the profile's parsed URL a plaintext HTTP one (used for the opt-in gate)? Only

@@ -23,3 +23,7 @@ fixture = "unsupported-claim.md"
 
 [assertions]
 required_context_artifacts = ["context/validation.json"]
+
+[runtime]
+name = "profile-limit"
+context_limit = 16000

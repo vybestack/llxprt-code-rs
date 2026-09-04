@@ -503,7 +503,7 @@ function buildClassificationTable() {
   add('authKeyfile', host, common, 'alias of auth-keyfile');
   add('api-keyfile', host, common, 'alias of auth-keyfile; newly accepted non-Codex');
   add('apiKeyfile', host, common, 'alias of auth-keyfile');
-  add('auth-key-name', rej, common, 'fixed unsupported-credential-source diagnostic');
+  add('auth-key-name', host, common, 'named provider-key credential source; resolves from the credential env selector then the secure store');
   add('base-url', host, common, 'API-specific endpoint alias; Codex requires fixed endpoint');
   add('baseUrl', host, common, 'alias of base-url');
   add('baseURL', host, common, 'alias of base-url');

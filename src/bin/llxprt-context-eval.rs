@@ -70,6 +70,7 @@ fn main() -> ExitCode {
             .scenarios
             .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
             .unwrap_or_default(),
+        records_root: args.eval_root.join("records"),
     };
     match context_eval::run_all(&root, &options) {
         Ok((report, all_accepted)) => {
