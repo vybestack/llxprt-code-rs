@@ -156,11 +156,11 @@ fn run_kill_fault(fault: MidRunFault, target: KillTarget) -> Option<String> {
 }
 
 /// Spawn wrapper the faulted drives install as `LLXPRT_CODE_RS_BIN`: it registers its own
-/// pid for the fault thread and then becomes the acceptance target through `exec`, so the
-/// bounded runner, envelope validation, and continuation checks are all unchanged.
+/// pid for the fault thread and then becomes the acceptance target through `exec`, so
+/// the bounded runner, envelope validation, and continuation checks are all unchanged.
 fn write_spawn_wrapper(path: &Path, cli: &Path, pid_file: &Path) -> Result<(), String> {
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$$\" > '{}'\nexec '{}' \"$@\"\n",
+        "printf '%s\\n' \"$$\" > '{}'\nexec '{}' \"$@\"\n",
         pid_file.display(),
         cli.display()
     );
@@ -193,6 +193,14 @@ impl<'a> StoreUnwritableGuard<'a> {
             session: &prepared.session,
         })
     }
+
+    /// The session `context/` directory this guard's fault will target.
+    pub fn context_dir(&self) -> PathBuf {
+        self.dir
+            .join("code-rs-sessions")
+            .join(self.session)
+            .join("context")
+    }
 }
 
 /// Mid-invocation fault injection for the unwritable-store scenario.
@@ -212,11 +220,7 @@ impl StoreUnwritableInjection {
     /// Polls for the first store artifact, applies the fault, and reports it on stderr.
     /// The thread returns whether the fault was actually applied.
     pub fn start(guard: &StoreUnwritableGuard<'_>) -> Self {
-        let context = guard
-            .dir
-            .join("code-rs-sessions")
-            .join(guard.session)
-            .join("context");
+        let context = guard.context_dir();
         let handle = std::thread::spawn({
             let context = context.clone();
             move || inject_unwritable(context)
@@ -291,20 +295,34 @@ fn restore_writable(context: &Path) {
     let _ = fs::set_permissions(context, fs::Permissions::from_mode(0o700));
 }
 
+/// Files a consistent session `context/` store must carry. A store that is missing them
+/// is not a store, so consistency is judged against existence first.
+pub const STORE_FILES: [&str; 3] = ["manifest.json", "events.log", "rewrite-journal.log"];
+
 /// Consistent-shape check for the session `context/` store after a fault-triggered
-/// process death: the manifest (when present) parses as one JSON object and every
-/// line-framed artifact ends on a frame boundary, so a restart replays whole frames
-/// only and never a torn tail.
+/// process death.
+///
+/// Every expected file must **exist**: an absent store is an inconsistent store, not a
+/// clean one, so the earlier "when present" shape let a vanished store pass as recovered.
+/// The manifest must parse as one JSON object, and every line-framed artifact must end on
+/// a frame boundary, so a restart replays whole frames only and never a torn tail.
 pub fn store_shape_consistent(context: &Path) -> bool {
-    let manifest = context.join("manifest.json");
-    if manifest.is_file() {
-        let bytes = match fs::read(&manifest) {
-            Ok(b) => b,
-            Err(_) => return false,
-        };
-        if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
+    if !context.is_dir() {
+        return false;
+    }
+    for name in STORE_FILES {
+        if !context.join(name).is_file() {
             return false;
         }
+    }
+    let manifest = context.join("manifest.json");
+    match fs::read(&manifest) {
+        Ok(bytes) => {
+            if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
+                return false;
+            }
+        }
+        Err(_) => return false,
     }
     // `events.log` and `rewrite-journal.log` are newline-separated JSON documents,
     // atomically published (tmp file + rename), so a torn frame here is not expected
@@ -312,19 +330,17 @@ pub fn store_shape_consistent(context: &Path) -> bool {
     // binary/framed formats the replaying process itself validates on open.
     for name in ["events.log", "rewrite-journal.log"] {
         let path = context.join(name);
-        if path.is_file() {
-            let bytes = match fs::read(&path) {
-                Ok(b) => b,
-                Err(_) => return false,
-            };
-            let text = String::from_utf8_lossy(&bytes);
-            for line in text.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if serde_json::from_str::<serde_json::Value>(line).is_err() {
-                    return false;
-                }
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if serde_json::from_str::<serde_json::Value>(line).is_err() {
+                return false;
             }
         }
     }

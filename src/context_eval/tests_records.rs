@@ -13,6 +13,13 @@ fn fixtures() -> PathBuf {
     Path::new("evals/context-management").join("fixtures")
 }
 
+/// Lowercase hex SHA-256 of a byte string, for the digest fields `RunRecord` binds.
+fn sha256_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(text.as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Append-only expected-status history (GAP-H7, R-013): records load, latest wins,
 /// a contradiction for the same phase is rejected, and the preserved phase-0 baseline
 /// is all-red across the shipped manifests.
@@ -95,12 +102,16 @@ fn shipped_baseline_is_all_red_and_run_records_append() {
         observed_status: "red".to_string(),
         reason_class: "context-limit".to_string(),
         verdict: "expected-red".to_string(),
-        report: "r1".to_string(),
+        runner_revision: "0123456789abcdef".to_string(),
+        manifest_digest: sha256_hex("a"),
+        fixture_digests: vec![sha256_hex("b")],
+        report: "report-probe.json".to_string(),
     };
     let green = records::RunRecord {
         observed_status: "green".to_string(),
         verdict: "pass".to_string(),
-        reason_class: "task-failure".to_string(),
+        // A green observation has no failure to name (R-013).
+        reason_class: String::new(),
         ..red.clone()
     };
     runs.record_run(&red).unwrap();
@@ -175,9 +186,15 @@ fn red_then_green_trail_is_reported() {
         scenario: "probe".to_string(),
         phase: 4,
         observed_status: "green".to_string(),
-        reason_class: "task-failure".to_string(),
+        // A green observation has no failure to name (R-013): the record binds the digests
+        // and revision of the drive that produced it, and the empty reason class is part
+        // of what the grader observed, not an omission.
+        reason_class: String::new(),
         verdict: "pass".to_string(),
-        report: "r1".to_string(),
+        runner_revision: "0123456789abcdef".to_string(),
+        manifest_digest: sha256_hex("a"),
+        fixture_digests: vec![sha256_hex("b")],
+        report: "report-probe.json".to_string(),
     })
     .unwrap();
     let summary = records::baseline_summary(&runs, &[]).unwrap();

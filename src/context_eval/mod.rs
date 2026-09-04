@@ -32,6 +32,7 @@ use grader::{Evidence, Graded, Verdict};
 use loopback::Loopback;
 use manifest::Scenario;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -42,6 +43,20 @@ pub const ARTIFACT_STREAM_CAP: usize = 64 * 1024;
 pub const TURN_TIMEOUT_SECS: u64 = 600;
 /// Default artifact root, repository-local and never a bare `/tmp` path.
 pub const DEFAULT_OUT_ROOT: &str = "tmp/issue37-context-evals";
+/// The acceptance target's typed error code for the context wall.
+pub const CONTEXT_LIMIT_ERROR_CODE: &str = "context-limit";
+
+/// The reference runner's residual, deliberately-distrusted context-wall classification.
+///
+/// The TS runner prints prose rather than a typed error contract, so this is a substring
+/// match and inherits both of its failure modes: a false positive on prose that merely
+/// mentions the words, and a false negative on a wall described with other wording. It
+/// exists only so the calibration drive can say *something*; it is never used as gating
+/// evidence.
+fn ts_context_limit_hit(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    lowered.contains("context-limit") || lowered.contains("context limit")
+}
 
 /// Which runner adapter a drive uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +142,33 @@ fn absolute_child(parent: &Path, name: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// The repository-relative path of this run's aggregate report file.
+///
+/// Run records must name a report file *relative to the repository root* (#116.2): an
+/// absolute path would embed one developer's filesystem layout into the append-only
+/// evidence trail, and the out root itself is a directory rather than this run's
+/// report. The out root is always created under the working directory, so stripping it
+/// yields a stable relative path.
+fn repo_relative(path: &Path) -> String {
+    let Ok(cwd) = std::env::current_dir() else {
+        return path.display().to_string();
+    };
+    path.strip_prefix(&cwd)
+        .map(|rel| rel.display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+/// Path (repository-relative) of the run's one aggregate report file.
+fn pending_report_path_for(opts: &Options, report_file: &str) -> String {
+    repo_relative(&opts.out_root.join(report_file))
+}
+
+/// SHA-256 hex of a manifest file's bytes, for the run record's digest binding.
+fn manifest_file_digest(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(hex_digest(&sha2::Sha256::digest(&bytes)))
+}
+
 /// Load every scenario manifest under the eval root, schema-validated.
 pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String> {
     let all = manifest::load_dir(&opts.scenario_dir(), &opts.fixtures_dir())?;
@@ -137,16 +179,69 @@ pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String
         .into_iter()
         .filter(|(_, scen)| opts.allow.iter().any(|id| id == &scen.id))
         .collect();
-    if chosen.is_empty() {
+    // Every requested id must resolve, not just one of them: an allow-list that silently
+    // drops a typo'd or missing scenario would drive fewer scenarios than the operator
+    // asked for and still report success.
+    let missing: Vec<String> = opts
+        .allow
+        .iter()
+        .filter(|id| !chosen.iter().any(|(_, scen)| &scen.id == *id))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
         return Err(format!(
-            "none of the requested scenarios {} exist",
-            opts.allow.join(", ")
+            "requested scenarios do not exist: {} (loaded {})",
+            missing.join(", "),
+            chosen.len()
         ));
     }
     Ok(chosen)
 }
 
 /// Run every selected scenario and return `(report, all_accepted)`.
+/// The #116.1 green gate: a manifest may declare `green` for its owning phase only when
+/// the append-only run records carry an *observed* red `RunRecord` for that same
+/// (scenario, phase) — a red that was actually driven and graded, not merely predicted.
+///
+/// History expectations never license green: an `expected_status = "red"` entry is a
+/// prediction about a future run, and the whole point of the gate is that a phase must
+/// have *seen* the red it claims to have turned green. Declaring green without that
+/// observed red is rejected before a single subprocess is spawned.
+fn green_gate(
+    store: &records::Records,
+    scen: &Scenario,
+    all: &[(PathBuf, Scenario)],
+) -> Result<(), String> {
+    if scen.expected_status != manifest::ExpectedStatus::Green {
+        return Ok(());
+    }
+    let prior = records::prior_observed_red(store, &scen.id, scen.owner_phase);
+    if prior.is_empty() {
+        return Err(format!(
+            "scenario {} declares green for phase {}, but no observed red run record \
+             exists for that phase; run the phase first and let it record the red, then \
+             declare green",
+            scen.id, scen.owner_phase
+        ));
+    }
+    // The cited red must come from a manifest state other than this one, so a manifest
+    // cannot cite a red driven from the very bytes that now declare themselves green.
+    let digest = manifest_file_digest(
+        &all.iter()
+            .find(|(_, s)| s.id == scen.id)
+            .map(|(path, _)| path.clone())
+            .ok_or_else(|| format!("scenario {}: manifest path lost", scen.id))?,
+    )?;
+    if prior.iter().any(|r| r.manifest_digest == digest) {
+        return Err(format!(
+            "scenario {} declares green for phase {} but every cited red run record was \
+             driven from the same manifest digest {digest}; a phase may only turn green \
+             past a red it observed under an earlier manifest state",
+            scen.id, scen.owner_phase
+        ));
+    }
+    Ok(())
+}
 pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
     let opts = &Options {
         out_root: absolute_out_root(&opts.out_root)?,
@@ -165,6 +260,7 @@ pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
             &scen.expected_reason_class,
         )
         .map_err(|e| format!("scenario {}: {e}", scen.id))?;
+        green_gate(&store, scen, &scenarios)?;
     }
     // Append-only phase-indexed history (R-013): a manifest's own declaration for its
     // owning phase is recorded as a new entry the first time this harness sees it, so
@@ -191,8 +287,13 @@ pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
     let revision = git_revision(root);
     let mut reports = Vec::new();
     let mut all_accepted = true;
+    // One report filename for the whole run, chosen before any scenario is driven, so
+    // every `RunRecord` this run appends names the exact aggregate file the run will
+    // publish — a relative path, never the out root (#116.2).
+    let report_file = format!("report-{}.json", harness::uniq());
+    let report_path = pending_report_path_for(opts, &report_file);
     for (path, scen) in scenarios {
-        let report = run_one(&path, &scen, opts, &revision, &store)?;
+        let report = run_one(&path, &scen, opts, &revision, &store, &report_path)?;
         if !accepted(&report) {
             all_accepted = false;
         }
@@ -204,12 +305,12 @@ pub fn run_all(root: &Path, opts: &Options) -> Result<(Value, bool), String> {
     // would reject. Validating before the write keeps a bad report unpublishable.
     report::validate(&report, true)
         .map_err(|e| format!("aggregate report failed schema validation: {e}"))?;
-    let path = opts
-        .out_root
-        .join(format!("report-{}.json", harness::uniq()));
     let bytes = serde_json::to_vec(&report).map_err(|e| format!("encode report: {e}"))?;
-    publish(&path, &bytes)?;
-    harness::eprint_status(&format!("context-evals report: {}", path.display()));
+    publish(&opts.out_root.join(&report_file), &bytes)?;
+    harness::eprint_status(&format!(
+        "context-evals report: {}",
+        opts.out_root.join(&report_file).display()
+    ));
     Ok((report, all_accepted))
 }
 
@@ -267,19 +368,23 @@ fn run_one(
     opts: &Options,
     revision: &str,
     store: &records::Records,
+    report_path: &str,
 ) -> Result<Value, String> {
     harness::eprint_status(&format!("== context-eval {} ==", scen.id));
     let (evidence, graded, verdict, digests, isolation_ok) = match opts.runner {
         RunnerKind::Rust => drive_rust(scen, opts)?,
         RunnerKind::Typescript => drive_typescript(scen, opts)?,
     };
-    let _ = path;
+    // The run record binds this observation to the source revision, the manifest bytes it
+    // was driven from, and the digests of every expanded fixture round (#116.2).
+    let manifest_digest = manifest_file_digest(path)?;
     let dims = grader::dimension_results(scen, &evidence);
     let evidence_dimensions = dimensions_block(&dims);
     let request_observations = request_observations_block(&evidence);
-    // Captured before the move below: the run record needs the verdict name too.
+    // Captured before the moves below: the run record needs the verdict name too.
     let verdict_name = verdict.name().to_string();
     let observed_status = if graded.passed { "green" } else { "red" }.to_string();
+    // A green observation has no failure to name, so it records none (R-013).
     let observed_reason = graded.reason_class.clone();
     let session_dir = evidence.session_dir.clone();
     let drive = DriveOutcome::new(
@@ -316,7 +421,10 @@ fn run_one(
         observed_status,
         reason_class: observed_reason,
         verdict: verdict_name,
-        report: opts.out_root.display().to_string(),
+        runner_revision: revision.to_string(),
+        manifest_digest,
+        fixture_digests: drive.digests.clone(),
+        report: report_path.to_string(),
     })?;
 
     Ok(report)
@@ -519,12 +627,32 @@ fn evidence_from_loopback(evidence: &mut Evidence, obs: &loopback::Observations)
         }
     }
     evidence.tool_names = tool_names;
-    evidence.request_bodies_digest = hex_digest(
-        &obs.requests
-            .iter()
-            .flat_map(|r| r.body_bytes.to_be_bytes())
-            .collect::<Vec<u8>>(),
-    );
+    evidence.request_bodies_digest = request_bodies_digest(&obs.requests);
+}
+
+/// Per-body bound for the request-bodies digest. The loopback observes each request's
+/// serialized *length* (never its bytes, which would double the harness's capture
+/// footprint), so every body is represented by exactly 8 bytes, its shape, and its
+/// stream mode: the bound is structural, not advisory.
+pub const MAX_DIGESTED_BODY_BYTES: usize = 8;
+
+/// Real SHA-256 over the request bodies the loopback observed, in drive order.
+///
+/// Each observed request contributes its bounded serialized-size representation, its
+/// tool-name list, and its stream mode, so two runs that made the same requests in the
+/// same order always digest identically while any reordering, insertion, or shape
+/// change moves the digest. This replaces the earlier field of the same name, which
+/// hashed only the sizes while its documentation claimed it covered the bodies.
+fn request_bodies_digest(requests: &[loopback::ObservedRequest]) -> String {
+    let mut hasher = Sha256::new();
+    for request in requests {
+        let bounded = request.body_bytes.min(MAX_DIGESTED_BODY_BYTES);
+        hasher.update((bounded as u64).to_be_bytes());
+        hasher.update(request.tool_names.join(":").as_bytes());
+        hasher.update([u8::from(request.streamed)]);
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    hex_digest(&digest)
 }
 
 /// Leakage scan (R-012) over everything this run produced or captured: the isolated
@@ -565,6 +693,27 @@ fn scan_drive_outputs(
                 .leaks
                 .push((marker.to_string(), "envelope summary".to_string()));
         }
+    }
+}
+
+/// Leakage scan over the TypeScript reference drive's own outputs: the isolated settings
+/// tree, the harness artifacts, and the captured streams. The bulk fixtures are the
+/// plant's input and are excluded, exactly as in the Rust drive's scan.
+fn scan_ts_outputs(evidence: &mut Evidence, out_dir: &Path, settings: &Path, captured: &str) {
+    let bulk_dir = out_dir.join("bulk");
+    evidence.leaks = secrets::scan_tree_skipping(settings, Some(bulk_dir.as_path()))
+        .into_iter()
+        .map(|(marker, found)| (marker, format!("settings: {found}")))
+        .chain(
+            secrets::scan_tree_skipping(out_dir, Some(bulk_dir.as_path()))
+                .into_iter()
+                .map(|(marker, found)| (marker, format!("harness artifacts: {found}"))),
+        )
+        .collect();
+    for marker in secrets::scan_bytes(captured.as_bytes()) {
+        evidence
+            .leaks
+            .push((marker.to_string(), "captured stream".to_string()));
     }
 }
 
@@ -767,7 +916,12 @@ fn evidence_from_results(results: &[BbResult]) -> Evidence {
         if is_harness_error(result) {
             evidence.harness_error = true;
         }
-        if result.error_code.contains("context") || result.error_message.contains("context") {
+        // Typed classification (#7): the acceptance target's own error envelope carries
+        // `error.code`, and the context wall is the code `context-limit` exactly. The
+        // substring test that used to run here would have counted any error whose prose
+        // merely mentioned the word "context" as a wall hit, which is exactly how an
+        // unrelated failure could be graded as the predicted reason class.
+        if result.error_code == CONTEXT_LIMIT_ERROR_CODE {
             evidence.context_limit_hit = true;
             evidence.resource_limit_hit = true;
         }
@@ -836,9 +990,11 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     };
     // The TS reference runner has no fault or recovery machinery; the harness records
     // that honestly rather than simulating an execution.
-    if !scen.faults.injected.is_empty() {
-        evidence.faults_executed = Vec::new();
-    }
+    // The reference runner executes no faults, so it must not report any: an empty list
+    // here is the honest observation (the grader then fails the recovery dimension for a
+    // scenario that declares faults), and it replaces the no-op assignment that used to
+    // stand in for a real "did the TS drive execute anything" check.
+    evidence.faults_executed.clear();
     let args = runner::ts_args(&scen.stimulus.prompt, &url, &scen.profile.model);
     let outcome = process::run_cmd(CmdSpec {
         program: opts.ts_bin.clone(),
@@ -866,6 +1022,11 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
         ),
         Err(_) => String::new(),
     };
+    // The TS drive's leakage scan is real, exactly like the Rust drive's: the isolated
+    // settings tree, the harness artifacts, and the captured streams are all scanned, so
+    // the reference runner cannot publish a clean it never earned. Before the fix the TS
+    // drive published `"clean": true` without scanning anything at all.
+    scan_ts_outputs(&mut evidence, &out_dir, &settings, &text);
     match outcome {
         Ok(o) => {
             if o.timed_out || o.status.is_none() {
@@ -883,8 +1044,14 @@ fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
             harness::eprint_status(&format!("typescript reference spawn failed: {e}"));
         }
     }
-    evidence.context_limit_hit =
-        text.to_lowercase().contains("context") || text.to_lowercase().contains("compress");
+    // Typed classification where the reference runner offers one (#7): the TS runner has
+    // no typed error contract, so the residual substring fallback below is the only
+    // classification available for it. Its failure modes are documented at the site:
+    // a *false positive* whenever the run's prose merely mentions "context" or
+    // "compress" without hitting a wall, and a *false negative* whenever a wall is hit
+    // but reported with other wording. That is why the TS drive is calibration-only and
+    // never gates a phase: its classification cannot be trusted as evidence.
+    evidence.context_limit_hit = ts_context_limit_hit(&text);
     let graded = grader::grade(scen, &evidence);
     let verdict = grader::verdict(scen, &graded);
     Ok((evidence, graded, verdict, digests, true))
@@ -930,7 +1097,7 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-/// Lowercase hex digest of `bytes` (request-body ordering digest).
+/// Lowercase hex SHA-256 of `bytes`.
 fn hex_digest(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

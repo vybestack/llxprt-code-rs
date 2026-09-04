@@ -101,6 +101,57 @@ fn manifest_schema_rejects_unknown_fields_and_bad_versions() {
     );
 }
 
+/// The schema bounds the harness's inputs, so a drive cannot be made unbounded or made
+/// to read outside the fixture tree by a manifest: prompt and followup sizes are capped,
+/// fixture names must stay inside the fixture root, and duplicate scenario ids cannot
+/// alias each other in reports, records, and allow-lists.
+#[test]
+fn manifest_bounds_prompts_fixtures_and_duplicate_ids() {
+    // An oversized opening prompt is rejected at load, not discovered mid-drive.
+    let long_prompt = "x".repeat(manifest::MAX_PROMPT_BYTES + 1);
+    let oversized = good_manifest().replace(
+        "prompt = \"CTXEVAL-SELFTEST read the bulk file then emit the final marker\"",
+        &format!("prompt = \"{long_prompt}\""),
+    );
+    assert!(
+        manifest::parse_str(&oversized, &fixtures()).is_err(),
+        "oversized prompt accepted"
+    );
+
+    // A fixture name that escapes the fixture root is a traversal attempt, not a fixture.
+    for name in [
+        "../leak-corpus.txt",
+        "/etc/hosts",
+        "nested/../../escape.txt",
+    ] {
+        let traversal = good_manifest().replace(
+            "fixture = \"tool-output-block.txt\"",
+            &format!("fixture = \"{name}\""),
+        );
+        assert!(
+            manifest::parse_str(&traversal, &fixtures()).is_err(),
+            "traversal fixture name {name} accepted"
+        );
+    }
+
+    // Duplicate scenario ids must not silently alias: two manifests with the same id are
+    // a load-time error naming both files, not a report that mixes two scenarios.
+    let dir = std::env::temp_dir().join(format!("ctxeval-dup-{}", crate::harness::uniq()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("a.toml"), good_manifest()).unwrap();
+    fs::write(dir.join("b.toml"), good_manifest()).unwrap();
+    let err = manifest::load_dir(&dir, &fixtures());
+    assert!(
+        err.is_err(),
+        "duplicate scenario id accepted across two manifests"
+    );
+    assert!(
+        err.unwrap_err().contains("duplicate scenario id"),
+        "duplicate id error does not name the collision"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn arm_mismatch_between_manifest_and_record_is_rejected() {
     let dir = std::env::temp_dir().join(format!("ctxeval-arm-{}", crate::harness::uniq()));
@@ -306,7 +357,15 @@ fn good_report() -> Value {
     json!({
         "id": "x", "schema_version": 1, "owner_phase": 7, "arm": "feature",
         "expected_status": "red", "runner": "rust", "runner_revision": "abc",
-        "fixture_digests": [], "profile": {}, "result": {}, "evidence_status": {},
+        "fixture_digests": [],
+        "profile": {"name": "p", "provider": "openai", "model": "m",
+                    "context_limit_tokens": 1000, "max_output_tokens": 100},
+        "result": {"verdict": "expected-red", "accepted": true,
+                   "reason_class": "context-limit", "failures": []},
+        "evidence_status": {"source": "independent", "turns_total": 1, "turns_ok": 1,
+                            "provider_requests": 1, "tool_calls_scripted": 1,
+                            "final_response_issued": true, "wall_hit": true,
+                            "terminal_outcome": "none", "isolation_ok": true},
         "cache": report::cache_block(),
         "evidence_dimensions": {"task": true, "protocol": true, "resource": true,
                                 "latency": true, "recovery": true, "wall_realism": true},
@@ -729,10 +788,15 @@ fn publish_path_report_validates_with_new_fields() {
     let report = json!({
         "id": "ingress-secret-and-digest", "schema_version": 1, "owner_phase": 2,
         "arm": "feature", "expected_status": "red", "runner": "rust",
-        "runner_revision": "abc", "fixture_digests": [], "profile": {},
+        "runner_revision": "abc", "fixture_digests": [],
+        "profile": {"name": "p", "provider": "openai", "model": "m",
+                    "context_limit_tokens": 1000, "max_output_tokens": 100},
         "result": {"verdict": "expected-red", "accepted": true,
-                   "reason_class": "leakage", "failures": ["[protocol] leaked"]},
-        "evidence_status": {"source": "independent"},
+                   "reason_class": "leakage", "failures": []},
+        "evidence_status": {"source": "independent", "turns_total": 1, "turns_ok": 1,
+                            "provider_requests": 9, "tool_calls_scripted": 1,
+                            "final_response_issued": true, "wall_hit": false,
+                            "terminal_outcome": "none", "isolation_ok": true},
         "cache": report::cache_block(),
         "runtime_config": {"name": "profile-limit", "context_limit": 20000},
         "evidence_dimensions": {"task": true, "protocol": false, "resource": true,
@@ -743,8 +807,8 @@ fn publish_path_report_validates_with_new_fields() {
                                  "last_request_bytes": 90_000,
                                  "observations_source": "loopback",
                                  "serialized": "deadbeef"},
-        "leakage_scan": {"clean": false,
-                         "findings": [{"marker": "m", "found_in": "captured stream"}],
+        "leakage_scan": {"clean": true,
+                         "findings": [],
                          "markers": ["m"]},
     });
     report::validate(&report, false).unwrap();

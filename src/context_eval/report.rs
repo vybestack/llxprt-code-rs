@@ -8,6 +8,27 @@ use std::path::Path;
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 /// Cost class recorded when cache telemetry is unavailable.
 pub const CACHE_UNKNOWN_CLASS: &str = "disarmed_unavailable";
+/// Every verdict name the schema accepts, exactly as [`crate::context_eval::grader::Verdict`]
+/// names them. A report carrying anything else is unpublishable.
+pub const VERDICT_NAMES: [&str; 5] = [
+    "pass",
+    "expected-red",
+    "unexpected-green",
+    "unexpected-red-reason",
+    "harness-error",
+];
+/// Every reason class the grader can name. `leakage` is deliberately absent from the
+/// "acceptable red" story a report may carry, which is what makes a leak gate rather
+/// than merely label.
+pub const REASON_CLASS_NAMES: [&str; 7] = [
+    "harness-error",
+    "leakage",
+    "context-limit",
+    "resource-limit",
+    "recovery-failure",
+    "missing-evidence",
+    "task-failure",
+];
 
 /// Fields every per-scenario report must carry.
 pub const SCENARIO_REQUIRED: [&str; 16] = [
@@ -42,6 +63,31 @@ pub const AGGREGATE_REQUIRED: [&str; 11] = [
     "scenarios",
     "summary",
     "cache",
+];
+
+/// Fields the nested `result` object must carry (a bare `{}` is not a result).
+const RESULT_REQUIRED: [&str; 4] = ["verdict", "accepted", "reason_class", "failures"];
+
+/// Fields the nested `profile` object must carry (a bare `{}` is not a profile).
+const PROFILE_REQUIRED: [&str; 5] = [
+    "name",
+    "provider",
+    "model",
+    "context_limit_tokens",
+    "max_output_tokens",
+];
+
+/// Fields the nested `evidence_status` object must carry.
+const EVIDENCE_STATUS_REQUIRED: [&str; 9] = [
+    "source",
+    "turns_total",
+    "turns_ok",
+    "provider_requests",
+    "tool_calls_scripted",
+    "final_response_issued",
+    "wall_hit",
+    "terminal_outcome",
+    "isolation_ok",
 ];
 
 /// Cache telemetry is explicitly unknown when no durable journal is available.
@@ -190,6 +236,7 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
         return Err("report cache block has no cost class".to_string());
     }
     if !aggregate {
+        validate_nested_objects(value)?;
         let dims = value["evidence_dimensions"]
             .as_object()
             .ok_or("report has no evidence_dimensions object")?;
@@ -219,17 +266,133 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
                 return Err(format!("request_observations is missing {field}"));
             }
         }
-        let leak = value["leakage_scan"]
-            .as_object()
-            .ok_or("report has no leakage_scan object")?;
-        if leak.get("clean").and_then(Value::as_bool).is_none()
-            || leak.get("findings").and_then(Value::as_array).is_none()
-        {
-            return Err("leakage_scan must carry boolean clean and findings array".to_string());
-        }
+        validate_leakage_scan(value)?;
     }
     if aggregate {
         validate_summary(&value["summary"])?;
+    }
+    Ok(())
+}
+
+/// Reject empty nested objects: `profile`, `result`, and `evidence_status` must each be a
+/// populated object, and `result.verdict` must be one of the five verdict names.
+///
+/// The old check accepted `"profile": {}` and any verdict string, which is exactly how a
+/// harness change could silently publish a report whose graded content was absent.
+fn validate_nested_objects(value: &Value) -> Result<(), String> {
+    for (name, required) in [
+        ("profile", &PROFILE_REQUIRED[..]),
+        ("evidence_status", &EVIDENCE_STATUS_REQUIRED[..]),
+    ] {
+        let object = value[name]
+            .as_object()
+            .ok_or(format!("report {name} is not an object"))?;
+        if object.is_empty() {
+            return Err(format!("report {name} object is empty"));
+        }
+        for field in required {
+            if !object.contains_key(*field) {
+                return Err(format!("report {name} is missing {field}"));
+            }
+        }
+    }
+    let result = value["result"]
+        .as_object()
+        .ok_or("report result is not an object")?;
+    if result.is_empty() {
+        return Err("report result object is empty".to_string());
+    }
+    for field in RESULT_REQUIRED {
+        if !result.contains_key(field) {
+            return Err(format!("report result is missing {field}"));
+        }
+    }
+    let verdict = result["verdict"]
+        .as_str()
+        .ok_or("report result verdict is not a string")?;
+    if !VERDICT_NAMES.contains(&verdict) {
+        return Err(format!(
+            "report result verdict {verdict} is not one of {}",
+            VERDICT_NAMES.join(", ")
+        ));
+    }
+    let accepted = result["accepted"]
+        .as_bool()
+        .ok_or("report result accepted is not a boolean")?;
+    let verdict_accepted = matches!(verdict, "pass" | "expected-red");
+    if accepted != verdict_accepted {
+        return Err(format!(
+            "report result accepted {accepted} disagrees with verdict {verdict}"
+        ));
+    }
+    let reason = result["reason_class"]
+        .as_str()
+        .ok_or("report result reason_class is not a string")?;
+    if !REASON_CLASS_NAMES.contains(&reason) {
+        return Err(format!(
+            "report result reason_class {reason} is not a reason class the grader can name"
+        ));
+    }
+    let failures = result["failures"]
+        .as_array()
+        .ok_or("report result failures is not an array")?;
+    if accepted && !failures.is_empty() {
+        return Err("report result accepted a verdict that still carries failures".to_string());
+    }
+    // A pass has no failure to name; a green observation carrying a failure reason class
+    // is a record contradiction, not a graded result.
+    if verdict == "pass" && !reason.is_empty() {
+        return Err("report result pass carries a failure reason class".to_string());
+    }
+    Ok(())
+}
+
+/// The leakage scan gates acceptance (#116.2/6): `clean` must be an explicit boolean and
+/// a report may only be accepted when the scan actually ran and found nothing.
+fn validate_leakage_scan(value: &Value) -> Result<(), String> {
+    let leak = value["leakage_scan"]
+        .as_object()
+        .ok_or("report has no leakage_scan object")?;
+    let findings = leak
+        .get("findings")
+        .and_then(Value::as_array)
+        .ok_or("leakage_scan must carry a findings array")?;
+    let clean = leak["clean"].as_bool();
+    let Some(clean) = clean else {
+        return Err("leakage_scan must carry boolean clean".to_string());
+    };
+    if !findings.is_empty() && clean {
+        return Err("leakage_scan claims clean while carrying findings".to_string());
+    }
+    let accepted = value["result"]["accepted"].as_bool().unwrap_or(false);
+    if accepted && !clean {
+        return Err(
+            "leakage scan did not come back clean; a leak blocks acceptance for every \
+             scenario"
+                .to_string(),
+        );
+    }
+    let status = leak.get("status").and_then(Value::as_str);
+    match status {
+        // A scan that ran may omit `status` (the shipped shape) or name `performed`.
+        None | Some("performed") => {
+            if !leak.get("markers").map(|m| m.is_array()).unwrap_or(true) {
+                return Err("leakage_scan markers must be an array".to_string());
+            }
+        }
+        // A scan that did not run must say so and must not claim clean.
+        Some("not_performed") => {
+            if clean {
+                return Err(
+                    "leakage_scan marks the scan not_performed but still claims clean".to_string(),
+                );
+            }
+        }
+        Some(other) => {
+            return Err(format!(
+                "leakage_scan status {other} is neither performed nor not_performed"
+            ));
+        }
     }
     Ok(())
 }

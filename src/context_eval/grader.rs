@@ -45,7 +45,8 @@ pub struct Evidence {
     pub streamed_requests: usize,
     /// Distinct tool names the runner offered, in first-seen order.
     pub tool_names: Vec<String>,
-    /// SHA-256 over the concatenated observed request bodies (ordering-sensitive).
+    /// SHA-256 over the concatenated observed request bodies, each body truncated at
+    /// `MAX_DIGESTED_BODY_BYTES` before hashing (ordering-sensitive).
     pub request_bodies_digest: String,
 }
 
@@ -56,6 +57,9 @@ pub struct Graded {
     pub reason_class: String,
     pub failures: Vec<String>,
     pub harness_error: bool,
+    /// The leak findings this drive produced, carried so the verdict can gate on them
+    /// structurally rather than re-reading the reason string.
+    pub leaks: Vec<(String, String)>,
 }
 
 /// One evidence dimension, graded separately from task correctness (R-016, GAP-M15).
@@ -245,12 +249,20 @@ pub fn grade(scen: &Scenario, ev: &Evidence) -> Graded {
     let evidence = evidence_failures(scen, ev);
     failures.extend(evidence.iter().cloned());
     let passed = failures.is_empty();
-    let reason_class = classify(scen, ev, &failures);
+    // A reason class names *why a run failed*, so a passing observation carries none:
+    // an empty string, never a recycled failure class. Every caller that persists the
+    // class (reports, run records) keeps the same rule.
+    let reason_class = if passed {
+        String::new()
+    } else {
+        classify(scen, ev, &failures)
+    };
     Graded {
         passed,
         reason_class,
         failures,
         harness_error: ev.harness_error,
+        leaks: ev.leaks.clone(),
     }
 }
 
@@ -318,9 +330,17 @@ impl Verdict {
 /// Reason matching is strict: a red scenario is predicted *for its declared reason
 /// class*, and only `accept_any_reason = true` broadens that to any clean failure.
 /// There is no implicit leniency for `missing-evidence`.
+///
+/// `accept_any_reason` never reaches a leak: a leak is a security finding, not a
+/// failure-class prediction, so no manifest can pre-authorize one. The check is
+/// structural here rather than string-based so it cannot be argued away by a renamed
+/// class: a leak blocks acceptance before the broadening clause is even consulted.
 pub fn verdict(scen: &Scenario, graded: &Graded) -> Verdict {
     if graded.harness_error {
         return Verdict::HarnessError;
+    }
+    if !graded.leaks.is_empty() {
+        return Verdict::UnexpectedRedReason;
     }
     if graded.passed {
         return match scen.expected_status {
@@ -328,7 +348,8 @@ pub fn verdict(scen: &Scenario, graded: &Graded) -> Verdict {
             ExpectedStatus::Red => Verdict::UnexpectedGreen,
         };
     }
-    let reason_ok = scen.accept_any_reason || graded.reason_class == scen.expected_reason_class;
+    let reason_ok = graded.reason_class == scen.expected_reason_class
+        || (scen.accept_any_reason && graded.reason_class != "leakage");
     match scen.expected_status {
         ExpectedStatus::Red if reason_ok => Verdict::ExpectedRed,
         _ => Verdict::UnexpectedRedReason,

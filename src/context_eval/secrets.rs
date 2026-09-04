@@ -1,4 +1,4 @@
-//! Planted-secret leakage scan over harness-captured outputs (issue #115, R-012).
+//! Planted-secret leakage scan over harness-captured outputs (issue 37, R-012).
 //!
 //! The leak-corpus fixture carries synthetic markers that the ingress path must vault or
 //! redact. Anything the runner prints, anything the session store persists, and anything
@@ -10,11 +10,16 @@ use std::path::Path;
 /// Synthetic markers planted by `evals/context-management/fixtures/leak-corpus.txt`
 /// (never real credentials). Byte-exact matches only: no normalization, so encoding
 /// tricks cannot hide a leak from the scan or manufacture one.
+///
+/// Every marker is unique enough that ordinary runner prose can never trip one by
+/// accident; the earlier "unexpected trailing frame" marker was a generic protocol
+/// phrase that a legitimate run could print for its own reasons, which would have
+/// turned an honest run into a false leak.
 pub const LEAK_MARKERS: [&str; 4] = [
     "CTXEVAL-SECRET-A1B2C3D4E5",
     "CTXEVAL-TOKEN-F6G7H8I9J0",
     "x-txn-9f31ac04be",
-    "unexpected trailing frame",
+    "CTXEVAL-FRAGMENT-8e2f5b71cc4a",
 ];
 
 /// Every marker contained verbatim in `bytes`.
