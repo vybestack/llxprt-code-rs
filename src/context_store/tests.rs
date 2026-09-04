@@ -176,3 +176,39 @@ fn phase2_operation_rows_are_named_and_complete() {
     assert!(!StoreOperation::QuiesceUnwritable.advances_state());
     assert!(StoreOperation::AdmitIngress.advances_state());
 }
+
+#[test]
+fn phase2_rows_carry_the_registry_names_in_order() {
+    use crate::context_kernel::events::OperationClass;
+
+    fn kernel_row(row: StoreOperation) -> OperationClass {
+        match row {
+            StoreOperation::AdmitIngress => OperationClass::AdmitIngress,
+            StoreOperation::Sanitize => OperationClass::Sanitize,
+            StoreOperation::Redact => OperationClass::Redact,
+            StoreOperation::Import => OperationClass::Import,
+            StoreOperation::RuleUpdate => OperationClass::RuleUpdate,
+            StoreOperation::VocabularyUpdate => OperationClass::VocabularyUpdate,
+            StoreOperation::IndexRebuild => OperationClass::IndexRebuild,
+            StoreOperation::StoreMode => OperationClass::StoreMode,
+            StoreOperation::QuiesceUnwritable => OperationClass::QuiesceUnwritable,
+        }
+    }
+
+    let rows = StoreOperation::all();
+    let named: Vec<&'static str> = rows.iter().map(|row| kernel_row(*row).name()).collect();
+    assert_eq!(
+        named,
+        vec![
+            "admit-ingress",
+            "sanitize",
+            "redact",
+            "import",
+            "rule-update",
+            "vocabulary-update",
+            "index-rebuild",
+            "store-mode",
+            "quiesce-unwritable",
+        ]
+    );
+}
