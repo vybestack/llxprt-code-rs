@@ -189,7 +189,7 @@ fn parse_disabled_tools(map: &Map<String, Value>, name: &str) -> Result<Vec<Stri
                     "profile {name:?}: '{key}' entries must be bounded tool names"
                 ));
             }
-            if crate::agent::known_tool(tool, true) {
+            if crate::tools::is_known_tool_name(tool) {
                 return Err(format!(
                     "profile {name:?}: '{key}' cannot disable the registered Rust tool '{tool}'"
                 ));
