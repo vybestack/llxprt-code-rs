@@ -41,10 +41,21 @@ pub struct VaultReference {
     pub content_digest: Digest,
 }
 
-/// One admitted ingress record.
+/// Where the transaction's exempt append landed in the sanitized spine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpinePlacement {
+    /// Content-stable handle the sink assigned to the record.
+    pub handle: String,
+    /// Byte range the record occupies in the spine.
+    pub range: Range<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IngressRecord {
     pub source: CaptureSource,
+    /// The admitted record as it landed in the store: handle, spine ranges,
+    /// admitted bytes, and segmentation.
+    pub payload: IngressPayload,
     pub sanitized: Vec<u8>,
     pub segments: Vec<Segment>,
     pub redactions: usize,
@@ -52,6 +63,10 @@ pub struct IngressRecord {
     /// Digests of each quarantined secret token, so generated artifacts can be checked
     /// for laundering without storing plaintext anywhere durable.
     pub secret_digests: Vec<u64>,
+    /// Where the sanitized (or placeholder) bytes were appended. This is the
+    /// transaction's own exempt write; no other spine write may exist for the
+    /// payload (issue #100).
+    pub spine: Option<SpinePlacement>,
 }
 
 impl IngressRecord {
@@ -80,6 +95,23 @@ impl IngressRecord {
     }
 }
 
+/// The admitted payload of one ingress record, as it landed in the store:
+/// the sink-assigned handle, the spine ranges it covers, the admitted bytes,
+/// and the segmentation of those bytes. Everything downstream (filter
+/// digests, IR placement, read-back) consumes this view instead of the raw
+/// input, so no unredacted bytes ever leave the transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IngressPayload {
+    /// Content-stable handle the sink assigned to the admitted record.
+    pub handle: String,
+    /// Spine ranges the admitted record occupies.
+    pub ranges: Vec<Range<u64>>,
+    /// Admitted bytes exactly as they were appended to the spine.
+    pub bytes: Vec<u8>,
+    /// Segmentation of `bytes`, computed after the durable append.
+    pub segments: Vec<Segment>,
+}
+
 /// A captured-but-not-yet-ingested generated artifact (volatile by contract).
 pub struct PendingDerivation {
     pub source_kind: &'static str,
@@ -88,8 +120,9 @@ pub struct PendingDerivation {
 
 /// Callback port the transaction uses to reach the store.
 pub trait IngressSink {
-    /// Appends sanitized bytes; returns the byte range they occupy in the spine.
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<Range<u64>, String>;
+    /// Appends sanitized bytes and returns where they landed: the
+    /// sink-assigned content-stable handle plus the spine byte range.
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String>;
     /// Writes quarantined plaintext into the encrypted vault; returns its handle.
     fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String>;
     /// Current store mode name, used to refuse writes before any side effect.
@@ -175,23 +208,36 @@ impl IngressTxn {
         let outcome = self.redactor.redact(raw);
         match outcome {
             RedactionOutcome::Sanitized { bytes, redactions } => {
+                // Order is durable sanitized append first, segmentation
+                // second: the record is addressable before any consumer sees
+                // it, and segmentation is re-derivable deterministically from
+                // the stored bytes (issue #119).
+                let placement =
+                    sink.sanitized_append(&bytes)
+                        .map_err(|e| IngressError::StoreBlocked {
+                            mode: leak_mode(&e),
+                        })?;
                 let segments = segment(&bytes);
                 if !coverage_is_total(&segments, bytes.len()) {
                     return Err(IngressError::Coverage {
                         sanitized_len: bytes.len(),
                     });
                 }
-                sink.sanitized_append(&bytes)
-                    .map_err(|e| IngressError::StoreBlocked {
-                        mode: leak_mode(&e),
-                    })?;
+                let payload = IngressPayload {
+                    handle: placement.handle.clone(),
+                    ranges: vec![placement.range.clone()],
+                    bytes: bytes.clone(),
+                    segments: segments.clone(),
+                };
                 Ok(IngressRecord {
                     source,
+                    payload,
                     sanitized: bytes,
                     segments,
                     redactions: redactions.len(),
                     vault: None,
                     secret_digests: secret_token_digests(raw),
+                    spine: Some(placement),
                 })
             }
             RedactionOutcome::Vaulted { reason, byte_len } => {
@@ -201,13 +247,29 @@ impl IngressTxn {
                             mode: leak_mode(&e),
                         })?;
                 let placeholder = vault_placeholder(reason.clone(), byte_len);
-                let segments = segment(&placeholder);
-                sink.sanitized_append(&placeholder)
-                    .map_err(|e| IngressError::StoreBlocked {
+                // Same order as the sanitized branch: placeholder into the
+                // spine first, segmentation of the stored bytes after (issue
+                // #119).
+                let placement = sink.sanitized_append(&placeholder).map_err(|e| {
+                    IngressError::StoreBlocked {
                         mode: leak_mode(&e),
-                    })?;
+                    }
+                })?;
+                let segments = segment(&placeholder);
+                if !coverage_is_total(&segments, placeholder.len()) {
+                    return Err(IngressError::Coverage {
+                        sanitized_len: placeholder.len(),
+                    });
+                }
+                let payload = IngressPayload {
+                    handle: placement.handle.clone(),
+                    ranges: vec![placement.range.clone()],
+                    bytes: placeholder.clone(),
+                    segments: segments.clone(),
+                };
                 Ok(IngressRecord {
                     source,
+                    payload,
                     sanitized: placeholder.clone(),
                     segments,
                     redactions: 0,
@@ -218,6 +280,7 @@ impl IngressTxn {
                         placeholder,
                         content_digest: digest(raw),
                     }),
+                    spine: Some(placement),
                 })
             }
         }
@@ -230,7 +293,6 @@ fn vault_placeholder(reason: VaultReason, byte_len: usize) -> Vec<u8> {
     placeholder.resize(byte_len.max(1), b'-');
     placeholder
 }
-
 /// Digests every delimiter-delimited token of `raw` so a quarantined secret cannot be
 /// copied into a generated artifact without matching one of these digests.
 fn secret_token_digests(raw: &[u8]) -> Vec<u64> {

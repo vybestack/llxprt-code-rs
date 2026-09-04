@@ -3,13 +3,14 @@ use crate::context_ingress::capture::{CaptureBuffer, CaptureLoss, CaptureSource}
 use crate::context_ingress::filter::{
     Digest as FilterDigest, FilterClass, FilterRegistry, FilterRules, RuleVerdict, Vocabulary,
 };
-use crate::context_ingress::ingress::{IngressError, IngressRecord, IngressSink, IngressTxn};
+use crate::context_ingress::ingress::{
+    IngressError, IngressRecord, IngressSink, IngressTxn, SpinePlacement,
+};
 use crate::context_ingress::launder::{LaunderVerdict, QuarantineSet};
 use crate::context_ingress::redactor::{
     Detector, DetectorClass, RedactionOutcome, Redactor, ScanVerdict, VaultReason,
 };
 use crate::context_ingress::segment::{coverage_is_total, segment, StructuralClass};
-use std::ops::Range;
 
 /// In-memory sink used by the transaction tests.
 struct MemSink {
@@ -31,13 +32,17 @@ impl MemSink {
 }
 
 impl IngressSink for MemSink {
-    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<Range<u64>, String> {
+    fn sanitized_append(&mut self, bytes: &[u8]) -> Result<SpinePlacement, String> {
         if self.mode != "normal" {
             return Err(format!("store mode {} refuses append", self.mode));
         }
         let start = self.spine.len() as u64;
         self.spine.extend_from_slice(bytes);
-        Ok(start..(self.spine.len() as u64))
+        let range = start..(self.spine.len() as u64);
+        Ok(SpinePlacement {
+            handle: format!("ingress-{:016x}", bytes.len()),
+            range,
+        })
     }
 
     fn vault_put(&mut self, raw: &[u8], reason: &str) -> Result<String, String> {
@@ -285,12 +290,21 @@ fn filter_digests_exact_ranked_and_noise_with_handles_and_versions() {
 }
 
 #[test]
-fn filter_size_floor_passes_verbatim() {
-    let registry = FilterRegistry::new();
+fn filter_size_floor_routes_bulk_to_a_digest() {
+    let mut registry = FilterRegistry::new();
     let big = vec![b'x'; 2048];
     let segments = segment(&big);
     assert_eq!(
         registry.verdict("read", &segments, big.len()),
+        RuleVerdict::Digest
+    );
+    // A verbatim tool keeps its verbatim routing at any size.
+    let mut rules = FilterRules::v1();
+    rules.verbatim_tools = vec!["sensitive-tool".to_string()];
+    rules.version = 2;
+    registry.update_rules(rules).unwrap();
+    assert_eq!(
+        registry.verdict("sensitive-tool", &segments, big.len()),
         RuleVerdict::PassVerbatim
     );
 }
