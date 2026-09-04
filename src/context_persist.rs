@@ -7,6 +7,8 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+use crate::context_ingress::filter::RuleVerdict;
+use crate::context_ingress::ingress::IngressPayload;
 use crate::session::{
     ensure_private_subdir, open_regular_at, RoundRecord, SessionStore, StoreError,
 };
@@ -24,6 +26,12 @@ pub(crate) const PRESERVED_SPAN_LIMIT: usize = 64;
 pub(crate) const DIGEST_SPAN_LIMIT: usize = 4;
 /// Byte budget for the preserved-span block of one compact CTXDIGEST record.
 pub(crate) const DIGEST_SPAN_BYTES: usize = 1024;
+/// Read bound for a reloaded sanitized spine (session slot cap).
+pub(crate) const SPINE_RELOAD_MAX: usize = 32 << 20;
+/// Read bound for a reloaded vault snapshot.
+pub(crate) const VAULT_RELOAD_MAX: usize = 8 << 20;
+/// Read bound for a reloaded context manifest.
+pub(crate) const MANIFEST_RELOAD_MAX: usize = 1 << 20;
 
 /// Lazily opened phase-2 context store with its filter registry and quiesce state.
 pub(crate) struct ContextState {
@@ -41,32 +49,169 @@ struct ContextManifest<'a> {
     mode: &'a str,
     pub(crate) quiesce: Option<&'a str>,
     pub(crate) detail: Option<&'a str>,
+    /// Every rule and vocabulary version the session adopted, oldest first.
+    /// Reloaded after a restart so a historical version keeps resolving
+    /// (issue #118).
+    pub(crate) rules: &'a [crate::context_ingress::filter::FilterRules],
+    pub(crate) vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
     pub(crate) terminal_outcome: Option<&'a str>,
     pub(crate) preserved: &'a [String],
 }
 
-/// Deterministic in-process vault key for one session. Platform-keychain derivation is a
-/// later phase; the key is stable for the session id and never leaves the process.
-fn context_vault_key(session_id: &str) -> crate::context_store::vault::VaultKey {
-    let mut key = [0u8; 32];
-    let mut seed = crate::context_kernel::canonical::digest(b"issue39-context-vault");
-    for chunk in key.chunks_mut(8) {
-        seed = crate::context_kernel::canonical::chained(seed, session_id.as_bytes());
-        let bytes = seed.to_le_bytes();
-        chunk.copy_from_slice(&bytes[..chunk.len()]);
-    }
-    crate::context_store::vault::VaultKey::from(key)
+/// Owned form of [`ContextManifest`] used when reloading it from disk.
+#[derive(serde::Deserialize)]
+struct PersistedManifest {
+    mode: String,
+    quiesce: Option<String>,
+    detail: Option<String>,
+    rules: Vec<crate::context_ingress::filter::FilterRules>,
+    vocabularies: Vec<crate::context_ingress::filter::VocabularySnapshot>,
+    #[allow(dead_code)]
+    terminal_outcome: Option<String>,
+    #[serde(default)]
+    preserved: Vec<String>,
 }
 
-fn new_context_state(session_id: &str) -> ContextState {
+/// One durable checkpoint line: what a crash-safe publication actually
+/// recorded, so a reopened store can verify its recovered spine against the
+/// checkpoint it claims to resume from (issue #102).
+#[derive(Serialize)]
+struct DurableCheckpoint {
+    /// Applied spine records at checkpoint time.
+    applied: u64,
+    /// Encoded spine byte length at checkpoint time.
+    spine_len: u64,
+    /// Digest of the encoded spine bytes the checkpoint covers.
+    spine_digest: u64,
+    /// Policy logical time that produced the checkpoint.
+    logical_time: u64,
+}
+
+/// Draws one 64-bit word from the std entropy pool (OS-seeded per-process keys).
+fn entropy_u64() -> u64 {
+    use std::hash::{BuildHasher as _, Hasher as _};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+}
+
+/// The per-session vault key, stored as a private artifact beside the session
+/// state. The key is drawn from the OS entropy pool once per session, is never
+/// derived from a public seed or the session id, and never leaves the process
+/// except through this 0600 artifact; restarts reopen the same key so sealed
+/// vault slots stay readable while no other session can derive them (issue
+/// #101; platform-keychain derivation stays a later phase).
+fn ensure_vault_key(store: &SessionStore) -> Result<crate::context_store::vault::VaultKey, String> {
+    const KEY_FILE: &str = "context-vault-key";
+    const KEY_LEN: usize = 32;
+    match crate::safe_file::read_artifact(&store.dir, KEY_FILE, KEY_LEN) {
+        Ok(bytes) => {
+            if bytes.len() != KEY_LEN {
+                return Err(format!(
+                    "context vault key artifact is {0} bytes, want {1}",
+                    bytes.len(),
+                    KEY_LEN
+                ));
+            }
+            let key = crate::context_store::vault::VaultKey::from_slice(&bytes);
+            Ok(*key)
+        }
+        Err(message) => {
+            if !message.contains("open artifact context-vault-key failed") {
+                return Err(message);
+            }
+            let mut key = [0u8; KEY_LEN];
+            for chunk in key.chunks_mut(8) {
+                chunk.copy_from_slice(&entropy_u64().to_le_bytes()[..chunk.len()]);
+            }
+            crate::safe_file::publish_artifact(&store.dir, KEY_FILE, &key, open_regular_at)
+                .map_err(|error| format!("publish context vault key failed: {error}"))?;
+            Ok(crate::context_store::vault::VaultKey::from(key))
+        }
+    }
+}
+
+fn new_context_state(key: crate::context_store::vault::VaultKey) -> ContextState {
     ContextState {
-        store: crate::context_store::store::ContextStore::open(&context_vault_key(session_id)),
+        store: crate::context_store::store::ContextStore::open(&key),
         filters: crate::context_ingress::filter::FilterRegistry::new(),
         quiesce: None,
         detail: None,
         preserved: Vec::new(),
         policy: crate::context_policy::runtime::ProposalOnlyController::default(),
     }
+}
+
+/// Reopens the durable `context/` artifacts of a previous process into a live
+/// [`ContextState`]: the sanitized spine is re-framed and integrity-checked as a
+/// whole (a corrupt frame is a typed error, never a silent truncation), the
+/// vault snapshot restores its slots so restored handles read back, and the
+/// manifest restores mode, quiesce state, and the preserved-span window.
+/// Missing artifacts mean a fresh store; a corrupt artifact is a typed error
+/// surfaced to the caller instead of a degraded restart (issue #102).
+pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState, String> {
+    let key = ensure_vault_key(store)?;
+    let dir = match context_dir(store) {
+        Ok(dir) => dir,
+        Err(_) => return Ok(new_context_state(key)),
+    };
+    let spine_bytes = match crate::safe_file::read_artifact(&dir, "sanitized", SPINE_RELOAD_MAX) {
+        Ok(bytes) => bytes,
+        Err(message) if message.contains("open artifact sanitized failed") => {
+            return Ok(new_context_state(key));
+        }
+        Err(message) => return Err(format!("context spine unreadable: {message}")),
+    };
+    let mut state = new_context_state(key);
+    state
+        .store
+        .load_spine_typed(&spine_bytes)
+        .map_err(|error| format!("context spine corrupt: {error:?}"))?;
+    match crate::safe_file::read_artifact(&dir, "vault", VAULT_RELOAD_MAX) {
+        Ok(bytes) => {
+            let snapshot: crate::context_store::vault::VaultSnapshot =
+                serde_json::from_slice(&bytes)
+                    .map_err(|error| format!("context vault corrupt: {error}"))?;
+            state
+                .store
+                .restore_vault(snapshot)
+                .map_err(|error| format!("context vault refused restore: {error:?}"))?;
+        }
+        Err(message) if message.contains("open artifact vault failed") => {}
+        Err(message) => return Err(format!("context vault unreadable: {message}")),
+    }
+    let mut filters_restored = false;
+    if let Ok(bytes) = crate::safe_file::read_artifact(&dir, "manifest.json", MANIFEST_RELOAD_MAX) {
+        let manifest: PersistedManifest = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("context manifest corrupt: {error}"))?;
+        // Historical filter versions reload with the store so a version named by
+        // a durable digest keeps resolving after a restart (issue #118).
+        state
+            .filters
+            .restore_histories(manifest.rules.clone())
+            .map_err(|_| "context manifest filter rules are not relaxations".to_string())?;
+        state
+            .filters
+            .restore_vocabulary_snapshots(manifest.vocabularies.clone())
+            .map_err(|_| "context manifest vocabularies are not additions".to_string())?;
+        filters_restored = true;
+        if manifest.mode == "read-only" {
+            state
+                .store
+                .set_mode(crate::context_store::store::StoreMode::ReadOnly);
+        } else if manifest.mode == "unavailable" {
+            state
+                .store
+                .set_mode(crate::context_store::store::StoreMode::Unavailable);
+        }
+        state.quiesce = manifest.quiesce;
+        state.detail = manifest.detail;
+        state.preserved = manifest.preserved;
+    }
+    if !filters_restored {
+        return Err("context manifest is missing: filter versions cannot be restored".to_string());
+    }
+    Ok(state)
 }
 
 /// Stable textual refusal for the external context store seam.
@@ -95,24 +240,15 @@ fn ingress_error(error: &crate::context_ingress::ingress::IngressError) -> Strin
     }
 }
 
-/// Writes one context artifact through a private temporary file and an atomic rename, so
-/// a torn write is never observable and an unwritable directory is detected right here.
-fn write_artifact(dir: &openat::Dir, root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write as _;
-    let temp = format!("{name}.tmp");
-    let mut file = open_regular_at(
-        dir,
-        &temp,
-        libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
-        0o600,
-    )
-    .map_err(|error| format!("open context artifact {name} failed: {error}"))?;
-    file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| format!("write context artifact {name} failed: {error}"))?;
-    drop(file);
-    std::fs::rename(root.join(&temp), root.join(name))
-        .map_err(|error| format!("publish context artifact {name} failed: {error}"))
+/// Writes one context artifact through the crash-safe publication primitive: payload to
+/// a dot-prefixed temporary file inside `context/`, fsync on the payload, a
+/// same-directory rename over the final name, then an fsync on the directory. A crash
+/// anywhere leaves either the old or the new artifact (issue #120).
+fn write_artifact(dir: &openat::Dir, _root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    crate::safe_file::publish_artifact(dir, name, bytes, |dir, name, flags, mode| {
+        open_regular_at(dir, name, flags, mode)
+    })
+    .map_err(|error| format!("publish context artifact {name} failed: {error}"))
 }
 
 /// Keeps the preserved-span window bounded across pre-entry compaction calls.
@@ -153,26 +289,49 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
         let mut txn = IngressTxn::new(bytes.len(), INGRESS_WORK_BUDGET);
         txn.capture(CaptureSource::ToolResult, bytes)
             .map_err(|error| ingress_error(&error))?;
+        // The transaction's own exempt append (and vault reference on
+        // quarantine) are the only durable results of this ingestion; the raw
+        // input bytes are never written again (issue #100).
         let records = txn
             .commit(&mut state.store)
             .map_err(|error| ingress_error(&error))?;
-        let segments = records
+        let record = records
             .first()
-            .ok_or_else(|| "ingress committed no records".to_string())?
-            .segments
-            .clone();
-        let range = state
-            .store
-            .sanitized_append(&handle, bytes)
-            .map_err(|error| context_store_error(&error))?;
-        state
-            .store
-            .vault_put(bytes, "tool-result")
-            .map_err(|error| context_store_error(&error))?;
-        let digest = state
+            .ok_or_else(|| "ingress committed no records".to_string())?;
+        let spine = record
+            .spine
+            .as_ref()
+            .ok_or_else(|| "ingress committed no sanitized record".to_string())?;
+        let payload = IngressPayload {
+            handle: spine.handle.clone(),
+            ranges: vec![spine.range.clone()],
+            bytes: record.sanitized.clone(),
+            segments: record.segments.clone(),
+        };
+        // The verdict rules what the caller receives: PassVerbatim returns the
+        // sanitized bytes themselves, DropBulk a drop stub, and only Digest
+        // yields the CTXDIGEST substitution (issue #118).
+        match state
             .filters
-            .digest(tool, &handle, vec![range], bytes, &segments);
-        Ok(digest_record(state, tool, bytes, &handle, &digest))
+            .verdict(tool, &payload.segments, payload.bytes.len())
+        {
+            RuleVerdict::PassVerbatim => Ok(String::from_utf8_lossy(&payload.bytes).into_owned()),
+            RuleVerdict::DropBulk => Ok(format!(
+                "CTXDROP v1 tool={tool} bytes={} handle={}\n",
+                payload.bytes.len(),
+                payload.handle
+            )),
+            RuleVerdict::Digest => {
+                let digest = state.filters.digest(
+                    tool,
+                    &payload.handle,
+                    payload.ranges.clone(),
+                    &payload.bytes,
+                    &payload.segments,
+                );
+                Ok(digest_record(state, tool, &payload, &handle, &digest))
+            }
+        }
     })();
     match result {
         Ok(record) => {
@@ -206,21 +365,30 @@ fn memory_digest(state: &mut ContextState, tool: &str, bytes: &[u8]) -> String {
         "content-{:016x}",
         crate::context_kernel::canonical::digest(bytes)
     );
+    let payload = IngressPayload {
+        handle: handle.clone(),
+        ranges: Vec::new(),
+        bytes: bytes.to_vec(),
+        segments: Vec::new(),
+    };
+    if state.filters.verdict(tool, &[], bytes.len()) == RuleVerdict::PassVerbatim {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
     let digest = state.filters.digest(tool, &handle, Vec::new(), bytes, &[]);
-    digest_record(state, tool, bytes, &handle, &digest)
+    digest_record(state, tool, &payload, &handle, &digest)
 }
 
 /// Renders one CTXDIGEST v1 record and folds its preserved spans into the manifest state.
 fn digest_record(
     state: &mut ContextState,
     tool: &str,
-    bytes: &[u8],
+    payload: &IngressPayload,
     handle: &str,
     digest: &crate::context_ingress::filter::Digest,
 ) -> String {
     let mut record = format!(
         "CTXDIGEST v1 tool={tool} bytes={} class={} rule={} vocab={} handle={handle}\n",
-        bytes.len(),
+        payload.bytes.len(),
         digest.class.name(),
         digest.rule_version,
         digest.vocabulary_version,
@@ -235,8 +403,11 @@ fn digest_record(
         if carried >= DIGEST_SPAN_LIMIT {
             break;
         }
-        let text = String::from_utf8_lossy(&bytes[span.span.clone()]).into_owned();
-        if carried > 0 && text.len() > budget {
+        let text = String::from_utf8_lossy(&payload.bytes[span.span.clone()]).into_owned();
+        // Every carried span, including the first, must fit the record byte
+        // budget; a span larger than the whole budget is never carried (issue
+        // #117).
+        if text.len() > budget {
             break;
         }
         budget = budget.saturating_sub(text.len());
@@ -258,7 +429,7 @@ fn digest_record(
 
 /// Lock-poisoned fallback: a pure in-memory record with no shared state touched at all.
 fn memory_quiesce_record(tool: &str, result: &str) -> String {
-    let mut state = new_context_state("unavailable");
+    let mut state = new_context_state([0u8; 32].into());
     state.quiesce = Some("quiesce_unwritable".to_string());
     state.detail = Some("context store lock poisoned".to_string());
     memory_digest(&mut state, tool, result.as_bytes())
@@ -286,9 +457,10 @@ fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> 
 /// Digests bulk tool results and persists the phase-2 context artifacts, returning
 /// the transcript the session log should store.
 ///
-/// A context-store or artifact-write failure never fails the session transaction:
-/// the run quiesces (recorded best-effort in the manifest) and keeps its committed
-/// exit state, so an unwritable store degrades instead of aborting the turn.
+/// The store must be writable and the artifacts must land before the session
+/// log may record completion: an unavailable store blocks advancement instead
+/// of being swallowed into a quiesce marker (issue #106). The run still
+/// records its quiesce marker beside the session so an operator can read it.
 pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
     let mut guard = store
         .context
@@ -300,9 +472,12 @@ pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
     state.policy.wrap_up();
     if let Err(reason) = persist_context(store, state) {
         state.quiesce = Some("quiesce_unwritable".to_string());
-        state.detail = Some(reason);
+        state.detail = Some(reason.clone());
         record_quiesce_manifest(store, state);
         record_quiesce_fallback(store, state);
+        return Err(StoreError::Invalid(format!(
+            "context store unwritable, refusing to record completion: {reason}"
+        )));
     }
     Ok(())
 }
@@ -316,7 +491,14 @@ pub(crate) fn context_exchange(
         .lock()
         .map_err(|_| StoreError::Lock("context store lock poisoned".into()))?;
     if guard.is_none() {
-        *guard = Some(new_context_state(&store.session_id));
+        // Restart recovery: reopen the durable artifacts of the previous
+        // process instead of silently starting from an empty store. A corrupt
+        // artifact fails the exchange rather than degrading into a rewritten
+        // history (issue #120).
+        match recover_context_state(store) {
+            Ok(state) => *guard = Some(state),
+            Err(reason) => return Err(StoreError::Invalid(format!("context recovery: {reason}"))),
+        }
     }
     let state = guard
         .as_mut()
@@ -324,12 +506,18 @@ pub(crate) fn context_exchange(
     let mut transformed = rounds.to_vec();
     if let Err(reason) = digest_bulk_results(state, &mut transformed) {
         state.quiesce = Some("quiesce_unwritable".to_string());
-        state.detail = Some(reason);
+        state.detail = Some(reason.clone());
+        // A blocked admission is an integrity failure: the bulk bytes never
+        // entered the store, so the session must not advance (issue #106).
+        return Err(StoreError::Invalid(reason));
     }
     if let Err(reason) = persist_context(store, state) {
         state.quiesce = Some("quiesce_unwritable".to_string());
-        state.detail = Some(reason);
+        state.detail = Some(reason.clone());
         record_quiesce_manifest(store, state);
+        // Persistence failed: the context state that produced this transcript is
+        // not durable, so the session must not record advancement (issue #106).
+        return Err(StoreError::Invalid(reason));
     }
     Ok(transformed)
 }
@@ -352,7 +540,27 @@ pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> St
         return memory_quiesce_record(tool, result);
     };
     if guard.is_none() {
-        *guard = Some(new_context_state(&store.session_id));
+        // Restart recovery as above; an unrecoverable store quiesces instead
+        // of pretending the history is gone, and the compact record is still
+        // computed in memory so no raw bytes ride the request list.
+        match recover_context_state(store) {
+            Ok(state) => *guard = Some(state),
+            Err(reason) => {
+                let key = match ensure_vault_key(store) {
+                    Ok(key) => key,
+                    Err(inner) => {
+                        let mut state = new_context_state([0u8; 32].into());
+                        state.quiesce = Some("quiesce_unwritable".to_string());
+                        state.detail = Some(inner);
+                        return memory_digest(&mut state, tool, result.as_bytes());
+                    }
+                };
+                let mut state = new_context_state(key);
+                state.quiesce = Some("quiesce_unwritable".to_string());
+                state.detail = Some(reason);
+                return memory_digest(&mut state, tool, result.as_bytes());
+            }
+        }
     }
     let Some(state) = guard.as_mut() else {
         return memory_quiesce_record(tool, result);
@@ -416,6 +624,8 @@ pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        rules: state.filters.rules_history(),
+        vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
@@ -454,13 +664,24 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         .map_err(|error| format!("encode policy event failed: {error}"))?
         .join("\n");
     write_artifact(&dir, &root, "events.log", events.as_bytes())?;
-    let checkpoints = state
-        .policy
-        .events()
-        .iter()
-        .map(|event| event.logical_time.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
+    // One durable checkpoint line per publication: the applied record count and
+    // spine length the store checkpoint recorded, the digest of the spine bytes
+    // it covers, and the policy logical time that produced it. A reopened store
+    // can verify the recovered spine against the last line (issue #102).
+    let spine_bytes = state.store.spine_bytes();
+    let mut checkpoints = String::new();
+    for (index, event) in state.policy.events().iter().enumerate() {
+        checkpoints.push_str(
+            &serde_json::to_string(&DurableCheckpoint {
+                applied: index as u64,
+                spine_len: spine_bytes.len() as u64,
+                spine_digest: crate::context_kernel::canonical::digest(&spine_bytes),
+                logical_time: event.logical_time,
+            })
+            .map_err(|error| format!("encode checkpoint failed: {error}"))?,
+        );
+        checkpoints.push('\n');
+    }
     write_artifact(&dir, &root, "checkpoints", checkpoints.as_bytes())?;
     let mut journal = String::new();
     for entry in state.policy.journal().entries() {
@@ -501,6 +722,8 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        rules: state.filters.rules_history(),
+        vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
@@ -516,6 +739,8 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
+        rules: state.filters.rules_history(),
+        vocabularies: state.filters.vocabulary_snapshots(),
         terminal_outcome: state.policy.terminal_outcome(),
         preserved: &state.preserved,
     };
