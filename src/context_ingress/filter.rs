@@ -8,6 +8,7 @@
 //! and a tightening request is an explicit rejected mode rather than a silent change.
 
 use crate::context_ingress::segment::Segment;
+use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
 /// Filter content class.
@@ -63,10 +64,11 @@ pub enum RuleVerdict {
 }
 
 /// Versioned rule set.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterRules {
     pub version: u64,
-    /// Payloads at or above this size pass verbatim.
+    /// Bulk-evidence admission floor: payloads at or above this size are
+    /// digested into a bounded handle (issue #119).
     pub size_floor: usize,
     /// Unknown-shaped spans shorter than this route verbatim.
     pub unknown_bound: usize,
@@ -97,7 +99,7 @@ impl FilterRules {
 }
 
 /// Versioned preservation vocabulary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Vocabulary {
     pub version: u64,
     /// Labels preserved by name in every digest.
@@ -201,14 +203,110 @@ impl FilterRegistry {
         Ok(self.vocabulary().version)
     }
 
+    /// Durable, serializable form of one vocabulary version.
+    pub fn vocabulary_snapshots(&self) -> Vec<VocabularySnapshot> {
+        self.vocabulary
+            .iter()
+            .map(|vocabulary| VocabularySnapshot {
+                version: vocabulary.version,
+                labels: vocabulary
+                    .labels
+                    .iter()
+                    .map(|label| label.to_string())
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Restores the vocabulary history from its durable form. Additions only:
+    /// dropping a label is a typed refusal (issue #118).
+    pub fn restore_vocabulary_snapshots(
+        &mut self,
+        snapshots: Vec<VocabularySnapshot>,
+    ) -> Result<(), RejectedUpdate> {
+        let mut restored = Vec::with_capacity(snapshots.len());
+        let mut labels = Vocabulary::v1().labels;
+        for (index, snapshot) in snapshots.iter().enumerate() {
+            if index as u64 + 1 != snapshot.version
+                || !labels
+                    .iter()
+                    .all(|label| snapshot.labels.contains(&label.to_string()))
+            {
+                return Err(RejectedUpdate::TighteningRequiresOffline {
+                    from: index as u64 + 1,
+                    to: snapshot.version,
+                });
+            }
+            restored.push(Vocabulary {
+                version: snapshot.version,
+                labels: std::mem::take(&mut labels),
+            });
+            labels = snapshot
+                .labels
+                .iter()
+                .map(|l| Box::leak(l.as_str().to_string().into_boxed_str()) as &'static str)
+                .collect();
+        }
+        restored.push(Vocabulary {
+            version: snapshots.len() as u64 + 1,
+            labels,
+        });
+        self.vocabulary = restored;
+        Ok(())
+    }
+
+    /// Durable history of every rule version this session adopted, oldest first.
+    /// Persisted after the run and reloaded after a restart so a historical
+    /// rule version keeps resolving (issue #118).
+    pub fn rules_history(&self) -> &[FilterRules] {
+        &self.rules
+    }
+
+    /// Durable history of every vocabulary version this session adopted.
+    pub fn vocabulary_history(&self) -> &[Vocabulary] {
+        &self.vocabulary
+    }
+
+    /// Restores the versioned histories from a durable artifact. Each history
+    /// must be non-empty, begin at version 1, and advance by strictly
+    /// increasing versions that are legal relaxations of their predecessor;
+    /// anything else is a typed refusal instead of a silent rewrite (issue
+    /// #118).
+    pub fn restore_histories(&mut self, rules: Vec<FilterRules>) -> Result<(), RejectedUpdate> {
+        if rules.first().map(|rules| rules.version) != Some(1) {
+            return Err(RejectedUpdate::TighteningRequiresOffline {
+                from: 1,
+                to: rules.first().map(|rules| rules.version).unwrap_or(0),
+            });
+        }
+        let mut current = rules[0].clone();
+        for update in rules.iter().skip(1) {
+            if update.version <= current.version || !current.is_relaxation_of(update) {
+                return Err(RejectedUpdate::TighteningRequiresOffline {
+                    from: current.version,
+                    to: update.version,
+                });
+            }
+            current = update.clone();
+        }
+        self.rules = rules;
+        Ok(())
+    }
+
     /// Rule verdict for one candidate payload from one tool.
+    ///
+    /// The size floor is an *admission* floor for bulk evidence: a payload at or
+    /// above it is bulk evidence that must be digested into a bounded handle
+    /// (issue #119), never passed verbatim into the request list. Verbatim
+    /// routing is reserved for the tool list and for unknown-shaped spans below
+    /// the unknown bound.
     pub fn verdict(&self, tool: &str, segments: &[Segment], total: usize) -> RuleVerdict {
         let rules = self.rules();
         if rules.verbatim_tools.iter().any(|name| name == tool) {
             return RuleVerdict::PassVerbatim;
         }
         if total >= rules.size_floor {
-            return RuleVerdict::PassVerbatim;
+            return RuleVerdict::Digest;
         }
         use crate::context_ingress::segment::StructuralClass;
         let has_exact = segments.iter().any(|segment| {
@@ -253,14 +351,10 @@ impl FilterRegistry {
         bytes: &[u8],
         segments: &[Segment],
     ) -> Digest {
-        let class = if self.verdict(tool, segments, bytes.len()) == RuleVerdict::DropBulk
-            && self.verdict(tool, segments, bytes.len()) != RuleVerdict::Digest
-        {
-            FilterClass::Noise
-        } else if self.verdict(tool, segments, bytes.len()) == RuleVerdict::Digest {
-            FilterClass::Exact
-        } else {
-            FilterClass::Ranked
+        let class = match self.verdict(tool, segments, bytes.len()) {
+            RuleVerdict::Digest => FilterClass::Exact,
+            RuleVerdict::DropBulk => FilterClass::Noise,
+            RuleVerdict::PassVerbatim => FilterClass::Ranked,
         };
         let vocabulary = self.vocabulary();
         let mut preserved = Vec::new();
@@ -297,4 +391,11 @@ impl Default for FilterRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Durable form of one preservation vocabulary version (issue #118).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VocabularySnapshot {
+    pub version: u64,
+    pub labels: Vec<String>,
 }
