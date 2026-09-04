@@ -1,4 +1,4 @@
-use super::{parse_chat, EphemeralSettings, ModelParams};
+use super::{chat::parse_chat, EphemeralSettings, ModelParams};
 use crate::model_api::settings::{AnthropicSettingsDraft, PromptCaching};
 
 #[derive(Debug)]
@@ -95,7 +95,7 @@ mod issue81_parser_tests {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         let profile = parse_profile_value(&value, "anthropic-marker").unwrap();
         assert_eq!(
-            profile.chat_missing_discriminator.as_deref(),
+            profile.chat_missing_discriminator().as_deref(),
             Some("ephemeralSettings.shell-replacement")
         );
     }
