@@ -130,6 +130,18 @@ pub enum ExecutorError {
     NotRebaseSafe,
 }
 
+/// What `commit` did to the governed state: applied a real effect, or
+/// re-applied a rebase-safe row on a moved parent and turned out to be a
+/// no-op the caller must not report as progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommitOutcome {
+    /// The effect landed against the named parent.
+    Applied,
+    /// The row is rebase-safe but the parent moved; the caller re-applies it
+    /// out of band, so this commit produced no effect of its own.
+    RebaseNoOp,
+}
+
 /// Fenced executor. The `epoch` fences stale writers; only the highest epoch
 /// may commit.
 #[derive(Debug, Clone)]
@@ -205,18 +217,33 @@ impl Executor {
     }
 
     /// Generate effect artifacts (durable). Rows through Phase 4 are landed;
-    /// rows owned by a later phase stop with a typed verdict.
+    /// rows owned by a later phase stop with a typed verdict and kill the
+    /// transaction, so a capability failure can never be committed (issue
+    /// #120, commit-after-failure).
     pub fn generate(&mut self) -> Result<Txn, ExecutorError> {
         self.step(TxnState::Generated)?;
         let txn = self.current.clone().expect("txn present after propose");
         let row = operation::find(txn.op).expect("registered");
         if row.owner_phase > 4 {
+            self.fail();
             return Err(ExecutorError::CapabilityNotLanded { op: txn.op });
         }
         Ok(txn)
     }
 
+    /// Kills the live transaction after a failed precondition or capability
+    /// check: the state machine jumps to `Aborted` and every further step is
+    /// refused until a new transaction is proposed.
+    fn fail(&mut self) {
+        self.aborted = true;
+        self.state = TxnState::Aborted;
+    }
+
     /// Record verdicts and enforce the universal preconditions centrally.
+    ///
+    /// Any failure leaves the transaction dead: a failed validate can never be
+    /// repaired in place, so the only next legal step is `abort` (issue #120,
+    /// commit-after-failure).
     pub fn validate(
         &mut self,
         bound: u64,
@@ -227,9 +254,11 @@ impl Executor {
     ) -> Result<Txn, ExecutorError> {
         self.step(TxnState::Validated)?;
         if !budget::fits(bound, budget) {
+            self.fail();
             return Err(ExecutorError::PreconditionFailed { which: "fit-bound" });
         }
         if !budget::feasible(m, budget) {
+            self.fail();
             return Err(ExecutorError::PreconditionFailed {
                 which: "protection-floor",
             });
@@ -237,6 +266,7 @@ impl Executor {
         let txn = self.current.clone().expect("txn present after propose");
         let row = operation::find(txn.op).expect("registered");
         if row.reclamation && !budget::net_reclaim_ok(phi_pre, phi_post, row.bar) {
+            self.fail();
             return Err(ExecutorError::PreconditionFailed {
                 which: "reclamation-bar",
             });
@@ -245,8 +275,10 @@ impl Executor {
     }
 
     /// Compare-and-commit: rebase-safe rows re-apply on the actual parent,
-    /// every other row aborts on mismatch.
-    pub fn commit(&mut self, actual_parent: u64) -> Result<TxnState, ExecutorError> {
+    /// every other row aborts on mismatch. A rebase never lands an effect in
+    /// this call, so the outcome is [`CommitOutcome::RebaseNoOp`] and the
+    /// caller must report a no-op rather than success (issue #103).
+    pub fn commit_outcome(&mut self, actual_parent: u64) -> Result<CommitOutcome, ExecutorError> {
         if !self.state.can_transition(TxnState::Committed) {
             return Err(ExecutorError::IllegalTransition {
                 from: self.state,
@@ -257,17 +289,26 @@ impl Executor {
         let row = operation::find(txn.op).expect("registered");
         if actual_parent != txn.parent_version {
             if row.rebase_safe {
-                return Ok(TxnState::Committed);
+                // The transaction ends committed-for-replay purposes, but no
+                // effect was produced here: the caller re-applies on the moved
+                // parent and must not count this commit as applied progress.
+                self.state = TxnState::Committed;
+                return Ok(CommitOutcome::RebaseNoOp);
             }
-            self.aborted = true;
-            self.state = TxnState::Aborted;
+            self.fail();
             return Err(ExecutorError::StaleParent {
                 expected: txn.parent_version,
                 actual: actual_parent,
             });
         }
         self.state = TxnState::Committed;
-        Ok(TxnState::Committed)
+        Ok(CommitOutcome::Applied)
+    }
+
+    /// Compare-and-commit, reporting only the terminal state.
+    pub fn commit(&mut self, actual_parent: u64) -> Result<TxnState, ExecutorError> {
+        self.commit_outcome(actual_parent)
+            .map(|_| TxnState::Committed)
     }
 
     /// Fenced compare-and-commit: a newer lease epoch fences us out
@@ -278,8 +319,7 @@ impl Executor {
         clock: &FencingClock,
     ) -> Result<TxnState, ExecutorError> {
         if clock.latest() > self.epoch.0 {
-            self.aborted = true;
-            self.state = TxnState::Aborted;
+            self.fail();
             return Err(ExecutorError::Fenced {
                 held: clock.latest(),
                 mine: self.epoch.0,

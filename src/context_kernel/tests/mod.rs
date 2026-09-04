@@ -4,5 +4,4 @@
 mod ir;
 mod lanes_scopes;
 mod legality;
-mod migration;
 mod reducer;

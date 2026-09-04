@@ -3,7 +3,7 @@
 //! the green turn must satisfy (red now).
 
 use super::budget::{self, AccountingPort, Budget};
-use super::executor::{Epoch, Executor, ExecutorError, FencingClock, TxnState};
+use super::executor::{CommitOutcome, Epoch, Executor, ExecutorError, FencingClock, TxnState};
 use super::operation::{self, Proposer};
 
 /// Deterministic, additive, conservative test port.
@@ -225,6 +225,87 @@ fn stale_parent_compare_and_commit() {
     ex2.validate(50, &budget, 80, 0, 0).unwrap();
     assert_eq!(ex2.commit(99).unwrap(), TxnState::Committed);
     assert!(operation::find("note").unwrap().rebase_safe);
+}
+
+/// rebase honesty - a rebase-safe row whose parent moved reports a no-op, not
+/// success: the caller learns it must re-apply out of band (issue #103).
+#[test]
+fn rebase_no_op_is_reported_not_committed_as_applied() {
+    let mut ex = Executor::new(Epoch(1));
+    ex.propose("note", 10).unwrap();
+    ex.snapshot().unwrap();
+    ex.generate().unwrap();
+    let budget = Budget { b: 100, r: 8, h: 4 };
+    ex.validate(50, &budget, 80, 0, 0).unwrap();
+    let outcome = ex.commit_outcome(99).unwrap();
+    assert_eq!(outcome, CommitOutcome::RebaseNoOp);
+    assert_eq!(ex.state(), TxnState::Committed);
+    // An applied parent, by contrast, is a real effect.
+    let mut ex2 = Executor::new(Epoch(2));
+    ex2.propose("note", 10).unwrap();
+    ex2.snapshot().unwrap();
+    ex2.generate().unwrap();
+    ex2.validate(50, &budget, 80, 0, 0).unwrap();
+    assert_eq!(ex2.commit_outcome(10).unwrap(), CommitOutcome::Applied);
+}
+
+/// a non-rebase-safe row that would otherwise be misreported still aborts.
+#[test]
+fn non_rebase_safe_mismatch_keeps_aborting() {
+    let mut ex = Executor::new(Epoch(1));
+    ex.propose("drop-with-handle", 10).unwrap();
+    ex.snapshot().unwrap();
+    ex.generate().unwrap();
+    let budget = Budget { b: 100, r: 8, h: 4 };
+    ex.validate(50, &budget, 80, 0, 0).unwrap();
+    assert!(ex.commit_outcome(11).is_err());
+    assert_eq!(ex.state(), TxnState::Aborted);
+}
+
+/// a failed precondition kills the transaction: commit after the failure is
+/// refused and the only legal next step is abort (issue #120).
+#[test]
+fn failed_precondition_blocks_commit() {
+    let mut ex = Executor::new(Epoch(1));
+    ex.propose("note", 10).unwrap();
+    ex.snapshot().unwrap();
+    ex.generate().unwrap();
+    let budget = Budget { b: 100, r: 8, h: 4 };
+    let err = ex
+        .validate(150, &budget, 80, 0, 0)
+        .expect_err("bound 150 does not fit");
+    assert_eq!(
+        err,
+        ExecutorError::PreconditionFailed { which: "fit-bound" }
+    );
+    assert_eq!(ex.state(), TxnState::Aborted);
+    assert_eq!(
+        ex.commit(10),
+        Err(ExecutorError::IllegalTransition {
+            from: TxnState::Aborted,
+            to: TxnState::Committed
+        })
+    );
+}
+
+/// a failed reclamation bar kills the transaction too.
+#[test]
+fn failed_reclamation_bar_blocks_commit() {
+    let mut ex = Executor::new(Epoch(1));
+    ex.propose("compact", 10).unwrap();
+    ex.snapshot().unwrap();
+    ex.generate().unwrap();
+    let budget = Budget { b: 100, r: 8, h: 4 };
+    let err = ex
+        .validate(50, &budget, 80, 100, 100)
+        .expect_err("phi must drop by at least the bar");
+    assert_eq!(
+        err,
+        ExecutorError::PreconditionFailed {
+            which: "reclamation-bar"
+        }
+    );
+    assert_eq!(ex.state(), TxnState::Aborted);
 }
 
 /// crash property - replaying any prefix leaves the txn

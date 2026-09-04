@@ -15,6 +15,42 @@ pub struct SpineRecord {
     pub content_digest: u64,
 }
 
+/// One admitted sanitized record with its stored handle.
+///
+/// Handles are content-stable: `sanitized-<16 hex of frame digest>` where the
+/// frame digest covers the payload and the preceding byte length, so the same
+/// payload at the same spine position resolves to the same handle before and
+/// after a reload (issue #102).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpineFrame {
+    pub handle: String,
+    pub bytes: Vec<u8>,
+    pub content_digest: u64,
+}
+
+impl SpineFrame {
+    /// The canonical content-stable handle for the frame that would start at
+    /// byte offset `preceding_len`.
+    pub fn canonical_handle(preceding_len: u64, bytes: &[u8]) -> String {
+        let mut material = Vec::with_capacity(bytes.len() + 8);
+        material.extend_from_slice(&preceding_len.to_le_bytes());
+        material.extend_from_slice(bytes);
+        format!("sanitized-{:016x}", digest(&material))
+    }
+}
+
+/// Errors raised by typed framed loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpineLoadError {
+    /// A frame is truncated, has a bad length, or fails its digest.
+    CorruptFrame {
+        /// Zero-based index of the first bad frame.
+        index: usize,
+        /// How many frames validated before the failure.
+        good_records: usize,
+    },
+}
+
 /// Errors raised by the spine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpineError {
@@ -25,7 +61,10 @@ pub enum SpineError {
 pub struct Spine {
     bytes: Vec<u8>,
     records: Vec<SpineRecord>,
-    recovered_tails: usize,
+    /// How many tail FRAMES the last in-process salvage dropped. The salvage
+    /// stops at the first frame that fails validation, so this is a count of
+    /// frames (each dropped frame carries one record), not a boolean.
+    dropped_tail_frames: usize,
 }
 
 /// One bounded page of a range read.
@@ -41,7 +80,7 @@ impl Spine {
         Self {
             bytes: Vec::new(),
             records: Vec::new(),
-            recovered_tails: 0,
+            dropped_tail_frames: 0,
         }
     }
 
@@ -60,9 +99,22 @@ impl Spine {
         &self.records
     }
 
-    /// Corrupt tails dropped by the last load.
+    /// How many tail frames the last in-process salvage dropped. Honest
+    /// crash-salvage reporting: each dropped frame is one record's worth of
+    /// bytes recovered away, so the count is reported as the number of frames
+    /// dropped rather than collapsed into a mere yes/no.
     pub fn recovered_tail_records(&self) -> usize {
-        self.recovered_tails
+        self.dropped_tail_frames
+    }
+
+    /// The stored bytes of one record, exactly as `encode` frames them.
+    ///
+    /// Checkpoint digests are computed over a record prefix, so the prefix
+    /// encoder and `encode` must agree byte for byte on what one record is.
+    pub fn record_bytes(&self, record: &SpineRecord) -> &[u8] {
+        let start = record.range.start as usize;
+        let end = record.range.end as usize;
+        &self.bytes[start..end]
     }
 
     /// Appends sanitized bytes; the spine is append-only, so no range ever moves.
@@ -125,26 +177,73 @@ impl Spine {
         out
     }
 
+    /// Loads framed records, failing closed with the index of the first
+    /// corrupt frame instead of silently truncating the spine (issue #102).
+    pub fn load_typed(encoded: &[u8]) -> Result<Self, SpineLoadError> {
+        let mut spine = Spine::new();
+        let mut cursor = 0usize;
+        let mut index = 0usize;
+        while cursor < encoded.len() {
+            let Some(record) = frame_at(encoded, cursor) else {
+                return Err(SpineLoadError::CorruptFrame {
+                    index,
+                    good_records: spine.records.len(),
+                });
+            };
+            let (bytes, content_digest, next) = record;
+            if digest(bytes) != content_digest {
+                return Err(SpineLoadError::CorruptFrame {
+                    index,
+                    good_records: spine.records.len(),
+                });
+            }
+            let handle = SpineFrame::canonical_handle(spine.len(), bytes);
+            spine.append(&handle, bytes);
+            cursor = next;
+            index += 1;
+        }
+        Ok(spine)
+    }
+
     /// Loads framed records, dropping a corrupt tail instead of failing the whole spine.
+    ///
+    /// In-process salvage path; the durable loader is [`Spine::load_typed`].
     pub fn load(encoded: &[u8]) -> Self {
         let mut spine = Spine::new();
         let mut cursor = 0usize;
-        let mut recovered = 0usize;
         while cursor < encoded.len() {
             let Some(record) = frame_at(encoded, cursor) else {
-                recovered += 1;
                 break;
             };
             let (bytes, content_digest, next) = record;
             if digest(bytes) != content_digest {
-                recovered += 1;
                 break;
             }
-            let handle = format!("sanitized-{}", spine.records.len());
+            let handle = SpineFrame::canonical_handle(spine.len(), bytes);
             spine.append(&handle, bytes);
             cursor = next;
         }
-        spine.recovered_tails = recovered;
+        // Count EVERY tail frame the salvage dropped, not merely whether the
+        // salvage stopped early: frames after the first invalid one are
+        // dropped with it even when they individually validate, because a
+        // spine cannot resume past a frame it could not verify. A trailing
+        // partial frame counts as one dropped frame too, so a truncated run
+        // is reported as the number of frames recovered away rather than
+        // collapsed into a yes/no (the accessor reports this count).
+        let mut dropped = 0usize;
+        while cursor < encoded.len() {
+            match frame_at(encoded, cursor) {
+                Some((_, _, next)) => {
+                    dropped += 1;
+                    cursor = next;
+                }
+                None => {
+                    dropped += 1;
+                    break;
+                }
+            }
+        }
+        spine.dropped_tail_frames = dropped;
         spine
     }
 }
