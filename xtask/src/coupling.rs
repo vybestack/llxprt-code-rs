@@ -681,7 +681,9 @@ fn production_text(source: &str) -> String {
             while index < bytes.len() {
                 if bytes[index] == b'"'
                     && index + 1 + hashes <= bytes.len()
-                    && bytes[index + 1..index + 1 + hashes].iter().all(|byte| *byte == b'#')
+                    && bytes[index + 1..index + 1 + hashes]
+                        .iter()
+                        .all(|byte| *byte == b'#')
                 {
                     index += 1 + hashes;
                     break;
@@ -690,7 +692,8 @@ fn production_text(source: &str) -> String {
             }
             blank(&mut clean, start, index);
         } else if bytes[index] == b'"'
-            || ((bytes[index] == b'b' || bytes[index] == b'c') && bytes.get(index + 1) == Some(&b'"'))
+            || ((bytes[index] == b'b' || bytes[index] == b'c')
+                && bytes.get(index + 1) == Some(&b'"'))
         {
             let start = index;
             if bytes[index] == b'b' || bytes[index] == b'c' {
