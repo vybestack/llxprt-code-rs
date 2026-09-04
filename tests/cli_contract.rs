@@ -375,12 +375,14 @@ fn insecure_http_error_is_one_json_object() {
 #[test]
 fn profile_precedence_and_missing_named_profile() {
     let dir = tempfile::tempdir().unwrap();
-    // File profile without its own key -> NoProfileAuth, not settings.json fallback.
+    // File profile without its own key -> NoProfileAuth, not settings.json fallback. The
+    // endpoint stays remote: a loopback base URL is credential-less by design (see
+    // `loopback_profile_without_credentials_passes_the_config_gate`).
     let profile = dir.path().join("keyless.json");
     std::fs::write(
         &profile,
         r#"{"provider":"openai","model":"m",
-            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1"}}"#,
+            "ephemeralSettings":{"base-url":"https://api.example.com/v1"}}"#,
     )
     .unwrap();
     let out = bin()
@@ -408,6 +410,40 @@ fn profile_precedence_and_missing_named_profile() {
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(stdout_json(&out)["error"]["code"], "profile-missing");
+}
+
+/// A loopback profile with no credentials at all is accepted by the config gate: the
+/// request then reaches the (refused) loopback endpoint, so the failure is a transport
+/// error, never `model-config`'s "auth keyfile path not set".
+#[test]
+fn loopback_profile_without_credentials_passes_the_config_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    // No settings.json, no auth-key, no auth-keyfile: the loopback endpoint makes this
+    // credential-less profile valid (LM Studio, ollama, llama.cpp server).
+    let profile = dir.path().join("lm-studio.json");
+    std::fs::write(
+        &profile,
+        r#"{"provider":"openai","model":"qwen/lm-studio",
+            "ephemeralSettings":{"base-url":"http://localhost:1/v1"}}"#,
+    )
+    .unwrap();
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile-load")
+        .arg(&profile)
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    let parsed = stdout_json(&out);
+    assert_eq!(
+        parsed["status"], "error",
+        "localhost:1 refuses the connection, so the run still fails"
+    );
+    assert_ne!(
+        parsed["error"]["code"], "model-config",
+        "a credential-less loopback profile must clear the config gate"
+    );
 }
 
 /// Missing or relative configuration roots fail before profile access or network activity.

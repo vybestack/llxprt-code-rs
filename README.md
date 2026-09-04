@@ -117,9 +117,15 @@ and authenticate with `x-api-key` plus `anthropic-version: 2023-06-01` (not bear
 Codex is separate. On macOS it loads the native Codex OAuth credential from Keychain and does
 not use API-key profile fields.
 
-A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile`; it
-never falls back to ambient `settings.json` credentials. The resolved key lives only in
-[`ModelConfig`] and is never logged or persisted.
+A profile with a **loopback** base URL and no `auth-key`/`auth-keyfile` is credential-less:
+local OpenAI-compatible servers (LM Studio, ollama, llama.cpp server) take any or no key,
+so the resolved key is empty and neither the file-profile refusal nor `settings.json` is
+consulted. The transport then sends no `Authorization` header at all. An explicit credential field still resolves (and a missing keyfile still
+refuses), and every non-loopback endpoint keeps requiring a key.
+
+A *file* profile (`--profile-load`) must carry its own `auth-key`/`auth-keyfile` unless its
+base URL is loopback; it never falls back to ambient `settings.json` credentials. The
+resolved key lives only in [`ModelConfig`] and is never logged or persisted.
 
 ## Insecure HTTP gate
 

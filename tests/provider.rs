@@ -10,8 +10,13 @@ use serdes_ai::core::FinishReason;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
-/// A thread that answers a fixed number of chat/completions requests with `body`, then closes.
-fn serve(body: String) -> std::net::SocketAddr {
+/// A thread that answers one chat/completions request with `body`, then closes. The
+/// captured headers (the received Authorization header in particular) are reported back
+/// through `seen`.
+fn serve_with_headers(
+    body: String,
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
@@ -28,13 +33,10 @@ fn serve(body: String) -> std::net::SocketAddr {
                 if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" || h == "\n" {
                     break;
                 }
-                if let Some(v) = h
-                    .split(':')
-                    .next()
-                    .map(|k| k.trim().to_ascii_lowercase())
-                    .filter(|k| k == "content-length")
-                {
-                    let _ = v;
+                if let Some(rest) = h.split_once(':') {
+                    if rest.0.trim().eq_ignore_ascii_case("authorization") {
+                        seen.lock().unwrap().push(rest.1.trim().to_string());
+                    }
                 }
                 if let Some(rest) = h.split_once(':') {
                     if rest.0.trim().eq_ignore_ascii_case("content-length") {
@@ -55,6 +57,12 @@ fn serve(body: String) -> std::net::SocketAddr {
         }
     });
     addr
+}
+
+/// A thread that answers one chat/completions request with `body`; the Authorization
+/// header is discarded.
+fn serve(body: String) -> std::net::SocketAddr {
+    serve_with_headers(body, std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
 }
 
 fn config(addr: std::net::SocketAddr) -> ModelConfig {
@@ -190,6 +198,47 @@ fn malformed_raw_args_are_preserved() {
     // Executing a malformed arg fails, never a successful round.
     let err = llxprt_code_rs::agent::parse_object_args(&got.calls[0]);
     assert!(err.is_err(), "malformed args must be rejected");
+}
+
+/// A loopback profile with no credentials at all reaches the real transport: the config
+/// gate resolves the empty key (issue #8), the request completes, and the wire carries no
+/// `Authorization` header. A loopback profile that *does* carry a key still sends it.
+#[test]
+fn credential_less_loopback_profile_sends_no_authorization_header() {
+    use llxprt_code_rs::model::ModelConfig;
+    use llxprt_code_rs::profile::parse_profile_value;
+    use serde_json::json;
+
+    for (auth_key, expect_header) in [(None, false), (Some("local-key"), true)] {
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        let addr = serve_with_headers(chat_body("stop", None), seen.clone());
+        let mut ephemeral = json!({"base-url": format!("http://{addr}/v1")});
+        if let Some(key) = auth_key {
+            ephemeral["auth-key"] = json!(key);
+        }
+        let p = parse_profile_value(
+            &json!({
+                "provider": "openai",
+                "model": "loopback",
+                "ephemeralSettings": ephemeral
+            }),
+            "t",
+        )
+        .expect("loopback profile must parse");
+        let cfg = ModelConfig::from_profile(&p, true, true)
+            .unwrap_or_else(|e| panic!("credential-less loopback profile must resolve: {e}"));
+        let got = request_one(&cfg).expect("loopback request");
+        assert_eq!(got.finish_reason.as_ref(), Some(&FinishReason::Stop));
+        let got = seen.lock().unwrap().clone();
+        if expect_header {
+            assert_eq!(got, vec!["Bearer local-key".to_string()]);
+        } else {
+            assert!(
+                got.is_empty(),
+                "a credential-less loopback request must send no Authorization header"
+            );
+        }
+    }
 }
 
 /// A missing finish_reason must fail.

@@ -10,6 +10,11 @@
 //! URL that is not a loopback address; HTTPS (any host) and loopback HTTP stay allowed,
 //! and remote `http://` is rejected without the opt-in.
 //!
+//! Credential-less mode: a profile whose base URL is loopback and that carries no
+//! `auth-key`/`auth-keyfile` resolves to the empty key. Local OpenAI-compatible servers
+//! (LM Studio, ollama, llama.cpp server) accept any or no key, so neither the file-profile
+//! refusal nor an ambient `settings.json` read applies to them.
+//!
 //! Keys are only ever held inside [`ModelConfig`] and are never logged or persisted.
 
 use crate::profile::{std_profile_dir, ModelParams, Profile};
@@ -378,7 +383,8 @@ impl ModelConfig {
     /// Resolve a full model config from a profile.
     ///
     /// `from_file` marks a `--profile-load` profile: when it carries no
-    /// `auth-key`/`auth-keyfile` it fails rather than touching `settings.json`.
+    /// `auth-key`/`auth-keyfile` and its base URL is not loopback it fails rather than
+    /// touching `settings.json`.
     pub fn from_profile(
         profile: &Profile,
         from_file: bool,
@@ -504,6 +510,26 @@ pub(crate) fn resolve_api_key(
     from_file: bool,
     config_root: &std::path::Path,
 ) -> Result<String, ModelError> {
+    let Some(api_key) = resolve_api_key_opt(profile, from_file, config_root)? else {
+        return Ok(String::new());
+    };
+    if api_key.len() > crate::redact::MAX_KEY_BYTES {
+        return Err(ModelError::CredentialRejected(
+            crate::redact::KEY_CAP_MESSAGE.to_string(),
+        ));
+    }
+    Ok(api_key)
+}
+
+/// Resolve the credential for a profile, or `None` when the profile is credential-less
+/// by construction: a loopback endpoint with no `auth-key`/`auth-keyfile` fields. Local
+/// OpenAI-compatible servers take any or no key, so the empty key travels (the transport
+/// still sends an `Authorization` header only when a key is present).
+fn resolve_api_key_opt(
+    profile: &Profile,
+    from_file: bool,
+    config_root: &std::path::Path,
+) -> Result<Option<String>, ModelError> {
     let keyfile = profile
         .ephemeral
         .auth_keyfile_orig
@@ -519,19 +545,22 @@ pub(crate) fn resolve_api_key(
         if key.trim().is_empty() {
             return Err(ModelError::NoAuth);
         }
-        key.to_string()
+        Some(key.to_string())
     } else if let Some(path) = keyfile {
-        read_credential_path(path)?
+        Some(read_credential_path(path)?)
+    } else if profile
+        .ephemeral
+        .base_url
+        .as_ref()
+        .map(|url| classify_loopback(url.full()))
+        .unwrap_or(false)
+    {
+        None
     } else if from_file {
         return Err(ModelError::NoProfileAuth);
     } else {
-        resolve_settings_api_key(&profile.provider, config_root)?
+        Some(resolve_settings_api_key(&profile.provider, config_root)?)
     };
-    if api_key.len() > crate::redact::MAX_KEY_BYTES {
-        return Err(ModelError::CredentialRejected(
-            crate::redact::KEY_CAP_MESSAGE.to_string(),
-        ));
-    }
     Ok(api_key)
 }
 
