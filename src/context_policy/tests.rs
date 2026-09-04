@@ -476,10 +476,14 @@ fn runtime_bulk_accounting_uses_measured_pressure_without_panicking() {
     let proposal = policy.propose_bulk("read_file", bytes.len(), 1.0);
     assert!(proposal.armed);
     policy.complete_bulk(proposal, &bytes, 5000, 0.2, 7);
-    assert_eq!(policy.terminal_outcome(), Some("disarm"));
+    assert_eq!(
+        policy.terminal_outcome(),
+        None,
+        "an ordinary disarmed completion records no terminal"
+    );
     assert_eq!(policy.cache_report().economic_gate_suspensions, 1);
     assert!(!policy.events()[0].armed_after);
-    policy.wrap_up();
+    policy.wrap_up(0, u64::MAX, true);
     assert_eq!(policy.terminal_outcome(), Some("wrap_up"));
 }
 
@@ -490,7 +494,7 @@ fn runtime_failed_proposal_quiesces_and_wrap_up_cannot_override_it() {
     policy.abort_bulk(proposal);
     assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
     assert_eq!(policy.events()[0].operation, "quiesce-unwritable");
-    policy.wrap_up();
+    policy.wrap_up(0, u64::MAX, true);
     assert_eq!(policy.terminal_outcome(), Some("quiesce_unwritable"));
 }
 

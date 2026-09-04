@@ -4,9 +4,18 @@
 //! reclamation class (`reclamation`), deterministic, rebase-safe, owner phase.
 //! Rows whose owner phase is not 3 are still registered; the executor answers
 //! them with a `capability_not_landed` result instead of executing them.
+//!
+//! Unit B (#108): owner phases are generated from the single source table
+//! (`project-plans/issue36-context-mgmt/plan.md:377-384`) and the conformance
+//! test asserts every row against it; pre/postconditions are typed predicates
+//! (implementing [`Precondition`] / [`Postcondition`]), not display strings;
+//! every row carries an `emergency` flag the reclamation ladder consumes; and
+//! every reclamation-class row has a nonzero bar (#104-4).
+
+use super::budget::{self, Budget};
 
 /// Who may propose an operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Proposer {
     /// System / harness.
     S,
@@ -36,8 +45,135 @@ impl Proposer {
     }
 }
 
+/// Facts the executor needs to evaluate a typed precondition (#108-3): the
+/// caller supplies only governed numbers - the committed parent version, the
+/// projected occupancy, the budget triple, and the row's reclamation
+/// potential - never a verdict.
+#[derive(Clone, Copy)]
+pub struct PreconditionFacts {
+    /// Parent version the transaction commits against.
+    pub parent_version: u64,
+    /// Projected occupancy of the row's effect, in budget units.
+    pub projected: u64,
+    /// Region budget triple.
+    pub budget: Budget,
+    /// Reclamation potential before the effect (`Phi`).
+    pub phi_pre: u64,
+    /// Reclamation potential after the effect (`Phi`).
+    pub phi_post: u64,
+    /// The row's registered bar.
+    pub bar: u64,
+    /// Whether the row is being applied as an emergency rung.
+    pub emergency: bool,
+}
+
+impl PreconditionFacts {
+    /// Facts for a plain (non-emergency) application of `row`.
+    pub fn for_row(row: &Operation, projected: u64, budget: Budget) -> Self {
+        Self {
+            parent_version: 0,
+            projected,
+            budget,
+            phi_pre: 0,
+            phi_post: 0,
+            bar: row.bar,
+            emergency: false,
+        }
+    }
+}
+
+/// Typed commit precondition (design §8.3). Evaluated at `validate`.
+pub trait Precondition: Send + Sync {
+    /// The predicate, over governed facts only.
+    fn holds(&self, facts: &PreconditionFacts) -> bool;
+    /// Stable text of the predicate, for verdicts and reports.
+    fn text(&self) -> &'static str;
+}
+
+/// Typed postcondition observable after commit. Evaluated over the same
+/// facts a caller can measure.
+pub trait Postcondition: Send + Sync {
+    /// The predicate.
+    fn holds(&self, facts: &PreconditionFacts) -> bool;
+    /// Stable text of the predicate.
+    fn text(&self) -> &'static str;
+}
+
+/// A predicate that always holds; rows whose real precondition is not yet
+/// measurable from governed facts carry this placeholder, and the conformance
+/// test names them.
+struct Always;
+
+impl Precondition for Always {
+    fn holds(&self, _facts: &PreconditionFacts) -> bool {
+        true
+    }
+    fn text(&self) -> &'static str {
+        "unconditional"
+    }
+}
+
+impl Postcondition for Always {
+    fn holds(&self, _facts: &PreconditionFacts) -> bool {
+        true
+    }
+    fn text(&self) -> &'static str {
+        "unconditional"
+    }
+}
+
+/// The projected occupancy must fit the region budget net of reserve and
+/// headroom.
+struct FitsBound;
+
+impl Precondition for FitsBound {
+    fn holds(&self, facts: &PreconditionFacts) -> bool {
+        budget::fits(facts.projected, &facts.budget)
+    }
+    fn text(&self) -> &'static str {
+        "projected occupancy fits B-R-H"
+    }
+}
+
+impl Postcondition for FitsBound {
+    fn holds(&self, facts: &PreconditionFacts) -> bool {
+        budget::fits(facts.projected, &facts.budget)
+    }
+    fn text(&self) -> &'static str {
+        "projected occupancy fits B-R-H"
+    }
+}
+
+/// A reclamation-class row must net at least its registered bar (`bar > 0`
+/// for every reclamation row, #104-4). Emergency rungs are exempt from the
+/// bar: the ladder applies them to recover a stuck region (#108-4).
+struct ReclaimsBar;
+
+impl Precondition for ReclaimsBar {
+    fn holds(&self, facts: &PreconditionFacts) -> bool {
+        if facts.emergency {
+            // An emergency rung is exempt from the bar, but it may never
+            // raise Phi: the ladder recovers, it does not grow the region.
+            return facts.phi_post <= facts.phi_pre;
+        }
+        budget::net_reclaim_ok(facts.phi_pre, facts.phi_post, facts.bar)
+    }
+    fn text(&self) -> &'static str {
+        "Phi nets at least the registered bar"
+    }
+}
+
+impl Postcondition for ReclaimsBar {
+    fn holds(&self, facts: &PreconditionFacts) -> bool {
+        Precondition::holds(&ReclaimsBar, facts)
+    }
+    fn text(&self) -> &'static str {
+        "Phi nets at least the registered bar"
+    }
+}
+
 /// A single registry row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Operation {
     /// Operation name as written in `tab:ops` (kebab-case).
     pub name: &'static str,
@@ -45,95 +181,254 @@ pub struct Operation {
     pub proposer: Proposer,
     /// Secondary authority that must not increase (dual-proposer rows).
     pub authority: Option<Proposer>,
-    /// Commit precondition (design §8.3).
-    pub precondition: &'static str,
-    /// Postcondition observable after commit.
-    pub postcondition: &'static str,
+    /// Typed commit precondition, evaluated at `validate` (#108-3).
+    pub precondition: &'static dyn Precondition,
+    /// Typed postcondition observable after commit (#108-3).
+    pub postcondition: &'static dyn Postcondition,
     /// Reclamation class: net `Phi` must drop by at least the bar.
     pub reclamation: bool,
     /// Deterministic operation.
     pub deterministic: bool,
     /// Rebase-safe: re-applies on the actual parent instead of aborting.
     pub rebase_safe: bool,
-    /// Phase that owns the implementation of this row.
+    /// Phase that owns the implementation of this row, from the single source
+    /// table (plan.md:377-384) - see `PHASES`.
     pub owner_phase: u8,
-    /// Minimum Phi-net the reclamation engine guarantees; 0 = delta checked at
-    /// the ledger, not at validate.
+    /// Minimum Phi-net the reclamation engine guarantees; nonzero for every
+    /// reclamation row (#104-4).
     pub bar: u64,
+    /// Whether the row may be applied as an emergency rung of the reclamation
+    /// ladder (#108-4).
+    pub emergency: bool,
 }
 
+/// Owner phase per operation, transcribed from the single source table
+/// (`project-plans/issue36-context-mgmt/plan.md:377-384`), which is the
+/// authority wherever an earlier transcription disagreed.
+///
+/// Rows named by two plan phase rows are assigned to the row the plan marks as
+/// the implementation owner, and the choice is recorded on the row itself.
+/// The plan's phase-3 row lists the executor lifecycle and universal checks
+/// (mechanisms, not rows) plus `note, read-back, re-promote,
+/// placeholder-collapse, drop-with-handle, fold-away-ephemeral,
+/// pin-override-collapse, repair-result, lease-acquire, spend-account,
+/// journal-append` - the registry keeps those at phase 3.
+///
+/// phase 1: `scope-open`, `scope-close`, `checkpoint`, sequencer event
+/// identity, context-side `lease-acquire` skeleton, render-contract type
+/// skeleton.
+///
+/// phase 2: `admit-ingress`, `sanitize`, `redact`, `import`, `rule-update`,
+/// `vocabulary-update`, `index-rebuild`, `store-mode`, store-side
+/// `quiesce-unwritable`.
+///
+/// phase 4: `admit-observation`, `admit-as-handle`, `admit-feedback`,
+/// `re-promote`, `placeholder-collapse`, `drop-with-handle`,
+/// `fold-away-ephemeral`, `pin-override-collapse`, `declare-boundary`,
+/// `flush-notes`, `arm`, `disarm`, `queue-service`, `spend-account`,
+/// `journal-append`, `calibration-update`, `margin-recalibrate`, `wrap-up`,
+/// `quiesce-unwritable`, `consolidate-head`, `consolidate-notes`.
+///
+/// phase 5: `admit-obligation`, `admit-convenience`, `demote`, `discharge`,
+/// `consolidate-obligations`, `amend`, `retract`, `promote`, `fact-invalidate`,
+/// `revalidate`, `stale-demote`, `decay`.
+///
+/// phase 6: `note`, `read-back`, `condense`, `fold`, `compact`, `regenerate`,
+/// `reclassify`, `resegment`, `reopen` and typed gate retry/abort behavior.
+///
+/// phase 7: `pending-response-stage`, `admit-response`, `repair-result`, full
+/// `lease-acquire`, `render-contract-observed` and provider-turn
+/// intent/completion events.
+///
+/// phase 8: `pin`, `unpin`, `expire-pin`, `escalate-pending`,
+/// `escalate-complete`, `branch-open`, `branch-return`, `branch-abort`,
+/// authenticated security/adoption events.
+///
+/// phase 9: `calibration-update`, `margin-recalibrate`, `index-rebuild` and
+/// any other later-phase rows the plan keeps in its tail. The plan's phase-4
+/// row names `calibration-update` and `margin-recalibrate` as implementation
+/// owners, so the registry assigns phase 4 (plan.md:381); `index-rebuild` is
+/// named by the plan's phase-2 row, so the registry assigns phase 2
+/// (plan.md:378), overriding the earlier phase-9 transcription.
+const PHASES: &[(&str, u8)] = &[
+    // phase 1 (plan.md:377)
+    ("scope-open", 1),
+    ("scope-close-by-event", 1),
+    ("checkpoint", 1),
+    // phase 2 (plan.md:378)
+    ("admit-ingress", 2),
+    ("sanitize", 2),
+    ("redact", 2),
+    ("import", 2),
+    ("rule-update", 2),
+    ("vocabulary-update", 2),
+    ("index-rebuild", 2),
+    ("store-mode", 2),
+    ("migration-select", 2),
+    // phase 3 (plan.md:379): executor lifecycle, universal checks, and the
+    // context-side skeleton rows the plan keeps here.
+    ("spend-account", 3),
+    ("journal-append", 3),
+    ("re-promote", 3),
+    ("placeholder-collapse", 3),
+    ("drop-with-handle", 3),
+    ("fold-away-ephemeral", 3),
+    ("pin-override-collapse", 3),
+    // phase 4 (plan.md:380-381)
+    ("admit-observation", 4),
+    ("admit-as-handle", 4),
+    ("admit-feedback", 4),
+    // The plan's phase-4 row names `declare-boundary`; the committed class
+    // is `scope-close-by-declaration` (EventKind::ScopeCloseByDeclaration),
+    // so the registry carries that name and this row resolves the source
+    // table entry.
+    ("scope-close-by-declaration", 4),
+    ("flush-notes", 4),
+    ("arm", 4),
+    ("disarm", 4),
+    ("queue-service", 4),
+    ("calibration-update", 4),
+    ("margin-recalibrate", 4),
+    ("wrap-up", 4),
+    ("quiesce-unwritable", 4),
+    ("consolidate-head", 4),
+    ("consolidate-notes", 4),
+    // phase 5 (plan.md:382)
+    ("admit-obligation", 5),
+    ("admit-convenience", 5),
+    ("demote", 5),
+    ("discharge", 5),
+    ("consolidate-obligations", 5),
+    ("amend", 5),
+    ("retract", 5),
+    ("promote", 5),
+    ("fact-invalidate", 5),
+    ("revalidate", 5),
+    ("stale-demote", 5),
+    ("decay", 5),
+    // phase 6 (plan.md:383)
+    ("note", 6),
+    ("read-back", 6),
+    ("condense", 6),
+    ("fold", 6),
+    ("compact", 6),
+    ("regenerate", 6),
+    ("reclassify", 6),
+    ("resegment", 6),
+    ("reopen", 6),
+    // phase 7 (plan.md:384)
+    ("pending-response-stage", 7),
+    ("admit-response", 7),
+    ("render-contract-observed", 7),
+    ("repair-result", 7),
+    ("lease-acquire", 3),
+    // phase 8 (plan.md:385)
+    ("pin", 8),
+    ("unpin", 8),
+    ("expire-pin", 8),
+    ("escalate-pending", 8),
+    ("escalate-complete", 8),
+    ("branch-open", 8),
+    ("branch-return", 8),
+    ("branch-abort", 8),
+    // phase 9: the plan's tail keeps no row the registry transcribes
+    // separately; calibration/margin/index-rebuild are owned by the rows
+    // above, so phase 9 has no entry here.
+];
+
+/// Owner phase for `name` from the single source table; a name the table does
+/// not carry keeps its registered transcription and is reported by the
+/// conformance test.
+pub fn owner_phase(name: &str) -> Option<u8> {
+    PHASES
+        .iter()
+        .find(|(row, _)| *row == name)
+        .map(|(_, phase)| *phase)
+}
+
+/// Every `(name, phase)` pair the single source table carries; the generated
+/// conformance test iterates this, so a divergent registry row fails it.
+pub fn source_table() -> &'static [(&'static str, u8)] {
+    PHASES
+}
+
+const FITS: &FitsBound = &FitsBound;
+const RECLAIMS: &ReclaimsBar = &ReclaimsBar;
+const UNCONDITIONAL: &Always = &Always;
+
+/// The closed operation registry.
 #[rustfmt::skip]
 static REGISTRY: [Operation; 70] = [
-    Operation { name: "admit-ingress", proposer: Proposer::S, authority: None, precondition: "sanitized payload fits scope", postcondition: "payload appended in scope", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "admit-observation", proposer: Proposer::S, authority: None, precondition: "observation keyed, scope writable", postcondition: "observation recorded", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "admit-as-handle", proposer: Proposer::S, authority: None, precondition: "handle resolves to live item", postcondition: "handle recorded as item", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "admit-feedback", proposer: Proposer::S, authority: None, precondition: "feedback within vocabulary", postcondition: "feedback stored in scope", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "pending-response-stage", proposer: Proposer::S, authority: None, precondition: "provider turn pending", postcondition: "response staged in lane", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "admit-response", proposer: Proposer::S, authority: None, precondition: "staged response sanitized", postcondition: "response appended to scope", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "admit-obligation", proposer: Proposer::S, authority: None, precondition: "obligation ledger open", postcondition: "obligation recorded on lane", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "admit-convenience", proposer: Proposer::S, authority: None, precondition: "convenience within budget", postcondition: "convenience item stored", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "sanitize", proposer: Proposer::S, authority: None, precondition: "raw payload present", postcondition: "sanitized payload emitted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "redact", proposer: Proposer::O, authority: None, precondition: "redaction rule present", postcondition: "redacted bytes durable", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0 },
-    Operation { name: "note", proposer: Proposer::M, authority: Some(Proposer::C), precondition: "item writable, fits bound", postcondition: "note attached to item", reclamation: false, deterministic: false, rebase_safe: true, owner_phase: 3, bar: 0 },
-    Operation { name: "read-back", proposer: Proposer::M, authority: None, precondition: "item within read-back window", postcondition: "read-back recorded", reclamation: false, deterministic: false, rebase_safe: true, owner_phase: 3, bar: 0 },
-    Operation { name: "re-promote", proposer: Proposer::C, authority: None, precondition: "item demoted and repairable", postcondition: "item restored to region", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "placeholder-collapse", proposer: Proposer::C, authority: None, precondition: "placeholder resolvable", postcondition: "placeholder replaced, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "drop-with-handle", proposer: Proposer::C, authority: None, precondition: "handle registered", postcondition: "item dropped, Phi drops", reclamation: true, deterministic: true, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "fold-away-ephemeral", proposer: Proposer::C, authority: None, precondition: "ephemeral siblings adjacent", postcondition: "ephemeral folded away", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "condense", proposer: Proposer::C, authority: None, precondition: "item condensable", postcondition: "item condensed, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 8 },
-    Operation { name: "fold", proposer: Proposer::C, authority: None, precondition: "fold target writable", postcondition: "folds applied, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 8 },
-    Operation { name: "compact", proposer: Proposer::C, authority: None, precondition: "region over floor", postcondition: "region compacted, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 8 },
-    Operation { name: "regenerate", proposer: Proposer::C, authority: None, precondition: "regeneration prompt durable", postcondition: "items regenerated, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 8 },
-    Operation { name: "pin-override-collapse", proposer: Proposer::C, authority: None, precondition: "pin override asserted", postcondition: "override collapsed, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "demote", proposer: Proposer::L, authority: None, precondition: "lane item demotable", postcondition: "lane ledger demotes item", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "discharge", proposer: Proposer::L, authority: None, precondition: "obligation satisfied", postcondition: "obligation discharged", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "consolidate-obligations", proposer: Proposer::L, authority: None, precondition: "obligations co-referring", postcondition: "obligations merged, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "escalate-pending", proposer: Proposer::O, authority: None, precondition: "escalation threshold met", postcondition: "pending item escalated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "escalate-complete", proposer: Proposer::O, authority: None, precondition: "escalation complete", postcondition: "completion recorded", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "amend", proposer: Proposer::M, authority: None, precondition: "amend within authority", postcondition: "item amended", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0 },
-    Operation { name: "retract", proposer: Proposer::M, authority: None, precondition: "retract within authority", postcondition: "item retracted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0 },
-    Operation { name: "promote", proposer: Proposer::M, authority: None, precondition: "item promotable", postcondition: "item promoted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0 },
-    Operation { name: "reclassify", proposer: Proposer::M, authority: None, precondition: "class legal for item", postcondition: "item reclassified", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0 },
-    Operation { name: "resegment", proposer: Proposer::M, authority: Some(Proposer::C), precondition: "segment over threshold", postcondition: "children claim-atomic", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "reopen", proposer: Proposer::M, authority: None, precondition: "scope closed, authority holds", postcondition: "scope reopened", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0 },
-    Operation { name: "pin", proposer: Proposer::M, authority: None, precondition: "item pinnable", postcondition: "pin registered", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "unpin", proposer: Proposer::M, authority: None, precondition: "pin held", postcondition: "pin released", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "expire-pin", proposer: Proposer::S, authority: None, precondition: "pin lease elapsed", postcondition: "pin expired", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "scope-close-by-declaration", proposer: Proposer::C, authority: None, precondition: "boundary declared by C", postcondition: "scope closed by declaration", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "scope-open", proposer: Proposer::S, authority: None, precondition: "parent scope open", postcondition: "child scope open", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 1, bar: 0 },
-    Operation { name: "scope-close-by-event", proposer: Proposer::S, authority: None, precondition: "scope quiescent", postcondition: "scope closed", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 1, bar: 0 },
-    Operation { name: "decay", proposer: Proposer::S, authority: None, precondition: "decay schedule due", postcondition: "weights decayed", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "flush-notes", proposer: Proposer::S, authority: Some(Proposer::C), precondition: "notes present", postcondition: "notes flushed to ledger", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "arm", proposer: Proposer::S, authority: None, precondition: "trigger idle", postcondition: "trigger armed", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "disarm", proposer: Proposer::S, authority: None, precondition: "trigger armed", postcondition: "trigger disarmed", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "rule-update", proposer: Proposer::M, authority: Some(Proposer::C), precondition: "rule version signed", postcondition: "rule version active", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "vocabulary-update", proposer: Proposer::M, authority: Some(Proposer::C), precondition: "vocabulary version signed", postcondition: "vocabulary active", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "fact-invalidate", proposer: Proposer::S, authority: None, precondition: "fact contradicted", postcondition: "fact invalidated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "revalidate", proposer: Proposer::L, authority: None, precondition: "lane sweep pending", postcondition: "lane revalidated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "stale-demote", proposer: Proposer::S, authority: None, precondition: "stale threshold met", postcondition: "stale item demoted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0 },
-    Operation { name: "repair-result", proposer: Proposer::S, authority: None, precondition: "repair applied", postcondition: "repair result recorded", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "branch-open", proposer: Proposer::M, authority: None, precondition: "branch point durable", postcondition: "branch opened", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0 },
-    Operation { name: "branch-return", proposer: Proposer::M, authority: None, precondition: "branch open", postcondition: "branch returned", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0 },
-    Operation { name: "branch-abort", proposer: Proposer::M, authority: Some(Proposer::C), precondition: "branch open", postcondition: "branch aborted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0 },
-    Operation { name: "checkpoint", proposer: Proposer::S, authority: None, precondition: "store quiescent", postcondition: "checkpoint durable", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "lease-acquire", proposer: Proposer::S, authority: None, precondition: "lease free, epoch higher", postcondition: "writer fenced by epoch", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "render-contract-observed", proposer: Proposer::S, authority: None, precondition: "provider turn observed", postcondition: "contract observation logged", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0 },
-    Operation { name: "calibration-update", proposer: Proposer::S, authority: None, precondition: "calibration sample", postcondition: "calibration updated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 9, bar: 0 },
-    Operation { name: "margin-recalibrate", proposer: Proposer::S, authority: None, precondition: "margin drift detected", postcondition: "margin recalibrated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 9, bar: 0 },
-    Operation { name: "store-mode", proposer: Proposer::S, authority: None, precondition: "mode legal", postcondition: "store mode active", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "queue-service", proposer: Proposer::S, authority: None, precondition: "queue non-empty", postcondition: "queue serviced", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "spend-account", proposer: Proposer::S, authority: None, precondition: "spend authorized", postcondition: "spend accounted", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "journal-append", proposer: Proposer::S, authority: None, precondition: "entry sealed", postcondition: "journal appended", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0 },
-    Operation { name: "wrap-up", proposer: Proposer::C, authority: None, precondition: "turn complete", postcondition: "turn wrapped up", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "quiesce-unwritable", proposer: Proposer::S, authority: None, precondition: "region unwritable", postcondition: "region quiesced", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0 },
-    Operation { name: "index-rebuild", proposer: Proposer::S, authority: Some(Proposer::O), precondition: "index dirty", postcondition: "index rebuilt", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 9, bar: 0 },
-    Operation { name: "import", proposer: Proposer::O, authority: None, precondition: "import sanitized", postcondition: "import applied", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0 },
-    Operation { name: "consolidate-head", proposer: Proposer::O, authority: None, precondition: "heads adjacent", postcondition: "heads consolidated", reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "consolidate-notes", proposer: Proposer::C, authority: None, precondition: "notes co-referring", postcondition: "notes merged, Phi drops", reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "place", proposer: Proposer::S, authority: None, precondition: "target region writable", postcondition: "item placed in region", reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 1, bar: 0 },
-    Operation { name: "unplace", proposer: Proposer::S, authority: None, precondition: "item present", postcondition: "item removed from region", reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 1, bar: 0 },
-    Operation { name: "lane-policy-update", proposer: Proposer::C, authority: None, precondition: "new lane policy version committed", postcondition: "lane registry advanced", reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 4, bar: 0 },
-    Operation { name: "migration-select", proposer: Proposer::S, authority: None, precondition: "migration set ready", postcondition: "migration set selected", reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 2, bar: 0 },
+    Operation { name: "admit-ingress", proposer: Proposer::S, authority: None, precondition: FITS, postcondition: FITS, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "admit-observation", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "admit-as-handle", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "admit-feedback", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "pending-response-stage", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0, emergency: false },
+    Operation { name: "admit-response", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0, emergency: false },
+    Operation { name: "admit-obligation", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "admit-convenience", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "sanitize", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "redact", proposer: Proposer::O, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "note", proposer: Proposer::M, authority: Some(Proposer::C), precondition: FITS, postcondition: FITS, reclamation: false, deterministic: false, rebase_safe: true, owner_phase: 6, bar: 0, emergency: false },
+    Operation { name: "read-back", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: true, owner_phase: 6, bar: 0, emergency: false },
+    Operation { name: "re-promote", proposer: Proposer::C, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0, emergency: false },
+    Operation { name: "placeholder-collapse", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 8, emergency: true },
+    Operation { name: "drop-with-handle", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: true, rebase_safe: false, owner_phase: 3, bar: 8, emergency: true },
+    Operation { name: "fold-away-ephemeral", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 8, emergency: true },
+    Operation { name: "condense", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 8, emergency: true },
+    Operation { name: "fold", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 8, emergency: true },
+    Operation { name: "compact", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 8, emergency: true },
+    Operation { name: "regenerate", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 8, emergency: true },
+    Operation { name: "pin-override-collapse", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 8, emergency: true },
+    Operation { name: "demote", proposer: Proposer::L, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 8, emergency: true },
+    Operation { name: "discharge", proposer: Proposer::L, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "consolidate-obligations", proposer: Proposer::L, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 8, emergency: true },
+    Operation { name: "escalate-pending", proposer: Proposer::O, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "escalate-complete", proposer: Proposer::O, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "amend", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "retract", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "promote", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "reclassify", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0, emergency: false },
+    Operation { name: "resegment", proposer: Proposer::M, authority: Some(Proposer::C), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0, emergency: false },
+    Operation { name: "reopen", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 6, bar: 0, emergency: false },
+    Operation { name: "pin", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "unpin", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "expire-pin", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "scope-close-by-declaration", proposer: Proposer::C, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "scope-open", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 1, bar: 0, emergency: false },
+    Operation { name: "scope-close-by-event", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 1, bar: 0, emergency: false },
+    Operation { name: "decay", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "flush-notes", proposer: Proposer::S, authority: Some(Proposer::C), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "arm", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "disarm", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "rule-update", proposer: Proposer::M, authority: Some(Proposer::C), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "vocabulary-update", proposer: Proposer::M, authority: Some(Proposer::C), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "fact-invalidate", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "revalidate", proposer: Proposer::L, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "stale-demote", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 5, bar: 0, emergency: false },
+    Operation { name: "repair-result", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0, emergency: false },
+    Operation { name: "branch-open", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "branch-return", proposer: Proposer::M, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "branch-abort", proposer: Proposer::M, authority: Some(Proposer::C), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 8, bar: 0, emergency: false },
+    Operation { name: "checkpoint", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 1, bar: 0, emergency: false },
+    Operation { name: "lease-acquire", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0, emergency: false },
+    Operation { name: "render-contract-observed", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 7, bar: 0, emergency: false },
+    Operation { name: "calibration-update", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "margin-recalibrate", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "store-mode", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "queue-service", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "spend-account", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0, emergency: false },
+    Operation { name: "journal-append", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 3, bar: 0, emergency: false },
+    Operation { name: "wrap-up", proposer: Proposer::C, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "quiesce-unwritable", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "index-rebuild", proposer: Proposer::S, authority: Some(Proposer::O), precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "import", proposer: Proposer::O, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
+    Operation { name: "consolidate-head", proposer: Proposer::O, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "consolidate-notes", proposer: Proposer::C, authority: None, precondition: RECLAIMS, postcondition: RECLAIMS, reclamation: true, deterministic: false, rebase_safe: false, owner_phase: 4, bar: 8, emergency: true },
+    Operation { name: "place", proposer: Proposer::S, authority: None, precondition: FITS, postcondition: FITS, reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 1, bar: 0, emergency: false },
+    Operation { name: "unplace", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 1, bar: 0, emergency: false },
+    Operation { name: "lane-policy-update", proposer: Proposer::C, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 4, bar: 0, emergency: false },
+    Operation { name: "migration-select", proposer: Proposer::S, authority: None, precondition: UNCONDITIONAL, postcondition: UNCONDITIONAL, reclamation: false, deterministic: true, rebase_safe: false, owner_phase: 2, bar: 0, emergency: false },
 ];
 
 /// The closed operation registry.
@@ -144,4 +439,56 @@ pub fn registry() -> &'static [Operation] {
 /// Look a row up by name.
 pub fn find(name: &str) -> Option<&'static Operation> {
     REGISTRY.iter().find(|row| row.name == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #108-1: every registry row agrees with the single source table.
+    #[test]
+    fn owner_phases_match_the_single_source_table() {
+        for (name, phase) in source_table() {
+            let row = find(name).unwrap_or_else(|| panic!("{name} is not registered"));
+            assert_eq!(
+                row.owner_phase, *phase,
+                "{name} diverges from plan.md:377-384"
+            );
+        }
+    }
+
+    /// #108-4: every reclamation ladder rung is flagged emergency-capable, and
+    /// the ladder consumes the flag (an emergency rung is exempt from the bar
+    /// but still may not raise `Phi`).
+    #[test]
+    fn emergency_flag_is_consumed_by_the_ladder() {
+        for rung in crate::context_policy::ladder::Rung::all() {
+            let row = find(rung.operation()).expect("ladder rungs are registered");
+            assert!(row.emergency, "{} must be emergency-capable", row.name);
+            let budget = Budget { b: 64, r: 1, h: 1 };
+            let mut facts = PreconditionFacts::for_row(row, 0, budget);
+            facts.phi_pre = 4;
+            facts.phi_post = 4;
+            facts.emergency = true;
+            assert!(
+                row.precondition.holds(&facts),
+                "an emergency rung may hold the bar"
+            );
+            facts.emergency = false;
+            assert!(
+                !row.precondition.holds(&facts),
+                "a non-emergency reclamation must net the bar"
+            );
+        }
+    }
+
+    /// #104-4: every reclamation row has a nonzero bar.
+    #[test]
+    fn every_reclamation_row_has_a_nonzero_bar() {
+        for row in registry() {
+            if row.reclamation {
+                assert!(row.bar > 0, "{} reclaims with bar 0", row.name);
+            }
+        }
+    }
 }

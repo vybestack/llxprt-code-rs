@@ -3,7 +3,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RewriteEntry {
     pub source: u64,
-    pub tokens_reclaimed: u64,
+    pub bytes_reclaimed: u64,
     pub invalidation_cost: Option<u64>,
     pub logical_time: u64,
     pub wall_elapsed_us: u64,
@@ -13,13 +13,13 @@ pub struct RewriteEntry {
 impl RewriteEntry {
     pub const fn new(
         source: u64,
-        tokens_reclaimed: u64,
+        bytes_reclaimed: u64,
         invalidation_cost: Option<u64>,
         logical_time: u64,
     ) -> Self {
         Self {
             source,
-            tokens_reclaimed,
+            bytes_reclaimed,
             invalidation_cost,
             logical_time,
             wall_elapsed_us: 0,

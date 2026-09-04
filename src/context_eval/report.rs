@@ -102,7 +102,7 @@ pub fn cache_block() -> Value {
         "invalidation_cost_per_event": Value::Null,
         "prefix_invalidation_cost_per_rewrite": Value::Null,
         "rewrite_journal_entries": Value::Null,
-        "rewrite_journal_tokens_reclaimed": Value::Null,
+        "rewrite_journal_bytes_reclaimed": Value::Null,
         "rewrite_journal_tokens_invalidated": Value::Null,
         "amortization_decisions_below_at_above": Value::Null,
         "suspended_while_armed": Value::Null,
@@ -120,7 +120,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
         return cache_block();
     };
     let mut entries = 0_u64;
-    let mut tokens_reclaimed = 0_u64;
+    let mut bytes_reclaimed = 0_u64;
     let mut tokens_invalidated = 0_u64;
     let mut unknown_invalidation = false;
     let mut runtime_report = None;
@@ -132,11 +132,11 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
             runtime_report = Some(report.clone());
             continue;
         }
-        let Some(reclaimed) = value.get("tokens_reclaimed").and_then(Value::as_u64) else {
+        let Some(reclaimed) = value.get("bytes_reclaimed").and_then(Value::as_u64) else {
             continue;
         };
         entries = entries.saturating_add(1);
-        tokens_reclaimed = tokens_reclaimed.saturating_add(reclaimed);
+        bytes_reclaimed = bytes_reclaimed.saturating_add(reclaimed);
         match value.get("invalidation_cost").and_then(Value::as_u64) {
             Some(cost) => tokens_invalidated = tokens_invalidated.saturating_add(cost),
             None => unknown_invalidation = true,
@@ -160,7 +160,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
         "known_invalidation_cost_events": report["known_invalidation_cost_events"],
         "unknown_invalidation_cost_events": report["unknown_invalidation_cost_events"],
         "rewrite_journal_entries": entries,
-        "rewrite_journal_tokens_reclaimed": tokens_reclaimed,
+        "rewrite_journal_bytes_reclaimed": bytes_reclaimed,
         "rewrite_journal_tokens_invalidated": invalidated,
         "amortization_decisions_below_at_above": {
             "below": report["threshold_denials"],
@@ -190,7 +190,7 @@ pub fn aggregate_cache(scenarios: &[Value]) -> Value {
     }
     let reclaimed = measured.iter().fold(0_u64, |sum, cache| {
         sum.saturating_add(
-            cache["rewrite_journal_tokens_reclaimed"]
+            cache["rewrite_journal_bytes_reclaimed"]
                 .as_u64()
                 .unwrap_or(0),
         )
@@ -199,7 +199,7 @@ pub fn aggregate_cache(scenarios: &[Value]) -> Value {
         "class": "measured_aggregate",
         "hit_rate": Value::Null,
         "prefix_invalidation_cost_per_rewrite": Value::Null,
-        "rewrite_journal_tokens_reclaimed": reclaimed,
+        "rewrite_journal_bytes_reclaimed": reclaimed,
         "rewrite_journal_tokens_invalidated": Value::Null,
         "amortization_decisions_below_at_above": Value::Null,
         "suspended_while_armed": measured.iter().any(|cache| cache["suspended_while_armed"] == true),

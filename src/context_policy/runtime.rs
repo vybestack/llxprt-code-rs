@@ -60,6 +60,7 @@ impl PolicyEvent {
             logical_time: field("logical_time")?,
             source: field("source")?,
             operation: match operation {
+                "quiesce-rate" => "quiesce-rate",
                 "quiesce-unwritable" => "quiesce-unwritable",
                 "drop-with-handle" => "drop-with-handle",
                 "wrap-up" => "wrap-up",
@@ -168,7 +169,7 @@ impl ProposalOnlyController {
             logical_time: proposal.logical_time,
             source: proposal.source,
             operation: match digest_admission {
-                Admission::Quiesce => "quiesce-unwritable",
+                Admission::Quiesce => "quiesce-rate",
                 Admission::Admit | Admission::Handle => "drop-with-handle",
             },
             input_bytes: proposal.input_bytes,
@@ -177,14 +178,21 @@ impl ProposalOnlyController {
             armed_before: proposal.armed,
             armed_after,
         });
-        self.terminal_outcome =
-            if digest_admission == Admission::Quiesce || self.governor.state().quiescing {
-                Some("quiesce_unwritable")
-            } else if armed_after {
-                None
-            } else {
-                Some("disarm")
-            };
+        // #107-1: a rate quiesce is its own terminal, distinct from an
+        // unwritable store; #107-6: an ordinary disarmed completion is not a
+        // terminal at all, so it records no terminal outcome.
+        if digest_admission == Admission::Quiesce || self.governor.state().quiescing {
+            self.terminal_outcome = Some("quiesce_unwritable");
+        } else if armed_after {
+            // An ordinary armed completion is not a terminal at all: the
+            // episode keeps running and wrap-up can still be recorded.
+            self.terminal_outcome = None;
+        } else {
+            // An ordinary disarmed completion records no terminal at all
+            // ([r----): the disarm macrostep is a progress verdict the caller
+            // renders, not a durable branch, so wrap-up is still permitted.
+            self.terminal_outcome = None;
+        }
     }
 
     /// Accounts a failed caller-owned store transaction and enters a named terminal branch.
@@ -204,9 +212,27 @@ impl ProposalOnlyController {
         self.terminal_outcome = Some("quiesce_unwritable");
     }
 
-    /// Records the explicit session-finalization terminal without overriding quiescence.
-    pub fn wrap_up(&mut self) {
+    /// Records the explicit session-finalization terminal without overriding
+    /// quiescence.
+    ///
+    /// #107-2: `wrap_up` refuses (and downgrades to the write-free quiesce)
+    /// when the terminal fit check fails - `terminal_reserve` is fed the
+    /// measured wrap-up cost against the room left in the region.
+    /// #107-3: `wrap_up` refuses when the store is unwritable; the writability
+    /// signal is the caller's own write-path verdict (`StoreBlocked`/
+    /// `StoreError`), handed in as `writable`, never a new store API.
+    /// #107-1: a rate quiesce is terminal in its own right and is not
+    /// overridden, and neither is an unwritable quiesce.
+    pub fn wrap_up(&mut self, wrap_up_cost: u64, available: u64, writable: bool) {
         if self.terminal_outcome == Some("quiesce_unwritable") {
+            return;
+        }
+        if !writable {
+            self.terminal_outcome = Some("quiesce_unwritable");
+            return;
+        }
+        if !super::progress::terminal_reserve(wrap_up_cost, available) {
+            self.terminal_outcome = Some("quiesce_unwritable");
             return;
         }
         self.logical_time = self.logical_time.saturating_add(1);

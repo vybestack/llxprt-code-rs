@@ -105,7 +105,7 @@ fn journal_lines(state: &ContextState) -> String {
     for entry in state.policy.journal().entries() {
         let line = serde_json::json!({
             "source": entry.source,
-            "tokens_reclaimed": entry.tokens_reclaimed,
+            "bytes_reclaimed": entry.bytes_reclaimed,
             "invalidation_cost": entry.invalidation_cost,
             "logical_time": entry.logical_time,
             "wall_elapsed_us": entry.wall_elapsed_us,
