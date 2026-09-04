@@ -160,7 +160,7 @@ fn run_kill_fault(fault: MidRunFault, target: KillTarget) -> Option<String> {
 /// the bounded runner, envelope validation, and continuation checks are all unchanged.
 pub fn write_spawn_wrapper(path: &Path, cli: &Path, pid_file: &Path) -> Result<(), String> {
     let script = format!(
-        "printf '%s\\n' \"$$\" > '{}'\nexec '{}' \"$@\"\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$$\" > '{}'\nexec '{}' \"$@\"\n",
         pid_file.display(),
         cli.display()
     );

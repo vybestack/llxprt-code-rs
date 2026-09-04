@@ -146,7 +146,7 @@ fn store_unwritable_injection_blocks_then_restores_writes() {
         "the unwritable-store fault was never applied"
     );
     assert!(
-        !fs::write(&probe, b"x").is_ok(),
+        fs::write(&probe, b"x").is_err(),
         "a write through the faulted store still succeeded"
     );
     assert!(
@@ -244,7 +244,11 @@ fn spawn_wrapper_registers_pid_and_kill_path_confirms_death() {
     eventually(
         "the wrapper to register its pid",
         Duration::from_secs(30),
-        || pid_file.is_file(),
+        || {
+            fs::read_to_string(&pid_file)
+                .map(|s| s.trim().parse::<u32>().is_ok())
+                .unwrap_or(false)
+        },
     );
     assert!(pid_file.is_file(), "the wrapper did not register its pid");
     let registered: u32 = fs::read_to_string(&pid_file)
