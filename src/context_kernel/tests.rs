@@ -1567,7 +1567,14 @@ fn split_children_inherit_the_parents_region() {
         ir.region_items(Region::Body).is_empty(),
         "the split moved nothing into another region"
     );
-    assert!(ir.region_items(Region::Notes).is_empty() && ir.region_items(Region::Tail).is_empty());
+    assert!(
+        ir.region_items(Region::Notes).is_empty(),
+        "the split moved nothing into the notes region"
+    );
+    assert!(
+        ir.region_items(Region::Tail).is_empty(),
+        "the split moved nothing into the tail region"
+    );
     assert_eq!(
         ir.region_occupancy(Region::Head),
         8,
