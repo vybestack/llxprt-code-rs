@@ -227,10 +227,15 @@ tool layer. Nonzero exits are reported to the model so it can repair the code.
 ## Base URL, endpoint routes, and `top_k`
 
 Endpoint routes are target-qualified. Chat Completions accepts an origin, `/v1`,
-`/chat/completions`, or `/v1/chat/completions`; public Responses accepts an origin, `/v1`,
-`/responses`, or `/v1/responses`. One trailing slash is allowed. Each form normalizes to
-exactly one API suffix. Arbitrary path prefixes fail with a fixed `model-config` error before
-credential lookup or a request. Userinfo, query, and fragment are rejected. The redacted
+`/chat/completions`, `/v1/chat/completions`, or any nested path prefix that is a prefix of
+the final route, such as z.ai's `/api/paas/v4` or FriendliGLM's `/serverless/v1`; one
+trailing slash is allowed, a bare origin keeps the documented `/v1/chat/completions` route,
+and a declared path prefix keeps that prefix and appends `/chat/completions` to it. Public
+Responses accepts an origin, `/v1`, `/responses`, or `/v1/responses`. Each form normalizes
+to exactly one API suffix. A base whose path already repeats the chat/completions
+suffix, or that carries an empty path segment, fails with a fixed
+`model-config` error before credential lookup or a request. Userinfo, query, and fragment are
+rejected. The redacted
 `scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
 `top_k` field, so a profile that sets it is rejected instead of being silently dropped.
 

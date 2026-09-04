@@ -290,11 +290,14 @@ mod serde_ai_core_model_settings {
 /// Parse and validate a base URL for the OpenAI chat-completions path.
 ///
 /// Returns the normalized URL string. The URL must be an absolute `http://` or
-/// `https://` URL with a host and no userinfo (including a password-only `:password@host`
-/// form), and its path must be one of the accepted base forms:
-/// empty, `/`, `/v1`, `/v1/`, or ending exactly in `/chat/completions`
-/// (trailing slashes aside). Any arbitrary path prefix is rejected with
-/// [`ModelError::InvalidEndpoint`]; the host refuses it before a request is made.
+/// `https://` URL with a host, no userinfo (including a password-only `:password@host`
+/// form), and no query or fragment. The path may be any sequence of nested path segments
+/// (empty, `/`, `/v1`, `/api/paas/v4`, `/serverless/v1`, ...): real OpenAI-compatible
+/// providers publish versioned and nested bases, so the rule constrains the shape of the
+/// path, not a fixed spelling list. A path that carries the `/chat/completions` suffix in
+/// anything but the two documented full-route spellings refuses, as does an empty path
+/// segment, so the suffix is never doubled or nested; both refusals are
+/// [`ModelError::InvalidEndpoint`] and precede any request.
 pub fn parse_base_url(raw: &str) -> Result<String, ModelError> {
     if raw.len() > crate::redact::MAX_ENDPOINT_BYTES {
         return Err(ModelError::InvalidEndpoint(ENDPOINT_CAP.to_string()));
@@ -325,12 +328,32 @@ pub fn parse_base_url(raw: &str) -> Result<String, ModelError> {
         return Ok(u.to_string());
     }
     let path = u.path().trim_end_matches('/');
-    if path == "/v1" || path == "/chat/completions" || path == "/v1/chat/completions" {
+    // The documented full-route spellings are kept verbatim; every other base has the
+    // single `/chat/completions` suffix appended by the route joiner.
+    if path == "/chat/completions" || path == "/v1/chat/completions" {
         return Ok(u.to_string());
     }
-    Err(ModelError::InvalidEndpoint(
-        "unsupported or invalid endpoint".to_string(),
-    ))
+    // A path that carries the API suffix anywhere else (for example
+    // `/inference/v1/chat/completions` or `/chat/completions/v1`) never reaches the
+    // route joiner, which would nest or double the suffix.
+    if path.contains("/chat/completions") {
+        return Err(ModelError::InvalidEndpoint(
+            "unsupported or invalid endpoint".to_string(),
+        ));
+    }
+    // `path` starts with `/`, so the first split element is always empty and is skipped.
+    // `.`/`..` segments never appear here: `url` normalizes them away while parsing.
+    if path
+        .strip_prefix('/')
+        .unwrap_or(path)
+        .split('/')
+        .any(str::is_empty)
+    {
+        return Err(ModelError::InvalidEndpoint(
+            "unsupported or invalid endpoint".to_string(),
+        ));
+    }
+    Ok(u.to_string())
 }
 
 /// A fixed, path-free message for an over-limit endpoint string. The over-limit value
