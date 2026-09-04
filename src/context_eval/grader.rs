@@ -45,9 +45,10 @@ pub struct Evidence {
     pub streamed_requests: usize,
     /// Distinct tool names the runner offered, in first-seen order.
     pub tool_names: Vec<String>,
-    /// SHA-256 over the concatenated observed request bodies, each body truncated at
-    /// `MAX_DIGESTED_BODY_BYTES` before hashing (ordering-sensitive).
-    pub request_bodies_digest: String,
+    /// SHA-256 over the loopback-observed request shapes, in drive order: each request's
+    /// observed serialized size (from its `content-length` header; bodies are never
+    /// captured), its tool names, and its stream mode (ordering-sensitive).
+    pub request_shape_digest: String,
 }
 
 /// Graded result for one scenario.

@@ -158,7 +158,7 @@ fn run_kill_fault(fault: MidRunFault, target: KillTarget) -> Option<String> {
 /// Spawn wrapper the faulted drives install as `LLXPRT_CODE_RS_BIN`: it registers its own
 /// pid for the fault thread and then becomes the acceptance target through `exec`, so
 /// the bounded runner, envelope validation, and continuation checks are all unchanged.
-fn write_spawn_wrapper(path: &Path, cli: &Path, pid_file: &Path) -> Result<(), String> {
+pub fn write_spawn_wrapper(path: &Path, cli: &Path, pid_file: &Path) -> Result<(), String> {
     let script = format!(
         "printf '%s\\n' \"$$\" > '{}'\nexec '{}' \"$@\"\n",
         pid_file.display(),

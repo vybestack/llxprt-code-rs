@@ -8,6 +8,7 @@
 //! live provider.
 
 use crate::context_eval::grader::{self, Dimension, Evidence, Verdict};
+use crate::context_eval::loopback::ObservedRequest;
 use crate::context_eval::{manifest, report, runner, secrets, ARTIFACT_STREAM_CAP};
 use serde_json::{json, Value};
 use std::fs;
@@ -371,6 +372,7 @@ fn good_report() -> Value {
                                 "latency": true, "recovery": true, "wall_realism": true},
         "request_observations": {"requests": 0, "max_request_bytes": 0,
                                  "streamed_requests": 0, "tool_names": [],
+                                 "request_shape_digest": "00",
                                  "observations_source": "loopback"},
         "leakage_scan": {"clean": true, "findings": []},
         "runtime_config": {"name": "profile-limit", "context_limit": 20000},
@@ -806,7 +808,7 @@ fn publish_path_report_validates_with_new_fields() {
                                  "streamed_requests": 2, "tool_names": ["read_file"],
                                  "last_request_bytes": 90_000,
                                  "observations_source": "loopback",
-                                 "serialized": "deadbeef"},
+                                 "request_shape_digest": "deadbeef"},
         "leakage_scan": {"clean": true,
                          "findings": [],
                          "markers": ["m"]},
@@ -866,4 +868,44 @@ fn generated_profile_installs_the_arm_runtime_config() {
         "the generated profile ignored the arm's runtime config"
     );
     fs::remove_dir_all(&dir).ok();
+}
+
+/// The request-shape digest covers exactly what the loopback observes about a request
+/// (its content-length-derived size, its tool names, its stream mode) and nothing else,
+/// so distinct sizes, tool sets, stream modes, and orderings each move it while identical
+/// observations never do.
+///
+/// The loopback never captures request bodies, so a digest that claimed to cover them
+/// would be false evidence: an eight-byte body and a megabyte body hashed identically
+/// before this bound was removed. The size is now hashed in full.
+#[test]
+fn request_shape_digest_follows_what_the_loopback_observes() {
+    let req = |index: usize, body_bytes: usize, tools: &[&str], streamed: bool| ObservedRequest {
+        index,
+        body_bytes,
+        tool_names: tools.iter().map(|t| t.to_string()).collect(),
+        streamed,
+    };
+    let base = req(0, 8, &["read_file"], false);
+    let digest =
+        |requests: &[ObservedRequest]| crate::context_eval::request_shape_digest_for_test(requests);
+
+    let small = vec![req(0, 8, &["read_file"], false)];
+    let large = vec![req(0, 9, &["read_file"], false)];
+    let huge = vec![req(0, 1 << 20, &["read_file"], false)];
+    assert_eq!(digest(std::slice::from_ref(&base)), digest(&small.clone()));
+    // A size change the old eight-byte clamp hid is visible now.
+    assert_ne!(digest(&small), digest(&large));
+    assert_ne!(digest(&small), digest(&huge));
+    // So are a tool change, a stream change, and a reordering.
+    assert_ne!(digest(&small), digest(&[req(0, 8, &["write_file"], false)]));
+    assert_ne!(digest(&small), digest(&[req(0, 8, &["read_file"], true)]));
+    let a = vec![req(0, 8, &["read_file"], false), req(1, 9, &[], true)];
+    let b = vec![req(1, 9, &[], true), req(0, 8, &["read_file"], false)];
+    assert_ne!(digest(&a), digest(&b));
+    // Identical observations in identical order are identical.
+    assert_eq!(
+        digest(&a),
+        digest(&[req(0, 8, &["read_file"], false), req(1, 9, &[], true)])
+    );
 }

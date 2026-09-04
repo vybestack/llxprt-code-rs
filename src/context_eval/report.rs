@@ -4,6 +4,8 @@
 use serde_json::{json, Value};
 use std::path::Path;
 
+use crate::context_eval::REQUEST_SHAPE_DIGEST_KEY;
+
 /// Report schema version. Bumping it is a breaking eval change.
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 /// Cost class recorded when cache telemetry is unavailable.
@@ -260,6 +262,7 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
             "max_request_bytes",
             "streamed_requests",
             "tool_names",
+            REQUEST_SHAPE_DIGEST_KEY,
             "observations_source",
         ] {
             if obs.get(field).is_none() {

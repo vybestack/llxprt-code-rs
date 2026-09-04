@@ -20,14 +20,16 @@ pub mod records;
 pub mod report;
 pub mod runner;
 pub mod secrets;
+mod ts_drive;
 
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_inject;
+#[cfg(test)]
 mod tests_records;
 
 use crate::harness::{self, BbResult, ContinuationState, InvocationSpec};
-use crate::process::{self, CmdSpec};
 use grader::{Evidence, Graded, Verdict};
 use loopback::Loopback;
 use manifest::Scenario;
@@ -35,7 +37,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Cap on one raw stream copied into an artifact file; the flag records the cut.
 pub const ARTIFACT_STREAM_CAP: usize = 64 * 1024;
@@ -373,7 +374,7 @@ fn run_one(
     harness::eprint_status(&format!("== context-eval {} ==", scen.id));
     let (evidence, graded, verdict, digests, isolation_ok) = match opts.runner {
         RunnerKind::Rust => drive_rust(scen, opts)?,
-        RunnerKind::Typescript => drive_typescript(scen, opts)?,
+        RunnerKind::Typescript => ts_drive::drive_typescript(scen, opts)?,
     };
     // The run record binds this observation to the source revision, the manifest bytes it
     // was driven from, and the digests of every expanded fixture round (#116.2).
@@ -463,7 +464,7 @@ fn request_observations_block(evidence: &Evidence) -> Value {
         "tool_names": evidence.tool_names,
         "last_request_bytes": evidence.last_request_bytes,
         "observations_source": "loopback",
-        "serialized": evidence.request_bodies_digest,
+        REQUEST_SHAPE_DIGEST_KEY: evidence.request_shape_digest,
     })
 }
 
@@ -627,27 +628,27 @@ fn evidence_from_loopback(evidence: &mut Evidence, obs: &loopback::Observations)
         }
     }
     evidence.tool_names = tool_names;
-    evidence.request_bodies_digest = request_bodies_digest(&obs.requests);
+    evidence.request_shape_digest = request_shape_digest(&obs.requests);
 }
 
-/// Per-body bound for the request-bodies digest. The loopback observes each request's
-/// serialized *length* (never its bytes, which would double the harness's capture
-/// footprint), so every body is represented by exactly 8 bytes, its shape, and its
-/// stream mode: the bound is structural, not advisory.
-pub const MAX_DIGESTED_BODY_BYTES: usize = 8;
+/// Loopback-observed request shapes, in drive order: the observed serialized size
+/// (from the request's `content-length` header; the body bytes are never captured), the
+/// offered tool names, and whether the request asked for a streamed response.
+pub const REQUEST_SHAPE_DIGEST_KEY: &str = "request_shape_digest";
 
-/// Real SHA-256 over the request bodies the loopback observed, in drive order.
+/// Real SHA-256 over the loopback-observed request shapes, in drive order.
 ///
-/// Each observed request contributes its bounded serialized-size representation, its
-/// tool-name list, and its stream mode, so two runs that made the same requests in the
-/// same order always digest identically while any reordering, insertion, or shape
-/// change moves the digest. This replaces the earlier field of the same name, which
-/// hashed only the sizes while its documentation claimed it covered the bodies.
-fn request_bodies_digest(requests: &[loopback::ObservedRequest]) -> String {
+/// Each observed request contributes its observed serialized size, its tool-name list,
+/// and its stream mode, and nothing else: no request body is ever captured, so this
+/// digest cannot and does not claim to cover request contents. Two runs that made the
+/// same requests in the same order digest identically; a different size, a different
+/// tool set or order, a different stream mode, or a different request order moves the
+/// digest. What it cannot reveal is any request change that leaves all of those
+/// observations unchanged, because the loopback observes nothing else about a request.
+fn request_shape_digest(requests: &[loopback::ObservedRequest]) -> String {
     let mut hasher = Sha256::new();
     for request in requests {
-        let bounded = request.body_bytes.min(MAX_DIGESTED_BODY_BYTES);
-        hasher.update((bounded as u64).to_be_bytes());
+        hasher.update((request.body_bytes as u64).to_be_bytes());
         hasher.update(request.tool_names.join(":").as_bytes());
         hasher.update([u8::from(request.streamed)]);
     }
@@ -693,27 +694,6 @@ fn scan_drive_outputs(
                 .leaks
                 .push((marker.to_string(), "envelope summary".to_string()));
         }
-    }
-}
-
-/// Leakage scan over the TypeScript reference drive's own outputs: the isolated settings
-/// tree, the harness artifacts, and the captured streams. The bulk fixtures are the
-/// plant's input and are excluded, exactly as in the Rust drive's scan.
-fn scan_ts_outputs(evidence: &mut Evidence, out_dir: &Path, settings: &Path, captured: &str) {
-    let bulk_dir = out_dir.join("bulk");
-    evidence.leaks = secrets::scan_tree_skipping(settings, Some(bulk_dir.as_path()))
-        .into_iter()
-        .map(|(marker, found)| (marker, format!("settings: {found}")))
-        .chain(
-            secrets::scan_tree_skipping(out_dir, Some(bulk_dir.as_path()))
-                .into_iter()
-                .map(|(marker, found)| (marker, format!("harness artifacts: {found}"))),
-        )
-        .collect();
-    for marker in secrets::scan_bytes(captured.as_bytes()) {
-        evidence
-            .leaks
-            .push((marker.to_string(), "captured stream".to_string()));
     }
 }
 
@@ -956,107 +936,6 @@ fn is_harness_error(result: &BbResult) -> bool {
         || result.stdout_truncated
 }
 
-/// Drive the TypeScript reference runner. Calibration only: its verdict is reported and
-/// never gates the phase, because the sibling implementation is not the oracle.
-fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
-    let out_dir = opts
-        .out_root
-        .join(format!("{}-{}", scen.id, harness::uniq()));
-    let (bulk, digests) = runner::expand_fixture(
-        &opts.fixtures_dir(),
-        &scen.wall.fixture,
-        scen.wall.tool_rounds,
-        scen.wall.tool_output_bytes,
-        &out_dir.join("bulk"),
-    )?;
-    let marker = scen
-        .assertions
-        .required_final_marker
-        .clone()
-        .unwrap_or_else(|| "CTXEVAL-FINAL".to_string());
-    // `Loopback::start` only binds the port; the scripted rounds arrive through
-    // `set_bulk` once the fixtures exist, exactly as the Rust drive does. Without the
-    // hand-off the stub serves an empty script and answers every turn with the final
-    // marker, so no wall is ever exercised.
-    let rounds = bulk.len();
-    let server = Loopback::start(rounds, Vec::new(), &marker, scen.wall.tool_output_bytes);
-    server.set_bulk(bulk);
-    let url = server.base_url();
-    let settings = absolute_child(&out_dir, "settings")?;
-    fs::create_dir_all(&settings).map_err(|e| format!("create settings: {e}"))?;
-    let mut evidence = Evidence {
-        turns_total: 1,
-        ..Evidence::default()
-    };
-    // The TS reference runner has no fault or recovery machinery; the harness records
-    // that honestly rather than simulating an execution.
-    // The reference runner executes no faults, so it must not report any: an empty list
-    // here is the honest observation (the grader then fails the recovery dimension for a
-    // scenario that declares faults), and it replaces the no-op assignment that used to
-    // stand in for a real "did the TS drive execute anything" check.
-    evidence.faults_executed.clear();
-    let args = runner::ts_args(&scen.stimulus.prompt, &url, &scen.profile.model);
-    let outcome = process::run_cmd(CmdSpec {
-        program: opts.ts_bin.clone(),
-        args,
-        cwd: Some(opts.ts_root.clone()),
-        cwd_fd: None,
-        env_add: vec![
-            ("LLXPRT_CONFIG_HOME".into(), settings.display().to_string()),
-            ("XDG_CONFIG_HOME".into(), settings.display().to_string()),
-            ("CTXEVAL_LOOPBACK_BASE_URL".into(), url),
-        ],
-        timeout: Duration::from_secs(TURN_TIMEOUT_SECS),
-        max_output: 32 * 1024 * 1024,
-    });
-    let obs = server.snapshot();
-    server.stop();
-    evidence.provider_requests = obs.requests.len();
-    evidence.tool_calls_scripted = obs.tool_calls_issued;
-    evidence.final_response_issued = obs.final_response_issued;
-    let text = match &outcome {
-        Ok(o) => format!(
-            "{}{}",
-            String::from_utf8_lossy(&o.stdout),
-            String::from_utf8_lossy(&o.stderr)
-        ),
-        Err(_) => String::new(),
-    };
-    // The TS drive's leakage scan is real, exactly like the Rust drive's: the isolated
-    // settings tree, the harness artifacts, and the captured streams are all scanned, so
-    // the reference runner cannot publish a clean it never earned. Before the fix the TS
-    // drive published `"clean": true` without scanning anything at all.
-    scan_ts_outputs(&mut evidence, &out_dir, &settings, &text);
-    match outcome {
-        Ok(o) => {
-            if o.timed_out || o.status.is_none() {
-                evidence.harness_error = true;
-            }
-            if o.status == Some(0) && serde_json::from_slice::<Value>(&o.stdout).is_ok() {
-                evidence.turns_ok = 1;
-                evidence.last_ok_stdout = o.stdout.clone();
-                evidence.last_ok_summary = String::from_utf8_lossy(&o.stdout).to_string();
-            }
-            save_ts_artifacts(&out_dir, &o.stdout, &o.stderr)?;
-        }
-        Err(e) => {
-            evidence.harness_error = true;
-            harness::eprint_status(&format!("typescript reference spawn failed: {e}"));
-        }
-    }
-    // Typed classification where the reference runner offers one (#7): the TS runner has
-    // no typed error contract, so the residual substring fallback below is the only
-    // classification available for it. Its failure modes are documented at the site:
-    // a *false positive* whenever the run's prose merely mentions "context" or
-    // "compress" without hitting a wall, and a *false negative* whenever a wall is hit
-    // but reported with other wording. That is why the TS drive is calibration-only and
-    // never gates a phase: its classification cannot be trusted as evidence.
-    evidence.context_limit_hit = ts_context_limit_hit(&text);
-    let graded = grader::grade(scen, &evidence);
-    let verdict = grader::verdict(scen, &graded);
-    Ok((evidence, graded, verdict, digests, true))
-}
-
 /// Publish one turn's bounded raw streams as create-only artifacts.
 fn save_turn_artifacts(out_dir: &Path, index: usize, result: &BbResult) -> Result<(), String> {
     fs::create_dir_all(out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
@@ -1079,13 +958,6 @@ fn save_turn_artifacts(out_dir: &Path, index: usize, result: &BbResult) -> Resul
     )
 }
 
-fn save_ts_artifacts(out_dir: &Path, stdout: &[u8], stderr: &[u8]) -> Result<(), String> {
-    fs::create_dir_all(out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
-    publish(&out_dir.join("ts.stdout"), &bounded(stdout))?;
-    publish(&out_dir.join("ts.stderr"), &bounded(stderr))?;
-    Ok(())
-}
-
 fn bounded(bytes: &[u8]) -> Vec<u8> {
     bytes[..bytes.len().min(ARTIFACT_STREAM_CAP)].to_vec()
 }
@@ -1095,6 +967,12 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(e) => Err(format!("publish {}: {e:?}", path.display())),
     }
+}
+
+/// Test-only re-export of request_shape_digest, so the self-tests can hold the
+/// digest to its documented contract without depending on private visibility.
+pub fn request_shape_digest_for_test(requests: &[loopback::ObservedRequest]) -> String {
+    request_shape_digest(requests)
 }
 
 /// Lowercase hex SHA-256 of `bytes`.
