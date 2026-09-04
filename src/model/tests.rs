@@ -31,6 +31,11 @@ fn load_err(json: &serde_json::Value, name: &str, allow_insecure: bool) -> Strin
     .unwrap_err()
     .to_string()
 }
+
+/// The rendered credential-policy failure for an unresolvable named provider key,
+/// as `from_profile_in` reports it (issue 6).
+const NAMED_KEY_RESOLUTION_FAILURE: &str =
+    "auth-key-name could not be resolved; set LLXPRT_PROVIDER_KEY_<NAME> or store the key under the llxprt-code-provider-keys secure-store account";
 /// The **public** strict validator accepts a bare origin, `/v1`, and the chat-route
 /// forms (the full URL, including its path, is what is validated) with a host and
 /// no userinfo/query/fragment, rejects a nested path, userinfo, query, and
@@ -299,24 +304,20 @@ fn configuration_errors_precede_credential_resolution_in_fixed_order() {
         "insecure http base-url requires --allow-insecure-http"
     );
 
-    // Credential policy (class 3) precedes the structural gate (class 4):
-    // markers without a discriminator are reported only when no named
-    // secure-store reference is present.
+    // Credential policy (class 3) precedes the structural gate (class 4): an
+    // unresolvable named key is reported before a marker without a discriminator.
     let both = serde_json::json!({
         "provider": "openai",
         "model": "m",
         "ephemeralSettings": {
             "base-url": "https://api.example.com/v1",
-            "auth-key-name": "marker",
+            "auth-key-name": "ordering-unresolved-marker",
             "shell-replacement": true
         }
     });
     assert_eq!(
         load_err(&both, "ordering", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // The structural gate (class 4) precedes unsupported-key rejection
@@ -448,8 +449,8 @@ fn friendliglm_ladder_first_failures_in_order() {
         "{err}"
     );
 
-    // Rung 2: rewrite the route to /v1 (host preserved); the named
-    // secure-store reference now refuses first.
+    // Rung 2: rewrite the route to /v1 (host preserved); the unresolvable named
+    // key now refuses first.
     let mut rung2 = installed.clone();
     rung2["ephemeralSettings"]["base-url"] = serde_json::json!("https://api.friendli.ai/v1");
     let profile = parse_profile_value(&rung2, "friendliglm").unwrap();
@@ -463,10 +464,7 @@ fn friendliglm_ladder_first_failures_in_order() {
     .to_string();
     assert_eq!(
         err,
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     // Rung 3: drop auth-key-name; the unsupported model parameters are now
@@ -528,10 +526,7 @@ fn marker_profiles_fail_on_their_first_structural_cause() {
         serde_json::from_str(include_str!("../../tests/fixtures/profiles/qwen38.json")).unwrap();
     assert_eq!(
         load_err(&qwen38, "qwen38", false),
-        format!(
-            "unsupported profile setting(s): {}",
-            crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE
-        )
+        format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
     let mi300x: serde_json::Value = serde_json::from_str(include_str!(

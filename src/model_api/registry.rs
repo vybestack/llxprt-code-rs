@@ -126,18 +126,26 @@ fn construct_openai_responses(
         .as_ref()
         .ok_or_else(|| "OpenAI Responses settings were not resolved".to_string())?;
 
-    // Credential policy after endpoint validation: the fixed value-free refusal
-    // for a named secure-store reference (mirrors the Chat path's class ordering).
-    if profile.ephemeral.auth_key_name {
-        return Err(crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
-    }
+    // Credential policy after endpoint validation: a named provider key resolves
+    // through the credential env selector then the secure store. The name is a
+    // credential surface; the fixed value-free refusal is all that travels.
+    let named_key = profile
+        .ephemeral
+        .auth_key_name
+        .as_deref()
+        .map(crate::model_api::provider_keys::resolve_named_key)
+        .transpose()
+        .map_err(|error| error.to_string())?;
 
-    let api_key = crate::model::resolve_api_key(
-        profile,
-        profile_from_file,
-        dependencies.config_home().as_path(),
-    )
-    .map_err(|error| error.to_string())?;
+    let api_key = match named_key {
+        Some(key) => key,
+        None => crate::model::resolve_api_key(
+            profile,
+            profile_from_file,
+            dependencies.config_home().as_path(),
+        )
+        .map_err(|error| error.to_string())?,
+    };
     let keyfile_path = profile.ephemeral.auth_keyfile_orig.clone();
     let secret_config = ModelConfig {
         model: profile.model.clone(),
@@ -209,17 +217,27 @@ fn construct_anthropic(
             error.to_string()
         }
     })?;
-    if profile.ephemeral.auth_key_name {
-        return Err(crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE.to_string());
-    }
+    // Credential policy after endpoint validation: a named provider key resolves
+    // through the credential env selector then the secure store. The name is a
+    // credential surface; the fixed value-free refusal is all that travels.
+    let named_key = profile
+        .ephemeral
+        .auth_key_name
+        .as_deref()
+        .map(crate::model_api::provider_keys::resolve_named_key)
+        .transpose()
+        .map_err(|error| error.to_string())?;
     validate_anthropic_settings(profile)?;
 
-    let api_key = crate::model::resolve_api_key(
-        profile,
-        profile_from_file,
-        dependencies.config_home().as_path(),
-    )
-    .map_err(|error| error.to_string())?;
+    let api_key = match named_key {
+        Some(key) => key,
+        None => crate::model::resolve_api_key(
+            profile,
+            profile_from_file,
+            dependencies.config_home().as_path(),
+        )
+        .map_err(|error| error.to_string())?,
+    };
     let timeout = std::time::Duration::from_millis(profile.ephemeral.timeout_ms.unwrap_or(900_000));
     let secret_config = ModelConfig {
         model: profile.model.clone(),
@@ -346,429 +364,4 @@ fn codex_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::config::ConfigHomeRoot;
-    use crate::model_api::credentials::{
-        parse_credential, Clock, CodexCredential, CredentialError, CredentialSource,
-    };
-
-    struct FixedClock;
-
-    impl Clock for FixedClock {
-        fn unix_seconds(&self) -> Result<i64, CredentialError> {
-            Ok(1_000)
-        }
-    }
-
-    struct InMemorySource {
-        calls: AtomicUsize,
-    }
-
-    impl CredentialSource for InMemorySource {
-        fn load(&self, clock: &dyn Clock) -> Result<CodexCredential, CredentialError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            parse_credential(
-                br#"{"access_token":"token-value","account_id":"account-value","expiry":1031,"token_type":"Bearer"}"#,
-                clock,
-            )
-        }
-    }
-
-    #[test]
-    fn codex_transport_identity_is_fixed() {
-        let draft = crate::model_api::settings::CodexResponsesSettingsDraft::new(
-            "gpt-5.6-sol".to_string(),
-            true,
-        );
-        assert_eq!(
-            draft.endpoint().responses_url(),
-            "https://chatgpt.com/backend-api/codex/responses"
-        );
-        assert_eq!(CODEX_RESPONSES_BETA, "responses=experimental");
-        assert_eq!(ORIGINATOR, "llxprt-code");
-    }
-
-    #[test]
-    fn chat_registry_construction_does_not_load_native_credentials() {
-        let profile = crate::profile::parse_profile_value(
-            &serde_json::json!({
-                "provider": "openai",
-                "model": "chat-model",
-                "ephemeralSettings": {
-                    "base-url": "https://api.example.com/v1",
-                    "auth-key": "chat-secret"
-                }
-            }),
-            "chat",
-        )
-        .unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let source = Arc::new(InMemorySource {
-            calls: AtomicUsize::new(0),
-        });
-        let dependencies = RuntimeDependencies::new(
-            source.clone(),
-            Arc::new(FixedClock),
-            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-        );
-
-        let constructed = construct_backend(
-            &profile,
-            &crate::session::SessionId::parse("test-session").unwrap(),
-            &dependencies,
-            false,
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
-        assert_eq!(constructed.secret_values, vec!["chat-secret".to_string()]);
-    }
-
-    #[test]
-    fn zai_anthropic_backend_constructs_offline_without_native_credentials() {
-        let mut value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
-        ))
-        .unwrap();
-        value["ephemeralSettings"]
-            .as_object_mut()
-            .unwrap()
-            .remove("auth-key-name");
-        value["ephemeralSettings"]["auth-key"] = serde_json::json!("zai-test-key");
-        let profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let source = Arc::new(InMemorySource {
-            calls: AtomicUsize::new(0),
-        });
-        let dependencies = RuntimeDependencies::new(
-            source.clone(),
-            Arc::new(FixedClock),
-            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-        );
-
-        let constructed = construct_backend(
-            &profile,
-            &crate::session::SessionId::parse("zai-session").unwrap(),
-            &dependencies,
-            true,
-            false,
-        )
-        .expect("z.ai-shaped Anthropic profile must construct without a request");
-
-        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
-        assert_eq!(constructed.backend.request_calls(), 0);
-        assert_eq!(constructed.secret_values, vec!["zai-test-key"]);
-    }
-
-    #[test]
-    fn anthropic_settings_forward_profile_top_k() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
-        ))
-        .unwrap();
-        let mut profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
-        profile.model_params.top_k = Some(37);
-        let timeout = std::time::Duration::from_secs(30);
-
-        let settings = anthropic_model_settings(&profile, timeout);
-
-        assert_eq!(settings.top_k, Some(37));
-    }
-
-    #[test]
-    fn anthropic_messages_wire_uses_expected_route_and_headers() {
-        use std::io::{Read as _, Write as _};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            loop {
-                let read = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..read]);
-                if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
-            let body = r#"{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"glm-5.3","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            String::from_utf8(request).unwrap()
-        });
-
-        let model = serdes_ai::models::anthropic::AnthropicModel::new("glm-5.3", "wire-key")
-            .with_base_url(format!("http://127.0.0.1:{port}/api/anthropic"));
-        let backend = AnthropicBackend::new(
-            model,
-            serdes_ai::ModelSettings {
-                timeout: Some(std::time::Duration::from_secs(5)),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let request_message = serdes_ai::core::ModelRequest::with_parts(vec![
-            serdes_ai::core::messages::ModelRequestPart::UserPrompt(
-                serdes_ai::core::messages::UserPromptPart::new("hello"),
-            ),
-        ]);
-        backend.request(&[request_message], &[]).unwrap();
-        let request = server.join().unwrap().to_ascii_lowercase();
-
-        assert!(request.starts_with("post /api/anthropic/v1/messages http/1.1"));
-        assert!(request.contains("\r\nx-api-key: wire-key\r\n"));
-        assert!(request.contains("\r\nanthropic-version: 2023-06-01\r\n"));
-        assert!(!request.contains("\r\nauthorization:"));
-    }
-
-    #[test]
-    fn zai_acceptance_profile_parses_before_named_credential_policy() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
-        ))
-        .unwrap();
-        let profile = crate::profile::parse_profile_value(&value, "zai").unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let source = Arc::new(InMemorySource {
-            calls: AtomicUsize::new(0),
-        });
-        let dependencies = RuntimeDependencies::new(
-            source.clone(),
-            Arc::new(FixedClock),
-            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-        );
-
-        let error = match construct_backend(
-            &profile,
-            &crate::session::SessionId::parse("zai-session").unwrap(),
-            &dependencies,
-            false,
-            false,
-        ) {
-            Ok(_) => panic!("named secure-store references remain unsupported"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error, crate::profile::AUTH_KEY_NAME_UNSUPPORTED_MESSAGE);
-        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn codex_registry_construction_loads_native_credentials_once() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/gpt56solhigh.json"
-        ))
-        .unwrap();
-        let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let source = Arc::new(InMemorySource {
-            calls: AtomicUsize::new(0),
-        });
-        let dependencies = RuntimeDependencies::new(
-            source.clone(),
-            Arc::new(FixedClock),
-            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-        );
-
-        let constructed = construct_backend(
-            &profile,
-            &crate::session::SessionId::parse("test-session").unwrap(),
-            &dependencies,
-            true,
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(source.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(constructed.context_limit, Some(262_144));
-        assert_eq!(constructed.max_rounds, usize::MAX);
-        assert_eq!(
-            constructed.secret_values,
-            vec!["token-value".to_string(), "account-value".to_string()]
-        );
-    }
-
-    #[test]
-    fn max_turns_per_prompt_resolves_the_documented_sentinels() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/gpt56solhigh.json"
-        ))
-        .unwrap();
-        let mut profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
-        // The fixture declares -1, which the profile contract defines as unlimited.
-        assert_eq!(resolve_max_rounds(&profile).unwrap(), usize::MAX);
-        profile.ephemeral.max_turns_per_prompt = None;
-        // An absent knob is unlimited too, matching the TS ephemerals contract.
-        assert_eq!(resolve_max_rounds(&profile).unwrap(), usize::MAX);
-        profile.ephemeral.max_turns_per_prompt = Some(64);
-        assert_eq!(resolve_max_rounds(&profile).unwrap(), 64);
-        for invalid in [0, -2] {
-            profile.ephemeral.max_turns_per_prompt = Some(invalid);
-            assert!(
-                resolve_max_rounds(&profile).is_err(),
-                "{invalid} must not resolve"
-            );
-        }
-    }
-
-    #[test]
-    fn codex_settings_forward_the_profile_output_bound() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/gpt56solhigh.json"
-        ))
-        .unwrap();
-        let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
-        let settings = codex_model_settings(&profile);
-        // The ChatGPT codex backend rejects `max_output_tokens` outright;
-        // the profile's 40000 cap stays host-side instead of on the wire.
-        assert_eq!(settings.max_tokens, None);
-        assert_eq!(settings.temperature, profile.model_params.temperature);
-        assert_eq!(settings.top_p, profile.model_params.top_p);
-        assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(900)));
-        crate::agent::validate_timeout(settings.timeout)
-            .expect("900s Codex timeout must clear the lease bound");
-    }
-
-    #[test]
-    fn both_public_responses_targets_construct_without_native_credentials() {
-        for value in [
-            serde_json::json!({
-                "provider": "openai",
-                "model": "responses-model",
-                "ephemeralSettings": {
-                    "apiMode": "responses",
-                    "base-url": "https://api.example.com/v1/responses",
-                    "auth-key": "responses-secret"
-                }
-            }),
-            serde_json::json!({
-                "provider": "openai-responses",
-                "model": "responses-model",
-                "ephemeralSettings": {
-                    "base-url": "https://api.example.com/v1/responses",
-                    "auth-key": "responses-secret"
-                }
-            }),
-        ] {
-            let profile = crate::profile::parse_profile_value(&value, "responses").unwrap();
-            let root = tempfile::tempdir().unwrap();
-            let source = Arc::new(InMemorySource {
-                calls: AtomicUsize::new(0),
-            });
-            let dependencies = RuntimeDependencies::new(
-                source.clone(),
-                Arc::new(FixedClock),
-                ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-            );
-
-            let constructed = construct_backend(
-                &profile,
-                &crate::session::SessionId::parse("responses-session").unwrap(),
-                &dependencies,
-                true,
-                false,
-            )
-            .unwrap();
-
-            assert_eq!(source.calls.load(Ordering::SeqCst), 0);
-            assert_eq!(constructed.secret_values, vec!["responses-secret"]);
-        }
-    }
-
-    #[test]
-    fn responses_endpoint_rejection_precedes_credential_io() {
-        let missing_keyfile = "/definitely/missing/issue1-secret";
-        let profile = crate::profile::parse_profile_value(
-            &serde_json::json!({
-                "provider": "openai-responses",
-                "model": "responses-model",
-                "ephemeralSettings": {
-                    "base-url": "https://api.example.com/chat/completions",
-                    "auth-keyfile": missing_keyfile
-                }
-            }),
-            "responses",
-        )
-        .unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let source = Arc::new(InMemorySource {
-            calls: AtomicUsize::new(0),
-        });
-        let dependencies = RuntimeDependencies::new(
-            source.clone(),
-            Arc::new(FixedClock),
-            ConfigHomeRoot::for_test(root.path().to_path_buf()).unwrap(),
-        );
-
-        let error = match construct_backend(
-            &profile,
-            &crate::session::SessionId::parse("responses-session").unwrap(),
-            &dependencies,
-            true,
-            false,
-        ) {
-            Ok(_) => panic!("invalid Responses route must fail"),
-            Err(error) => error,
-        };
-
-        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
-        assert!(!error.contains(missing_keyfile));
-    }
-
-    #[test]
-    fn responses_endpoint_routes_normalize_to_one_suffix() {
-        for (raw, expected_url) in [
-            (
-                "https://api.example.com",
-                "https://api.example.com/responses",
-            ),
-            (
-                "https://api.example.com/",
-                "https://api.example.com/responses",
-            ),
-            (
-                "https://api.example.com/v1",
-                "https://api.example.com/v1/responses",
-            ),
-            (
-                "https://api.example.com/v1/",
-                "https://api.example.com/v1/responses",
-            ),
-            (
-                "https://api.example.com/responses",
-                "https://api.example.com/responses",
-            ),
-            (
-                "https://api.example.com/v1/responses/",
-                "https://api.example.com/v1/responses",
-            ),
-        ] {
-            let endpoint = normalize_responses_endpoint(raw).unwrap();
-            assert_eq!(
-                format!("{}/responses", responses_transport_base(&endpoint)),
-                expected_url
-            );
-        }
-        for raw in [
-            "https://api.example.com/chat/completions",
-            "https://api.example.com/v1//responses",
-            "https://user@example.com/v1",
-            "https://api.example.com/v1?secret=value",
-            "https://api.example.com/v1#fragment",
-        ] {
-            assert!(normalize_responses_endpoint(raw).is_err(), "{raw}");
-        }
-    }
-}
+mod tests;

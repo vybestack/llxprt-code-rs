@@ -307,3 +307,36 @@ fn request_budget_constants_keep_their_public_agent_paths() {
     assert_eq!(llxprt_code_rs::agent::PER_REQUEST_OVERHEAD_BYTES, 512);
     assert_eq!(llxprt_code_rs::agent::PER_PART_OVERHEAD_BYTES, 128);
 }
+
+/// A configured request timeout fires as a timeout without the diagnostic asserting a duration
+/// it cannot know. Issue #10 observed a 900-second `stream-first-response-timeout-ms` value
+/// surfacing as "timed out after 30s"; the transport reports only that it timed out.
+#[test]
+fn timed_out_transport_reports_no_duration() {
+    use std::io::Read as _;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            // Read the request, then never answer, so the configured request timeout fires.
+            let mut buffer = [0u8; 8192];
+            while stream.read(&mut buffer).unwrap_or(0) > 0 {
+                let _ = buffer;
+            }
+        }
+    });
+
+    let mut cfg = config(addr);
+    cfg.timeout = Some(std::time::Duration::from_millis(150));
+
+    let err = request_one(&cfg).expect_err("a silent provider must time out");
+    assert_eq!(err, "Model request timed out");
+    assert!(
+        !err.chars().any(|c| c.is_ascii_digit()),
+        "diagnostic asserted a duration: {err}"
+    );
+}
