@@ -254,7 +254,11 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
             error.profiling_stage.unwrap_or("sample"),
             error.session_status.as_deref().unwrap_or("ok"),
         ),
-        Err(error) => Envelope::error(error_session_id, error.key, error.message.clone()),
+        Err(error) => Envelope::error(
+            error_session_id,
+            error.envelope_code.unwrap_or(error.key),
+            error.message.clone(),
+        ),
     }
 }
 
@@ -348,6 +352,11 @@ pub struct AppError {
     pub message: String,
     pub profiling_stage: Option<&'static str>,
     pub session_status: Option<String>,
+    /// The stable envelope `error.code` token. `None` means [`Self::key`] is already the
+    /// envelope token. A model transport failure carries its finer `model-<class>`
+    /// transport key here (for example `model-quota-exhausted`) while [`Self::key`]
+    /// stays `model`, so the process exit code family is unchanged.
+    pub envelope_code: Option<&'static str>,
 }
 
 impl AppError {
@@ -363,7 +372,15 @@ impl AppError {
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
             profiling_stage: None,
             session_status: None,
+            envelope_code: None,
         }
+    }
+
+    /// Carry a finer envelope `error.code` token than [`Self::key`], leaving the process
+    /// exit code family alone.
+    pub fn with_envelope_code(mut self, envelope_code: Option<&'static str>) -> Self {
+        self.envelope_code = envelope_code;
+        self
     }
 
     pub fn profiling(error: crate::memory_profile::ProfilingError) -> Self {
@@ -377,6 +394,7 @@ impl AppError {
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
             profiling_stage: Some(stage),
             session_status: Some("ok".into()),
+            envelope_code: None,
         }
     }
 }

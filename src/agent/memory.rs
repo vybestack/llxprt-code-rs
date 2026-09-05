@@ -62,7 +62,7 @@ impl CodingAgent {
             },
         )
         .map_err(RoundFailure::Profiling)?;
-        result.map_err(RoundFailure::Model)
+        result
     }
 
     pub(super) fn round_failure(
@@ -74,6 +74,11 @@ impl CodingAgent {
     ) -> AgentError {
         match failure {
             RoundFailure::Model(message) => self.dead(store, reserved, "model", &message, rounds),
+            RoundFailure::ModelTransport(failure) => {
+                let key = failure.transport_key();
+                self.dead(store, reserved, "model", &failure.diagnostic(), rounds)
+                    .with_envelope_code(key)
+            }
             RoundFailure::Profiling(error) => error,
         }
     }

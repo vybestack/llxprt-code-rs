@@ -177,7 +177,8 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
     );
 
     // Model-error contract: exit code 5 (Code::Model) and stdout is exactly one
-    // JSON object with error.code "model".
+    // JSON object. The envelope code is the transport class (`model-permanent` for a
+    // 400), while the process exit stays in the `Code::Model` family.
     assert_eq!(
         out.status.code(),
         Some(5),
@@ -188,7 +189,7 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
         serde_json::from_str(stdout_trimmed.trim()).expect("stdout is exactly one JSON object");
     assert!(parsed.is_object(), "stdout must be a single JSON object");
     assert_eq!(parsed["status"], "error");
-    assert_eq!(parsed["error"]["code"], "model");
+    assert_eq!(parsed["error"]["code"], "model-permanent");
 
     // The marker bytes must appear nowhere: raw stdout, raw stderr, the parsed error
     // fields, or any byte of the persisted session file. The markers are not echoed on
@@ -237,6 +238,12 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
         assert!(!contains_bytes(persisted, b"provider-reflected-secret"));
     }
     let stdout_str = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout_str.contains("Model HTTP error (status 400)"));
+    // The classified transport diagnostic: a 400 is a permanent class, and the bounded
+    // body prefix carries only the reflected credential markers, which must be scrubbed.
+    assert!(stdout_str.contains(
+        "model transport failed (status 400, origin status, class permanent, not retryable)"
+    ));
+    // The transport class rides the envelope code; the exit family stays `model`.
+    assert!(stdout_str.contains("\"code\":\"model-permanent\""));
     assert!(!stdout_str.contains("provider returned an error response"));
 }

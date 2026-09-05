@@ -94,11 +94,14 @@ pub struct CodingAgent {
 mod error;
 pub use error::AgentError;
 mod helpers;
+pub(crate) mod transport;
 pub(crate) use helpers::budget_notice;
 use helpers::{
     final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
     validate_provider_result,
 };
+use transport::TransportFailure;
+
 mod config;
 pub use config::{
     coding_system_prompt, round_limit_message, validate_timeout, TIMEOUT_LEASE_MARGIN_SECONDS,
@@ -853,14 +856,19 @@ impl CodingAgent {
         &self,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, RoundFailure> {
         // A single oversized model reply is bounded before it is any round: a reply over
         // [`MAX_RESPONSE_BYTES`] is a typed model failure here, so an unbounded
         // provider body can never be accumulated (or double-counted) into the aggregate
         // assistant bytes or become session-persist. The error carries the round's own
         // size, which stays bounded by the reply cap.
-        let result = self.backend.request(requests, tools)?;
-        validate_provider_result(&result, &self.secrets)?;
+        let result = self.backend.request(requests, tools).map_err(|message| {
+            match TransportFailure::from_message(&message) {
+                Some(failure) => RoundFailure::ModelTransport(failure),
+                None => RoundFailure::Model(message),
+            }
+        })?;
+        validate_provider_result(&result, &self.secrets).map_err(RoundFailure::Model)?;
         Ok(result)
     }
 
@@ -929,6 +937,7 @@ enum ToolCallFailure {
 
 enum RoundFailure {
     Model(String),
+    ModelTransport(TransportFailure),
     Profiling(AgentError),
 }
 
