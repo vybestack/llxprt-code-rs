@@ -2,7 +2,7 @@
 //! headless stdout error envelope.
 //!
 //! The vendored `serdes_ai::models::ModelError` already carries a structured,
-//! value-free [`TransportDetail`] (the failure origin, the URL scheme class, the HTTP
+//! value-free [`serdes_ai::models::error::TransportDetail`] (the failure origin, the URL scheme class, the HTTP
 //! status, and a bounded body prefix with its total byte length). This module turns that
 //! into the small, stable token the envelope reports, plus the bounded diagnostic text a
 //! human reads. No host, port, path, query, or credential ever travels: the underlying
@@ -206,7 +206,7 @@ impl TransportFailure {
     /// transport failure as its diagnostic text, which this recognizes by its stable
     /// framing so the envelope can report the classification without a second channel.
     ///
-    /// Known limitation: [`crate::model_api::ChatBackend`] still carries `String`
+    /// Known limitation: [`crate::adapter::ChatBackend`] still carries `String`
     /// errors, so the round trip here re-parses the host's own framed diagnostic prose
     /// rather than a typed failure. Restructuring the backend onto a typed error is
     /// deliberately out of scope for this change; the framing is fixed and stable, and
@@ -229,7 +229,7 @@ impl TransportFailure {
     /// failure. The framing is a fixed prefix carrying the classification facts, so the
     /// envelope reports the class without matching on diagnostic prose.
     ///
-    /// Known limitation, accepted for this change: [`crate::model_api::ChatBackend`]
+    /// Known limitation, accepted for this change: [`crate::adapter::ChatBackend`]
     /// still carries `String` errors and the backends flatten a classified failure to
     /// its diagnostic text, so this re-parses the host's own framed prose instead of a
     /// typed failure. The framing is fixed and stable, and anything unrecognized falls
