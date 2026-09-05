@@ -60,6 +60,7 @@ impl PolicyEvent {
             logical_time: field("logical_time")?,
             source: field("source")?,
             operation: match operation {
+                "quiesce-rate" => "quiesce-rate",
                 "quiesce-unwritable" => "quiesce-unwritable",
                 "drop-with-handle" => "drop-with-handle",
                 "wrap-up" => "wrap-up",
@@ -84,6 +85,16 @@ pub struct ProposalOnlyController {
     events: Vec<PolicyEvent>,
     logical_time: u64,
     terminal_outcome: Option<&'static str>,
+    /// Saturation of the terminal fit gate at the accepted wrap-up (108-4).
+    terminal_fit_saturated: Option<bool>,
+    /// The room the terminal fit decision was made against, so the persisted
+    /// manifest can state the decision's own numbers rather than a later
+    /// re-measurement of the region.
+    terminal_fit_room: Option<u64>,
+    /// Set only by the write-failure branch of `wrap_up`: the store being
+    /// unwritable wedges the session, while a saturated-cost refusal is
+    /// superseded by a later wrap-up the region can absorb.
+    terminal_write_failed: bool,
 }
 
 impl Default for ProposalOnlyController {
@@ -102,6 +113,9 @@ impl Default for ProposalOnlyController {
             events: Vec::new(),
             logical_time: 0,
             terminal_outcome: None,
+            terminal_fit_saturated: None,
+            terminal_fit_room: None,
+            terminal_write_failed: false,
         }
     }
 }
@@ -168,7 +182,7 @@ impl ProposalOnlyController {
             logical_time: proposal.logical_time,
             source: proposal.source,
             operation: match digest_admission {
-                Admission::Quiesce => "quiesce-unwritable",
+                Admission::Quiesce => "quiesce-rate",
                 Admission::Admit | Admission::Handle => "drop-with-handle",
             },
             input_bytes: proposal.input_bytes,
@@ -177,14 +191,27 @@ impl ProposalOnlyController {
             armed_before: proposal.armed,
             armed_after,
         });
-        self.terminal_outcome =
-            if digest_admission == Admission::Quiesce || self.governor.state().quiescing {
-                Some("quiesce_unwritable")
-            } else if armed_after {
-                None
-            } else {
-                Some("disarm")
-            };
+        // #107-1: a rate quiesce is its own terminal, distinct from an
+        // unwritable store; #107-6: an ordinary disarmed completion is not a
+        // terminal at all, so it records no terminal outcome.
+        if digest_admission == Admission::Quiesce {
+            // The quota's own refusal is the rate terminal: the caller never
+            // touched the store on this path, so the write-failure branch
+            // must not be recorded for it.
+            self.terminal_outcome = Some("quiesce_rate");
+        } else if self.governor.state().quiescing {
+            // A quiescing governor is the same rate refusal carried over
+            // from an earlier window, so it keeps the rate terminal too.
+            self.terminal_outcome = Some("quiesce_rate");
+        } else if armed_after {
+            // An ordinary armed completion is not a terminal at all: the
+            // episode keeps running and wrap-up can still be recorded.
+            self.terminal_outcome = None;
+        } else {
+            // An ordinary disarmed completion records no terminal at all
+            // (issue 108-4): the disarm macrostep is a progress verdict the caller renders,
+            self.terminal_outcome = None;
+        }
     }
 
     /// Accounts a failed caller-owned store transaction and enters a named terminal branch.
@@ -202,11 +229,39 @@ impl ProposalOnlyController {
             armed_after,
         });
         self.terminal_outcome = Some("quiesce_unwritable");
+        // A failed store transaction is the same wedged store the explicit
+        // write-failure branch of `wrap_up` records.
+        self.terminal_write_failed = true;
     }
 
-    /// Records the explicit session-finalization terminal without overriding quiescence.
-    pub fn wrap_up(&mut self) {
-        if self.terminal_outcome == Some("quiesce_unwritable") {
+    /// Records the explicit session-finalization terminal without overriding
+    /// quiescence.
+    ///
+    /// #107-2: `wrap_up` refuses (and downgrades to the write-free quiesce)
+    /// when the terminal fit check fails - `terminal_reserve` is fed the
+    /// measured wrap-up cost against the room left in the region.
+    /// #107-3: `wrap_up` refuses when the store is unwritable; the writability
+    /// signal is the caller's own write-path verdict (`StoreBlocked`/
+    /// `StoreError`), handed in as `writable`, never a new store API.
+    /// #107-1: a rate quiesce is terminal in its own right and is not
+    /// overridden, and neither is an unwritable quiesce.
+    pub fn wrap_up(&mut self, wrap_up_cost: u64, available: u64, writable: bool) {
+        // Only the write-failure branch is sticky here: a rate quiesce is a
+        // terminal in its own right, but a later explicit wrap-up that can
+        // actually be written supersedes it rather than wedging the session.
+        if self.terminal_write_failed {
+            return;
+        }
+        self.terminal_fit_room = Some(available);
+        if !writable {
+            self.terminal_write_failed = true;
+            self.terminal_fit_saturated = Some(true);
+            self.terminal_outcome = Some("quiesce_unwritable");
+            return;
+        }
+        if !super::progress::terminal_reserve(wrap_up_cost, available) {
+            self.terminal_fit_saturated = Some(true);
+            self.terminal_outcome = Some("quiesce_unwritable");
             return;
         }
         self.logical_time = self.logical_time.saturating_add(1);
@@ -221,6 +276,7 @@ impl ProposalOnlyController {
             armed_before: armed,
             armed_after: armed,
         });
+        self.terminal_fit_saturated = Some(false);
         self.terminal_outcome = Some("wrap_up");
     }
 
@@ -264,16 +320,34 @@ impl ProposalOnlyController {
     pub fn terminal_outcome(&self) -> Option<&'static str> {
         self.terminal_outcome
     }
+
+    /// Whether the accepted wrap-up saturated the terminal fit gate (108-4):
+    /// `Some(false)` is a feasible wrap-up, `Some(true)` a fit-saturated
+    /// refusal, `None` when no wrap-up has been accepted yet.
+    pub fn terminal_fit_saturated(&self) -> Option<bool> {
+        self.terminal_fit_saturated
+    }
+    /// The room the recorded terminal fit decision was made against, when a
+    /// wrap-up decision has happened at all.
+    pub fn terminal_fit_room(&self) -> Option<u64> {
+        self.terminal_fit_room
+    }
     /// Restores the terminal outcome a previous process recorded in its
     /// manifest, so a restarted session resumes the branch it had reached
     /// instead of silently reopening as a live session (issue 102 restart).
-    /// Quiescence is never upgraded: a restored `quiesce_unwritable` stays even
-    /// if a later wrap-up would have written a softer branch.
-    pub fn restore_terminal_outcome(&mut self, outcome: &'static str) {
-        if self.terminal_outcome == Some("quiesce_unwritable") {
+    /// Quiescence is never upgraded: a restored `quiesce_unwritable` or
+    /// `quiesce_rate` stays even if a later wrap-up would have written a
+    /// softer branch. `fit_saturated` is the previous process's own record of
+    /// the terminal fit gate, restored with the branch so a restarted session
+    /// keeps the feasible/saturated distinction durable (108-4).
+    pub fn restore_terminal_outcome(&mut self, outcome: &'static str, fit_saturated: Option<bool>) {
+        if self.terminal_outcome == Some("quiesce_unwritable")
+            || self.terminal_outcome == Some("quiesce_rate")
+        {
             return;
         }
         self.terminal_outcome = Some(outcome);
+        self.terminal_fit_saturated = fit_saturated;
     }
     /// Current policy logical time, used to stamp durable checkpoint lines.
     pub fn logical_time(&self) -> u64 {

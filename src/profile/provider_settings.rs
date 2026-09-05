@@ -1,4 +1,4 @@
-use super::{anthropic, codex, openai_responses, parse_chat, EphemeralSettings, ModelParams};
+use super::{anthropic, chat, codex, openai_responses, EphemeralSettings, ModelParams};
 use crate::model_api::settings::{
     AnthropicSettingsDraft, CodexResponsesSettingsDraft, OpenAiResponsesSettingsDraft,
 };
@@ -51,7 +51,7 @@ pub(super) fn parse(
             chat_missing_discriminator: None,
         })
     } else {
-        let (ephemeral, model_params, chat_missing_discriminator) = parse_chat(obj, name)?;
+        let (ephemeral, model_params, chat_missing_discriminator) = chat::parse_chat(obj, name)?;
         Ok(ParsedProviderSettings {
             ephemeral,
             model_params,

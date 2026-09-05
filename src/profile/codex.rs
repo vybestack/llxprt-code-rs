@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 
-use super::{btree, EphemeralSettings, MaxToolCalls, ModelParams};
+use super::chat::btree;
+use super::{EphemeralSettings, MaxToolCalls, ModelParams};
 use crate::model_api::settings::CodexResponsesSettingsDraft;
 
 const CODEX_PROFILE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex";

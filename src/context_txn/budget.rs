@@ -1,7 +1,64 @@
-//! Budget accounting port and the universal-commit predicates (design §8.3).
+//! Versioned margin table (#104).
 //!
-//! `B` is the region budget, `R` the reclamation reserve and `H` the headroom
-//! the executor must leave free so reclamation can always run.
+//! A margin is the byte cost the executor charges to a commit beyond the
+//! effect itself: the fixed commit frame and, since #104, the
+//! tool-declaration surface `D`. Margins are *versioned* so replay of an old
+//! transaction reproduces the bound it was validated under; a version bump is
+//! the mechanism a recalibration uses to record drift.
+//!
+//! Usage reconciliation itself is blocked by #80 (no measured per-request
+//! accounting reaches the executor today); what this module lands is the
+//! versioning plus the drift fixture so the moment #80 unblocks, the measured
+//! number has a version to be compared against.
+
+/// One version of the margin table.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Margins {
+    /// Monotonic table version; a drift fixture bumps it via [`Self::recalibrate`].
+    pub version: u64,
+    /// Per-tool-declaration charge (the `D` term of the bound).
+    pub per_tool_declaration: u64,
+    /// Fixed frame overhead charged to every commit (record header + framing).
+    pub commit_frame: u64,
+}
+
+impl Margins {
+    pub const V1: Margins = Margins {
+        version: 1,
+        per_tool_declaration: 32,
+        commit_frame: 64,
+    };
+
+    /// Recalibrates on detected drift: a strictly newer version with the
+    /// measured per-declaration cost. An older or equal version is rejected
+    /// because replay must never silently adopt a newer margin table than the
+    /// one it was validated under.
+    pub fn recalibrate(
+        self,
+        version: u64,
+        per_tool_declaration: u64,
+    ) -> Result<Self, &'static str> {
+        if version <= self.version {
+            return Err("margin version must be strictly newer");
+        }
+        Ok(Margins {
+            version,
+            per_tool_declaration,
+            commit_frame: self.commit_frame,
+        })
+    }
+
+    /// Byte cost charged to a commit for the declared tool surface.
+    pub fn tool_surface(&self, declarations: usize) -> u64 {
+        self.per_tool_declaration
+            .saturating_mul(declarations.min(u32::MAX as usize) as u64)
+    }
+}
+
+// Budget accounting port and the universal-commit predicates (design §8.3).
+//
+// `B` is the region budget, `R` the reclamation reserve and `H` the headroom
+// the executor must leave free so reclamation can always run.
 
 /// Read-only port the executor uses to ask for a region bound.
 ///
@@ -13,12 +70,35 @@
 /// * **conservative** - the port never under-reports a bound, so a passing
 ///   fit check implies the real consumption also fits.
 pub trait AccountingPort {
-    /// Conservative bound for `version` under `contract`, in budget units.
-    fn bound(&self, version: u64, contract: u64) -> u64;
+    /// Conservative bound for the commit's **effect size** under the margin
+    /// table validated at `version`, in budget units.
+    ///
+    /// The input is the effect, never the caller's own bound claim: `validate`
+    /// compares the claim against the value returned here, so the comparison
+    /// is a real disagreement test and not a fixpoint the caller can satisfy
+    /// by construction (#104-1).
+    fn bound(&self, version: u64, effect_bytes: u64) -> u64;
+
+    /// The margin table this port charges, if it owns one. A port with no
+    /// table reports `None`; the executor reports that instead of a dead
+    /// field nothing computes from (#104-3).
+    fn bound_margins(&self) -> Option<Margins> {
+        None
+    }
+
+    /// A clone of this port carrying the margin table recalibrated to
+    /// `version` (#104-3). The default refuses: a port with no table has
+    /// nothing to recalibrate, and a recalibration that moves no bound is what
+    /// the finding forbids.
+    fn recalibrated(
+        &self,
+        version: u64,
+        per_tool_declaration: u64,
+    ) -> Option<Result<std::rc::Rc<dyn AccountingPort>, &'static str>>;
 }
 
 /// Region budget triple.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Budget {
     /// Region budget.
     pub b: u64,
@@ -50,4 +130,22 @@ pub fn feasible(m: u64, budget: &Budget) -> bool {
 /// increase, and must drop by at least `bar` at the validated state.
 pub fn net_reclaim_ok(phi_pre: u64, phi_post: u64, bar: u64) -> bool {
     phi_post <= phi_pre && phi_pre - phi_post >= bar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #104-3: a margin-drift fixture raises the per-declaration charge and
+    /// bumps the version; a stale version never wins.
+    #[test]
+    fn margin_drift_fixture_recalibrates_under_a_new_version() {
+        let v1 = Margins::V1;
+        let drifted = v1.recalibrate(2, 128).expect("newer version recalibrates");
+        assert_eq!(drifted.version, 2);
+        assert_eq!(drifted.per_tool_declaration, 128);
+        assert!(drifted.tool_surface(4) > v1.tool_surface(4));
+        assert!(v1.recalibrate(1, 999).is_err());
+        assert!(v1.recalibrate(0, 999).is_err());
+    }
 }
