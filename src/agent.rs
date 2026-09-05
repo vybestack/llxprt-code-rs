@@ -21,6 +21,7 @@ use crate::adapter::{
 };
 use crate::model::ModelConfig;
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
+use crate::tools::known_tool;
 use serde_json::Value as JsonValue;
 
 mod finish;
@@ -917,14 +918,6 @@ fn validate_calls(
         }
     }
     Ok(result.calls.clone())
-}
-
-/// Whether a tool name is known and (for shell) enabled.
-pub fn known_tool(name: &str, allow_shell: bool) -> bool {
-    matches!(
-        name,
-        "read_file" | "write_file" | "replace" | "list_directory" | "search_file_content"
-    ) || (name == "run_shell_command" && allow_shell)
 }
 
 /// The budget notice appended to the last tool result of a round so the model
