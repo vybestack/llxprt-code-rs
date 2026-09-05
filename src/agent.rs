@@ -700,6 +700,14 @@ impl CodingAgent {
                 rounds,
             ));
         }
+        // The forced summary is the reply of record for a collapsed turn, so the same
+        // malformed-tool-call detector as the normal round applies: a summary that
+        // answers with invoke markup is a failed turn, not a finished one.
+        if let Some((_, message)) =
+            malformed_tool_call::classify(&forced.text, forced.calls.len(), self.allow_shell)
+        {
+            return Err(self.dead(store, reserved, MALFORMED_TOOL_CALL_KEY, &message, rounds));
+        }
         Ok(())
     }
 

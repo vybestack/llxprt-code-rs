@@ -83,6 +83,32 @@ fn unknown_tag_names_are_inert() {
     }
 }
 
+/// Text whose tail is a lone `<` or `<<` (a comparison, a truncated tag) must scan to
+/// the end without panicking and must never look like tool-call syntax.
+#[test]
+fn trailing_angle_bracket_never_panics_or_fires() {
+    for text in [
+        "value = x<",
+        "value = x<<",
+        "x <",
+        "<",
+        "<<",
+        "a<b<",
+        "<<<<",
+    ] {
+        assert_eq!(
+            trigger_for(text, false),
+            None,
+            "a trailing angle bracket must not fire: {text}"
+        );
+        assert_eq!(
+            classify(text, 0, false),
+            None,
+            "a trailing angle bracket must not classify: {text}"
+        );
+    }
+}
+
 #[test]
 fn zero_call_tail_counts_trailing_call_free_rounds() {
     let with_calls = crate::session::RoundRecord {

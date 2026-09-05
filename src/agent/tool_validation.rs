@@ -5,6 +5,10 @@ use super::*;
 /// A tool call is valid only when its id is unique across the whole attempt
 /// (`seen`), the name is a known *and enabled* tool, and the arguments are a
 /// JSON object.
+///
+/// Tool names come from `crate::tools::known_tool` (the `TOOL_CATALOGUE`) via the
+/// glob import above, so this path and the malformed-tool-call detector share one
+/// source of truth.
 pub(super) fn validate_calls(
     seen: &mut std::collections::HashSet<String>,
     result: &LlmResult,
@@ -36,12 +40,4 @@ pub(super) fn validate_calls(
         }
     }
     Ok(result.calls.clone())
-}
-
-/// Whether a tool name is known and (for shell) enabled.
-pub fn known_tool(name: &str, allow_shell: bool) -> bool {
-    matches!(
-        name,
-        "read_file" | "write_file" | "replace" | "list_directory" | "search_file_content"
-    ) || (name == "run_shell_command" && allow_shell)
 }

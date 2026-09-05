@@ -474,6 +474,70 @@ fn forced_summary_counts_already_persisted_rounds() {
     assert_eq!(agent.model_calls(), 3);
 }
 
+/// A forced summary that answers with tool-call markup fails the turn the same way the
+/// normal-round path does, so a collapsed turn cannot hide behind the final request.
+#[test]
+fn forced_summary_with_tool_call_markup_fails_the_turn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-forced-1").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let empty_round = LlmResult {
+        text: String::new(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let forced = LlmResult {
+        text: "still working\n<tool_call>{\"name\":\"read_file\"}</tool_call>".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![empty_round, forced])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("a forced summary with tool-call markup must fail the turn");
+    assert_eq!(error.key, MALFORMED_TOOL_CALL_KEY);
+    assert!(
+        !error.message.contains("read_file"),
+        "no model text in the diagnostic"
+    );
+    assert_eq!(agent.model_calls(), 2);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Failed);
+}
+
+/// A forced summary that answers in ordinary prose still completes the turn, so the
+/// detector does not turn every forced wrap-up into a failure.
+#[test]
+fn forced_summary_in_prose_still_completes_the_turn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-forced-2").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let empty_round = LlmResult {
+        text: String::new(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let forced = LlmResult {
+        text: "I used read_file to inspect the file, and the work is complete.".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![empty_round, forced])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let run = agent.run(&store, &reserved).expect("prose forced summary");
+    assert_eq!(run.status, "ok");
+    assert_eq!(agent.model_calls(), 2);
+}
+
 /// A turn whose only assistant message is malformed tool-call text (pseudo-XML invoke
 #[test]
 fn malformed_tool_call_text_fails_the_turn() {

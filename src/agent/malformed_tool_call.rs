@@ -48,16 +48,18 @@ fn has_stray_dsml_tag(text: &str) -> bool {
 /// wrapper or a known tool. Only tag names are inspected, and the scan walks tag by tag
 /// so a long reply costs one bounded pass.
 fn has_tag_block(text: &str, allow_shell: bool) -> bool {
-    let mut cursor = 0;
-    while let Some(open) = text[cursor..].find('<') {
-        let start = cursor + open;
+    // Walk the matches by position so the cursor can never pass the end of the text:
+    // a trailing `<` or `<<` leaves no further match and the loop simply ends.
+    let mut searched_from = 0;
+    while let Some(open) = text[searched_from..].find('<') {
+        let start = searched_from + open;
         let rest = &text[start + 1..];
         let end = rest.find(['>', '<']).unwrap_or(rest.len());
         if tag_is_tool_shaped(&rest[..end], allow_shell) {
             return true;
         }
-        // Step past the tag body; a zero-length body still advances past the second `<`.
-        cursor = start + 1 + end.max(1);
+        // Step past the tag body, never past the text itself.
+        searched_from = (start + 1 + end.max(1)).min(text.len());
     }
     false
 }

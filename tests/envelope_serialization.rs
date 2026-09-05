@@ -36,6 +36,28 @@ fn success_envelope_bytes_are_pinned() {
 }
 
 #[test]
+fn error_envelope_carries_terminal_outcome() {
+    let mut error = AppError::new(
+        Code::Model,
+        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
+        "collapsed turn",
+    );
+    error.terminal_outcome = Some(llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY);
+    let outcome: Result<RunOutcome, AppError> = Err(error);
+    let line = cli::envelope(&outcome, "sess_1").to_line();
+    let text = String::from_utf8_lossy(&line).into_owned();
+    assert!(
+        text.contains("\"terminal_outcome\":\"malformed_tool_call\""),
+        "terminal outcome missing from {text}"
+    );
+    let document: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
+    assert_eq!(
+        document["error"]["terminal_outcome"],
+        serde_json::json!("malformed_tool_call")
+    );
+}
+
+#[test]
 fn nested_error_envelope_bytes_are_pinned() {
     let outcome: Result<RunOutcome, AppError> =
         Err(AppError::new(Code::Model, "model-\"bad", "line one\n雪"));
