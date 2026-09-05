@@ -1040,7 +1040,7 @@ fn oversized_search_output_is_bounded_before_retention() {
 #[test]
 fn timeout_at_lease_boundary_is_rejected() {
     use llxprt_code_rs::agent::{validate_timeout, TIMEOUT_LEASE_MARGIN_SECONDS};
-    use llxprt_code_rs::session::LEASE_SECONDS;
+    use llxprt_code_rs::limits::TIMEOUT_LEASE_SECONDS as LEASE_SECONDS;
     let boundary = LEASE_SECONDS - TIMEOUT_LEASE_MARGIN_SECONDS;
     assert!(validate_timeout(Some(std::time::Duration::from_secs(LEASE_SECONDS))).is_err());
     assert!(validate_timeout(Some(std::time::Duration::from_secs(boundary))).is_err());

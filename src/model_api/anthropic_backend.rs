@@ -53,7 +53,7 @@ impl AnthropicBackend {
                 | serdes_ai::models::ModelError::Network(detail) => {
                     format!("{error}: {detail}")
                 }
-                _ => match crate::agent::transport::TransportFailure::from_model_error(&error) {
+                _ => match crate::transport::TransportFailure::from_model_error(&error) {
                     Some(failure) => failure.diagnostic(),
                     None => error.to_string(),
                 },

@@ -31,8 +31,9 @@ pub use finish::finish_check;
 pub use crate::adapter::chat_route;
 
 pub use crate::limits::{
-    prompt_digest, MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES, MAX_TOOL_NAME_BYTES,
-    MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES, MAX_TURN_ROUNDS,
+    prompt_digest, validate_timeout, MAX_RESPONSE_BYTES, MAX_TOOL_CALL_ID_BYTES,
+    MAX_TOOL_NAME_BYTES, MAX_TURN_ARGS_BYTES, MAX_TURN_ASSISTANT_BYTES, MAX_TURN_OUTPUT_BYTES,
+    MAX_TURN_ROUNDS, TIMEOUT_LEASE_MARGIN_SECONDS,
 };
 /// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
 /// the **complete** outgoing request on top of the message parts. The value stays
@@ -95,18 +96,14 @@ pub struct CodingAgent {
 mod error;
 pub use error::AgentError;
 mod helpers;
-pub(crate) mod transport;
+use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
     final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
     validate_provider_result,
 };
-use transport::TransportFailure;
-
 mod config;
-pub use config::{
-    coding_system_prompt, round_limit_message, validate_timeout, TIMEOUT_LEASE_MARGIN_SECONDS,
-};
+pub use config::{coding_system_prompt, round_limit_message};
 
 struct TurnUsage {
     assistant_bytes: usize,

@@ -9,9 +9,9 @@
 //! The agent talks to the model through the [`ChatBackend`] trait so tests can drive the
 //! whole turn loop against a mock with no network.
 
-use crate::agent::transport::TransportFailure;
 use crate::model::{ModelConfig, SerdeAiParams, SerdeAiSettings};
 use crate::session::RoundRecord;
+use crate::transport::TransportFailure;
 use serdes_ai::core::{
     messages::ToolCallArgs,
     messages::{FinishReason, ModelResponse, ModelResponsePart},
