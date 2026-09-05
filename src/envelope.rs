@@ -54,6 +54,9 @@ pub struct OkEnvelope {
     #[schemars(range(min = -1))]
     pub declared_tool_calls: i64,
     pub budget_exhausted: bool,
+    /// Consecutive trailing assistant rounds that parsed to zero tool calls, including
+    /// the final summary round (so a healthy wrap-up reports `1`).
+    pub zero_call_tail: u64,
     pub prompt_digest: String,
     /// Terminal context-store outcome declared by the runtime, when one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,6 +85,10 @@ pub struct EnvelopeError {
     /// Outcome of the agent/session independent of profile publication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_status: Option<String>,
+    /// Terminal outcome the run declared for itself (issue 146): a zero-call reply
+    /// whose text structurally resembles tool-call syntax.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_outcome: Option<String>,
 }
 
 impl Envelope {
@@ -98,6 +105,7 @@ impl Envelope {
                 message: message.into(),
                 stage: None,
                 session_status: None,
+                terminal_outcome: None,
             },
         })
     }
@@ -116,6 +124,7 @@ impl Envelope {
                 message: message.into(),
                 stage: Some(stage.into()),
                 session_status: Some(session_status.into()),
+                terminal_outcome: None,
             },
         })
     }

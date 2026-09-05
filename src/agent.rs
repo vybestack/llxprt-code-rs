@@ -21,7 +21,6 @@ use crate::adapter::{
 };
 use crate::model::ModelConfig;
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
-use crate::tools::known_tool;
 use serde_json::Value as JsonValue;
 
 mod finish;
@@ -44,9 +43,17 @@ pub use request_budget::{
     PER_PART_OVERHEAD_BYTES, PER_REQUEST_OVERHEAD_BYTES,
 };
 
+pub(crate) mod malformed_tool_call;
 mod memory;
 mod request_budget;
 mod tool_round;
+mod tool_validation;
+pub use crate::tools::known_tool;
+use tool_validation::validate_calls;
+
+/// Stable error key and terminal outcome for a zero-call reply that structurally
+/// resembles tool-call syntax (issue 146).
+pub const MALFORMED_TOOL_CALL_KEY: &str = "malformed_tool_call";
 pub use self::tool_round::parse_object_args;
 
 /// Result of a completed turn (either live or replayed).
@@ -63,6 +70,13 @@ pub struct CompletedRun {
     /// True when the turn hit its tool-call budget: excess calls were refused
     /// and the summary came from the forced final round.
     pub budget_exhausted: bool,
+    /// Consecutive trailing assistant rounds of this attempt that parsed to zero tool
+    /// calls, including the final summary round. A healthy wrap-up ends on 1.
+    pub zero_call_tail: u64,
+    /// Terminal outcome the run itself declared (issue 146): a zero-call reply whose
+    /// text structurally resembles tool-call syntax. `None` leaves the context
+    /// runtime's own verdict ([`crate::context_policy`]) in place.
+    pub terminal_outcome: Option<&'static str>,
     pub prompt_digest: String,
     pub status: String,
     pub branch: bool,
@@ -319,7 +333,9 @@ impl CodingAgent {
             branch: reserved.attempt > 1,
             declared_tool_calls: self.max_tool_calls,
             budget_exhausted: false,
+            zero_call_tail: malformed_tool_call::zero_call_tail(&reserved.rounds),
             replayed: true,
+            terminal_outcome: None,
         }
     }
 
@@ -610,6 +626,22 @@ impl CodingAgent {
     ) -> Result<String, AgentError> {
         if !attempt.current.text.trim().is_empty() {
             self.check_round_limit(store, reserved, &attempt.rounds)?;
+            if let Some((_, message)) = malformed_tool_call::classify(
+                &attempt.current.text,
+                attempt.current.calls.len(),
+                self.allow_shell,
+            ) {
+                // A reply that looks like a tool call but parses to none is a collapsed
+                // turn, not a finished one: persist it as a terminal failure so the
+                // session keeps the rounds and the CLI keeps the nonzero exit.
+                return Err(self.dead(
+                    store,
+                    reserved,
+                    MALFORMED_TOOL_CALL_KEY,
+                    &message,
+                    &attempt.rounds,
+                ));
+            }
             return Ok(std::mem::take(&mut attempt.current.text));
         }
         self.forced_summary(store, reserved, tools, attempt)
@@ -695,8 +727,10 @@ impl CodingAgent {
             tool_count: attempt.usage.total_calls,
             declared_tool_calls: self.max_tool_calls,
             budget_exhausted: attempt.budget_exhausted,
+            zero_call_tail: malformed_tool_call::zero_call_tail(&attempt.rounds),
             prompt_digest: prompt_digest(&reserved.prompt),
             status: "ok".into(),
+            terminal_outcome: None,
             branch: reserved.attempt > 1,
             replayed: false,
         })
@@ -876,40 +910,6 @@ impl CodingAgent {
             },
         })
     }
-}
-
-/// whole attempt (`seen`), a known *and enabled* tool name, and a JSON object of arguments.
-fn validate_calls(
-    seen: &mut std::collections::HashSet<String>,
-    result: &LlmResult,
-    allow_shell: bool,
-) -> Result<Vec<ToolCall>, String> {
-    for c in &result.calls {
-        if c.id.trim().is_empty() {
-            return Err("model returned a tool call with an empty id".into());
-        }
-        if !seen.insert(c.id.clone()) {
-            return Err(format!("duplicate tool call id {}", c.id));
-        }
-    }
-    for c in &result.calls {
-        match serde_json::from_str::<serde_json::Value>(&c.args_json) {
-            Ok(serde_json::Value::Object(_)) => {}
-            Ok(_) => {
-                return Err(format!(
-                    "tool call {}: arguments must be a JSON object",
-                    c.name
-                ));
-            }
-            Err(e) => return Err(format!("tool call {}: invalid argument JSON: {e}", c.name)),
-        }
-    }
-    for c in &result.calls {
-        if !known_tool(&c.name, allow_shell) {
-            return Err(format!("unknown or disabled tool {}", c.name));
-        }
-    }
-    Ok(result.calls.clone())
 }
 
 /// The budget notice appended to the last tool result of a round so the model
