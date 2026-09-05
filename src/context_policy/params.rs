@@ -9,6 +9,10 @@ pub enum ParameterClass {
     ProfileTunable,
     Calibrated,
     OperatorEnvelope,
+    /// The name is not declared in the registry. Classed treatment must
+    /// never silently default an unknown name to the most restrictive class
+    /// (issue 111): the mistyped name is its own answer.
+    Unknown,
 }
 
 /// One uniquely classed Phase-4 parameter.
@@ -178,10 +182,13 @@ impl Default for ParameterRegistry {
 }
 
 impl ParameterRegistry {
+    /// The declared class of a registry name, or [`ParameterClass::Unknown`]
+    /// when the name is not declared (issue 111): an unknown name is never
+    /// silently mapped onto the most restrictive class.
     pub fn class_of(name: &str) -> ParameterClass {
         lookup(name)
             .map(|parameter| parameter.class)
-            .unwrap_or(ParameterClass::SafetyInvariant)
+            .unwrap_or(ParameterClass::Unknown)
     }
     pub fn value(&self, name: &str) -> Option<f64> {
         self.values.get(name).copied()
@@ -204,6 +211,10 @@ impl ParameterRegistry {
             ParameterClass::ProfileTunable => UpdateAuthority::ProfileLoad,
             ParameterClass::Calibrated => UpdateAuthority::CalibrationTxn,
             ParameterClass::OperatorEnvelope => UpdateAuthority::Operator,
+            // The registry is the sole source of truth (issue 111): a class
+            // the registry never declared is not any operator authority, so
+            // the update is refused as unknown rather than guessed.
+            ParameterClass::Unknown => return Err(UpdateError::Unknown),
         };
         if authority != expected {
             return Err(UpdateError::WrongAuthority);

@@ -3,6 +3,7 @@ use serde_json::json;
 use std::time::Duration;
 
 mod advanced;
+mod catalogue;
 mod output_caps;
 mod redaction;
 

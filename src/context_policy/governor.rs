@@ -89,6 +89,32 @@ impl Governor {
         &self.state
     }
 
+    /// The window the governor is currently accounting, if any admissions
+    /// entered one yet.
+    pub fn active_window(&self) -> Option<u64> {
+        self.active_window
+    }
+
+    /// Corrects a proposal-time admission to the measured post-write size.
+    ///
+    /// The verdict had to be issued BEFORE the write, so the window counted
+    /// the raw input bound. What actually entered the context is the record
+    /// length, so the difference is refunded to the window's admission
+    /// counters and counted as reclaimed working set: the window's rate
+    /// predicate then judges the real keep/reclaim split, not the raw
+    /// traffic bound (issue 110).
+    pub fn settle_admission(&mut self, source: u64, window: u64, raw: u64, admitted: u64) {
+        if self.active_window != Some(window) {
+            return;
+        }
+        let refund = raw.saturating_sub(admitted);
+        let used = self.source_admitted.entry(source).or_insert(0);
+        *used = used.saturating_sub(refund);
+        self.state.window_admitted = self.state.window_admitted.saturating_sub(refund);
+        self.state.turn_admitted = self.state.turn_admitted.saturating_sub(refund);
+        self.state.window_reclaimed = self.state.window_reclaimed.saturating_add(refund);
+    }
+
     /// Starts a distinct model turn without changing window accounting.
     pub fn begin_turn(&mut self) {
         self.state.turn_admitted = 0;
