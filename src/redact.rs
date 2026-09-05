@@ -88,7 +88,9 @@ pub fn scrub_secrets(text: &str, secrets: &[String]) -> String {
             out = out.replace(secret, "[redacted]");
         }
     }
-    // Collapse any surviving `scheme://user:pass@host` / query / fragment chunks.
+    // Collapse any surviving `scheme://user:pass@host` / query / fragment chunks. Only a
+    // real URL-shaped chunk is rewritten; a bare `?` or `#` with no `://` scheme
+    // behind it in the same run is ordinary punctuation and round-trips untouched.
     if out.contains('@') || out.contains('?') || out.contains('#') {
         out = scrub_url_parts(&out);
     }
@@ -248,7 +250,7 @@ fn scrub_url_parts(text: &str) -> String {
     let mut out: Vec<char> = text.chars().collect();
     let mut i = 0usize;
     while i < out.len() {
-        if out[i] == '?' || out[i] == '#' {
+        if (out[i] == '?' || out[i] == '#') && inside_url_chunk(&out, i) {
             i = scrub_url_suffix(&mut out, i);
             continue;
         }
@@ -259,6 +261,19 @@ fn scrub_url_parts(text: &str) -> String {
         i += 1;
     }
     out.into_iter().collect()
+}
+
+/// Whether the `?` or `#` at `at` sits inside a URL chunk: scanning back over
+/// the same run (no whitespace or closing delimiter crossed) reaches a `://` scheme
+/// separator. Ordinary punctuation with no scheme around it (a Rust attribute line, a
+/// shebang, a trailing `?`) is not a URL chunk and is left byte-identical, so the
+/// scrubber never does character-level redaction of ordinary punctuation (issue 148).
+fn inside_url_chunk(out: &[char], at: usize) -> bool {
+    let mut start = at;
+    while start > 0 && !matches!(out[start - 1], ' ' | '\t' | '\n' | '\r' | '"' | ')' | '}') {
+        start -= 1;
+    }
+    out[start..at].windows(3).any(|w| w == [':', '/', '/'])
 }
 
 fn scrub_url_suffix(out: &mut [char], start: usize) -> usize {
@@ -524,6 +539,49 @@ mod tests {
         assert_eq!(redact_url("merely a string"), "<redacted url>");
         assert_eq!(safe_for_display("/etc/passwd"), "<redacted url>");
         assert_eq!(safe_for_display("http://h/a"), "http://h");
+    }
+
+    /// Issue 148 reproduction: the tool-result scrubber rewrote every bare `?` and
+    /// `#` into a `[r-----` style placeholder, so shell output lost shebangs, Rust
+    /// attribute lines, backslash escapes, and `?`, and agents copied that mangled
+    /// form back into source files. With no secret shape present the corpus must
+    /// round-trip byte-identically.
+    #[test]
+    fn ordinary_punctuation_round_trips_byte_identically() {
+        let corpus = concat!(
+            "#!/bin/sh\n",
+            "#[test]\n",
+            "#[cfg_attr(miri, ignore)]\n",
+            "path = C:\\Users\\me\\src\\lib.rs\n",
+            "let v = s.split('\\n').find(|l| l.starts_with(\"# \"))?;\n",
+            "grep -n #TODO\" src\n",
+            "whoami? root\n",
+        );
+        assert_eq!(scrub_secrets(corpus, &[]), corpus);
+        let secret = "sk-super-fake-marker-777".to_string();
+        assert_eq!(
+            scrub_secrets(corpus, &[secret]),
+            corpus,
+            "an unrelated secret must not drag ordinary punctuation into a rewrite"
+        );
+    }
+
+    /// A genuine secret-shaped span is still replaced, and the replacement is a stable
+    /// marker that ordinary code text can never produce.
+    #[test]
+    fn secret_shaped_url_chunks_are_still_redacted() {
+        let src = concat!(
+            "prefix stays\n",
+            "leak https://h.example/v1?token=sk-fake-query-999&x=1#frag\n",
+            "leak https://u:pw@h.example/v1?a=b and c",
+        );
+        let out = scrub_secrets(src, &[]);
+        assert!(!out.contains("token=sk-fake-query-999"), "{out}");
+        assert!(!out.contains("frag"), "{out}");
+        assert!(!out.contains("u:pw"), "{out}");
+        assert!(out.starts_with("prefix stays\n"), "{out}");
+        assert!(!out.contains("a=b"), "the query value survived: {out}");
+        assert!(!out.contains("sk-fake"), "{out}");
     }
 
     #[test]
