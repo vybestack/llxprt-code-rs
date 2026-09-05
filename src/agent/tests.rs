@@ -312,7 +312,7 @@ fn reflected_secret_in_tool_args_prevents_tool_side_effect() {
         calls: vec![ToolCall {
             id: "c1".into(),
             name: "write_file".into(),
-            args_json: format!(r#"{{"path":"leak.txt","content":"{secret}"}}"#),
+            args_json: format!(r#"{{"path":"{secret}"}}"#),
         }],
         finish_reason: Some(FinishReason::ToolCall),
     };
@@ -472,4 +472,128 @@ fn forced_summary_counts_already_persisted_rounds() {
         .expect_err("forced round must exceed cap");
     assert_eq!(error.key, "turn-budget");
     assert_eq!(agent.model_calls(), 3);
+}
+
+/// A turn whose only assistant message is malformed tool-call text (pseudo-XML invoke
+#[test]
+fn malformed_tool_call_text_fails_the_turn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-tag-1").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let malformed = LlmResult {
+        text: "<tool_calls><function_calls>read_file</function_calls></tool_calls>".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![malformed])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("malformed tool-call prose must fail the turn");
+    assert_eq!(error.key, MALFORMED_TOOL_CALL_KEY);
+    assert_eq!(error.code, crate::envelope::Code::Model);
+    assert!(
+        !error.message.contains("read_file"),
+        "no model text in the diagnostic"
+    );
+    assert_eq!(agent.model_calls(), 1);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Failed);
+}
+
+/// A stray DSML close delimiter after valid tool use fails the same way, so a turn that
+#[test]
+fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-dsml-1").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "list_directory".into(),
+            args_json: r#"{"path":"."}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let fragment = LlmResult {
+        text: "work finished\n</｜DSML｜parameter>".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![tool_round, fragment])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("a stray DSML fragment must fail the turn");
+    assert_eq!(error.key, MALFORMED_TOOL_CALL_KEY);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Failed);
+}
+
+/// A normal wrap-up final message still succeeds, reports `zero_call_tail: 1`, and
+#[test]
+fn normal_wrap_up_keeps_ok_exit_and_reports_zero_call_tail() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-ok-1").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let reply = LlmResult {
+        text: "I used read_file to inspect the file, and the change is complete.".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![reply])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let run = agent.run(&store, &reserved).expect("healthy wrap-up");
+    assert_eq!(run.status, "ok");
+    assert_eq!(run.terminal_outcome, None);
+    assert_eq!(run.zero_call_tail, 1);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Completed);
+}
+
+/// A tool-using turn that wraps up normally reports a trailing zero-call tail of one:
+#[test]
+fn tool_using_turn_reports_single_trailing_zero_call_round() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("malf-tail-1").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "list_directory".into(),
+            args_json: r#"{"path":"."}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let final_round = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![tool_round, final_round])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let run = agent
+        .run(&store, &reserved)
+        .expect("a tool turn with a normal summary succeeds");
+    assert_eq!(run.status, "ok");
+    assert_eq!(run.tool_count, 1);
+    assert_eq!(run.zero_call_tail, 1);
 }
