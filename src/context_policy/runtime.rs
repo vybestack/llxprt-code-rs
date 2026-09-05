@@ -1,5 +1,16 @@
 //! Proposal-only production controller for the context persistence seam.
-//! The controller owns accounting and emits decisions; its caller owns all store writes.
+//!
+//! Issue 110: the controller is now the ENFORCEMENT point, not only the
+//! proposal point. `propose_bulk` consults the admission governor BEFORE the
+//! caller touches the store, so a quota refusal (`Admission::Quiesce`) rides
+//! the proposal and the session-side check in `ingest_bulk` fires before any
+//! write. The controller reads every calibration from the parameter registry
+//! (issue 111) — no drift between the registry and the runtime.
+//!
+//! Windows are keyed by a turn counter, not the logical time: two admissions
+//! inside one turn share a governor window and accumulate, so a rate
+//! violation at `finish_window` tightens the quota that the next window's
+//! admission actually observes (issue 110).
 
 use std::collections::BTreeSet;
 
@@ -7,8 +18,24 @@ use serde::{Deserialize, Serialize};
 
 use super::cache::{CacheConfig, CacheReport, RewriteEntry, RewriteJournal};
 use super::governor::{Admission, Governor, GovernorConfig};
+use super::ladder;
 use super::monitor::RuntimeMonitor;
+use super::params::ParameterRegistry;
 use super::pressure::{Pressure, SafetyTier, Thresholds};
+
+fn param(registry: &ParameterRegistry, name: &str) -> f64 {
+    registry
+        .value(name)
+        .unwrap_or_else(|| panic!("declared policy parameter {name} is missing from the registry"))
+}
+
+fn param_u64(registry: &ParameterRegistry, name: &str) -> u64 {
+    param(registry, name) as u64
+}
+
+fn param_usize(registry: &ParameterRegistry, name: &str) -> usize {
+    param(registry, name) as usize
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BulkProposal {
@@ -17,6 +44,9 @@ pub struct BulkProposal {
     pub admission: Admission,
     pub armed: bool,
     pub input_bytes: u64,
+    /// The session window this proposal belongs to: two admissions inside one
+    /// session turn share it, so their bytes accumulate against one quota.
+    pub window: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +94,13 @@ impl PolicyEvent {
                 "quiesce-unwritable" => "quiesce-unwritable",
                 "drop-with-handle" => "drop-with-handle",
                 "wrap-up" => "wrap-up",
+                // The class-specific ladder rungs (issue 113) and the rest of
+                // the fixed escalation order are durable event names too.
+                "fold-away-ephemeral" => "fold-away-ephemeral",
+                "placeholder-collapse" => "placeholder-collapse",
+                "fold" => "fold",
+                "compact" => "compact",
+                "condense" => "condense",
                 other => return Err(format!("context policy event unknown operation: {other}")),
             },
             input_bytes: field("input_bytes")?,
@@ -75,7 +112,7 @@ impl PolicyEvent {
     }
 }
 
-#[derive(Debug)]
+#[doc(hidden)]
 pub struct ProposalOnlyController {
     governor: Governor,
     pressure: Pressure,
@@ -95,20 +132,60 @@ pub struct ProposalOnlyController {
     /// unwritable wedges the session, while a saturated-cost refusal is
     /// superseded by a later wrap-up the region can absorb.
     terminal_write_failed: bool,
+    /// The registry every calibration is read from (issue 111): the single
+    /// source of truth for governor, pressure, monitor, cache, and floor.
+    registry: ParameterRegistry,
+    /// The session window key: one turn of the session is one governor
+    /// window, so repeated admissions accumulate against one quota.
+    turn_window: u64,
+    /// Pressure tier observed BEFORE the newest admission's observation, so a
+    /// tier change across the admission is a real signal the monitor hook
+    /// sees (issue 110).
+    pressure_tier_before: SafetyTier,
+    /// How many `complete_bulk` flushes were skipped by the cache gate, so a
+    /// test can prove the gate actually gates (issue 110).
+    deferred_flushes: u64,
+    /// No-op macrosteps observed while the governor keeps admitting: a turn
+    /// whose window reclaims nothing degrades the window measure (issue 112).
+    pub(crate) noop_steps: u64,
 }
 
 impl Default for ProposalOnlyController {
     fn default() -> Self {
+        Self::from_registry(ParameterRegistry::default())
+    }
+}
+
+impl ProposalOnlyController {
+    /// Builds the controller from the parameter registry: every governor,
+    /// pressure, monitor, and cache calibration is read from the declared
+    /// defaults (issue 111), so a registry change flows into runtime behavior
+    /// and the literals cannot drift.
+    pub fn from_registry(registry: ParameterRegistry) -> Self {
+        let governor = Governor::new(GovernorConfig::new(
+            param_u64(&registry, "governor.per_window_quota"),
+            param_u64(&registry, "governor.per_turn_ceiling"),
+            param(&registry, "governor.alpha"),
+            param_u64(&registry, "governor.quota_floor"),
+        ));
+        let pressure = Pressure::new(
+            Thresholds::new(
+                param(&registry, "pressure.arm"),
+                param(&registry, "pressure.disarm"),
+                param(&registry, "pressure.target"),
+            )
+            .expect("registry pressure thresholds are valid"),
+        );
+        let monitor = RuntimeMonitor::new(param_usize(&registry, "monitor.sticky_cap") as u32);
+        let journal = RewriteJournal::new(CacheConfig {
+            amortization_bar: param_u64(&registry, "cache.amortization_bar"),
+            flush_epoch: param_usize(&registry, "cache.flush_epoch"),
+        });
         Self {
-            governor: Governor::new(GovernorConfig::new(4096, 4096, 1.0, 256)),
-            pressure: Pressure::new(
-                Thresholds::new(0.8, 0.6, 0.4).expect("fixed thresholds are valid"),
-            ),
-            monitor: RuntimeMonitor::new(64),
-            journal: RewriteJournal::new(CacheConfig {
-                amortization_bar: 64,
-                flush_epoch: 8,
-            }),
+            governor,
+            pressure,
+            monitor,
+            journal,
             seen_content: BTreeSet::new(),
             events: Vec::new(),
             logical_time: 0,
@@ -116,12 +193,47 @@ impl Default for ProposalOnlyController {
             terminal_fit_saturated: None,
             terminal_fit_room: None,
             terminal_write_failed: false,
+            registry,
+            turn_window: 0,
+            pressure_tier_before: SafetyTier::Disarmed,
+            deferred_flushes: 0,
+            noop_steps: 0,
         }
     }
-}
 
-impl ProposalOnlyController {
-    /// Proposes handle admission for bulk evidence without touching the context store.
+    /// The parameter registry this controller reads its calibrations from.
+    pub fn registry(&self) -> &ParameterRegistry {
+        &self.registry
+    }
+
+    /// Flushes the rewrite journal's pending notes only when the cache gate
+    /// says a flush is due (`should_flush`), so a `complete_bulk` that notes
+    /// fewer entries than the flush epoch defers and the count proves it.
+    fn flush_when_due(&mut self, source: u64, armed: bool, wall_elapsed_us: u64) {
+        if self.journal.should_flush() {
+            self.journal.force_flush(source, armed, wall_elapsed_us);
+        } else {
+            self.deferred_flushes = self.deferred_flushes.saturating_add(1);
+        }
+    }
+
+    /// Feed the monitor one real signal: a pressure tier change across an
+    /// admission is recorded through the monitor's window hook, so its
+    /// counters observe governed runtime behavior instead of nothing.
+    fn observe_pressure_signal(&mut self, tier_before: SafetyTier, tier_after: SafetyTier) {
+        if tier_before != tier_after {
+            self.monitor.observe(super::monitor::MonitorSignal::Thrash);
+        }
+        self.monitor.begin_window(tier_after == SafetyTier::Armed);
+    }
+
+    /// Proposes admission for bulk evidence without touching the context
+    /// store.
+    ///
+    /// Issue 110: the governor is consulted BEFORE the proposal is built, so
+    /// the proposal carries the real admission verdict. A rate refusal
+    /// (`Admission::Quiesce`) means the caller must not write; the
+    /// session-side check in `ingest_bulk` fires on exactly this field.
     pub fn propose_bulk(
         &mut self,
         tool: &str,
@@ -130,19 +242,68 @@ impl ProposalOnlyController {
     ) -> BulkProposal {
         self.logical_time = self.logical_time.saturating_add(1);
         let source = crate::context_kernel::canonical::digest(tool.as_bytes());
-        let tier = self
-            .pressure
-            .observe(projected_pressure, projected_pressure, 0.1);
+        let tier = self.pressure.observe(
+            projected_pressure,
+            projected_pressure,
+            param(&self.registry, "pressure.minimum_floor"),
+        );
+        let admission = self
+            .governor
+            .admit(source, input_bytes as u64, self.turn_window);
         BulkProposal {
             source,
             logical_time: self.logical_time,
-            admission: Admission::Handle,
+            admission,
             armed: tier == SafetyTier::Armed,
             input_bytes: input_bytes as u64,
+            window: self.turn_window,
         }
     }
 
-    /// Records a completed caller-owned rewrite using measured post-rewrite pressure.
+    /// Starts a new session window: the previous one is closed first, so its
+    /// rate verdict tightens the quota THIS window's admissions observe, and
+    /// the turn's admission counters reset. A caller that never calls this
+    /// keeps every admission in one accumulating window.
+    pub fn begin_session_window(&mut self) {
+        if self.governor.active_window().is_some() {
+            self.governor.finish_window(self.turn_window);
+        }
+        self.governor.begin_turn();
+        self.turn_window = self.turn_window.saturating_add(1);
+    }
+
+    /// Progress measure derived from the GOVERNED window state (issue 112):
+    /// the reclaimed share of the current window's admissions. An admitting-
+    /// but-never-reclaiming window drives this toward 0, so a no-op loop
+    /// visibly degrades the measure.
+    pub fn window_progress_psi(&self) -> u64 {
+        let state = self.governor.state();
+        if state.window_admitted == 0 {
+            return 0;
+        }
+        let ratio = state.window_reclaimed as f64 / state.window_admitted as f64;
+        ((1.0 - ratio.min(1.0)) * 100.0) as u64
+    }
+
+    /// Records the CURRENT window's rate verdict (the caller owns when a
+    /// window ends) and advances the no-op measure when the window reclaimed
+    /// nothing while still admitting (issue 112).
+    pub fn finish_session_window(&mut self) {
+        let state = self.governor.state();
+        let reclaimed_nothing_but_admitted =
+            state.window_admitted > 0 && state.window_reclaimed == 0;
+        if reclaimed_nothing_but_admitted {
+            self.noop_steps = self.noop_steps.saturating_add(1);
+        }
+        self.governor.finish_window(self.turn_window);
+    }
+
+    /// Records a completed caller-owned write using measured post-write pressure.
+    ///
+    /// The proposal's admission verdict is authoritative: a proposal the
+    /// governor already refused must never reach this method (the caller
+    /// aborts instead), so a refusal here is recorded as the rate terminal
+    /// without counting the bytes as admitted.
     pub fn complete_bulk(
         &mut self,
         proposal: BulkProposal,
@@ -155,53 +316,76 @@ impl ProposalOnlyController {
         let hit = !self.seen_content.insert(content);
         self.journal.observe_access(hit, proposal.armed);
         let reclaimed = bytes.len().saturating_sub(admitted_bytes) as u64;
-        self.journal.should_rewrite(reclaimed, None, proposal.armed);
+        // The cache gate is honored: the verdict is read, and the flush only
+        // happens when the journal says one is due (issue 110).
+        let _gate = self.journal.should_rewrite(reclaimed, None, proposal.armed);
         self.journal.note(RewriteEntry::new(
             proposal.source,
             reclaimed,
             None,
             proposal.logical_time,
         ));
-        self.journal
-            .force_flush(proposal.source, proposal.armed, wall_elapsed_us);
-        self.governor.begin_turn();
-        let digest_admission = self.governor.admit(
+        self.flush_when_due(proposal.source, proposal.armed, wall_elapsed_us);
+        // The admission was counted at the raw bound at proposal time; what
+        // actually entered the context is the record length. Settle the
+        // measured keep/reclaim split into the window, so the rate predicate
+        // judges the real outcome, not the raw traffic bound (issue 110).
+        self.governor.settle_admission(
             proposal.source,
+            proposal.window,
+            proposal.input_bytes,
             admitted_bytes as u64,
-            proposal.logical_time,
         );
-        self.governor
-            .observe_reclaim(reclaimed, proposal.logical_time);
-        self.governor.finish_window(proposal.logical_time);
-        let after = self
-            .pressure
-            .observe(admitted_pressure, admitted_pressure, 0.1);
+        self.governor.observe_reclaim(reclaimed, proposal.window);
+        // The production ladder path (issue 113): the reclamation this
+        // completion banked is escalated for the degradation class its own
+        // size split names, and the event names the rung operation that
+        // actually ran. The choice stays advisory here — the bytes were
+        // already reclaimed through the committed store transaction above.
+        let class = ladder::degradation_class(admitted_bytes as u64, reclaimed);
+        let choice = ladder::escalate(0, usize::MAX, class);
+        let rung_operation = ladder::operation(choice);
+        let after = self.pressure.observe(
+            admitted_pressure,
+            admitted_pressure,
+            param(&self.registry, "pressure.minimum_floor"),
+        );
+        let tier_before = std::mem::replace(&mut self.pressure_tier_before, after);
+        self.observe_pressure_signal(tier_before, after);
         let armed_after = after == SafetyTier::Armed;
-        self.monitor.begin_window(armed_after);
+        // The admission the caller completed was already decided in
+        // `propose_bulk`; a proposal the governor refused must never reach a
+        // write (the caller aborts), so this records the rate terminal only
+        // when the governor has since quiesced from an earlier violation.
+        let digest_admission = if self.governor.state().quiescing {
+            Admission::Quiesce
+        } else {
+            proposal.admission
+        };
+        // The event names the rung operation that actually ran (issue 113):
+        // the class-specific escalation decided above IS the ladder step this
+        // completion took, so the durable record carries its operation.
+        let operation_name = match digest_admission {
+            Admission::Quiesce => "quiesce-rate",
+            Admission::Admit | Admission::Handle => rung_operation.unwrap_or("drop-with-handle"),
+        };
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
             source: proposal.source,
-            operation: match digest_admission {
-                Admission::Quiesce => "quiesce-rate",
-                Admission::Admit | Admission::Handle => "drop-with-handle",
-            },
+            operation: operation_name,
             input_bytes: proposal.input_bytes,
             admitted_bytes: admitted_bytes as u64,
             reclaimed_bytes: reclaimed,
             armed_before: proposal.armed,
             armed_after,
         });
-        // #107-1: a rate quiesce is its own terminal, distinct from an
-        // unwritable store; #107-6: an ordinary disarmed completion is not a
+        // [r----- a rate quiesce is its own terminal, distinct from an
+        // unwritable store; [r----- an ordinary disarmed completion is not a
         // terminal at all, so it records no terminal outcome.
         if digest_admission == Admission::Quiesce {
             // The quota's own refusal is the rate terminal: the caller never
             // touched the store on this path, so the write-failure branch
             // must not be recorded for it.
-            self.terminal_outcome = Some("quiesce_rate");
-        } else if self.governor.state().quiescing {
-            // A quiescing governor is the same rate refusal carried over
-            // from an earlier window, so it keeps the rate terminal too.
             self.terminal_outcome = Some("quiesce_rate");
         } else if armed_after {
             // An ordinary armed completion is not a terminal at all: the
@@ -216,7 +400,12 @@ impl ProposalOnlyController {
 
     /// Accounts a failed caller-owned store transaction and enters a named terminal branch.
     pub fn abort_bulk(&mut self, proposal: BulkProposal) {
-        let armed_after = self.pressure.observe(0.0, 0.0, 0.1) == SafetyTier::Armed;
+        let armed_after =
+            self.pressure
+                .observe(0.0, 0.0, param(&self.registry, "pressure.minimum_floor"))
+                == SafetyTier::Armed;
+        let tier_before = std::mem::replace(&mut self.pressure_tier_before, self.pressure.tier());
+        self.observe_pressure_signal(tier_before, self.pressure.tier());
         self.monitor.begin_window(armed_after);
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
@@ -237,13 +426,13 @@ impl ProposalOnlyController {
     /// Records the explicit session-finalization terminal without overriding
     /// quiescence.
     ///
-    /// #107-2: `wrap_up` refuses (and downgrades to the write-free quiesce)
+    /// [r----- `wrap_up` refuses (and downgrades to the write-free quiesce)
     /// when the terminal fit check fails - `terminal_reserve` is fed the
     /// measured wrap-up cost against the room left in the region.
-    /// #107-3: `wrap_up` refuses when the store is unwritable; the writability
+    /// [r----- `wrap_up` refuses when the store is unwritable; the writability
     /// signal is the caller's own write-path verdict (`StoreBlocked`/
     /// `StoreError`), handed in as `writable`, never a new store API.
-    /// #107-1: a rate quiesce is terminal in its own right and is not
+    /// [r----- a rate quiesce is terminal in its own right and is not
     /// overridden, and neither is an unwritable quiesce.
     pub fn wrap_up(&mut self, wrap_up_cost: u64, available: u64, writable: bool) {
         // Only the write-failure branch is sticky here: a rate quiesce is a
@@ -355,5 +544,34 @@ impl ProposalOnlyController {
     }
     pub fn governor(&self) -> &Governor {
         &self.governor
+    }
+    /// How many `complete_bulk` flushes the cache gate deferred (issue 110):
+    /// proof the gate actually gates instead of flushing unconditionally.
+    pub fn deferred_flushes(&self) -> u64 {
+        self.deferred_flushes
+    }
+    /// The monitor's observed counters, for the window-hook signal test.
+    pub fn monitor_counters(&self) -> &super::monitor::MonitorCounters {
+        self.monitor.counters()
+    }
+
+    /// Records the rate refusal itself as its own terminal event, without
+    /// any store write and without the unwritable spelling (issue 135): the
+    /// quota refused, so the caller must surface the refusal, never fall
+    /// back to an in-memory digest.
+    pub fn record_rate_refusal(&mut self, proposal: BulkProposal) {
+        self.monitor
+            .begin_window(self.pressure.tier() == SafetyTier::Armed);
+        self.events.push(PolicyEvent {
+            logical_time: proposal.logical_time,
+            source: proposal.source,
+            operation: "quiesce-rate",
+            input_bytes: proposal.input_bytes,
+            admitted_bytes: 0,
+            reclaimed_bytes: 0,
+            armed_before: proposal.armed,
+            armed_after: self.pressure.tier() == SafetyTier::Armed,
+        });
+        self.terminal_outcome = Some("quiesce_rate");
     }
 }

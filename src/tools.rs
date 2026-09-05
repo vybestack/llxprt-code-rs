@@ -476,17 +476,29 @@ const MAX_SEARCH_NOTE_BYTES: usize = 128;
 const MAX_SEARCH_DATA_BYTES: usize = MAX_SEARCH_RESULT_BYTES - MAX_SEARCH_NOTE_BYTES;
 pub(crate) mod output_limits;
 
-/// Whether a name belongs to a tool that this agent can persist in a transcript.
+/// The single tool-name catalogue for the crate.
+pub(crate) const TOOL_CATALOGUE: &[&str] = &[
+    "read_file",
+    "write_file",
+    "replace",
+    "list_directory",
+    "search_file_content",
+    "run_shell_command",
+];
+
+/// Whether a tool name is registered for dispatch. `run_shell_command` counts as
+/// known only when `allow_shell` is set, because callers reject shell tool calls
+/// when shell is not allowed. The underlying catalogue is shared with
+/// `is_known_tool_name`.
+pub fn known_tool(name: &str, allow_shell: bool) -> bool {
+    TOOL_CATALOGUE.contains(&name) && (allow_shell || name != "run_shell_command")
+}
+
+/// Every catalogue name is persistable in a transcript, including
+/// `run_shell_command` regardless of policy, because transcripts must replay
+/// shell entries from before a policy change.
 pub(crate) fn is_known_tool_name(name: &str) -> bool {
-    matches!(
-        name,
-        "read_file"
-            | "write_file"
-            | "replace"
-            | "list_directory"
-            | "search_file_content"
-            | "run_shell_command"
-    )
+    known_tool(name, true)
 }
 
 pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
