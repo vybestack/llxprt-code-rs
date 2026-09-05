@@ -334,7 +334,7 @@ fn validate_nested_objects(value: &Value) -> Result<(), String> {
     let reason = result["reason_class"]
         .as_str()
         .ok_or("report result reason_class is not a string")?;
-    if !REASON_CLASS_NAMES.contains(&reason) {
+    if !reason.is_empty() && !REASON_CLASS_NAMES.contains(&reason) {
         return Err(format!(
             "report result reason_class {reason} is not a reason class the grader can name"
         ));
@@ -353,8 +353,9 @@ fn validate_nested_objects(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The leakage scan gates acceptance (#116.2/6): `clean` must be an explicit boolean and
-/// a report may only be accepted when the scan actually ran and found nothing.
+/// The leakage scan gates acceptance ([#116.1], R-012): `clean` must be an explicit
+/// boolean and a report may only be accepted when the scan actually ran and found
+/// nothing, which is what makes a leak a gate rather than a label.
 fn validate_leakage_scan(value: &Value) -> Result<(), String> {
     let leak = value["leakage_scan"]
         .as_object()
