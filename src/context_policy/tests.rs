@@ -3,7 +3,8 @@
 use crate::context_policy::cache::{CacheConfig, RewriteEntry, RewriteJournal};
 use crate::context_policy::governor::{Admission, Governor, GovernorConfig};
 use crate::context_policy::ladder::{
-    escalate, operation, select, select_candidate, Candidate, Capabilities, LadderChoice, Rung,
+    escalate, operation, select, select_candidate, Candidate, Capabilities, DegradationClass,
+    LadderChoice, Rung,
 };
 use crate::context_policy::monitor::{MonitorSignal, RuntimeMonitor};
 use crate::context_policy::params::{
@@ -210,12 +211,74 @@ fn ladder_fixed_order_and_capability_adjustment() {
     let terminal_rung = ladder[5] == Rung::Condense;
     assert!(terminal_rung);
 
-    let capped = escalate(3, 3);
+    let capped = escalate(3, 3, DegradationClass::GeneralDegradation);
     let wraps = matches!(capped, LadderChoice::WrapUp);
     assert!(wraps);
-    let zero_bound = escalate(0, 0);
+    let zero_bound = escalate(0, 0, DegradationClass::RederivableBulk);
     let quiesces = matches!(zero_bound, LadderChoice::Quiesce);
     assert!(quiesces);
+}
+
+/// Issue 113: step 0 is the degradation class's OWN designated emergency rung,
+/// so the table over all classes is pinned: each class escalates into the
+/// operation that answers its own degradation first, never a round-robin
+/// slot that ignores the class.
+#[test]
+fn escalation_step_zero_is_the_class_designated_emergency_rung() {
+    let expected = [
+        (DegradationClass::EphemeralBuildup, Rung::FoldAwayEphemeral),
+        (
+            DegradationClass::PlaceholderSaturation,
+            Rung::CollapsePlaceholders,
+        ),
+        (DegradationClass::RederivableBulk, Rung::DropWithHandle),
+        (DegradationClass::RedundantDetail, Rung::Fold),
+        (DegradationClass::FragmentedContent, Rung::Compact),
+        (DegradationClass::GeneralDegradation, Rung::Condense),
+    ];
+    for (class, rung) in expected {
+        let choice = escalate(0, 6, class);
+        assert_eq!(
+            choice,
+            LadderChoice::Emergency(rung),
+            "{class:?} must escalate into its own emergency rung first"
+        );
+    }
+}
+
+/// Issue 113: after the emergency step the walk CONTINUES from the following
+/// rung in the fixed order (not a restart at the top), wrapping at the end.
+#[test]
+fn escalation_continues_from_the_rung_after_the_emergency_step() {
+    // RederivableBulk's emergency rung is DropWithHandle (fixed index 2), so
+    // step 1 is the rung AFTER it: Fold.
+    let after = escalate(1, 6, DegradationClass::RederivableBulk);
+    assert_eq!(after, LadderChoice::Rung(Rung::Fold));
+    // ...and step 2 continues to Compact, proving no restart happened.
+    let next = escalate(2, 6, DegradationClass::RederivableBulk);
+    assert_eq!(next, LadderChoice::Rung(Rung::Compact));
+    // The walk wraps at the end of the fixed order: Emergency(2) + 4 → index 0.
+    let wrapped = escalate(4, 6, DegradationClass::RederivableBulk);
+    assert_eq!(wrapped, LadderChoice::Rung(Rung::FoldAwayEphemeral));
+}
+
+/// The terminal arms are unchanged by the class input (issue 113): a bound of
+/// zero still refuses into Quiesce and a step at or past the bound still
+/// hands over to WrapUp, for EVERY class.
+#[test]
+fn escalation_terminals_hold_for_every_class() {
+    for class in DegradationClass::all() {
+        assert_eq!(
+            escalate(0, 0, class),
+            LadderChoice::Quiesce,
+            "bound 0 must quiesce for {class:?}"
+        );
+        assert_eq!(
+            escalate(6, 6, class),
+            LadderChoice::WrapUp,
+            "step >= bound must wrap up for {class:?}"
+        );
+    }
 }
 
 #[test]
@@ -518,12 +581,13 @@ fn runtime_failed_proposal_quiesces_and_wrap_up_cannot_override_it() {
 }
 
 /// Drives the controller's own governor into a rate quiesce the way
-/// production does: every window admits at the quota while reclaiming one
-/// byte, so `predicate_holds` keeps failing, the quota tightens to the floor,
-/// and the governor quiesces (`governor_violation_tightens_floor_then_quiesces`
-/// proves the same walk on the bare governor). The completion after that is
-/// refused by the quiescing quota itself, which is what records the rate
-/// terminal as its own event instead of a write failure.
+/// production does: every session window admits the whole quota and reclaims
+/// nothing, so `predicate_holds` keeps failing at `finish_session_window`,
+/// the quota tightens to the floor, and the governor quiesces
+/// (`governor_violation_tightens_floor_then_quiesces` proves the same walk on
+/// the bare governor). The completion after that is refused by the quiescing
+/// quota itself, which is what records the rate terminal as its own event
+/// instead of a write failure.
 fn drive_governor_to_rate_quiesce(
     policy: &mut crate::context_policy::runtime::ProposalOnlyController,
 ) {
@@ -534,10 +598,22 @@ fn drive_governor_to_rate_quiesce(
             window < 64,
             "the governor must tighten to the floor and then quiesce"
         );
+        // W1: windows are session-owned now, so the driver closes each window
+        // explicitly — the violation at `finish_window` tightens the quota the
+        // NEXT window's admission observes.
+        policy.begin_session_window();
+        // One admission per window, capped by the TURN ceiling: an oversized
+        // probe would be refused as an uncounted Handle and the window would
+        // stay empty, so the probe must actually enter to violate the rate.
         let quota = policy.governor().state().quota;
-        let bytes = vec![b'x'; quota as usize + 1];
+        let ceiling = policy
+            .registry()
+            .value("governor.per_turn_ceiling")
+            .expect("the registry declares the turn ceiling") as u64;
+        let bytes = vec![b'x'; quota.min(ceiling) as usize];
         let proposal = policy.propose_bulk("read_file", bytes.len(), 1.0);
-        policy.complete_bulk(proposal, &bytes, quota as usize, 1.0, 7);
+        policy.complete_bulk(proposal, &bytes, bytes.len(), 1.0, 7);
+        policy.finish_session_window();
     }
     assert!(policy.governor().state().at_floor);
     // The next admission is refused by the quiescing quota, so the caller never
@@ -677,8 +753,17 @@ fn parameter_mutations_are_authorized_logged_and_armed_safe() {
     let mut registry = ParameterRegistry::default();
     assert_eq!(
         ParameterRegistry::class_of("unknown.parameter"),
-        ParameterClass::SafetyInvariant
+        ParameterClass::Unknown,
+        "issue 111: an undeclared name is Unknown, never SafetyInvariant"
     );
+    let unknown = registry.update(
+        "unknown.parameter",
+        1.0,
+        3,
+        UpdateAuthority::Operator,
+        false,
+    );
+    assert_eq!(unknown, Err(UpdateError::Unknown));
     let safety = registry.update("governor.alpha", 0.4, 1, UpdateAuthority::Operator, false);
     assert_eq!(safety, Err(UpdateError::SafetyInvariant));
     let wrong = registry.update("pressure.arm", 0.9, 1, UpdateAuthority::Operator, false);
@@ -728,4 +813,63 @@ fn source_scoped_forced_flush_leaves_other_notes_pending() {
     let second = journal.force_flush(2, false, 10);
     assert_eq!(second.len(), 1);
     assert_eq!(second[0].source, 2);
+}
+
+/// Issue 111: the controller's every calibration is read from the registry.
+/// This enumerates the parameters the runtime consumes and proves each stays
+/// declared — a rename or removal here must break this test, not silently
+/// fall back to a drifting literal.
+#[test]
+fn controller_calibration_is_registry_sourced() {
+    let registry = ParameterRegistry::default();
+    for name in [
+        "governor.per_window_quota",
+        "governor.per_turn_ceiling",
+        "governor.alpha",
+        "governor.quota_floor",
+        "pressure.arm",
+        "pressure.disarm",
+        "pressure.target",
+        "pressure.minimum_floor",
+        "monitor.sticky_cap",
+        "cache.amortization_bar",
+        "cache.flush_epoch",
+    ] {
+        assert!(
+            registry.value(name).is_some(),
+            "{name} must stay declared: the runtime reads its calibration there"
+        );
+    }
+}
+
+/// Issue 111 mutation proof: a registry default change flows into runtime
+/// behavior WITHOUT touching controller code. The same proposal the default
+/// registry admits outright is degraded to a handle once ONLY the registry's
+/// `governor.per_turn_ceiling` default is lowered.
+#[test]
+fn registry_default_changes_flow_into_runtime_behavior() {
+    let bytes = 512usize;
+    let mut default = crate::context_policy::runtime::ProposalOnlyController::default();
+    let admitted = default.propose_bulk("read_file", bytes, 1.0);
+    assert_eq!(admitted.admission, Admission::Admit);
+
+    let mut registry = ParameterRegistry::default();
+    registry
+        .update(
+            "governor.per_turn_ceiling",
+            1.0,
+            1,
+            UpdateAuthority::Operator,
+            false,
+        )
+        .expect("the operator may tune its own envelope");
+    assert_eq!(registry.value("governor.per_turn_ceiling"), Some(1.0));
+    let mut degraded =
+        crate::context_policy::runtime::ProposalOnlyController::from_registry(registry);
+    let proposal = degraded.propose_bulk("read_file", bytes, 1.0);
+    assert_eq!(
+        proposal.admission,
+        Admission::Handle,
+        "the lowered registry ceiling must degrade the same traffic"
+    );
 }

@@ -48,7 +48,7 @@ mod memory;
 mod request_budget;
 mod tool_round;
 mod tool_validation;
-pub use tool_validation::known_tool;
+pub use crate::tools::known_tool;
 use tool_validation::validate_calls;
 
 /// Stable error key and terminal outcome for a zero-call reply that structurally
