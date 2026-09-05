@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `8c9e9759e5b9c0a49e8346cd94c7e2cfb83b787857ddc47248838845ee59ecc7`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `26fcd25e10e8177d819b55bdb11c3703c796d2d339b41161e093400cf8c95d13`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -223,6 +223,27 @@ configured request timeout stays the single source of truth in the host configur
 two distinct configured timeouts must both yield the same value-free sentence) and the host
 `tests/provider.rs` `timed_out_transport_reports_no_duration` regression (the real adapter with a
 150 ms request timeout against a silent loopback provider).
+
+## Patch 12 - structured transport classification and bounded body prefix
+(`vendor/serdes-ai-models/src/error.rs`, `TransportDetail` + `TransportClass` + `TransportOrigin` + `UrlClass` + `classify_status`;
+`vendor/serdes-ai-models/src/response.rs`, `transport_detail` + `bounded_body_prefix` + `parse_retry_after`;
+`vendor/serdes-ai-models/src/openai/chat.rs`, `handle_error_response`)
+
+`ModelError` gains a `Transport(TransportDetail)` variant carrying structured, value-free facts: the failure
+origin (`connect`, `timeout`, `request`, `body`, `decode`, `redirect`, `status <n>`, `unknown`), the URL
+scheme class only (`https`, `http`, `other`), the HTTP status when one exists, a bounded response-body
+prefix (`MAX_TRANSPORT_BODY_PREFIX_BYTES = 512`) together with its total byte length, and the provider's
+`Retry-After` hint. `classify_status(status, body)` maps those facts onto `TransportClass`
+(`rate-limit`, `quota-exhausted`, `transient-server`, `connectivity`, `permanent`), and quota or billing
+wording in the bounded body wins over the status, so a weekly usage limit riding on a 429 or a 403 is a
+non-retryable exhaustion rather than a throttle. `From<reqwest::Error>` maps any remaining transport
+failure onto the structured detail instead of a bare string, and the public `Display` stays value-free
+(`Model transport failed (<site>, class <token>, retryable|not retryable)`), never rendering the body
+prefix. `ModelError::transport_class()` exposes the classification for retry policy while `is_retryable`
+keeps its historical coarser outcome. The OpenAI chat path reads a failed response through
+`response::transport_detail` instead of `error_text`, so the bounded body is carried as a typed prefix
+the host scrubs and renders on its own bounded path.
+
 
 ## Tests
 

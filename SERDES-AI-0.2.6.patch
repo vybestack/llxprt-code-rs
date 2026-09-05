@@ -12291,17 +12291,234 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..211c904 100644
+index 58b6fc1..b17495c 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
-@@ -2,13 +2,10 @@
+@@ -2,13 +2,228 @@
  
  use std::collections::HashMap;
  use std::time::Duration;
 -use thiserror::Error;
--
+ 
 -/// Model-related errors.
 -#[derive(Debug, Error)]
++/// Retryability classification for a transport failure. The class states a fact about
++/// the failure; it is not a retry policy, which is owned by the host.
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub enum TransportClass {
++    /// Provider throttling: HTTP 429 without quota or billing wording in the body.
++    /// Retryable, with or without a `Retry-After` hint.
++    RateLimit,
++    /// Quota or billing hard stop (a weekly or monthly usage cap, `insufficient_quota`,
++    /// a payment requirement). Not retryable: backoff cannot clear it.
++    QuotaExhausted,
++    /// Transient provider-side failure (5xx). Retryable.
++    TransientServer,
++    /// Connection-level failure: connect, timeout, or a dropped or undecodable body.
++    /// Retryable.
++    Connectivity,
++    /// Definitive refusal: a 4xx authorization or request-shape error. Not retryable.
++    Permanent,
++}
++
++impl TransportClass {
++    /// Whether an identical request could still succeed. Throttling, transient 5xx, and
++    /// connectivity failures can; quota exhaustion and 4xx refusals cannot.
++    pub fn is_retryable(self) -> bool {
++        matches!(
++            self,
++            Self::RateLimit | Self::TransientServer | Self::Connectivity
++        )
++    }
++
++    /// The stable, value-free token used by diagnostics and machine consumers.
++    pub fn as_str(self) -> &'static str {
++        match self {
++            Self::RateLimit => "rate-limit",
++            Self::QuotaExhausted => "quota-exhausted",
++            Self::TransientServer => "transient-server",
++            Self::Connectivity => "connectivity",
++            Self::Permanent => "permanent",
++        }
++    }
++}
++
++/// Where a transport failure happened. Value-free by construction: no host, port, path,
++/// query, or credential ever travels in it.
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub enum TransportOrigin {
++    /// Connection establishment failed: DNS resolution, TCP, or TLS.
++    Connect,
++    /// The configured request timeout fired. reqwest reports no elapsed duration.
++    Timeout,
++    /// The request could not be built or sent.
++    Request,
++    /// The response body transfer failed mid-stream (a dropped connection).
++    Body,
++    /// The response body could not be decoded.
++    Decode,
++    /// A redirect was refused.
++    Redirect,
++    /// The provider answered with this HTTP error status.
++    Status(u16),
++    /// An unclassified transport failure.
++    Unknown,
++}
++
++impl TransportOrigin {
++    /// The stable, value-free token used by diagnostics.
++    pub fn as_str(self) -> &'static str {
++        match self {
++            Self::Connect => "connect",
++            Self::Timeout => "timeout",
++            Self::Request => "request",
++            Self::Body => "body",
++            Self::Decode => "decode",
++            Self::Redirect => "redirect",
++            Self::Status(_) => "status",
++            Self::Unknown => "unknown",
++        }
++    }
++}
++
++/// The scheme class of the failed request URL, when reqwest exposed one. Only the scheme
++/// travels; the host, path, and query are credential-adjacent surfaces and never do.
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub enum UrlClass {
++    /// An `https` request.
++    Https,
++    /// An `http` request.
++    Http,
++    /// Any other scheme.
++    Other,
++}
++
++impl UrlClass {
++    fn of(url: &reqwest::Url) -> Self {
++        match url.scheme() {
++            "https" => Self::Https,
++            "http" => Self::Http,
++            _ => Self::Other,
++        }
++    }
++
++    /// The stable, value-free token used by diagnostics.
++    pub fn as_str(self) -> &'static str {
++        match self {
++            Self::Https => "https",
++            Self::Http => "http",
++            Self::Other => "other",
++        }
++    }
++}
++
++/// The most response-body text a transport failure retains as a diagnostic prefix. The
++/// body was already capped by the bounded reader; this bounds the retained slice again.
++/// The prefix is a typed field only: the public formatting contracts never render it.
++pub const MAX_TRANSPORT_BODY_PREFIX_BYTES: usize = 512;
++
++/// Structured, value-free facts about a transport failure: where it happened, the URL
++/// scheme class, the HTTP status, and a bounded body prefix with its total byte length.
++#[derive(Clone, Debug)]
++pub struct TransportDetail {
++    /// Where the failure happened.
++    pub origin: TransportOrigin,
++    /// The scheme class of the request URL, when reqwest exposed one.
++    pub url_class: Option<UrlClass>,
++    /// A bounded, lossily decoded response-body prefix; `None` when no body exists.
++    pub body_prefix: Option<String>,
++    /// The total response-body byte length the prefix was taken from.
++    pub body_bytes: usize,
++    /// The provider's `Retry-After` hint, when one was sent.
++    pub retry_after: Option<Duration>,
++}
++
++impl TransportDetail {
++    /// Derive the retryability class from the origin, the status, and the bounded body.
++    pub fn classify(&self) -> TransportClass {
++        match self.origin {
++            TransportOrigin::Status(status) => {
++                classify_status(status, self.body_prefix.as_deref().unwrap_or(""))
++            }
++            _ => TransportClass::Connectivity,
++        }
++    }
++
++    /// Build the facts for a provider status response.
++    pub fn from_status(
++        status: u16,
++        body_prefix: Option<String>,
++        body_bytes: usize,
++        retry_after: Option<Duration>,
++    ) -> Self {
++        Self {
++            origin: TransportOrigin::Status(status),
++            url_class: None,
++            body_prefix,
++            body_bytes,
++            retry_after,
++        }
++    }
++
++    /// Extract the value-free facts a reqwest error still carries. No response body is
++    /// available at this layer: a reqwest error carries only a failure class and,
++    /// sometimes, a request URL.
++    fn from_reqwest(error: &reqwest::Error) -> Self {
++        let origin = if error.is_timeout() {
++            TransportOrigin::Timeout
++        } else if error.is_connect() {
++            TransportOrigin::Connect
++        } else if error.is_request() {
++            TransportOrigin::Request
++        } else if error.is_body() {
++            TransportOrigin::Body
++        } else if error.is_decode() {
++            TransportOrigin::Decode
++        } else if error.is_redirect() {
++            TransportOrigin::Redirect
++        } else if let Some(status) = error.status() {
++            TransportOrigin::Status(status.as_u16())
++        } else {
++            TransportOrigin::Unknown
++        };
++        Self {
++            origin,
++            url_class: error.url().map(UrlClass::of),
++            body_prefix: None,
++            body_bytes: 0,
++            retry_after: None,
++        }
++    }
++}
++
++/// Classify a provider HTTP status together with its bounded body text. Quota and
++/// billing wording wins over the status, so a weekly usage limit reported on a 429 or a
++/// 403 is a non-retryable exhaustion rather than a transient throttle.
++pub fn classify_status(status: u16, body: &str) -> TransportClass {
++    if status == 402 || quota_body(body) {
++        return TransportClass::QuotaExhausted;
++    }
++    match status {
++        429 => TransportClass::RateLimit,
++        408 => TransportClass::Connectivity,
++        500..=599 => TransportClass::TransientServer,
++        _ => TransportClass::Permanent,
++    }
++}
++
++/// Whether a bounded provider body reads as a quota or billing hard stop.
++fn quota_body(body: &str) -> bool {
++    const MARKERS: [&str; 6] = [
++        "insufficient_quota",
++        "usage limit",
++        "usage cap",
++        "add extra usage",
++        "exceeded your current quota",
++        "payment required",
++    ];
++    let lowered = body.to_ascii_lowercase();
++    MARKERS.iter().any(|marker| lowered.contains(marker))
++}
 +/// Model-related errors. External text remains available in typed fields but is never rendered
 +/// by the standard public formatting contracts.
  pub enum ModelError {
@@ -12310,7 +12527,7 @@ index 58b6fc1..211c904 100644
      Http {
          /// HTTP status code.
          status: u16,
-@@ -19,7 +16,6 @@ pub enum ModelError {
+@@ -19,7 +234,6 @@ pub enum ModelError {
      },
  
      /// API-level error.
@@ -12318,7 +12535,7 @@ index 58b6fc1..211c904 100644
      Api {
          /// Error message.
          message: String,
-@@ -27,69 +23,105 @@ pub enum ModelError {
+@@ -27,69 +241,127 @@ pub enum ModelError {
          code: Option<String>,
      },
  
@@ -12392,6 +12609,11 @@ index 58b6fc1..211c904 100644
 -    #[error("Network error: {0}")]
      Network(String),
 -
++    /// Network-layer transport failure carrying structured, value-free facts: where it
++    /// happened, the URL scheme class, the HTTP status, and a bounded body prefix. The
++    /// prefix is a typed field only; the public formatting never renders it, so the host
++    /// renders it on its own scrubbed and bounded diagnostic path.
++    Transport(TransportDetail),
      /// Other error.
 -    #[error(transparent)]
 -    Other(#[from] anyhow::Error),
@@ -12427,6 +12649,23 @@ index 58b6fc1..211c904 100644
 +            ),
 +            Self::Configuration(_) => f.write_str("Model configuration is invalid"),
 +            Self::Network(_) => f.write_str("Model network request failed"),
++            Self::Transport(detail) => {
++                let class = detail.classify();
++                let site = match detail.origin {
++                    TransportOrigin::Status(status) => format!("status {status}"),
++                    other => format!("origin {}", other.as_str()),
++                };
++                let verdict = if class.is_retryable() {
++                    "retryable"
++                } else {
++                    "not retryable"
++                };
++                write!(
++                    f,
++                    "Model transport failed ({site}, class {}, {verdict})",
++                    class.as_str()
++                )
++            }
 +            Self::Other(_) => f.write_str("Model operation failed"),
 +        }
 +    }
@@ -12453,7 +12692,7 @@ index 58b6fc1..211c904 100644
  }
  
  impl ModelError {
-@@ -97,7 +129,7 @@ impl ModelError {
+@@ -97,14 +369,34 @@ impl ModelError {
      #[must_use]
      pub fn is_retryable(&self) -> bool {
          match self {
@@ -12462,7 +12701,34 @@ index 58b6fc1..211c904 100644
              ModelError::RateLimited { .. } => true,
              ModelError::Connection(_) => true,
              ModelError::Http { status, .. } => *status >= 500,
-@@ -199,18 +231,20 @@ impl ModelError {
++            ModelError::Transport(detail) => detail.classify().is_retryable(),
+             _ => false,
+         }
+     }
+ 
++    /// The retryability classification when this error is a transport-layer failure (a
++    /// network, timeout, or provider HTTP status failure); `None` otherwise. This is the
++    /// classification a retry policy builds on, while [`Self::is_retryable`] keeps its
++    /// historical, coarser outcome for existing callers.
++    pub fn transport_class(&self) -> Option<TransportClass> {
++        match self {
++            ModelError::Timeout | ModelError::Connection(_) | ModelError::Network(_) => {
++                Some(TransportClass::Connectivity)
++            }
++            ModelError::RateLimited { .. } => Some(TransportClass::RateLimit),
++            ModelError::Transport(detail) => Some(detail.classify()),
++            ModelError::Http { status, body, .. } => Some(classify_status(*status, body)),
++            ModelError::Authentication(_) | ModelError::Api { .. } => {
++                Some(TransportClass::Permanent)
++            }
++            _ => None,
++        }
++    }
++
+     /// Get the retry-after duration if applicable.
+     #[must_use]
+     pub fn retry_after(&self) -> Option<Duration> {
+@@ -199,18 +491,23 @@ impl ModelError {
  
  impl From<reqwest::Error> for ModelError {
      fn from(err: reqwest::Error) -> Self {
@@ -12483,11 +12749,14 @@ index 58b6fc1..211c904 100644
              }
          } else {
 -            ModelError::Other(err.into())
-+            ModelError::Network("provider transport failed".to_string())
++            // Every remaining transport failure keeps its structured, value-free facts
++            // (the origin, the URL scheme class, and a status when reqwest has one)
++            // instead of collapsing into a bare, unclassifiable string.
++            ModelError::Transport(TransportDetail::from_reqwest(&err))
          }
      }
  }
-@@ -224,7 +258,7 @@ mod tests {
+@@ -224,7 +521,7 @@ mod tests {
  
      #[test]
      fn test_is_retryable() {
@@ -12496,7 +12765,7 @@ index 58b6fc1..211c904 100644
          assert!(ModelError::rate_limited(None).is_retryable());
          assert!(ModelError::Connection("failed".into()).is_retryable());
          assert!(ModelError::http(500, "Server error").is_retryable());
-@@ -244,16 +278,119 @@ mod tests {
+@@ -244,16 +541,230 @@ mod tests {
          let err = ModelError::rate_limited(None);
          assert_eq!(err.retry_after(), None);
  
@@ -12554,9 +12823,7 @@ index 58b6fc1..211c904 100644
 +
 +        assert!(ModelError::http(404, marker).to_string().contains("404"));
 +    }
- 
--        let err = ModelError::http(404, "Not found");
--        assert!(err.to_string().contains("404"));
++
 +    #[tokio::test]
 +    async fn reqwest_errors_do_not_disclose_url_or_query_secrets() {
 +        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -12612,14 +12879,127 @@ index 58b6fc1..211c904 100644
 +                .await
 +                .unwrap_err();
 +            assert!(error.is_timeout(), "expected a timeout: {error:?}");
-+            let diagnostic = ModelError::from(error).to_string();
++            let detail = TransportDetail::from_reqwest(&error);
++            let mapped = ModelError::from(error);
++            let diagnostic = mapped.to_string();
 +            assert_eq!(diagnostic, "Model request timed out");
 +            assert!(
 +                !diagnostic.chars().any(|c| c.is_ascii_digit()),
 +                "diagnostic asserted a duration: {diagnostic}"
 +            );
++            // A reqwest timeout maps onto the timeout variant, whose classification is
++            // the same retryable connectivity family the origin token names.
++            assert_eq!(mapped.transport_class(), Some(TransportClass::Connectivity));
++            assert!(mapped.is_retryable());
++            assert_eq!(detail.origin, TransportOrigin::Timeout);
 +        }
 +        drop(server);
++    }
++
++    /// Every retained status classifies: quota and billing wording wins over the status,
++    /// 429 is a throttle, 408 and 5xx are retryable, and every other 4xx is permanent.
++    #[test]
++    fn status_classification_covers_retryability_families() {
++        let cases = [
++            (429u16, TransportClass::RateLimit),
++            (408, TransportClass::Connectivity),
++            (500, TransportClass::TransientServer),
++            (502, TransportClass::TransientServer),
++            (503, TransportClass::TransientServer),
++            (529, TransportClass::TransientServer),
++            (402, TransportClass::QuotaExhausted),
++            (400, TransportClass::Permanent),
++            (401, TransportClass::Permanent),
++            (403, TransportClass::Permanent),
++            (404, TransportClass::Permanent),
++            (413, TransportClass::Permanent),
++            (422, TransportClass::Permanent),
++        ];
++        for (status, expected) in cases {
++            assert_eq!(
++                classify_status(status, ""),
++                expected,
++                "status {status} classified wrong"
++            );
++            assert_eq!(
++                expected.is_retryable(),
++                expected != TransportClass::Permanent && expected != TransportClass::QuotaExhausted
++            );
++            let detail = TransportDetail::from_status(status, None, 0, None);
++            assert_eq!(detail.classify(), expected, "status {status} detail class");
++            assert_eq!(
++                ModelError::Transport(detail).transport_class(),
++                Some(expected)
++            );
++        }
++    }
++
++    /// Quota and billing wording in the bounded body wins over the status, so a weekly
++    /// usage limit riding on a 429 or a 403 is a non-retryable exhaustion rather than a
++    /// throttle or a plain refusal.
++    #[test]
++    fn quota_wording_wins_over_the_status() {
++        for status in [429u16, 403, 400] {
++            for body in [
++                "insufficient_quota",
++                "You have exceeded your current quota",
++                "usage limit reached for this plan",
++                "weekly usage cap exceeded",
++                "please add extra usage to continue",
++                "payment required before continuing",
++            ] {
++                assert_eq!(
++                    classify_status(status, body),
++                    TransportClass::QuotaExhausted,
++                    "status {status} body {body} must classify as quota exhaustion"
++                );
++            }
++        }
++        // Unrelated wording keeps the status class.
++        assert_eq!(
++            classify_status(429, "slow down a little"),
++            TransportClass::RateLimit
++        );
++        assert_eq!(
++            classify_status(503, "the model is overloaded"),
++            TransportClass::TransientServer
++        );
++    }
+ 
+-        let err = ModelError::http(404, "Not found");
+-        assert!(err.to_string().contains("404"));
++    /// A reqwest error's origin is derived from its failure kind, so a connect refusal
++    /// reports `Connect` and no URL ever travels beyond its scheme class.
++    #[tokio::test]
++    async fn reqwest_kinds_map_to_transport_origins() {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
++        drop(listener);
++        let error = reqwest::Client::builder()
++            .redirect(reqwest::redirect::Policy::none())
++            .no_proxy()
++            .build()
++            .unwrap()
++            .get(format!("https://{address}/v1/chat/completions"))
++            .send()
++            .await
++            .unwrap_err();
++        assert!(error.is_connect(), "expected a connect failure: {error:?}");
++        // The reqwest kind maps onto the structured, value-free origin and scheme class.
++        let detail = TransportDetail::from_reqwest(&error);
++        let url_class = detail.url_class;
++        let mapped = ModelError::from(error);
++        let retryable = mapped.is_retryable();
++        assert_eq!(mapped.transport_class(), Some(TransportClass::Connectivity));
++        assert_eq!(detail.origin, TransportOrigin::Connect);
++        assert_eq!(detail.classify(), TransportClass::Connectivity);
++        assert_eq!(url_class, Some(UrlClass::Https));
++        assert_eq!(detail.url_class, Some(UrlClass::Https));
++        assert!(retryable);
++        assert!(detail.body_prefix.is_none() && detail.body_bytes == 0);
++        assert!(ModelError::Transport(detail)
++            .to_string()
++            .starts_with("Model transport failed (origin connect"));
      }
  }
 diff --git a/vendor/serdes-ai-models/src/fallback.rs b/vendor/serdes-ai-models/src/fallback.rs
@@ -13365,7 +13745,7 @@ index 2807447..e8467f8 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..15c4aba 100644
+index 8dd0e9e..b298f3e 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -13470,7 +13850,19 @@ index 8dd0e9e..15c4aba 100644
  /// Azure OpenAI models.
  #[cfg(feature = "azure")]
  #[cfg_attr(docsrs, doc(cfg(feature = "azure")))]
-@@ -198,9 +253,6 @@ pub use mistral::MistralModel;
+@@ -162,7 +217,10 @@ pub use antigravity::AntigravityModel;
+ pub mod mock;
+ 
+ // Re-exports
+-pub use error::{ModelError, ModelResult};
++pub use error::{
++    classify_status, ModelError, ModelResult, TransportClass, TransportDetail, TransportOrigin,
++    UrlClass, MAX_TRANSPORT_BODY_PREFIX_BYTES,
++};
+ pub use fallback::{FallbackModel, RetryOn};
+ pub use mock::{FunctionModel, MockModel, TestModel};
+ pub use model::{
+@@ -198,9 +256,6 @@ pub use mistral::MistralModel;
  #[cfg(feature = "ollama")]
  pub use ollama::OllamaModel;
  
@@ -13480,7 +13872,7 @@ index 8dd0e9e..15c4aba 100644
  /// Prelude for common imports.
  pub mod prelude {
      pub use crate::{
-@@ -232,9 +284,6 @@ pub mod prelude {
+@@ -232,9 +287,6 @@ pub mod prelude {
      #[cfg(feature = "ollama")]
      pub use crate::ollama::OllamaModel;
  
@@ -13490,7 +13882,7 @@ index 8dd0e9e..15c4aba 100644
      #[cfg(feature = "openrouter")]
      pub use crate::openrouter::OpenRouterModel;
  
-@@ -271,8 +320,6 @@ pub mod prelude {
+@@ -271,8 +323,6 @@ pub mod prelude {
  /// ```
  #[cfg(feature = "openai")]
  pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -13499,7 +13891,7 @@ index 8dd0e9e..15c4aba 100644
      let (provider, model_name) = if identifier.contains(':') {
          let parts: Vec<&str> = identifier.splitn(2, ':').collect();
          (parts[0], parts[1])
-@@ -285,7 +332,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -285,7 +335,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "openai")]
              {
                  let model = OpenAIChatModel::from_env(model_name)?;
@@ -13508,7 +13900,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -298,7 +345,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -298,7 +348,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "anthropic")]
              {
                  let model = AnthropicModel::from_env(model_name)?;
@@ -13517,7 +13909,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -310,41 +357,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -310,41 +360,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
          #[cfg(feature = "groq")]
          "groq" => {
              let model = GroqModel::from_env(model_name)?;
@@ -13566,7 +13958,7 @@ index 8dd0e9e..15c4aba 100644
          ))),
      }
  }
-@@ -368,8 +409,6 @@ pub fn build_model_with_config(
+@@ -368,8 +412,6 @@ pub fn build_model_with_config(
      base_url: Option<&str>,
      timeout: Option<std::time::Duration>,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -13575,7 +13967,7 @@ index 8dd0e9e..15c4aba 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -392,7 +431,7 @@ pub fn build_model_with_config(
+@@ -392,7 +434,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -13584,7 +13976,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -423,7 +462,7 @@ pub fn build_model_with_config(
+@@ -423,7 +465,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -13593,7 +13985,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -444,7 +483,7 @@ pub fn build_model_with_config(
+@@ -444,7 +486,7 @@ pub fn build_model_with_config(
              // GroqModel doesn't have with_base_url/with_timeout
              let _ = (base_url, timeout);
  
@@ -13602,7 +13994,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -466,7 +505,7 @@ pub fn build_model_with_config(
+@@ -466,7 +508,7 @@ pub fn build_model_with_config(
                  model
              };
  
@@ -13611,7 +14003,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -481,7 +520,7 @@ pub fn build_model_with_config(
+@@ -481,7 +523,7 @@ pub fn build_model_with_config(
              // Ollama doesn't use API keys or timeouts in the same way
              let _ = (api_key, timeout);
  
@@ -13620,7 +14012,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -507,12 +546,11 @@ pub fn build_model_with_config(
+@@ -507,12 +549,11 @@ pub fn build_model_with_config(
  
              let _ = timeout; // Google model doesn't have with_timeout
  
@@ -13636,7 +14028,7 @@ index 8dd0e9e..15c4aba 100644
          ))),
      }
  }
-@@ -533,13 +571,51 @@ mod tests {
+@@ -533,13 +574,51 @@ mod tests {
          let result = build_model_with_config("unknown", "model", None, None, None);
          assert!(result.is_err());
      }
@@ -13689,7 +14081,7 @@ index 8dd0e9e..15c4aba 100644
  pub struct ExtendedModelConfig {
      /// API key (overrides environment variable)
      pub api_key: Option<String>,
-@@ -557,6 +633,21 @@ pub struct ExtendedModelConfig {
+@@ -557,6 +636,21 @@ pub struct ExtendedModelConfig {
      pub reasoning_effort: Option<String>,
  }
  
@@ -13711,7 +14103,7 @@ index 8dd0e9e..15c4aba 100644
  impl ExtendedModelConfig {
      /// Create a new empty config
      pub fn new() -> Self {
-@@ -628,8 +719,11 @@ pub fn build_model_extended(
+@@ -628,8 +722,11 @@ pub fn build_model_extended(
      model_name: &str,
      config: ExtendedModelConfig,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -13725,7 +14117,7 @@ index 8dd0e9e..15c4aba 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -654,13 +748,13 @@ pub fn build_model_extended(
+@@ -654,13 +751,13 @@ pub fn build_model_extended(
  
                  // TODO: Add reasoning_effort support when available in OpenAIChatModel
  
@@ -13745,7 +14137,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -698,13 +792,7 @@ pub fn build_model_extended(
+@@ -698,13 +795,7 @@ pub fn build_model_extended(
                      model
                  };
  
@@ -13760,7 +14152,7 @@ index 8dd0e9e..15c4aba 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -716,19 +804,18 @@ pub fn build_model_extended(
+@@ -716,19 +807,18 @@ pub fn build_model_extended(
          }
          #[cfg(feature = "groq")]
          "groq" => {
@@ -13786,7 +14178,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -750,13 +837,7 @@ pub fn build_model_extended(
+@@ -750,13 +840,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -13801,7 +14193,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -768,13 +849,7 @@ pub fn build_model_extended(
+@@ -768,13 +852,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -13816,7 +14208,7 @@ index 8dd0e9e..15c4aba 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +871,75 @@ pub fn build_model_extended(
+@@ -796,17 +874,75 @@ pub fn build_model_extended(
                  model
              };
  
@@ -14238,10 +14630,24 @@ index 97d1a2d..1e6fe0e 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..3aeabdf 100644
+index 9471b5b..c07cbf5 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
-@@ -20,8 +20,35 @@ use serdes_ai_core::{
+@@ -2,12 +2,11 @@
+ 
+ use super::stream::OpenAIStreamParser;
+ use super::types::*;
+-use crate::error::ModelError;
++use crate::error::{ModelError, TransportDetail};
+ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
+ use crate::profile::{openai_gpt4o_profile, ModelProfile};
+ use async_trait::async_trait;
+ use base64::Engine;
+-use reqwest::header::HeaderMap;
+ use reqwest::Client;
+ use serdes_ai_core::messages::{
+     ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs,
+@@ -20,8 +19,35 @@ use serdes_ai_core::{
  use serdes_ai_tools::ToolDefinition;
  use std::time::Duration;
  
@@ -14278,7 +14684,7 @@ index 9471b5b..3aeabdf 100644
  pub struct OpenAIChatModel {
      model_name: String,
      client: Client,
-@@ -31,6 +58,26 @@ pub struct OpenAIChatModel {
+@@ -31,6 +57,26 @@ pub struct OpenAIChatModel {
      project: Option<String>,
      profile: ModelProfile,
      default_timeout: Duration,
@@ -14305,7 +14711,7 @@ index 9471b5b..3aeabdf 100644
  }
  
  impl OpenAIChatModel {
-@@ -41,13 +88,18 @@ impl OpenAIChatModel {
+@@ -41,13 +87,18 @@ impl OpenAIChatModel {
  
          Self {
              model_name,
@@ -14325,7 +14731,7 @@ index 9471b5b..3aeabdf 100644
          }
      }
  
-@@ -80,17 +132,17 @@ impl OpenAIChatModel {
+@@ -80,17 +131,17 @@ impl OpenAIChatModel {
          self
      }
  
@@ -14349,7 +14755,7 @@ index 9471b5b..3aeabdf 100644
          self
      }
  
-@@ -364,10 +416,16 @@ impl OpenAIChatModel {
+@@ -364,10 +415,16 @@ impl OpenAIChatModel {
              },
              logprobs: None,
              top_logprobs: None,
@@ -14366,7 +14772,7 @@ index 9471b5b..3aeabdf 100644
      fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
          let choice = resp
              .choices
-@@ -375,6 +433,12 @@ impl OpenAIChatModel {
+@@ -375,6 +432,12 @@ impl OpenAIChatModel {
              .next()
              .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
  
@@ -14379,7 +14785,7 @@ index 9471b5b..3aeabdf 100644
          let mut parts = Vec::new();
  
          // Check for refusal
-@@ -397,22 +461,29 @@ impl OpenAIChatModel {
+@@ -397,22 +460,29 @@ impl OpenAIChatModel {
  
          if let Some(tool_calls) = choice.message.tool_calls {
              for tc in tool_calls {
@@ -14414,10 +14820,24 @@ index 9471b5b..3aeabdf 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -445,33 +516,15 @@ impl OpenAIChatModel {
+@@ -436,42 +506,18 @@ impl OpenAIChatModel {
+         })
      }
  
-     /// Handle API error response.
+-    fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+-        headers
+-            .get("retry-after")
+-            .and_then(|value| value.to_str().ok())
+-            .and_then(|value| value.parse::<u64>().ok())
+-            .map(Duration::from_secs)
++    /// Handle API error response. The bounded detail carries the status, the bounded
++    /// body prefix, and any `Retry-After`; the classification is derived from those facts
++    /// rather than the status alone, so a quota hard stop never masquerades as a throttle.
++    fn handle_error_response(&self, _status: u16, detail: TransportDetail) -> ModelError {
++        crate::response::status_transport_error(detail)
+     }
+ 
+-    /// Handle API error response.
 -    fn handle_error_response(&self, status: u16, body: &str, headers: &HeaderMap) -> ModelError {
 -        // Try to parse as OpenAI error
 -        if let Ok(err) = serde_json::from_str::<OpenAIError>(body) {
@@ -14443,10 +14863,7 @@ index 9471b5b..3aeabdf 100644
 -        if status == 429 {
 -            return ModelError::rate_limited(Self::parse_retry_after(headers));
 -        }
-+    fn handle_error_response(&self, status: u16, _body: &str, headers: &HeaderMap) -> ModelError {
-+        crate::response::status_error(status, Self::parse_retry_after(headers))
-+    }
- 
+-
 -        ModelError::http(status, body)
 +    /// The exact request route. The host adapter derives the full chat-completions URL via
 +    /// [`chat_url`] and stores it as the base URL, so [`endpoint_url`] returns it
@@ -14456,7 +14873,7 @@ index 9471b5b..3aeabdf 100644
      }
  }
  
-@@ -499,12 +552,16 @@ impl Model for OpenAIChatModel {
+@@ -499,12 +545,16 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -14475,13 +14892,18 @@ index 9471b5b..3aeabdf 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -518,16 +575,11 @@ impl Model for OpenAIChatModel {
+@@ -517,17 +567,14 @@ impl Model for OpenAIChatModel {
+ 
          let status = response.status().as_u16();
          if !response.status().is_success() {
-             let headers = response.headers().clone();
+-            let headers = response.headers().clone();
 -            let body = response.text().await.unwrap_or_default();
-+            let body = crate::response::error_text(response).await?;
-             return Err(self.handle_error_response(status, &body, &headers));
+-            return Err(self.handle_error_response(status, &body, &headers));
++            // The bounded body stays out of the public diagnostic: it is carried as a
++            // typed, bounded prefix so the host can classify (429 throttle versus
++            // quota exhaustion versus 5xx) and render on its own scrubbed path.
++            let detail = crate::response::transport_detail(response).await?;
++            return Err(self.handle_error_response(status, detail));
          }
  
 -        let resp: ChatCompletionResponse = response
@@ -14494,7 +14916,7 @@ index 9471b5b..3aeabdf 100644
      }
  
      async fn request_stream(
-@@ -540,12 +592,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +587,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -14512,13 +14934,18 @@ index 9471b5b..3aeabdf 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -559,13 +614,11 @@ impl Model for OpenAIChatModel {
+@@ -558,14 +608,14 @@ impl Model for OpenAIChatModel {
+ 
          let status = response.status().as_u16();
          if !response.status().is_success() {
-             let headers = response.headers().clone();
+-            let headers = response.headers().clone();
 -            let body = response.text().await.unwrap_or_default();
-+            let body = crate::response::error_text(response).await?;
-             return Err(self.handle_error_response(status, &body, &headers));
+-            return Err(self.handle_error_response(status, &body, &headers));
++            // The bounded body stays out of the public diagnostic: it is carried as a
++            // typed, bounded prefix so the host can classify (429 throttle versus
++            // quota exhaustion versus 5xx) and render on its own scrubbed path.
++            let detail = crate::response::transport_detail(response).await?;
++            return Err(self.handle_error_response(status, detail));
          }
  
 -        // Create stream parser
@@ -14528,7 +14955,7 @@ index 9471b5b..3aeabdf 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +635,59 @@ mod tests {
+@@ -582,6 +632,59 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -14588,7 +15015,7 @@ index 9471b5b..3aeabdf 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +767,94 @@ mod tests {
+@@ -661,4 +764,94 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15936,13 +16363,13 @@ index 5a4761d..e8950e4 100644
  }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..55012d9
+index 0000000..f0d75cc
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,454 @@
+@@ -0,0 +1,508 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
-+use crate::error::{ModelError, ModelResult};
++use crate::error::{ModelError, ModelResult, TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
 +#[cfg(any(
 +    feature = "antigravity",
 +    feature = "anthropic",
@@ -15954,6 +16381,7 @@ index 0000000..55012d9
 +    feature = "openai"
 +))]
 +use serde::de::DeserializeOwned;
++use std::time::Duration;
 +
 +/// Maximum successful JSON response body accepted from a provider.
 +pub(crate) const MAX_SUCCESS_BODY_BYTES: usize = 64 * 1024 * 1024;
@@ -16137,6 +16565,52 @@ index 0000000..55012d9
 +    Ok("provider returned an error response".to_string())
 +}
 +
++/// Consume a bounded error response and return the structured transport facts the host
++/// needs to classify it: the status, a bounded body prefix with the total byte length,
++/// and the provider's `Retry-After`. No unbounded body is retained and the prefix is a
++/// typed field the public formatting never renders.
++pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult<TransportDetail> {
++    let status = response.status().as_u16();
++    let retry_after = parse_retry_after(response.headers());
++    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
++    let body_bytes = bytes.len();
++    let text = String::from_utf8_lossy(&bytes);
++    let prefix = if text.is_empty() {
++        None
++    } else {
++        Some(bounded_body_prefix(&text))
++    };
++    Ok(TransportDetail::from_status(
++        status,
++        prefix,
++        body_bytes,
++        retry_after,
++    ))
++}
++
++/// Bound a decoded body to a fixed prefix. The total byte length is kept separately so a
++/// truncated prefix still states how much was read, and the truncation is at a safe
++/// UTF-8 boundary.
++pub(crate) fn bounded_body_prefix(text: &str) -> String {
++    if text.len() <= MAX_TRANSPORT_BODY_PREFIX_BYTES {
++        return text.to_string();
++    }
++    let mut end = MAX_TRANSPORT_BODY_PREFIX_BYTES;
++    while end > 0 && !text.is_char_boundary(end) {
++        end -= 1;
++    }
++    text[..end].to_string()
++}
++
++/// Read the provider's `Retry-After` hint, when one is sent.
++pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
++    headers
++        .get("retry-after")
++        .and_then(|value| value.to_str().ok())
++        .and_then(|value| value.parse::<u64>().ok())
++        .map(Duration::from_secs)
++}
++
 +/// Convert a provider status to a typed, value-free diagnostic.
 +pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
 +    match status {
@@ -16145,6 +16619,13 @@ index 0000000..55012d9
 +        429 => ModelError::rate_limited(retry_after),
 +        _ => ModelError::http(status, "provider returned an error response"),
 +    }
++}
++
++/// The structured transport failure for a provider status response whose body was read
++/// bounded. The classification derives from the status plus the bounded body, so a
++/// weekly usage limit riding on a 429 or a 403 is a quota exhaustion, not a throttle.
++pub(crate) fn status_transport_error(detail: TransportDetail) -> ModelError {
++    ModelError::Transport(detail)
 +}
 +
 +#[cfg(test)]

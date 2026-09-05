@@ -1,6 +1,6 @@
 //! Bounded HTTP response-body handling shared by provider models.
 
-use crate::error::{ModelError, ModelResult};
+use crate::error::{ModelError, ModelResult, TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
 #[cfg(any(
     feature = "antigravity",
     feature = "anthropic",
@@ -12,6 +12,7 @@ use crate::error::{ModelError, ModelResult};
     feature = "openai"
 ))]
 use serde::de::DeserializeOwned;
+use std::time::Duration;
 
 /// Maximum successful JSON response body accepted from a provider.
 pub(crate) const MAX_SUCCESS_BODY_BYTES: usize = 64 * 1024 * 1024;
@@ -195,6 +196,52 @@ pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<Strin
     Ok("provider returned an error response".to_string())
 }
 
+/// Consume a bounded error response and return the structured transport facts the host
+/// needs to classify it: the status, a bounded body prefix with the total byte length,
+/// and the provider's `Retry-After`. No unbounded body is retained and the prefix is a
+/// typed field the public formatting never renders.
+pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult<TransportDetail> {
+    let status = response.status().as_u16();
+    let retry_after = parse_retry_after(response.headers());
+    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
+    let body_bytes = bytes.len();
+    let text = String::from_utf8_lossy(&bytes);
+    let prefix = if text.is_empty() {
+        None
+    } else {
+        Some(bounded_body_prefix(&text))
+    };
+    Ok(TransportDetail::from_status(
+        status,
+        prefix,
+        body_bytes,
+        retry_after,
+    ))
+}
+
+/// Bound a decoded body to a fixed prefix. The total byte length is kept separately so a
+/// truncated prefix still states how much was read, and the truncation is at a safe
+/// UTF-8 boundary.
+pub(crate) fn bounded_body_prefix(text: &str) -> String {
+    if text.len() <= MAX_TRANSPORT_BODY_PREFIX_BYTES {
+        return text.to_string();
+    }
+    let mut end = MAX_TRANSPORT_BODY_PREFIX_BYTES;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
+/// Read the provider's `Retry-After` hint, when one is sent.
+pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
 /// Convert a provider status to a typed, value-free diagnostic.
 pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
     match status {
@@ -203,6 +250,13 @@ pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>
         429 => ModelError::rate_limited(retry_after),
         _ => ModelError::http(status, "provider returned an error response"),
     }
+}
+
+/// The structured transport failure for a provider status response whose body was read
+/// bounded. The classification derives from the status plus the bounded body, so a
+/// weekly usage limit riding on a 429 or a 403 is a quota exhaustion, not a throttle.
+pub(crate) fn status_transport_error(detail: TransportDetail) -> ModelError {
+    ModelError::Transport(detail)
 }
 
 #[cfg(test)]

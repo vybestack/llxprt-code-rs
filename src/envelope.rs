@@ -74,6 +74,11 @@ pub struct ErrorEnvelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeError {
+    /// The stable machine token for the failure class: one of the `Code` family keys
+    /// (`usage`, `model-config`, `session`, `model`, `turn`, `mem-profile`) or, for a
+    /// model transport failure, the finer `model-<class>` transport key the agent
+    /// carries on the error, such as `model-quota-exhausted` or
+    /// `model-transient-server`. Free-form text never appears here.
     pub code: String,
     pub message: String,
     /// Profiling lifecycle stage; present only for `mem-profile` failures.
@@ -85,7 +90,13 @@ pub struct EnvelopeError {
 }
 
 impl Envelope {
-    /// Construct a typed error document with its final session identity.
+    /// Construct a typed error document with its final session identity. The `code` is
+    /// the stable machine token for the failure class: normally the caller's key (one of
+    /// `usage`, `model-config`, `session`, `model`, `turn`, `mem-profile`), and for a
+    /// model transport failure the finer transport failure key the agent carries
+    /// on the error (`model-quota-exhausted`, `model-transient-server`, ...), so a
+    /// driver
+    /// reads the retryability class from `error.code` without matching on message text.
     pub fn error(
         session_id: impl Into<String>,
         code: impl Into<String>,

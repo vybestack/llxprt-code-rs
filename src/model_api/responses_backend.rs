@@ -75,7 +75,10 @@ impl ResponsesBackend {
             // needs, so the host renders them on its own trusted path.
             serdes_ai::models::ModelError::InvalidResponse(detail)
             | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
-            _ => error.to_string(),
+            _ => match crate::transport::TransportFailure::from_model_error(&error) {
+                Some(failure) => failure.diagnostic(),
+                None => error.to_string(),
+            },
         })?;
         Ok(LlmResult::from(&response))
     }

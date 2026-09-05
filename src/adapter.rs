@@ -11,6 +11,7 @@
 
 use crate::model::{ModelConfig, SerdeAiParams, SerdeAiSettings};
 use crate::session::RoundRecord;
+use crate::transport::TransportFailure;
 use serdes_ai::core::{
     messages::ToolCallArgs,
     messages::{FinishReason, ModelResponse, ModelResponsePart},
@@ -287,7 +288,10 @@ impl ModelAdapter {
             .inner
             .request(requests, &settings, &params.to_model_request_parameters())
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| match TransportFailure::from_model_error(&e) {
+                Some(failure) => failure.diagnostic(),
+                None => e.to_string(),
+            })?;
         Ok(LlmResult::from(&resp))
     }
 }

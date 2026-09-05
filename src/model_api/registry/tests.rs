@@ -425,7 +425,7 @@ fn codex_settings_forward_the_profile_output_bound() {
     assert_eq!(settings.temperature, profile.model_params.temperature);
     assert_eq!(settings.top_p, profile.model_params.top_p);
     assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(900)));
-    crate::agent::validate_timeout(settings.timeout)
+    crate::limits::validate_timeout(settings.timeout)
         .expect("900s Codex timeout must clear the lease bound");
 }
 

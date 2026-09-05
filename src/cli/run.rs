@@ -120,6 +120,6 @@ fn agent_error(error: crate::agent::AgentError) -> AppError {
     if error.code == Code::Profiling {
         AppError::profiling_at(error.key, error.message)
     } else {
-        AppError::new(error.code, error.key, error.message)
+        AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code)
     }
 }

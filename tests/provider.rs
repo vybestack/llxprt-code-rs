@@ -399,7 +399,10 @@ fn timed_out_transport_reports_no_duration() {
     cfg.timeout = Some(std::time::Duration::from_millis(150));
 
     let err = request_one(&cfg).expect_err("a silent provider must time out");
-    assert_eq!(err, "Model request timed out");
+    assert_eq!(
+        err,
+        "model transport failed (origin timeout, class connectivity, retryable)"
+    );
     assert!(
         !err.chars().any(|c| c.is_ascii_digit()),
         "diagnostic asserted a duration: {err}"
