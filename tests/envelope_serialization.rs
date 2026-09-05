@@ -50,6 +50,25 @@ fn nested_error_envelope_bytes_are_pinned() {
     );
 }
 
+/// An error the run decorated with its own terminal outcome carries that verdict into the
+/// nested error detail (issue 146 malformed tool call, issue 153 exhausted truncation
+/// retry), so a supervisor can branch without parsing the message.
+#[test]
+fn declared_terminal_outcome_rides_the_error_envelope() {
+    for outcome in [
+        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
+        llxprt_code_rs::agent::TRUNCATED_OUTPUT_RETRIED_KEY,
+    ] {
+        let mut error = AppError::new(Code::Model, "finish-reason", "truncated");
+        error.terminal_outcome = Some(outcome);
+        let line = cli::envelope(&Err(error), "sess_1").to_line();
+        let value: serde_json::Value = serde_json::from_slice(&line).unwrap();
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["error"]["code"], "finish-reason");
+        assert_eq!(value["error"]["terminal_outcome"], outcome);
+    }
+}
+
 #[test]
 fn clap_usage_envelope_bytes_are_pinned() {
     let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))

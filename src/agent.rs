@@ -48,13 +48,19 @@ mod memory;
 mod request_budget;
 mod tool_round;
 mod tool_validation;
-pub use tool_validation::known_tool;
+pub use crate::tools::known_tool;
 use tool_validation::validate_calls;
 
 /// Stable error key and terminal outcome for a zero-call reply that structurally
 /// resembles tool-call syntax (issue 146).
 pub const MALFORMED_TOOL_CALL_KEY: &str = "malformed_tool_call";
+/// Terminal outcome for a first-completion output truncation whose one bounded re-issue
+/// also truncated (issue 153). The failure keeps the `finish-reason` error key and its
+/// remediation text; this verdict marks the retry as exhausted.
+pub const TRUNCATED_OUTPUT_RETRIED_KEY: &str = "truncated_output_retried";
 pub use self::tool_round::parse_object_args;
+mod truncation;
+pub use truncation::is_output_truncation;
 
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
@@ -386,26 +392,14 @@ impl CodingAgent {
         &self,
         store: &SessionStore,
         reserved: &ReservedRequest,
-        requests: Vec<serdes_ai::core::ModelRequest>,
+        mut requests: Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
     ) -> Result<AttemptState, AgentError> {
         self.renew(store, reserved)?;
         self.check_request_budget(store, reserved, &requests, tools, &[])?;
-        let current = self
-            .profiled_round(
-                &requests,
-                tools,
-                "model_call_before",
-                "model_call_after",
-                1,
-                &TurnUsage {
-                    assistant_bytes: 0,
-                    args_bytes: 0,
-                    output_bytes: 0,
-                    total_calls: 0,
-                },
-            )
-            .map_err(|failure| self.round_failure(store, reserved, failure, &[]))?;
+        // A first completion cut by the output cap is re-issued once here, before any
+        // round exists: the truncated bytes never join the request list or the transcript.
+        let current = self.first_completion(store, reserved, &mut requests, tools)?;
         self.renew(store, reserved)?;
         self.check_finish(store, reserved, &current, &[])?;
         let usage = TurnUsage {
@@ -634,13 +628,18 @@ impl CodingAgent {
                 // A reply that looks like a tool call but parses to none is a collapsed
                 // turn, not a finished one: persist it as a terminal failure so the
                 // session keeps the rounds and the CLI keeps the nonzero exit.
-                return Err(self.dead(
+                // The collapsed turn keeps its typed failure; the verdict rides the error.
+                let mut error = self.dead(
                     store,
                     reserved,
                     MALFORMED_TOOL_CALL_KEY,
                     &message,
                     &attempt.rounds,
-                ));
+                );
+                if error.key == MALFORMED_TOOL_CALL_KEY {
+                    error.terminal_outcome = Some(MALFORMED_TOOL_CALL_KEY);
+                }
+                return Err(error);
             }
             return Ok(std::mem::take(&mut attempt.current.text));
         }

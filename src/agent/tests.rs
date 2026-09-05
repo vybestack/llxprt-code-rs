@@ -8,13 +8,13 @@ use std::sync::Mutex;
 
 /// A scripted backend for the forced-summary accounting tests: each call pops the
 /// next canned reply, repeating the last when exhausted.
-struct MockBackend {
+pub(super) struct MockBackend {
     replies: Mutex<std::collections::VecDeque<LlmResult>>,
     calls: Mutex<usize>,
 }
 
 impl MockBackend {
-    fn new(replies: Vec<LlmResult>) -> Self {
+    pub(super) fn new(replies: Vec<LlmResult>) -> Self {
         MockBackend {
             replies: Mutex::new(replies.into()),
             calls: Mutex::new(0),
@@ -57,7 +57,7 @@ extern "C" fn cleanup_shared_config_home() {
 
 /// A per-process config home shared by every unit test in this binary. Integration
 /// binaries run in their own process, so no other binary mutates this root.
-fn shared_config_home() -> PathBuf {
+pub(super) fn shared_config_home() -> PathBuf {
     SHARED_CONFIG_HOME
         .get_or_init(|| {
             let base =

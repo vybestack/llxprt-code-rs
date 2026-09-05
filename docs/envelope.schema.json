@@ -26,7 +26,7 @@
           ]
         },
         "terminal_outcome": {
-          "description": "Terminal outcome the run declared for itself (issue 146): a zero-call reply\nwhose text structurally resembles tool-call syntax.",
+          "description": "Terminal outcome the run declared for itself (issues 146 and 153): a zero-call\nreply whose text structurally resembles tool-call syntax, or a first-completion\noutput truncation whose one bounded re-issue also truncated.",
           "type": [
             "string",
             "null"

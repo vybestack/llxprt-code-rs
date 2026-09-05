@@ -85,8 +85,9 @@ pub struct EnvelopeError {
     /// Outcome of the agent/session independent of profile publication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_status: Option<String>,
-    /// Terminal outcome the run declared for itself (issue 146): a zero-call reply
-    /// whose text structurally resembles tool-call syntax.
+    /// Terminal outcome the run declared for itself (issues 146 and 153): a zero-call
+    /// reply whose text structurally resembles tool-call syntax, or a first-completion
+    /// output truncation whose one bounded re-issue also truncated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_outcome: Option<String>,
 }
