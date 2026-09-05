@@ -25,6 +25,8 @@ mod ts_drive;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_gate;
+#[cfg(test)]
 mod tests_inject;
 #[cfg(test)]
 mod tests_records;
@@ -200,9 +202,14 @@ pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String
 }
 
 /// Run every selected scenario and return `(report, all_accepted)`.
-/// The #116.1 green gate: a manifest may declare `green` for its owning phase only when
-/// the append-only run records carry an *observed* red `RunRecord` for that same
-/// (scenario, phase) — a red that was actually driven and graded, not merely predicted.
+/// The green gate (see `green_gate`) licenses a manifest's `green` declaration only
+/// when the run records carry an *observed* red RunRecord for that scenario at
+/// its owning phase or any earlier one — a red that was actually driven and graded,
+/// not merely predicted.
+/// The phase-N red that licenses phase-N+1 green is exactly the
+/// citation the gate intends: moving the owning phase changes the manifest digest, so
+/// the cited red was driven from a declaration other than the one now claiming green.
+/// Predictions alone license nothing.
 ///
 /// History expectations never license green: an `expected_status = "red"` entry is a
 /// prediction about a future run, and the whole point of the gate is that a phase must
@@ -216,12 +223,12 @@ fn green_gate(
     if scen.expected_status != manifest::ExpectedStatus::Green {
         return Ok(());
     }
-    let prior = records::prior_observed_red(store, &scen.id, scen.owner_phase);
+    let prior = records::prior_observed_red_through(store, &scen.id, scen.owner_phase);
     if prior.is_empty() {
         return Err(format!(
             "scenario {} declares green for phase {}, but no observed red run record \
-             exists for that phase; run the phase first and let it record the red, then \
-             declare green",
+             exists for that phase or any earlier one; run the phase first and let it \
+             record the red, then declare green",
             scen.id, scen.owner_phase
         ));
     }
