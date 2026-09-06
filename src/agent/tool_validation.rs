@@ -3,8 +3,8 @@
 use super::*;
 
 /// A tool call is valid only when its id is unique across the whole attempt
-/// (`seen`), the name is a known *and enabled* tool, and the arguments are a
-/// JSON object.
+/// (`seen`) and the arguments are a JSON object. Unknown or disabled names are
+/// returned as correctable refusals.
 ///
 /// Tool names come from `crate::tools::known_tool` (the `TOOL_CATALOGUE`) via the
 /// glob import above, so this path and the malformed-tool-call detector share one
@@ -13,7 +13,7 @@ pub(super) fn validate_calls(
     seen: &mut std::collections::HashSet<String>,
     result: &LlmResult,
     allow_shell: bool,
-) -> Result<Vec<ToolCall>, String> {
+) -> Result<(Vec<ToolCall>, Vec<ToolCall>), String> {
     for c in &result.calls {
         if c.id.trim().is_empty() {
             return Err("model returned a tool call with an empty id".into());
@@ -34,10 +34,10 @@ pub(super) fn validate_calls(
             Err(e) => return Err(format!("tool call {}: invalid argument JSON: {e}", c.name)),
         }
     }
-    for c in &result.calls {
-        if !known_tool(&c.name, allow_shell) {
-            return Err(format!("unknown or disabled tool {}", c.name));
-        }
-    }
-    Ok(result.calls.clone())
+    let (calls, refused): (Vec<_>, Vec<_>) = result
+        .calls
+        .iter()
+        .cloned()
+        .partition(|call| known_tool(&call.name, allow_shell));
+    Ok((calls, refused))
 }

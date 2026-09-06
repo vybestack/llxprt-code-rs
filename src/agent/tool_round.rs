@@ -10,16 +10,18 @@ impl CodingAgent {
     ) -> Result<bool, AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
         self.check_time_limit(store, reserved, &attempt.rounds, attempt.started.elapsed())?;
-        let mut calls = validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell)
-            .map_err(|error| {
-                self.dead(
-                    store,
-                    reserved,
-                    "invalid-tool-call",
-                    &error,
-                    &attempt.rounds,
-                )
-            })?;
+        let (mut calls, refused) =
+            validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell).map_err(
+                |error| {
+                    self.dead(
+                        store,
+                        reserved,
+                        "invalid-tool-call",
+                        &error,
+                        &attempt.rounds,
+                    )
+                },
+            )?;
         attempt.requests.push(assistant_request(&attempt.current));
         // Enforce the tool-call budget by executing only what fits: the model
         // gets explicit refusals for the rest, and the turn resolves through a
@@ -35,6 +37,7 @@ impl CodingAgent {
         };
         self.execute_calls(config, attempt, &mut round, &calls, store, reserved)?;
         refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
+        refuse_unknown_tools(self.allow_shell, attempt, &mut round, &refused);
         attempt.rounds.push(round);
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         store
