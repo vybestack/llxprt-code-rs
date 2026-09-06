@@ -11,8 +11,8 @@
 //!
 //! The loop inspects `finish_reason` after every round. Only allowed completion
 //! reasons succeed; `length`/`content_filter`/`error`/unknown terminally fail and
-//! are persisted. Empty/duplicate ids, unknown or disabled tools, non-object
-//! arguments, and the exact tool-call budget are all validated before any side effect.
+//! are persisted. //! Empty/duplicate ids, non-object arguments, and the exact tool-call budget are
+//! validated before any side effect; unknown or disabled tools are refused with a correction.
 //! Malformed argument JSON is a hard error, not a normalized `{}` that could execute.
 
 use crate::adapter::{
@@ -121,8 +121,8 @@ mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
-    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
-    validate_provider_result,
+    final_summary_request, refuse_over_budget, refuse_unknown_tools, split_over_budget,
+    tool_call_record, validate_provider_result,
 };
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
@@ -652,9 +652,9 @@ impl CodingAgent {
         rounds: &[RoundRecord],
         forced: &LlmResult,
     ) -> Result<(), AgentError> {
-        let calls = validate_calls(ids, forced, self.allow_shell)
+        let (calls, refused) = validate_calls(ids, forced, self.allow_shell)
             .map_err(|error| self.dead(store, reserved, "invalid-tool-call", &error, rounds))?;
-        if !calls.is_empty() {
+        if !calls.is_empty() || !refused.is_empty() {
             return Err(self.dead(
                 store,
                 reserved,
@@ -920,3 +920,6 @@ enum RoundFailure {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tool_validation_tests;

@@ -131,6 +131,32 @@ pub(super) fn split_over_budget(
     fit.split_off(allowed)
 }
 
+/// Record a refusal for every unknown or disabled call so the model receives
+/// a corrective tool result and can continue the turn.
+pub(super) fn refuse_unknown_tools(
+    allow_shell: bool,
+    attempt: &mut super::AttemptState,
+    round: &mut super::RoundRecord,
+    refused: &[ToolCall],
+) {
+    let roster = crate::tools::tool_specs(allow_shell)
+        .into_iter()
+        .map(|spec| spec.name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    for call in refused {
+        let text = format!(
+            "error: unknown or disabled tool {}; available: {roster}",
+            call.name
+        );
+        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
+        attempt.requests.push(super::tool_return_request(
+            &call.name, &call.id, false, &text,
+        ));
+        round.calls.push(refused_call_record(call, text));
+    }
+}
+
 /// Record a refusal for every over-budget call so the assistant's tool
 /// message stays protocol-valid and the model learns why nothing ran.
 pub(super) fn refuse_over_budget(
