@@ -258,9 +258,14 @@ fn scrub_url_parts(text: &str) -> String {
     let mut i = 0usize;
     let mut ctx = RunContext::default();
     while i < out.len() {
-        if is_run_stop(out[i]) {
-            // Whitespace or a quote ends the run: the run start and the scheme progress
-            // never carry across that boundary.
+        // Whitespace ends the run unconditionally. A quote ends only a run that has not
+        // yet proven a scheme: once the run has proven `://`, a quote inside it is an
+        // ordinary URL path byte (`…/v1?next="b"#api_key=…`), not the JSON string boundary
+        // a bare quote in ordinary text is. A scheme-free run still cuts at the quote, so
+        // a JSON string boundary stays a boundary for ordinary text.
+        if is_run_stop(out[i]) && !(out[i] == '"' && ctx.has_scheme) {
+            // Whitespace, or a quote in a scheme-free run, ends the run: the run start
+            // and the scheme progress never carry across that boundary.
             ctx = RunContext::default();
             i += 1;
             continue;
@@ -277,8 +282,26 @@ fn scrub_url_parts(text: &str) -> String {
                 }
             }
             if ctx.has_scheme {
-                i = scrub_url_suffix(&mut out, i);
-                ctx = RunContext::default();
+                let next = scrub_url_suffix(&mut out, i);
+                // The rewrite stopped at the edge of its chunk. `)`, `}`, and `"` are all
+                // legal unencoded URL path bytes and are deliberately *not* scheme-gate
+                // run boundaries, so a `?`/`#` further along the same URL can sit behind
+                // any of them: the run context — run start, the memoized scheme verdict,
+                // and the scheme-scan cursor — must survive that boundary, or the next
+                // trigger is gated by a scheme-free run and its secret is left in the
+                // clear (issue 148 follow-up).
+                match out.get(next) {
+                    // A path-byte stop: the run keeps its identity and its verdict, and
+                    // the scan resumes on the delimiter itself.
+                    Some(')') | Some('}') | Some('"') => i = next,
+                    // Whitespace, or the end of the input, really does end the run.
+                    _ => {
+                        ctx = RunContext::default();
+                        i = next;
+                    }
+                }
+                // `ctx.scanned` only ever moves forward, so carrying it across the
+                // delimiter rescans nothing and the whole pass stays linear.
                 continue;
             }
         }
@@ -294,13 +317,16 @@ fn scrub_url_parts(text: &str) -> String {
     out.into_iter().collect()
 }
 
-/// The characters that end a run for the scheme gate: whitespace, or a quote.
-/// Deliberately **not** `)` or `}` — both are legal unencoded URL path bytes
-/// (`…/Foo_(bar)?token=…`, `…/v1/{id}?api_key=…`), so treating them as run boundaries is
-/// exactly what hid a genuine query from the gate (issue 148 review F1). A quote still
-/// ends a run because a JSON-escaped URL sits inside one
+/// The characters that end a run for the scheme gate: whitespace, or a quote in a run
+/// that has not proven a scheme yet. Deliberately **not** `)` or `}` — both are legal
+/// unencoded URL path bytes (`…/Foo_(bar)?token=…`, `…/v1/{id}?api_key=…`), so treating them as run
+/// boundaries is exactly what hid a genuine query from the gate (issue 148 review F1).
+/// A quote ends a scheme-free run because a JSON-escaped URL sits inside one
 /// (`"https:\/\/h.example\/v1?token=…"`): the escaped separator
-/// must be recognized *within* the quotes, never across them.
+/// must be recognized *within* the quotes, never across them. Inside a run that has
+/// already proven its scheme, `)`, `}`, and `"` are all ordinary path bytes and the run
+/// (and its memoized verdict) carries across them: see the context preservation after a
+/// suffix rewrite in [`scrub_url_parts`].
 fn is_run_stop(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\r' | '"')
 }
@@ -690,6 +716,59 @@ mod tests {
         }
     }
 
+    /// Issue 148 follow-up: a suffix rewrite stops at `)`, `}`, and `"` even though those
+    /// bytes are deliberately **not** scheme-gate run boundaries. Resetting the run
+    /// context after every rewrite therefore wiped a proven scheme at exactly the wrong
+    /// moment, so the `#`/`?` sitting behind the delimiter was gated by a scheme-free run
+    /// and its secret survived in the clear. The context (run start, memoized scheme
+    /// verdict, and the monotone scheme-scan cursor) now survives those three delimiters
+    /// and is dropped only at a real run stop (whitespace, or a quote in a run that has
+    /// not proven a scheme) or at end of input.
+    #[test]
+    fn url_run_context_survives_suffix_delimiters() {
+        // The pinned reproductions: the parenthesized, braced, and quoted variants of the
+        // same URL, each with a second trigger behind the delimiter.
+        for (src, expected) in [
+            (
+                "https://h.example/v1?next=(b)#token=SECRET",
+                "https://h.example/v1[r------)[r-----------",
+            ),
+            (
+                "https://h.example/v1?next={b}#api_key=SECRET",
+                "https://h.example/v1[r------}[r-------------",
+            ),
+            (
+                "https://h.example/v1?next=\"b\"#api_key=SECRET",
+                "https://h.example/v1[r----\"b\"[r-------------",
+            ),
+        ] {
+            let out = scrub_secrets(src, &[]);
+            assert_eq!(out, expected, "wrong rewrite extent for {src}");
+            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
+            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
+            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
+        }
+
+        // The wider set from the same review: every one must lose its secret material.
+        for src in [
+            "https://h.example/v1?next=(b)?api_key=SECRET",
+            "https://h.example#sec=(a)?api_key=SECRET",
+            "https://search.example/api?q=foo(bar)#api_key=SECRET",
+            "https://app.example/cb?state=(x)#access_token=SECRET",
+            "https://auth.example/oauth/authorize?redirect_uri=https%3A%2F%2Fapp(x)?token=SECRET",
+        ] {
+            let out = scrub_secrets(src, &[]);
+            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
+            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
+            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
+            assert!(
+                !out.contains("access_token="),
+                "secret leaked from {src}: {out}"
+            );
+            assert!(out.contains("[r"), "no rewrite for {src}: {out}");
+        }
+    }
+
     /// Issue 148 review F2: a punctuation run of length n must cost O(n), not O(n^2).
     /// Tool output reaches `MAX_TOOL_OUTPUT_DEFAULT` (16 MiB) before this scrubber sees
     /// it, so a multi-hundred-kilobyte run is scrubbed here under a hard wall-clock
@@ -713,6 +792,19 @@ mod tests {
             !out.contains("?"),
             "punctuation survived the rewrite: {out}"
         );
+        assert!(out.contains("[r"), "no rewrite happened: {out}");
+
+        // Issue 148 follow-up: the run context now survives `)`/`}`/`"`, so this shape —
+        // a scheme-proven run holding n delimiter-separated segments, each with its own
+        // trigger — must stay one linear sweep. `has_scheme` stays memoized and the
+        // scheme-scan cursor stays monotone across each preserved boundary, so no
+        // backward walk and no rescanning can creep back in.
+        let segments = "?a=1)".repeat(n);
+        let chunked = format!("https://h.example/v1?first=SECRET{segments}?end=SECRET");
+        let out = time_bounded(&chunked, &[], budget, "delimited post-scheme run");
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(!out.contains("first="), "{out}");
+        assert!(!out.contains("end="), "{out}");
         assert!(out.contains("[r"), "no rewrite happened: {out}");
     }
 
