@@ -552,18 +552,63 @@ fn length_finish_reason_persists_failed() {
     let cwd = new_cwd();
     let st = store("s11");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
+    let truncated = |text: &str| LlmResult {
+        text: text.to_string(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Length),
+    };
+    // Both completions truncate, so the single re-issue (issue 153) is exhausted and the
+    // run still fails terminally with the typed finish-reason error.
+    let a = agent(
+        Box::new(MockBackend::new(vec![
+            truncated("half"),
+            truncated("half again"),
+        ])),
+        &cwd,
+    );
+    let err = a.run(&st, &r1).expect_err("length must fail");
+    assert_eq!(err.key, "finish-reason");
+    assert_eq!(
+        err.terminal_outcome,
+        Some(llxprt_code_rs::agent::TRUNCATED_OUTPUT_RETRIED_KEY)
+    );
+    let snap = st.snapshot().unwrap();
+    let b1 = snap.branches.iter().find(|b| b.branch_id == "b1").unwrap();
+    assert_eq!(b1.lifecycle, Lifecycle::Failed);
+    assert!(b1.error.contains("finish_reason"));
+}
+
+/// A truncation after tool work keeps the immediate fatal path: no re-issue, so a single
+/// truncated reply after a tool round fails without the exhausted-retry verdict.
+#[test]
+fn length_finish_reason_after_tool_use_fails_immediately() {
+    let cwd = new_cwd();
+    let st = store("s11-mid");
+    let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".to_string(),
+            name: "list_directory".to_string(),
+            args_json: r#"{"path":"."}"#.to_string(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
     let truncated = LlmResult {
         text: "half".to_string(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
     };
-    let a = agent(Box::new(MockBackend::new(vec![truncated])), &cwd);
-    let err = a.run(&st, &r1).expect_err("length must fail");
+    let a = agent(
+        Box::new(MockBackend::new(vec![tool_round, truncated])),
+        &cwd,
+    );
+    let err = a.run(&st, &r1).expect_err("mid-work length must fail");
     assert_eq!(err.key, "finish-reason");
+    assert_eq!(err.terminal_outcome, None);
     let snap = st.snapshot().unwrap();
     let b1 = snap.branches.iter().find(|b| b.branch_id == "b1").unwrap();
     assert_eq!(b1.lifecycle, Lifecycle::Failed);
-    assert!(b1.error.contains("finish_reason"));
 }
 
 #[test]

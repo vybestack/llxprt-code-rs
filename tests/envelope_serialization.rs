@@ -36,28 +36,6 @@ fn success_envelope_bytes_are_pinned() {
 }
 
 #[test]
-fn error_envelope_carries_terminal_outcome() {
-    let mut error = AppError::new(
-        Code::Model,
-        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
-        "collapsed turn",
-    );
-    error.terminal_outcome = Some(llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY);
-    let outcome: Result<RunOutcome, AppError> = Err(error);
-    let line = cli::envelope(&outcome, "sess_1").to_line();
-    let text = String::from_utf8_lossy(&line).into_owned();
-    assert!(
-        text.contains("\"terminal_outcome\":\"malformed_tool_call\""),
-        "terminal outcome missing from {text}"
-    );
-    let document: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
-    assert_eq!(
-        document["error"]["terminal_outcome"],
-        serde_json::json!("malformed_tool_call")
-    );
-}
-
-#[test]
 fn nested_error_envelope_bytes_are_pinned() {
     let outcome: Result<RunOutcome, AppError> =
         Err(AppError::new(Code::Model, "model-\"bad", "line one\n雪"));
@@ -70,6 +48,25 @@ fn nested_error_envelope_bytes_are_pinned() {
         line,
         b"{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n\xe9\x9b\xaa\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
+}
+
+/// An error the run decorated with its own terminal outcome carries that verdict into the
+/// nested error detail (issue 146 malformed tool call, issue 153 exhausted truncation
+/// retry), so a supervisor can branch without parsing the message.
+#[test]
+fn declared_terminal_outcome_rides_the_error_envelope() {
+    for outcome in [
+        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
+        llxprt_code_rs::agent::TRUNCATED_OUTPUT_RETRIED_KEY,
+    ] {
+        let mut error = AppError::new(Code::Model, "finish-reason", "truncated");
+        error.terminal_outcome = Some(outcome);
+        let line = cli::envelope(&Err(error), "sess_1").to_line();
+        let value: serde_json::Value = serde_json::from_slice(&line).unwrap();
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["error"]["code"], "finish-reason");
+        assert_eq!(value["error"]["terminal_outcome"], outcome);
+    }
 }
 
 #[test]

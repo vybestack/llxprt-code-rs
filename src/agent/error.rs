@@ -5,6 +5,10 @@ pub struct AgentError {
     pub key: &'static str,
     pub message: String,
     pub code: crate::envelope::Code,
+    /// Terminal outcome the run declared for itself, when it declared one: the malformed
+    /// tool-call collapse (issue 146) and the exhausted truncation retry (issue 153) both
+    /// stay typed failures but carry a distinct verdict the caller can branch on.
+    pub terminal_outcome: Option<&'static str>,
 }
 
 impl AgentError {
@@ -13,6 +17,7 @@ impl AgentError {
             code,
             key,
             message: msg.into(),
+            terminal_outcome: None,
         }
     }
 
@@ -21,6 +26,7 @@ impl AgentError {
             code: crate::envelope::Code::Session,
             key: "session",
             message: error.to_string(),
+            terminal_outcome: None,
         }
     }
 }
