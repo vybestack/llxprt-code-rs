@@ -661,3 +661,42 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
     assert_eq!(run.tool_count, 1);
     assert_eq!(run.zero_call_tail, 1);
 }
+
+/// While the `list_directory` call executes the session directory carries a
+/// `tool-in-flight.json` sidecar a headless operator can stat; once the run
+/// finishes Ok the sidecar is removed, so an absent marker means the turn is free.
+#[test]
+fn tool_in_flight_marker_is_absent_after_successful_run() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("in-flight-gone").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "list_directory".into(),
+            args_json: r#"{"path":"."}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let final_round = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![tool_round, final_round])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let run = agent
+        .run(&store, &reserved)
+        .expect("a tool turn with a normal summary succeeds");
+    assert_eq!(run.status, "ok");
+    assert_eq!(run.tool_count, 1);
+    assert!(
+        !store.session_dir().join("tool-in-flight.json").exists(),
+        "a completed turn leaves no in-flight marker behind"
+    );
+}

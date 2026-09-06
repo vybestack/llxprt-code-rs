@@ -24,6 +24,7 @@ use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 use serde_json::Value as JsonValue;
 
 mod finish;
+mod in_flight;
 pub use finish::finish_check;
 
 // Compatibility alias retained while route construction remains owned by the adapter.
