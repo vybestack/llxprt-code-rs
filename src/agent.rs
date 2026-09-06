@@ -279,7 +279,16 @@ impl CodingAgent {
                     ..Default::default()
                 },
             )?;
-            return Ok(self.replayed_run(reserved));
+            let completed = finish::replayed_run(self.max_tool_calls, reserved);
+            // Same no-tool-calls guard as the live path (issue #144 fingerprint).
+            if finish::zero_call_channel_failure(completed.tool_count, &completed.summary) {
+                return Err(AgentError::new(
+                    crate::envelope::Code::Model,
+                    "no-tool-calls",
+                    "completed without executing any tool call while the assistant text contains unparsed tool-call markup",
+                ));
+            }
+            return Ok(completed);
         }
         self.renew(store, reserved)?;
         self.validate_history_budget(store, reserved)?;
@@ -299,28 +308,17 @@ impl CodingAgent {
         let mut attempt = self.begin_attempt(store, reserved, requests, &tools)?;
         self.run_tool_rounds(store, reserved, &tools, &config, &mut attempt)?;
         let summary = self.resolve_summary(store, reserved, &tools, &mut attempt)?;
-        self.complete_attempt(store, reserved, summary, attempt)
-    }
-
-    fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
-        CompletedRun {
-            turn: reserved.turn,
-            attempt: reserved.attempt,
-            branch_id: reserved.branch_id.clone(),
-            summary: reserved.summary.clone(),
-            tool_count: reserved
-                .rounds
-                .iter()
-                .flat_map(|round| round.calls.iter())
-                .filter(|call| !call.refused)
-                .count(),
-            prompt_digest: prompt_digest(&reserved.prompt),
-            status: "ok".into(),
-            branch: reserved.attempt > 1,
-            declared_tool_calls: self.max_tool_calls,
-            budget_exhausted: false,
-            replayed: true,
+        // Zero-call guard; see finish::zero_call_channel_failure (issue #144).
+        if finish::zero_call_channel_failure(attempt.usage.total_calls, &summary) {
+            return Err(self.dead(
+                store,
+                reserved,
+                "no-tool-calls",
+                "completed without executing any tool call while the assistant text contains unparsed tool-call markup",
+                &[],
+            ));
         }
+        self.complete_attempt(store, reserved, summary, attempt)
     }
 
     fn validate_history_budget(

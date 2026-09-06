@@ -473,3 +473,150 @@ fn forced_summary_counts_already_persisted_rounds() {
     assert_eq!(error.key, "turn-budget");
     assert_eq!(agent.model_calls(), 3);
 }
+
+/// Issue #144: a headless run that completes with zero executed tool calls must not
+/// report ok. The evidence envelope carried the model raw `<tool_calls>` markup as the
+/// summary; zero executed calls means nothing verifiable happened, so the run fails
+/// with the verbatim `no-tool-calls` key.
+/// The evidence markup from the issue, rebuilt without risking source-level quote or
+/// hash literals: the third char is U+4EBA and there are exactly seven opening angle brackets.
+fn tool_call_markup() -> String {
+    let person = '\u{4eba}';
+    format!(
+        "\n\n<{person} unitA round 4: fix the three defects. Let me explore first.\n\n\
+         <tool_calls>\n\n<name>list_directory</name>\n<path>src/context_ingress</path>\n</tool_calls>"
+    )
+}
+
+#[test]
+fn zero_executed_tool_calls_fails_not_ok() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("zero-tool-calls").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let markup = tool_call_markup();
+    // ord-verify the reconstructed evidence literals survived every transform.
+    assert_eq!(markup.chars().filter(|c| *c == '<').count(), 7);
+    assert!(markup.contains('\u{4eba}'));
+    assert!(markup.contains("list_directory"));
+    let reply = LlmResult {
+        text: markup,
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![reply])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("a zero-tool-call completion must not report ok");
+    assert_eq!(error.key, "no-tool-calls");
+    assert!(error.message.contains("without executing any tool call"));
+    // The branch must fail, not silently persist the unparsed markup as a summary.
+    let state = store.snapshot().unwrap();
+    assert_eq!(state.branches[0].lifecycle, Lifecycle::Failed);
+    assert!(agent.model_calls() == 1);
+}
+
+#[test]
+fn zero_calls_without_markup_still_ok() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("zero-calls-plain").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    // A single text-only round of ordinary assistant text (no tool-call
+    // markup) with zero executed calls is a declared outcome: the #144 guard
+    // keys on the markup fingerprint, not the bare call count.
+    let reply = LlmResult {
+        text: "Nothing to run; reporting the final summary directly.".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![reply])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let completed = agent
+        .run(&store, &reserved)
+        .expect("a zero-call completion without tool-call markup stays ok");
+    assert_eq!(completed.status, "ok");
+    assert_eq!(completed.tool_count, 0);
+    let state = store.snapshot().unwrap();
+    assert_eq!(state.branches[0].lifecycle, Lifecycle::Completed);
+}
+
+#[test]
+fn replayed_zero_tool_calls_fails_not_ok() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("replay-zero-calls").unwrap()).unwrap();
+    let reserved0 = store.start_request(None, None, "P", cwd.path()).unwrap();
+    // A replay reservation whose recorded rounds contain no non-refused calls: the
+    // network-free replay must fail with the same key as the live path. The backend is
+    // never consulted (model_calls stays 0), and the guard must not touch the store
+    // because a completed branch cannot be failed.
+    let reserved = ReservedRequest {
+        branch_id: reserved0.branch_id.clone(),
+        turn: reserved0.turn,
+        attempt: reserved0.attempt,
+        replay: true,
+        retry: false,
+        rounds: vec![RoundRecord {
+            assistant: "done".into(),
+            calls: Vec::new(),
+        }],
+        summary: tool_call_markup(),
+        prompt: "P".into(),
+        history: Vec::new(),
+        owner: reserved0.owner.clone(),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(Vec::new())),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent
+        .run(&store, &reserved)
+        .expect_err("a replay with zero executed tool calls must not report ok");
+    assert_eq!(error.key, "no-tool-calls");
+    assert!(error.message.contains("without executing any tool call"));
+    assert_eq!(agent.model_calls(), 0);
+}
+
+#[test]
+fn one_executed_tool_call_still_ok() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("one-tool-call-ok").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let tool_round = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "list_directory".into(),
+            args_json: "{\"path\":\".\"}".to_string(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let final_round = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![tool_round, final_round])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let completed = agent
+        .run(&store, &reserved)
+        .expect("one executed tool call is verifiable progress and stays ok");
+    assert!(completed.tool_count >= 1);
+    assert_eq!(completed.status, "ok");
+    assert_eq!(completed.summary, "done");
+    let state = store.snapshot().unwrap();
+    assert_eq!(state.branches[0].lifecycle, Lifecycle::Completed);
+}
