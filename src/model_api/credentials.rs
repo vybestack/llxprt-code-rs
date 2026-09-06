@@ -33,30 +33,39 @@ const CREDENTIAL_REMEDIATION: &str =
 const UNSUPPORTED_PLATFORM: &str =
     "Codex OAuth credentials require the native macOS keychain on this platform";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CredentialError {
-    diagnostic: &'static str,
+    diagnostic: String,
 }
 
 impl CredentialError {
     #[cfg(any(test, target_os = "macos"))]
-    pub(crate) const fn remediation() -> Self {
+    pub(crate) fn remediation() -> Self {
         Self {
-            diagnostic: CREDENTIAL_REMEDIATION,
+            diagnostic: CREDENTIAL_REMEDIATION.to_owned(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn keychain_timeout(service: &str, account: &str) -> Self {
+        Self {
+            diagnostic: format!(
+                "The macOS keychain prompt for service={service}, account={account} went unanswered for 10s in a headless run. Run once from an interactive Terminal and click Always Allow, or pre-grant with security set-generic-password-partition-list.",
+            ),
         }
     }
 
     #[cfg(not(target_os = "macos"))]
-    const fn unsupported() -> Self {
+    fn unsupported() -> Self {
         Self {
-            diagnostic: UNSUPPORTED_PLATFORM,
+            diagnostic: UNSUPPORTED_PLATFORM.to_owned(),
         }
     }
 }
 
 impl fmt::Display for CredentialError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.diagnostic)
+        formatter.write_str(&self.diagnostic)
     }
 }
 
