@@ -122,7 +122,9 @@ fn env_max_tool_calls_validated_like_cli() {
         let mut l = layers();
         l.env = budget(value);
         let error = resolve(l).unwrap_err().to_string();
-        assert!(error.starts_with("--max-tool-calls must be in the range 1..=512 (got "));
+        assert!(
+            error.starts_with("--max-tool-calls must be -1 or an integer from 1 through 512 (got ")
+        );
     }
 }
 #[test]
@@ -149,4 +151,76 @@ fn settings_schema_drift() {
         );
     }
     assert_eq!(SETTINGS_SCHEMA_ID, "https://llxprt.dev/schema/settings-v1");
+}
+
+#[test]
+fn runtime_max_tool_calls_follows_resolver() {
+    let mut l = layers();
+    l.user_file = budget(4);
+    l.profile = budget(8);
+    l.env = budget(12);
+    l.cli = budget(16);
+    let settings = resolve(l).unwrap();
+    assert_eq!(
+        (
+            settings.budgets.max_tool_calls.value,
+            settings.budgets.max_tool_calls.source
+        ),
+        (16, Source::Cli)
+    );
+}
+
+#[test]
+fn runtime_settings_json_applies_when_unoverridden() {
+    let mut l = layers();
+    l.user_file = SettingsLayer {
+        budgets: SettingsBudgets {
+            max_tool_calls: Some(23),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let settings = resolve(l).unwrap();
+    assert_eq!(
+        (
+            settings.budgets.max_tool_calls.value,
+            settings.budgets.max_tool_calls.source
+        ),
+        (23, Source::UserFile)
+    );
+}
+
+#[test]
+fn runtime_env_overrides_profile_for_turn_time() {
+    let mut l = layers();
+    l.profile.budgets.turn_time = Some("2h".into());
+    l.env.budgets.turn_time = Some("90s".into());
+    let settings = resolve(l).unwrap();
+    assert_eq!(
+        settings.budgets.turn_time.value,
+        Some(std::time::Duration::from_secs(90))
+    );
+    assert_eq!(settings.budgets.turn_time.source, Source::Env);
+}
+
+#[test]
+fn cli_flag_error_messages_unchanged() {
+    assert_eq!(
+        validate_max_tool_calls(0).unwrap_err(),
+        "--max-tool-calls must be -1 or an integer from 1 through 512 (got 0)"
+    );
+    assert_eq!(
+        parse_turn_time("5x").unwrap_err(),
+        "--turn-time unit must be s, m, or h (got 5x)"
+    );
+}
+
+#[test]
+fn no_settings_env_reads_outside_resolver() {
+    // Runtime accepts Settings, so resolved values are the sole budget inputs to build_agent.
+    let mut l = layers();
+    l.env = budget(31);
+    let settings = resolve(l).unwrap();
+    assert_eq!(settings.budgets.max_tool_calls.value, 31);
+    assert_eq!(settings.budgets.max_tool_calls.source, Source::Env);
 }

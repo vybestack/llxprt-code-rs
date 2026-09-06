@@ -11,9 +11,12 @@ pub fn run_profiled(
         Some(prompt) => prompt,
         None => read_stdin_prompt()?,
     };
+    // Resolve every settings layer before production dependencies can read credentials.
+    let settings = resolve_settings(&args)?;
     let dependencies = RuntimeDependencies::production()
         .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
-    let profile = resolve_profile(&args, dependencies.config_home().as_path())?;
+    let mut profile = resolve_profile(&args, settings.paths.config_root.value.as_path())?;
+    apply_runtime_settings(&mut profile, &settings)?;
     profile_event(&profiler, "profile_parsed", Default::default())?;
     let cwd = resolve_cwd(&args)?;
     let constructed = construct_backend(
@@ -24,7 +27,14 @@ pub fn run_profiled(
         args.allow_insecure_http,
     )
     .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
-    let agent = build_agent(&args, &profile, constructed, &cwd, profiler.clone())?;
+    let agent = build_agent(
+        &args,
+        &profile,
+        &settings,
+        constructed,
+        &cwd,
+        profiler.clone(),
+    )?;
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|error| AppError::new(Code::Session, "session-store", error))?;
     profile_event(&profiler, "session_store_opened", Default::default())?;
@@ -78,32 +88,22 @@ fn resolve_cwd(args: &Args) -> Result<PathBuf, AppError> {
 fn build_agent(
     args: &Args,
     profile: &Profile,
+    settings: &Settings,
     constructed: crate::model_api::registry::ConstructedBackend,
     cwd: &std::path::Path,
     profiler: Option<crate::memory_profile::Profiler>,
 ) -> Result<CodingAgent, AppError> {
-    let max_tool_calls = match args.max_tool_calls {
-        None | Some(-1) | Some(1..=512) => crate::profile::resolve_max_tool_calls(
-            args.max_tool_calls,
-            profile.ephemeral.max_tool_calls_per_prompt,
-        ),
-        Some(value) => {
-            return Err(AppError::new(
-                Code::Usage,
-                "max-tool-calls",
-                format!(
-                    "--max-tool-calls must be -1 or an integer from 1 through 512 (got {value})"
-                ),
-            ));
-        }
+    let max_tool_calls = match settings.budgets.max_tool_calls.value {
+        -1 => None,
+        value => Some(usize::try_from(value).map_err(|_| {
+            AppError::new(
+                Code::Config,
+                "settings-resolve",
+                "resolved max-tool-calls is invalid",
+            )
+        })?),
     };
-    let turn_time = args
-        .turn_time
-        .as_deref()
-        .map(parse_turn_time)
-        .transpose()
-        .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?
-        .flatten();
+    let turn_time = settings.budgets.turn_time.value;
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?
         .with_secrets(constructed.secret_values)

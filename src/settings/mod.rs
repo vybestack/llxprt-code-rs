@@ -83,13 +83,35 @@ pub struct SettingsLayers {
     pub config_root: PathBuf,
 }
 
+/// Read the process environment settings layer. This is the sole settings-env reader.
+pub fn environment_layer() -> Result<SettingsLayer, String> {
+    Ok(SettingsLayer {
+        provider: SettingsProvider {
+            base_url: std::env::var("LLXPRT_BASE_URL").ok(),
+            ..Default::default()
+        },
+        budgets: SettingsBudgets {
+            max_tool_calls: std::env::var("LLXPRT_MAX_TOOL_CALLS")
+                .ok()
+                .map(|value| {
+                    value.parse().map_err(|_| {
+                        "--max-tool-calls must be -1 or an integer from 1 through 512".to_string()
+                    })
+                })
+                .transpose()?,
+            turn_time: std::env::var("LLXPRT_TURN_TIME").ok(),
+        },
+        ..Default::default()
+    })
+}
+
 /// Validate the max-tool-call setting used by both CLI-equivalent layers.
 pub fn validate_max_tool_calls(value: i64) -> Result<i64, String> {
-    if (1..=512).contains(&value) {
+    if value == -1 || (1..=512).contains(&value) {
         Ok(value)
     } else {
         Err(format!(
-            "--max-tool-calls must be in the range 1..=512 (got {value})"
+            "--max-tool-calls must be -1 or an integer from 1 through 512 (got {value})"
         ))
     }
 }

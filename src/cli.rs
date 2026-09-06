@@ -10,9 +10,10 @@ use crate::envelope::{Envelope, OkEnvelope};
 use crate::model::{ProfileResolver, ResolveOutcome};
 use crate::model_api::dependencies::RuntimeDependencies;
 use crate::model_api::registry::construct_backend;
-use crate::profile::Profile;
+use crate::profile::{Profile, RedactedUrl};
 use crate::session::load_session_store_in;
 use crate::session::SessionId;
+use crate::settings::Settings;
 use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -90,44 +91,10 @@ pub struct Args {
     pub print_config: bool,
 }
 
-/// Parse a `--turn-time` value: digits plus an `s`/`m`/`h` unit, or a bare
-/// `0` (any zero form disables the budget). Bare nonzero numbers, unknown
-/// units, and overflowing values are usage errors.
-pub(crate) fn parse_turn_time(raw: &str) -> Result<Option<std::time::Duration>, String> {
-    let raw = raw.trim();
-    let (digits, unit) = match raw.char_indices().rfind(|(_, c)| !c.is_ascii_digit()) {
-        Some((idx, c)) => (&raw[..idx], c),
-        None => (raw, '\0'),
-    };
-    let seconds_per_unit = match unit {
-        '\0' => {
-            if digits == "0" {
-                return Ok(None);
-            }
-            return Err(format!(
-                "--turn-time needs an s/m/h unit (got {raw:?}); pass 0 to disable"
-            ));
-        }
-        's' => 1u64,
-        'm' => 60,
-        'h' => 3600,
-        _ => return Err(format!("--turn-time unit must be s, m, or h (got {raw:?})")),
-    };
-    let Ok(count) = digits.parse::<u64>() else {
-        return Err(format!("--turn-time needs an integer count (got {raw:?})"));
-    };
-    let seconds = count
-        .checked_mul(seconds_per_unit)
-        .ok_or_else(|| format!("--turn-time {raw:?} overflows"))?;
-    if seconds == 0 {
-        return Ok(None);
-    }
-    Ok(Some(std::time::Duration::from_secs(seconds)))
-}
-
-/// Resolve the actual configuration layers for `--print-config` without reading credentials.
-pub fn print_config(args: &Args) -> Result<String, AppError> {
+/// Resolve the actual configuration layers used both by runtime and `--print-config`.
+pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
     use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
+
     let root = crate::config::std_profile_dir()
         .map_err(|e| AppError::new(Code::Config, "config-home", e))?;
     let profile = resolve_profile(args, &root)?;
@@ -140,28 +107,8 @@ pub fn print_config(args: &Args) -> Result<String, AppError> {
             .as_ref()
             .map(|name| root.join("profiles").join(format!("{name}.json")))
     });
-    let env = SettingsLayer {
-        provider: SettingsProvider {
-            base_url: std::env::var("LLXPRT_BASE_URL").ok(),
-            ..Default::default()
-        },
-        budgets: SettingsBudgets {
-            max_tool_calls: std::env::var("LLXPRT_MAX_TOOL_CALLS")
-                .ok()
-                .map(|value| {
-                    value.parse().map_err(|_| {
-                        AppError::new(
-                            Code::Config,
-                            "settings-resolve",
-                            "--max-tool-calls must be in the range 1..=512",
-                        )
-                    })
-                })
-                .transpose()?,
-            turn_time: std::env::var("LLXPRT_TURN_TIME").ok(),
-        },
-        ..Default::default()
-    };
+    let env = settings::environment_layer()
+        .map_err(|e| AppError::new(Code::Config, "settings-resolve", e))?;
     let cli = SettingsLayer {
         budgets: SettingsBudgets {
             max_tool_calls: args.max_tool_calls,
@@ -187,18 +134,34 @@ pub fn print_config(args: &Args) -> Result<String, AppError> {
     };
     let user_file = settings::load_user_file(&root)
         .map_err(|e| AppError::new(Code::Config, "settings-load", e))?;
-    let settings = settings::resolve(SettingsLayers {
+    settings::resolve(SettingsLayers {
         user_file,
         profile,
         env,
         cli,
         config_root: root,
     })
-    .map_err(|e| AppError::new(Code::Config, "settings-resolve", e.to_string()))?;
-    serde_json::to_string(&settings)
+    .map_err(|e| AppError::new(Code::Config, "settings-resolve", e.to_string()))
+}
+
+/// Render the resolved settings without constructing a backend.
+pub fn print_config(args: &Args) -> Result<String, AppError> {
+    serde_json::to_string(&resolve_settings(args)?)
         .map_err(|e| AppError::new(Code::Config, "settings-json", e.to_string()))
 }
 
+/// Apply the resolver's provider values to the selected profile before backend construction.
+pub(crate) fn apply_runtime_settings(
+    profile: &mut Profile,
+    settings: &Settings,
+) -> Result<(), AppError> {
+    profile.model.clone_from(&settings.provider.model.value);
+    profile.ephemeral.base_url = Some(
+        RedactedUrl::parse(&settings.provider.base_url.value)
+            .map_err(|e| AppError::new(Code::Config, "settings-resolve", e))?,
+    );
+    Ok(())
+}
 /// Outcome of a successful invocation.
 pub struct RunOutcome {
     pub session: SessionId,
@@ -558,7 +521,7 @@ fn resolve_profile(args: &Args, config_root: &std::path::Path) -> Result<Profile
 
 #[cfg(test)]
 mod turn_time_tests {
-    use super::parse_turn_time;
+    use crate::settings::parse_turn_time;
     use std::time::Duration;
 
     #[test]
