@@ -7,6 +7,11 @@ pub fn run_profiled(
 ) -> Result<RunOutcome, AppError> {
     let session_id =
         SessionId::parse(&args.session).map_err(|m| AppError::new(Code::Usage, "session", m))?;
+    // Pure CLI flag validation runs before any profile resolution, backend
+    // construction, or credential access (issue 60): an invalid `--max-tool-calls`
+    // or `--turn-time` must fail as a usage error even when the named profile or
+    // its credential source is missing.
+    let limits = validate_cli_limits(&args)?;
     let prompt = match args.prompt.clone() {
         Some(prompt) => prompt,
         None => read_stdin_prompt()?,
@@ -24,7 +29,7 @@ pub fn run_profiled(
         args.allow_insecure_http,
     )
     .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
-    let agent = build_agent(&args, &profile, constructed, &cwd, profiler.clone())?;
+    let agent = build_agent(&args, &profile, limits, constructed, &cwd, profiler.clone())?;
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|error| AppError::new(Code::Session, "session-store", error))?;
     profile_event(&profiler, "session_store_opened", Default::default())?;
@@ -75,18 +80,22 @@ fn resolve_cwd(args: &Args) -> Result<PathBuf, AppError> {
     Ok(cwd.canonicalize().unwrap_or(cwd))
 }
 
-fn build_agent(
-    args: &Args,
-    profile: &Profile,
-    constructed: crate::model_api::registry::ConstructedBackend,
-    cwd: &std::path::Path,
-    profiler: Option<crate::memory_profile::Profiler>,
-) -> Result<CodingAgent, AppError> {
+/// The CLI-provided per-run limits, parsed and validated up front (issue 60).
+///
+/// Construction is the only place the raw `--max-tool-calls` / `--turn-time` flags are
+/// interpreted, so [`run_profiled`] can run this pure validation before any profile
+/// resolution or credential access while [`build_agent`] consumes the typed result.
+#[derive(Debug, Clone, Copy)]
+struct ValidatedCliLimits {
+    /// `None`, `-1` (unlimited), or a checked `1..=512` value; the profile still
+    /// supplies the budget when this is `None`.
+    max_tool_calls: Option<i64>,
+    turn_time: Option<std::time::Duration>,
+}
+
+fn validate_cli_limits(args: &Args) -> Result<ValidatedCliLimits, AppError> {
     let max_tool_calls = match args.max_tool_calls {
-        None | Some(-1) | Some(1..=512) => crate::profile::resolve_max_tool_calls(
-            args.max_tool_calls,
-            profile.ephemeral.max_tool_calls_per_prompt,
-        ),
+        None | Some(-1) | Some(1..=512) => args.max_tool_calls,
         Some(value) => {
             return Err(AppError::new(
                 Code::Usage,
@@ -104,6 +113,28 @@ fn build_agent(
         .transpose()
         .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?
         .flatten();
+    Ok(ValidatedCliLimits {
+        max_tool_calls,
+        turn_time,
+    })
+}
+
+fn build_agent(
+    args: &Args,
+    profile: &Profile,
+    limits: ValidatedCliLimits,
+    constructed: crate::model_api::registry::ConstructedBackend,
+    cwd: &std::path::Path,
+    profiler: Option<crate::memory_profile::Profiler>,
+) -> Result<CodingAgent, AppError> {
+    let ValidatedCliLimits {
+        max_tool_calls,
+        turn_time,
+    } = limits;
+    let max_tool_calls = crate::profile::resolve_max_tool_calls(
+        max_tool_calls,
+        profile.ephemeral.max_tool_calls_per_prompt,
+    );
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?
         .with_secrets(constructed.secret_values)
