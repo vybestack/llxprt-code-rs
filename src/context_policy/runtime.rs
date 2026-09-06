@@ -22,6 +22,7 @@ use super::ladder;
 use super::monitor::RuntimeMonitor;
 use super::params::ParameterRegistry;
 use super::pressure::{Pressure, SafetyTier, Thresholds};
+use super::vocabulary::{PolicyOperation, TerminalLabel};
 
 fn param(registry: &ParameterRegistry, name: &str) -> f64 {
     registry
@@ -89,20 +90,7 @@ impl PolicyEvent {
         Ok(Self {
             logical_time: field("logical_time")?,
             source: field("source")?,
-            operation: match operation {
-                "quiesce-rate" => "quiesce-rate",
-                "quiesce-unwritable" => "quiesce-unwritable",
-                "drop-with-handle" => "drop-with-handle",
-                "wrap-up" => "wrap-up",
-                // The class-specific ladder rungs (issue 113) and the rest of
-                // the fixed escalation order are durable event names too.
-                "fold-away-ephemeral" => "fold-away-ephemeral",
-                "placeholder-collapse" => "placeholder-collapse",
-                "fold" => "fold",
-                "compact" => "compact",
-                "condense" => "condense",
-                other => return Err(format!("context policy event unknown operation: {other}")),
-            },
+            operation: PolicyOperation::parse(operation)?.as_str(),
             input_bytes: field("input_bytes")?,
             admitted_bytes: field("admitted_bytes")?,
             reclaimed_bytes: field("reclaimed_bytes")?,
@@ -365,14 +353,16 @@ impl ProposalOnlyController {
         // The event names the rung operation that actually ran (issue 113):
         // the class-specific escalation decided above IS the ladder step this
         // completion took, so the durable record carries its operation.
-        let operation_name = match digest_admission {
-            Admission::Quiesce => "quiesce-rate",
-            Admission::Admit | Admission::Handle => rung_operation.unwrap_or("drop-with-handle"),
+        let operation = match digest_admission {
+            Admission::Quiesce => PolicyOperation::QuiesceRate,
+            Admission::Admit | Admission::Handle => rung_operation
+                .and_then(|name| PolicyOperation::parse(name).ok())
+                .unwrap_or(PolicyOperation::DropWithHandle),
         };
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
             source: proposal.source,
-            operation: operation_name,
+            operation: operation.as_str(),
             input_bytes: proposal.input_bytes,
             admitted_bytes: admitted_bytes as u64,
             reclaimed_bytes: reclaimed,
@@ -386,7 +376,7 @@ impl ProposalOnlyController {
             // The quota's own refusal is the rate terminal: the caller never
             // touched the store on this path, so the write-failure branch
             // must not be recorded for it.
-            self.terminal_outcome = Some("quiesce_rate");
+            self.terminal_outcome = Some(TerminalLabel::QuiesceRate.as_terminal_str());
         } else if armed_after {
             // An ordinary armed completion is not a terminal at all: the
             // episode keeps running and wrap-up can still be recorded.
@@ -410,14 +400,14 @@ impl ProposalOnlyController {
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
             source: proposal.source,
-            operation: "quiesce-unwritable",
+            operation: PolicyOperation::QuiesceUnwritable.as_str(),
             input_bytes: proposal.input_bytes,
             admitted_bytes: 0,
             reclaimed_bytes: 0,
             armed_before: proposal.armed,
             armed_after,
         });
-        self.terminal_outcome = Some("quiesce_unwritable");
+        self.terminal_outcome = Some(TerminalLabel::QuiesceUnwritable.as_terminal_str());
         // A failed store transaction is the same wedged store the explicit
         // write-failure branch of `wrap_up` records.
         self.terminal_write_failed = true;
@@ -445,12 +435,12 @@ impl ProposalOnlyController {
         if !writable {
             self.terminal_write_failed = true;
             self.terminal_fit_saturated = Some(true);
-            self.terminal_outcome = Some("quiesce_unwritable");
+            self.terminal_outcome = Some(TerminalLabel::QuiesceUnwritable.as_terminal_str());
             return;
         }
         if !super::progress::terminal_reserve(wrap_up_cost, available) {
             self.terminal_fit_saturated = Some(true);
-            self.terminal_outcome = Some("quiesce_unwritable");
+            self.terminal_outcome = Some(TerminalLabel::QuiesceUnwritable.as_terminal_str());
             return;
         }
         self.logical_time = self.logical_time.saturating_add(1);
@@ -458,7 +448,7 @@ impl ProposalOnlyController {
         self.events.push(PolicyEvent {
             logical_time: self.logical_time,
             source: 0,
-            operation: "wrap-up",
+            operation: PolicyOperation::WrapUp.as_str(),
             input_bytes: 0,
             admitted_bytes: 0,
             reclaimed_bytes: 0,
@@ -466,7 +456,7 @@ impl ProposalOnlyController {
             armed_after: armed,
         });
         self.terminal_fit_saturated = Some(false);
-        self.terminal_outcome = Some("wrap_up");
+        self.terminal_outcome = Some(TerminalLabel::WrapUp.as_terminal_str());
     }
 
     pub fn events(&self) -> &[PolicyEvent] {
@@ -530,8 +520,8 @@ impl ProposalOnlyController {
     /// the terminal fit gate, restored with the branch so a restarted session
     /// keeps the feasible/saturated distinction durable (108-4).
     pub fn restore_terminal_outcome(&mut self, outcome: &'static str, fit_saturated: Option<bool>) {
-        if self.terminal_outcome == Some("quiesce_unwritable")
-            || self.terminal_outcome == Some("quiesce_rate")
+        if self.terminal_outcome == Some(TerminalLabel::QuiesceUnwritable.as_terminal_str())
+            || self.terminal_outcome == Some(TerminalLabel::QuiesceRate.as_terminal_str())
         {
             return;
         }
@@ -573,13 +563,13 @@ impl ProposalOnlyController {
         self.events.push(PolicyEvent {
             logical_time: proposal.logical_time,
             source: proposal.source,
-            operation: "quiesce-rate",
+            operation: PolicyOperation::QuiesceRate.as_str(),
             input_bytes: proposal.input_bytes,
             admitted_bytes: 0,
             reclaimed_bytes: 0,
             armed_before: proposal.armed,
             armed_after: self.pressure.tier() == SafetyTier::Armed,
         });
-        self.terminal_outcome = Some("quiesce_rate");
+        self.terminal_outcome = Some(TerminalLabel::QuiesceRate.as_terminal_str());
     }
 }
