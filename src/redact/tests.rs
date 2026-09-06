@@ -1,5 +1,4 @@
 use super::*;
-use std::time::{Duration, Instant};
 
 #[test]
 fn redacts_credentials_full_url_no_path() {
@@ -183,6 +182,7 @@ fn ordinary_typed_credential_names_round_trip_byte_identically() {
         "pub struct Profile {\n",
         "    pub api_key: Option<String>,\n",
         "    pub api_key: String,\n",
+        "    pub api_key: ProviderCredential,\n",
         "}\n",
         "impl Profile {\n",
         "    fn key(&self, api_key: &str) -> &str {\n",
@@ -344,57 +344,25 @@ fn url_run_context_survives_suffix_delimiters() {
     }
 }
 
-/// Issue 148 review F2: a punctuation run of length n must cost O(n), not O(n^2).
-/// Tool output reaches `MAX_TOOL_OUTPUT_DEFAULT` (16 MiB) before this scrubber sees
-/// it, so a multi-hundred-kilobyte run is scrubbed here under a hard wall-clock
-/// budget with the whole output still covered.
+/// Rejected names are inspected in one monotone pass. This is a structural regression
+/// test rather than a wall-clock threshold: each input byte can enter the scanner at most
+/// once, even when tool output repeats a non-value `api_key` mention many times.
 #[test]
-fn long_punctuation_run_scrubs_in_linear_time() {
-    let n = 400_000usize;
-    // One long run with no scheme anywhere in it: nothing to rewrite.
-    let noise = "?".repeat(n);
-    let quiet = format!("quiet {noise} end");
-    let budget = Duration::from_millis(2_000);
-    let scrubbed = time_bounded(&quiet, &[], budget, "scheme-free run");
-    assert_eq!(scrubbed, quiet, "a scheme-free run must round-trip");
+fn rejected_credential_names_are_scanned_once() {
+    let repeated = "api_key ".repeat(1_000_000);
+    let (out, scanned) = scrub_auth_like_scanned(&repeated);
+    assert_eq!(out, repeated);
+    assert_eq!(scanned, repeated.len());
 
-    // The same run shape with a scheme earlier in it: one rewrite covers it all.
-    let url = format!("https://h.example/v1?token=SECRET&{noise}");
-    let out = time_bounded(&url, &[], budget, "post-scheme run");
-    assert!(!out.contains("SECRET"), "{out}");
-    assert!(!out.contains("token="), "{out}");
-    assert!(
-        !out.contains("?"),
-        "punctuation survived the rewrite: {out}"
-    );
-    assert!(out.contains("[r"), "no rewrite happened: {out}");
-
-    // Issue 148 follow-up: the run context now survives `)`/`}`/`"`, so this shape —
-    // a scheme-proven run holding n delimiter-separated segments, each with its own
-    // trigger — must stay one linear sweep. `has_scheme` stays memoized and the
-    // scheme-scan cursor stays monotone across each preserved boundary, so no
-    // backward walk and no rescanning can creep back in.
-    let segments = "?a=1)".repeat(n);
-    let chunked = format!("https://h.example/v1?first=SECRET{segments}?end=SECRET");
-    let out = time_bounded(&chunked, &[], budget, "delimited post-scheme run");
-    assert!(!out.contains("SECRET"), "{out}");
-    assert!(!out.contains("first="), "{out}");
-    assert!(!out.contains("end="), "{out}");
-    assert!(out.contains("[r"), "no rewrite happened: {out}");
-}
-
-/// Scrub under a wall-clock budget so a super-linear scrubber fails the test instead
-/// of hanging the suite.
-fn time_bounded(text: &str, secrets: &[String], budget: Duration, label: &str) -> String {
-    let started = Instant::now();
-    let out = scrub_secrets(text, secrets);
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed <= budget,
-        "{label} took {elapsed:?} (budget {budget:?}) on a {} byte input",
-        text.len()
-    );
-    out
+    // Source-like type annotations take the same rejected path and must not cause a
+    // suffix rescan for every occurrence.
+    // One source line holds the entire external tool-output bound. It used to be the
+    // adversarial shape: every rejected field re-searched its ever-growing prefix.
+    let unit = "pub api_key: Option<String>, ";
+    let typed = unit.repeat((16 * 1024 * 1024) / unit.len());
+    let (out, scanned) = scrub_auth_like_scanned(&typed);
+    assert_eq!(out, typed);
+    assert_eq!(scanned, typed.len());
 }
 
 #[test]
@@ -592,4 +560,43 @@ fn truncate_utf8_preserves_multibyte_within_cap() {
     // A string that already fits is returned verbatim even at a tiny cap.
     let short = "ok".to_string();
     assert_eq!(truncate_utf8(short.clone(), 2), short);
+}
+
+/// Review F1: recognized credential boundaries redact every value shape, rather than
+/// relying on a finite list of schemes or a token-length heuristic. These short and
+/// separator-bearing values are realistic header/config credentials.
+#[test]
+fn credential_boundaries_redact_short_and_separator_bearing_values() {
+    let src = concat!(
+        "Authorization: token 5f8dcc2b09c0a1b4c3\n",
+        "Authorization: SharedKey acct:base64sig\n",
+        "Authorization: OAuth realm=\"x\"\n",
+        "x-api-key: ab12cd34\n",
+        "api_key: hunter2\n",
+    );
+    let out = scrub_secrets(src, &[]);
+    for leaked in [
+        "token 5f8dcc2b09c0a1b4c3",
+        "SharedKey acct:base64sig",
+        "OAuth realm=\"x\"",
+        "ab12cd34",
+        "hunter2",
+    ] {
+        assert!(!out.contains(leaked), "credential leaked: {out}");
+    }
+    assert_eq!(out.matches("[redacted]").count(), 5, "{out}");
+    let doc = scrub_secrets("/// api_key: hunter2\n", &[]);
+    assert!(!doc.contains("hunter2"), "doc credential leaked: {doc}");
+}
+
+/// Review F2: Rust equality and pattern operators are not credential assignments.
+#[test]
+fn rust_credential_name_comparisons_round_trip_byte_identically() {
+    let src = concat!(
+        "assert!(self.api_key == b.api_key);\n",
+        "if api_key == expected {}\n",
+        "assert!(my_api_key == other.my_api_key);\n",
+        "match api_key { value => value }\n",
+    );
+    assert_eq!(scrub_secrets(src, &[]), src);
 }

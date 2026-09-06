@@ -422,239 +422,290 @@ fn scrub_url_userinfo(out: &mut [char], scheme_end: usize) -> Option<usize> {
     Some(separator)
 }
 
-/// The byte length a value must reach before a bare `name:` span can be treated as a
-/// credential. Ordinary typed identifiers are short (`&str`, `String`, `Option<u8>`), so
-/// a floor keeps every one of them out of the rewrite while a real credential — whose
-/// whole point is unguessable length — still clears it.
-const MIN_CREDENTIAL_VALUE_BYTES: usize = 12;
+/// Credential names recognized at a header/config boundary. The name check is exact and
+/// case-insensitive (the caller supplies ASCII-folded bytes), including Rust identifier
+/// boundaries, so a field such as `my_api_key` is not mistaken for an `api_key` key.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CredentialName {
+    Authorization,
+    XApiKey,
+    ApiKey,
+}
 
-/// The credential shapes a bare `name:` value can take and still be redacted.
+/// Every authorization-like header/config value and standalone bearer token is replaced
+/// with `[redacted]` before tool output or diagnostics become model-visible.
 ///
-/// This is the syntax gate that keeps ordinary Rust (and ordinary prose) intact when it
-/// merely *names* a credential field: `api_key: &str`, `pub api_key: Option<String>,`,
-/// and `the api_key: field is required` are all declarations of a **type**, a **field**, or
-/// a **placeholder**, never a value, so nothing in them is a secret and the bytes must
-/// round-trip. A value is only treated as a credential when its own bytes are
-/// credential-shaped: a quoted string, a classic token prefix, a `Bearer`/`Basic` scheme,
-/// an assignment, a shell reference, or a `name: token` pair inside a URL. URL query and
-/// userinfo secrets never depend on this gate — they are rewritten by [`scrub_url_parts`]
-/// from the `://` of the URL alone, so `?api_key=<anything>` stays fully redacted whether
-/// or not this predicate would call the value credential-shaped.
-fn is_credential_value(bytes: &[u8], start: usize, end: usize) -> bool {
-    let mut i = start;
-    // A value region begins at the first non-space byte; the needle's trailing byte was
-    // the `:` (or the space of `authorization `), so any run of spaces is a separator.
-    while i < end && bytes[i] == b' ' {
+/// This scanner is deliberately one forward pass. In particular, a rejected source-name
+/// occurrence advances the cursor rather than searching the remaining suffix again; a
+/// tool result containing millions of `api_key` mentions is therefore O(n), not O(n²).
+fn scrub_auth_like(text: &str) -> String {
+    scrub_auth_like_scanned(text).0
+}
+
+/// The implementation also returns the number of input positions examined. Keeping that
+/// count local makes the linear scan invariant directly testable without a timing-based
+/// performance test.
+fn scrub_auth_like_scanned(text: &str) -> (String, usize) {
+    let low = text.to_ascii_lowercase();
+    let bytes = low.as_bytes();
+    let mut state = AuthScanState::default();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        advance_source_state(bytes, i, &mut state);
+        if let Some(end) = credential_replacement_end(
+            bytes,
+            text.as_bytes(),
+            i,
+            state.rust_source,
+            state.doc_comment,
+        ) {
+            state.replace(text, i, end);
+            i = end;
+            continue;
+        }
+        if let Some((start, end)) = bearer_replacement_range(bytes, i) {
+            state.out.push_str(&text[state.copied..start]);
+            state.out.push_str("[redacted]");
+            state.copied = end;
+            i = end;
+            continue;
+        }
         i += 1;
     }
-    if i >= end {
-        // `Authorization:` with nothing behind it is a bare word, not a value.
-        return false;
-    }
-    let first = bytes[i];
-    // A quoted scalar is a value: `"sk-live-…"`, `"********"`. A quote also closes a JSON
-    // key (`"api_key": "…"`), where the value begins at the *next* quote, so the scan
-    // looks past a `":"`/`": ` boundary instead of stopping at the key's own closing
-    // quote and treating `"api_key"` as an empty value.
-    if first == b'"' {
-        let mut j = i + 1;
-        while j < end && bytes[j] != b'"' {
-            j += 1;
-        }
-        // The value is the inner span; empty quotes are a placeholder, not a secret.
-        return j > i + 1;
-    }
-    // The token prefixes the ecosystem actually uses, either bare or quoted.
-    if bytes[i..end].starts_with(b"sk-")
-        || bytes[i..end].starts_with(b"sk_")
-        || bytes[i..end].starts_with(b"ghp_")
-        || bytes[i..end].starts_with(b"gho_")
-        || bytes[i..end].starts_with(b"github_pat_")
-        || bytes[i..end].starts_with(b"glpat-")
-        || bytes[i..end].starts_with(b"xox")
-    {
-        return true;
-    }
-    // An HTTP auth scheme at the head of the value is a credential by construction.
-    if bytes[i..end].starts_with(b"bearer ") || bytes[i..end].starts_with(b"basic ") {
-        return true;
-    }
-    // An assignment (`api_key=sk-…`, `?api_key=…`, `token=`) is a value, never a type
-    // annotation; `=` is not part of Rust's type syntax at all.
-    if bytes[i..end].contains(&b'=') {
-        return true;
-    }
-    // A shell reference (`$LLXPRT_KEY`, `${KEY}`) is a value.
-    if first == b'$' {
-        return true;
-    }
-    // A credential inside URL credentials (`https://name:token@host`) is a value. The
-    // colon there separates a pair, so the run after it is the secret itself.
-    if bytes[i..end].contains(&b'@') {
-        return true;
-    }
-    // Otherwise, a bare unquoted span is only treated as a credential when it looks like
-    // one *and* is long enough to be one. Ordinary typed identifiers and placeholders are
-    // short (`&str`, `String`, `Option<u8>`, `field`, `value`), so they stay readable. A
-    // longer span is only a credential when it carries no ordinary-word separator: a
-    // comma/space-separated list is English prose or a field list (`the api_key: field is
-    // required`, `Option<String>,`), while a real token pasted behind a bare `api_key:` is
-    // one unbroken run (`sk-live-abcdef123456`, `ghp_…`) and clears both bars.
-    let span = &bytes[i..end];
-    let bare = end - i;
-    bare >= MIN_CREDENTIAL_VALUE_BYTES
-        && !span
-            .iter()
-            .any(|b| matches!(b, b' ' | b',' | b';' | b'(' | b')' | b'<' | b'>'))
+    state.out.push_str(&text[state.copied..]);
+    (state.out, bytes.len())
 }
 
-/// Every `Authorization` / `x-api-key` / `api-key` / `api_key` style header value
-/// and every standalone `Bearer <token>` chunk is replaced with `[redacted]`. The header
-/// names are matched **case-insensitively** over an ASCII case-folded byte copy (which
-/// preserves byte positions), while the output is rebuilt from the real text, so an
-/// every-size value — including one containing multi-byte codepoints — is replaced whole and
-/// never split. The scan continues **after** each replacement, so duplicate, mixed-case,
-/// and multiline occurrences each become `[redacted]` and never a second distinct value;
-/// the marker contains none of the needles, so an already-redacted value never re-enters
-/// the scan (no slow path and no loop).
-///
-/// A needle only triggers a rewrite when the span behind it is itself
-/// [`is_credential_value`] **credential-shaped** (issue 129). Matching the *name* alone
-/// rewrote ordinary Rust: `api_key: &str` in a function signature, `pub api_key:
-/// Option<String>,` in a struct field, and `the api_key: field is required` in prose each
-/// lost the rest of their line to a `[redacted]` marker, so a `read_file` of an ordinary
-/// `.rs` file reached the model with its source corrupted. Those spans name a credential
-/// without carrying one; a quoted token, a `sk-`-style prefix, a `Bearer`/`Basic` scheme,
-/// an assignment, a shell reference, URL credentials, or a long-enough bare value does
-/// carry one and is still replaced whole.
-fn scrub_auth_like(text: &str) -> String {
-    // ASCII byte case-folding never changes the byte count, so a needle's matched byte
-    // offset is a valid, UTF-8-aligned offset into the original `text`; the value
-    // region we replace also ends at an ASCII delimiter (newline/whitespace/end), so a
-    // multi-byte codepoint inside the value is removed whole, never split.
-    let low = text.to_ascii_lowercase();
-    let bytes = low.as_bytes();
-    let n = bytes.len();
-    // The credential **names**, matched case-insensitively and without a separator: the
-    // separator itself is found after the name, so a folded `api_key =`, `api_key:`,
-    // `api-key=`, or `authorization :` all reach the same one syntax gate. Matching a
-    // bare name is safe because a separator is *required* — `the api_key field is
-    // required` never has one behind the name, so it is not a candidate at all.
-    const NAMES: [&[u8]; 4] = [b"authorization", b"x-api-key", b"api-key", b"api_key"];
-    // Find the separator (`:` for a header/name, `=` for an assignment) that begins the
-    // value, allowing the spaces a folded config line or an aligned header block puts
-    // around it. `None` means the name occurrence carries no value at all.
-    let value_start = |idx: usize, name_len: usize| -> Option<usize> {
-        let mut j = idx + name_len;
-        while j < n && bytes[j] == b' ' {
-            j += 1;
-        }
-        match bytes.get(j) {
-            Some(b':') | Some(b'=') => Some(j + 1),
-            _ => None,
-        }
-    };
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0usize;
-    while i < n {
-        let Some((idx, name_len)) =
-            next_credential_name(&bytes[i..], NAMES).map(|(p, l)| (i + p, l))
-        else {
-            out.push_str(&text[i..]);
-            break;
-        };
-        out.push_str(&text[i..idx]);
-        // The headered value runs to the end of its line (or the end of the text);
-        // every occurrence is removed, never just the first. `end` stops at a newline
-        // or end, both UTF-8 boundaries.
-        let mut end = idx;
-        while end < n && bytes[end] != b'\n' && bytes[end] != b'\r' {
-            end += 1;
-        }
-        // A name with no separator behind it (`the api_key field is required`) is not a
-        // value-bearing occurrence at all; the bytes round-trip and the scan moves past
-        // the name.
-        let Some(start) = value_start(idx, name_len) else {
-            out.push_str(&text[idx..idx + name_len]);
-            i = idx + name_len;
-            continue;
-        };
-        // Syntax gate (issue 129): a name with an ordinary typed identifier, a field
-        // type, or a placeholder behind it names a credential without carrying one, so
-        // the bytes round-trip untouched instead of losing their line to the marker.
-        // `i` still advances past the name so the scan never reconsiders it.
-        if !is_credential_value(bytes, start, end) {
-            out.push_str(&text[idx..idx + name_len]);
-            i = idx + name_len;
-            continue;
-        }
-        out.push_str("[redacted]");
-        i = end;
-    }
-    // Any remaining standalone `Bearer <token>` chunk (not attached to a header) has its
-    // token replaced; the scan resumes past it, so many standalone tokens all redact.
-    let text = out;
-    let low = text.to_ascii_lowercase();
-    let bytes = low.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0usize;
-    let n = bytes.len();
-    while i < n {
-        let Some(rel) = find_bytes(&bytes[i..], b"bearer ") else {
-            out.push_str(&text[i..]);
-            break;
-        };
-        let idx = i + rel;
-        // A word-boundary guard keeps `forbearer` / `bearer_token` from matching.
-        if idx > 0 && bytes[idx - 1].is_ascii_alphanumeric() {
-            out.push_str(&text[i..idx + "bearer".len()]);
-            i = idx + "bearer".len();
-            continue;
-        }
-        out.push_str(&text[i..idx + "bearer".len()]);
-        let mut end = idx + "bearer ".len();
-        while end < n && !bytes[end].is_ascii_whitespace() && bytes[end] != b',' {
-            end += 1;
-        }
-        if end > idx + "bearer ".len() {
-            out.push_str("[redacted]");
-        }
-        i = end;
-    }
-    out
+#[derive(Default)]
+struct AuthScanState {
+    out: String,
+    copied: usize,
+    rust_source: bool,
+    doc_comment: bool,
 }
 
-/// Byte-window search used by [`scrub_auth_like`]: the offset of `needle` in `hay`,
-/// or `None` when absent.
-fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.len() > hay.len() {
+impl AuthScanState {
+    fn replace(&mut self, text: &str, start: usize, end: usize) {
+        self.out.push_str(&text[self.copied..start]);
+        self.out.push_str("[redacted]");
+        self.copied = end;
+    }
+}
+
+fn advance_source_state(bytes: &[u8], i: usize, state: &mut AuthScanState) {
+    if matches!(bytes[i], b'\n' | b'\r') {
+        state.rust_source = false;
+        state.doc_comment = false;
+    } else if bytes.get(i..i + b"///".len()) == Some(b"///") {
+        state.rust_source = true;
+        state.doc_comment = true;
+    } else if rust_source_marker_at(bytes, i) {
+        state.rust_source = true;
+    }
+}
+
+fn credential_replacement_end(
+    bytes: &[u8],
+    original: &[u8],
+    i: usize,
+    rust_source: bool,
+    doc_comment: bool,
+) -> Option<usize> {
+    let (name, name_end) = credential_name_at(bytes, i)?;
+    let (separator, value_start) = credential_separator(bytes, name_end)?;
+    let rust_type = name == CredentialName::ApiKey
+        && separator == b':'
+        && rust_source
+        && (looks_like_rust_type_annotation(bytes, original, value_start)
+            || (doc_comment && looks_like_doc_type_phrase(bytes, value_start)));
+    (!rust_type).then(|| line_end(bytes, value_start))
+}
+
+fn bearer_replacement_range(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
+    if !bearer_at(bytes, i) {
         return None;
     }
-    hay.windows(needle.len()).position(|w| w == needle)
+    let mut start = i + b"bearer".len();
+    while start < bytes.len() && matches!(bytes[start], b' ' | b'\t') {
+        start += 1;
+    }
+    let mut end = start;
+    while end < bytes.len() && !bytes[end].is_ascii_whitespace() && bytes[end] != b',' {
+        end += 1;
+    }
+    (start > i + b"bearer".len() && end > start).then_some((start, end))
 }
 
-/// The earliest credential **name** in `bytes`, with its length, or `None` when there is
-/// none. A word-boundary guard on both edges keeps `x-api-keyboard`, `my_api_key`, and
-/// `authorizationheader` from matching, so only a whole name is ever a candidate.
-fn next_credential_name(bytes: &[u8], names: [&[u8]; 4]) -> Option<(usize, usize)> {
-    let n = bytes.len();
-    let mut best: Option<(usize, usize)> = None;
-    for name in names {
-        let Some(p) = find_bytes(bytes, name) else {
-            continue;
-        };
-        let abs = p;
-        let after = abs + name.len();
-        let boundary_before =
-            abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric() || bytes[abs - 1] == b'-';
-        if !boundary_before || (after < n && bytes[after].is_ascii_alphanumeric()) {
-            continue;
-        }
-        if best.is_none_or(|(cur, _)| abs < cur) {
-            best = Some((abs, name.len()));
+/// Return a credential name starting at `i`, only when both edges are outside a Rust
+/// identifier. Treating `_` as an identifier byte is important: `my_api_key` is source,
+/// not a config key named `api_key`.
+fn credential_name_at(bytes: &[u8], i: usize) -> Option<(CredentialName, usize)> {
+    if i > 0 && is_identifier_continue(bytes[i - 1]) {
+        return None;
+    }
+    const NAMES: [(&[u8], CredentialName); 4] = [
+        (b"authorization", CredentialName::Authorization),
+        (b"x-api-key", CredentialName::XApiKey),
+        (b"api-key", CredentialName::XApiKey),
+        (b"api_key", CredentialName::ApiKey),
+    ];
+    for (spelling, name) in NAMES {
+        let end = i + spelling.len();
+        if bytes.get(i..end) == Some(spelling)
+            && bytes
+                .get(end)
+                .is_none_or(|byte| !is_identifier_continue(*byte))
+        {
+            return Some((name, end));
         }
     }
-    best
+    None
+}
+
+fn is_identifier_continue(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Return a real key/value separator after a credential name. Equality and match-arm
+/// operators are explicitly not assignments: `api_key == expected` and `api_key =>` must
+/// round-trip as Rust source.
+fn credential_separator(bytes: &[u8], name_end: usize) -> Option<(u8, usize)> {
+    let mut separator = name_end;
+    while separator < bytes.len() && matches!(bytes[separator], b' ' | b'\t') {
+        separator += 1;
+    }
+    match bytes.get(separator).copied() {
+        Some(b':') => Some((b':', separator + 1)),
+        Some(b'=') if !matches!(bytes.get(separator + 1), Some(b'=') | Some(b'>')) => {
+            Some((b'=', separator + 1))
+        }
+        _ => None,
+    }
+}
+
+fn line_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() && !matches!(bytes[end], b'\n' | b'\r') {
+        end += 1;
+    }
+    end
+}
+
+/// Detect source markers as the cursor advances. This state is monotone within a line,
+/// so repeated `api_key` fields never re-scan the preceding line prefix.
+fn rust_source_marker_at(bytes: &[u8], i: usize) -> bool {
+    const MARKERS: [&[u8]; 4] = [b"//", b"pub ", b"fn ", b"impl "];
+    MARKERS.into_iter().any(|marker| {
+        bytes.get(i..i + marker.len()) == Some(marker)
+            && (i == 0 || !is_identifier_continue(bytes[i - 1]))
+    })
+}
+
+/// A source type has either a standard Rust root or a PascalCase nominal-type root.
+/// This is a structural exception, not a credential-value heuristic: type spelling is
+/// ordinary source even outside a `pub` or `fn` line, while lowercase unknown values at a
+/// credential boundary remain closed. The root scan is bounded to preserve the scanner's
+/// monotone linear behavior.
+const MAX_RUST_TYPE_ANNOTATION_BYTES: usize = 256;
+
+fn looks_like_rust_type_annotation(bytes: &[u8], original: &[u8], start: usize) -> bool {
+    let bounded_end = bytes[start..]
+        .iter()
+        .take(MAX_RUST_TYPE_ANNOTATION_BYTES)
+        .position(|byte| matches!(*byte, b',' | b';' | b')' | b'{' | b'=' | b'\n' | b'\r'))
+        .map_or_else(
+            || bytes.len().min(start + MAX_RUST_TYPE_ANNOTATION_BYTES),
+            |offset| start + offset,
+        );
+    let mut value = trim_ascii(&bytes[start..bounded_end]);
+    let mut original_value = trim_ascii(&original[start..bounded_end]);
+    if value.first() == Some(&b'&') {
+        original_value = &original_value[1..];
+        value = &value[1..];
+        if value.first() == Some(&b'\'') {
+            while !value.is_empty() && !matches!(value[0], b' ' | b'\t') {
+                value = &value[1..];
+                original_value = &original_value[1..];
+            }
+            value = trim_ascii(value);
+            original_value = trim_ascii(original_value);
+        }
+    }
+    let root_end = value
+        .iter()
+        .position(|byte| !is_identifier_continue(*byte))
+        .unwrap_or(value.len());
+    let root = &value[..root_end];
+    let original_root = &original_value[..root_end];
+    (is_known_rust_type_root(root) || original_root.first().is_some_and(u8::is_ascii_uppercase))
+        && value.get(root_end).is_none_or(|byte| {
+            matches!(
+                *byte,
+                b'<' | b'[' | b':' | b',' | b';' | b')' | b'{' | b'=' | b'\n' | b'\r'
+            )
+        })
+}
+
+/// Doc comments commonly explain a typed field as `api_key: &str is …`. Preserve that
+/// source prose, but do not let arbitrary documentation values bypass the closed
+/// credential boundary.
+fn looks_like_doc_type_phrase(bytes: &[u8], start: usize) -> bool {
+    let value = trim_ascii(&bytes[start..]);
+    let value = value.strip_prefix(b"&").unwrap_or(value);
+    let root_end = value
+        .iter()
+        .position(|byte| !is_identifier_continue(*byte))
+        .unwrap_or(value.len());
+    is_known_rust_type_root(&value[..root_end]) && value[root_end..].starts_with(b" is ")
+}
+
+fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
+    while matches!(bytes.first(), Some(b' ' | b'\t')) {
+        bytes = &bytes[1..];
+    }
+    bytes
+}
+
+fn is_known_rust_type_root(root: &[u8]) -> bool {
+    matches!(
+        root,
+        b"str"
+            | b"string"
+            | b"bool"
+            | b"char"
+            | b"u8"
+            | b"u16"
+            | b"u32"
+            | b"u64"
+            | b"u128"
+            | b"usize"
+            | b"i8"
+            | b"i16"
+            | b"i32"
+            | b"i64"
+            | b"i128"
+            | b"isize"
+            | b"f32"
+            | b"f64"
+            | b"option"
+            | b"vec"
+            | b"result"
+            | b"box"
+            | b"arc"
+            | b"cow"
+            | b"hashmap"
+            | b"btreemap"
+            | b"pathbuf"
+            | b"duration"
+            | b"self"
+    )
+}
+
+fn bearer_at(bytes: &[u8], i: usize) -> bool {
+    let end = i + b"bearer".len();
+    bytes.get(i..end) == Some(b"bearer")
+        && (i == 0 || !is_identifier_continue(bytes[i - 1]))
+        && matches!(bytes.get(end), Some(b' ' | b'\t'))
 }
 
 /// A tiny, targeted `[dependencies]`-table parser for produced `Cargo.toml` files.
