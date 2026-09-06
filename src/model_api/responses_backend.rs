@@ -69,16 +69,16 @@ impl ResponsesBackend {
                     .await
             }
         }
-        .map_err(|error| match &error {
-            // The vendored crate keeps external text out of its public
-            // formatting; these two details are diagnostics the operator
-            // needs, so the host renders them on its own trusted path.
-            serdes_ai::models::ModelError::InvalidResponse(detail)
-            | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
-            _ => match crate::transport::TransportFailure::from_model_error(&error) {
-                Some(failure) => failure.diagnostic(),
-                None => error.to_string(),
-            },
+        .map_err(|error| {
+            let error = crate::transport::context_length_400(&error).unwrap_or(error);
+            match &error {
+                serdes_ai::models::ModelError::InvalidResponse(detail)
+                | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
+                _ => match crate::transport::TransportFailure::from_model_error(&error) {
+                    Some(failure) => failure.diagnostic(),
+                    None => error.to_string(),
+                },
+            }
         })?;
         Ok(LlmResult::from(&response))
     }

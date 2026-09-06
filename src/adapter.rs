@@ -288,9 +288,12 @@ impl ModelAdapter {
             .inner
             .request(requests, &settings, &params.to_model_request_parameters())
             .await
-            .map_err(|e| match TransportFailure::from_model_error(&e) {
-                Some(failure) => failure.diagnostic(),
-                None => e.to_string(),
+            .map_err(|e| {
+                let e = crate::transport::context_length_400(&e).unwrap_or(e);
+                match TransportFailure::from_model_error(&e) {
+                    Some(failure) => failure.diagnostic(),
+                    None => e.to_string(),
+                }
             })?;
         Ok(LlmResult::from(&resp))
     }
