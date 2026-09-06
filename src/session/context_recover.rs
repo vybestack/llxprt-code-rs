@@ -31,7 +31,11 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
         // store. An unreadable sanitized spine fails recovery instead of
         // silently returning a fresh empty store (issue 102).
         Err(crate::safe_file::ArtifactError::NotFound { .. }) => {
-            return Ok(new_context_state(key));
+            // A wiped context directory is a session whose artifacts were
+            // refused, and the marker beside it is the durable record of that
+            // refusal: recovery reads it back and re-arms the quiesce instead
+            // of reopening the session as live (#135).
+            return recover_quiesce_marker(store, key);
         }
         Err(error) => return Err(format!("context spine unreadable: {error}")),
     };
@@ -47,6 +51,34 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
     Ok(state)
 }
 
+/// Recovers the durable quiesce marker written beside the session when the
+/// context directory itself was unwritable ("context-quiesce.json", the same shape as
+/// "context/manifest.json"). The spine is gone, so only the refusal survives:
+/// mode, rules, and vocabularies stay unrestored, but the recorded quiesce and its
+/// terminal outcome re-arm the policy so a later wrap-up cannot supersede what the
+/// previous process durably refused. A missing marker with a missing spine is a
+/// genuinely new session; a present but unreadable one is an integrity failure
+/// instead of a silent fresh state (issue #102 precedent).
+fn recover_quiesce_marker(
+    store: &SessionStore,
+    key: crate::context_store::vault::VaultKey,
+) -> Result<ContextState, String> {
+    let path = store.session_dir.join("context-quiesce.json");
+    let Ok(bytes) = std::fs::read(&path) else {
+        return Ok(new_context_state(key));
+    };
+    let manifest: PersistedManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("context quiesce marker unreadable: {error}"))?;
+    let mut state = new_context_state(key);
+    state.quiesce = manifest.quiesce.clone();
+    state.detail = manifest.detail.clone();
+    if let Some(outcome) = recover_terminal_outcome(manifest.terminal_outcome) {
+        state
+            .policy
+            .restore_terminal_outcome(outcome, manifest.terminal_fit_saturated);
+    }
+    Ok(state)
+}
 /// Reloads the durable policy artifacts a previous process published -- the
 /// checkpoint lines, the policy event log, and the rewrite journal -- into a
 /// recovering state, and replays them into the controller so the republished

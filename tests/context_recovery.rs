@@ -1379,3 +1379,212 @@ fn recovery_either_outcome_is_reachable_on_both_arms() {
         "a corrupt history must fail recovery instead of resetting silently"
     );
 }
+
+/// Issue #135 — a context policy that quiesced must refuse completion
+/// even when the artifacts could still land, so `BranchCompleted` cannot fire
+/// past a quiesced policy. The lever proves a durable unwritable refusal
+/// (recorded in the manifest) restores as sticky and blocks completion: the
+/// splice publishes the manifest the way the refused process would have left
+/// it, with terminal_outcome and quiesce both naming quiesce_unwritable, and
+/// recovery restores that terminal as sticky, so a later wrap-up on a
+/// now-writable store still refuses - the finalize branch the old fill lever
+/// could never reach, because a successful fill always leaves more than one
+/// wrap-up cost of room. The chmod 000 turn supplies the errored-turn and
+/// flat-count context; the splice supplies the durable terminal the chmod
+/// turn never wrote.
+#[test]
+fn fit_saturated_wrap_up_refuses_completion() {
+    let cwd = workspace();
+    let store = store("sticky-quiesce-blocks-completion");
+    let first = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first).expect("first turn runs");
+
+    // The context directory keeps every artifact but is chmod 000 unwritable,
+    // so the second turn fails to persist INSIDE it: the admission already
+    // happened, the policy records its sticky write-failure terminal, and the
+    // quiesce marker lands beside the session where it stays writable.
+    let dir = store.session_dir.join("context");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+
+    let before = store.snapshot().unwrap();
+    let bulk = "sticky-bulk.txt";
+    std::fs::write(cwd.join(bulk), "z".repeat(256 * 1024)).unwrap();
+    let round = LlmResult {
+        text: "reading".into(),
+        calls: vec![ToolCall {
+            id: "s0".to_string(),
+            name: "read_file".into(),
+            args_json: format!(r#"{{"path":"{bulk}"}}"#),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let second = reserved(&store, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(
+        Box::new(MockBackend::new(vec![round, result("done")])),
+        &cwd,
+    );
+    let error = a.run(&store, &second).expect_err("the turn must fail");
+    assert!(
+        !error.to_string().is_empty(),
+        "the turn reports the context refusal"
+    );
+    let after = store.snapshot().unwrap();
+    let completed_before = before
+        .branches
+        .iter()
+        .filter(|b| b.lifecycle == Lifecycle::Completed)
+        .count();
+    let completed_after = after
+        .branches
+        .iter()
+        .filter(|b| b.lifecycle == Lifecycle::Completed)
+        .count();
+    assert_eq!(
+        completed_after, completed_before,
+        "no branch completes whose context artifacts did not land"
+    );
+
+    // The store is writable again, but the write-failure terminal is sticky:
+    // the wrap-up still refuses, so the third turn fails at completion even
+    // though its own artifacts land fine.
+    // The permissions come back: the chmod turn supplies the errored-turn and
+    // flat-count context, but its in-memory terminal never reached a durable
+    // record, so the splice publishes the manifest the way the refused process
+    // would have - terminal_outcome and the session-side quiesce flag both
+    // name the unwritable refusal, and every other byte stays untouched.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let manifest_path = dir.join("manifest.json");
+    let published = std::fs::read_to_string(&manifest_path).unwrap();
+    let recorded = splice_manifest_field(&published, "terminal_outcome", "quiesce_unwritable")
+        .and_then(|text| splice_manifest_field(&text, "quiesce", "quiesce_unwritable"))
+        .expect("the manifest carries the terminal and quiesce fields");
+    std::fs::write(&manifest_path, recorded).unwrap();
+
+    // A later process reopens the session: recovery restores the sticky
+    // unwritable terminal from the durable manifest, so the wrap-up still
+    // refuses and the third turn fails at completion even though its own
+    // artifacts land fine on the now-writable store.
+    let store = reopen(&store);
+    let third = reserved(&store, Some(2), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let error = a
+        .run(&store, &third)
+        .expect_err("completion must be refused");
+    assert!(
+        error.to_string().contains("context policy quiesced"),
+        "the refusal names the quiesced policy: {error}"
+    );
+    let final_state = store.snapshot().unwrap();
+    let completed_final = final_state
+        .branches
+        .iter()
+        .filter(|b| b.lifecycle == Lifecycle::Completed)
+        .count();
+    assert_eq!(
+        completed_final, completed_before,
+        "no branch completes past a quiesced policy"
+    );
+}
+
+/// Issue #135 a rate quiesce that a successful wrap-up superseded must not
+/// block completion, so the check reads the POLICY terminal after `wrap_up` and
+/// never the session-side `state.quiesce` flag, which goes stale on supersession.
+///
+/// The rate terminal is reached the way a restarted process reaches it: the
+/// previous process durably recorded `quiesce_rate` (the quota refused before
+/// any store write, so every artifact still landed) and recovery restores that
+/// terminal. The live drive is not reachable through the agent seams - production
+/// never closes a governor window inside one session, so the quota cannot tighten
+/// to the floor and quiesce - which makes the durable restore exactly the shape a
+/// later process sees, and it is the lever this test uses.
+#[test]
+fn superseded_rate_quiesce_still_completes() {
+    let cwd = workspace();
+    let store = store("superseded-rate-quiesce");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+
+    // Splice the rate spelling over the wrap-up terminal the first turn
+    // recorded, and over the session-side quiesce flag, so the durable
+    // manifest reads the way a previous process that hit the quota ceiling
+    // would have left it: every artifact landed, the terminal is rate.
+    let manifest_path = store.session_dir.join("context").join("manifest.json");
+    let published = std::fs::read_to_string(&manifest_path).unwrap();
+    let wrap_up_pair = json_pair("terminal_outcome", "wrap_up");
+    assert!(
+        published.contains(&wrap_up_pair),
+        "the first turn recorded a wrap-up terminal: {published}"
+    );
+    let recorded = splice_manifest_field(&published, "terminal_outcome", "quiesce_rate")
+        .and_then(|text| splice_manifest_field(&text, "quiesce", "quiesce_rate"))
+        .expect("the manifest carries the terminal and quiesce fields");
+    std::fs::write(&manifest_path, recorded).unwrap();
+
+    // The reopened store recovers the rate terminal, which is supersible and
+    // never sticky, so the explicit wrap-up of this turn supersedes it and the
+    // branch completes even though the session-side quiesce flag stays set.
+    let store = reopen(&store);
+    let before = store.snapshot().unwrap();
+    let second = reserved(&store, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &second).expect("the turn completes");
+    let after = store.snapshot().unwrap();
+    let count = |state: &llxprt_code_rs::session::SessionState| {
+        state
+            .branches
+            .iter()
+            .filter(|b| b.lifecycle == Lifecycle::Completed)
+            .count()
+    };
+    assert!(
+        count(&after) > count(&before),
+        "a BranchCompleted lands when wrap_up superseded the rate quiesce"
+    );
+
+    // The supersession itself is durable: the republished manifest carries the
+    // wrap_up terminal while the stale session-side flag still names the rate
+    // quiesce, which is exactly the pair the completion check must read past.
+    let republished = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(
+        republished.contains(&wrap_up_pair),
+        "wrap_up superseded the restored rate terminal: {republished}"
+    );
+    let rate_pair = json_pair("quiesce", "quiesce_rate");
+    assert!(
+        republished.contains(&rate_pair),
+        "the session-side flag goes stale on supersession: {republished}"
+    );
+}
+
+/// One compact-JSON string pair.
+fn json_pair(key: &str, value: &str) -> String {
+    let q = '"';
+    format!("{q}{key}{q}:{q}{value}{q}")
+}
+
+/// Rewrites one string field of a compact JSON manifest, leaving every other byte
+/// untouched, so a test can leave the durable artifacts exactly as a previous
+/// process would have published them.
+fn splice_manifest_field(text: &str, key: &str, value: &str) -> Option<String> {
+    let q = '"';
+    let needle = format!("{q}{key}{q}:");
+    let start = text.find(&needle)? + needle.len();
+    let end = text[start..]
+        .find(',')
+        .map(|offset| start + offset)
+        .unwrap_or(text.len());
+    let mut spliced = String::from(&text[..start]);
+    spliced.push(q);
+    spliced.push_str(value);
+    spliced.push(q);
+    spliced.push_str(&text[end..]);
+    Some(spliced)
+}
