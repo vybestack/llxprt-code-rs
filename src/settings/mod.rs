@@ -52,27 +52,54 @@ pub struct ResolvedPaths {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SettingsLayer {
+    #[serde(skip_serializing_if = "SettingsProvider::is_empty")]
     pub provider: SettingsProvider,
+    #[serde(skip_serializing_if = "SettingsBudgets::is_empty")]
     pub budgets: SettingsBudgets,
+    #[serde(skip_serializing_if = "SettingsPaths::is_empty")]
     pub paths: SettingsPaths,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsProvider {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_path: Option<PathBuf>,
+}
+
+impl SettingsProvider {
+    fn is_empty(&self) -> bool {
+        self.base_url.is_none() && self.model.is_none() && self.profile_path.is_none()
+    }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsBudgets {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tool_calls: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_time: Option<String>,
+}
+
+impl SettingsBudgets {
+    fn is_empty(&self) -> bool {
+        self.max_tool_calls.is_none() && self.turn_time.is_none()
+    }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsPaths {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub config_root: Option<PathBuf>,
+}
+
+impl SettingsPaths {
+    fn is_empty(&self) -> bool {
+        self.config_root.is_none()
+    }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SettingsLayers {

@@ -96,7 +96,8 @@ pub fn prepare(
     for dir in [&config_home, &workspace] {
         fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     }
-    write_profile(&config_home, scen, base_url)?;
+    write_settings(&config_home, base_url)?;
+    write_profile(&config_home, scen)?;
     Ok(Prepared {
         config_home,
         workspace,
@@ -107,13 +108,27 @@ pub fn prepare(
     })
 }
 
-fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<(), String> {
+fn write_settings(config_home: &Path, base_url: &str) -> Result<(), String> {
+    let settings = crate::settings::SettingsLayer {
+        provider: crate::settings::SettingsProvider {
+            base_url: Some(base_url.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let bytes = serde_json::to_vec(&settings).map_err(|e| format!("serialize settings: {e}"))?;
+    let path = config_home.join("settings.json");
+    crate::harness::publish_create_only_file(&path, &bytes)
+        .map_err(|e| format!("write settings {}: {e:?}", path.display()))
+}
+
+fn write_profile(config_home: &Path, scen: &Scenario) -> Result<(), String> {
     let dir = config_home.join("profiles");
     fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     // The loopback never validates credentials; the inline value is a synthetic marker so
-    // the CLI never touches a native credential store or a real provider. Only profile
-    // keys this CLI accepts for a plain loopback Chat provider are emitted; the
-    // ordinary sibling settings are inert here, so only the applied ones are sent.
+    // the CLI never touches a native credential store or a real provider. The loopback URL
+    // is carried by typed settings.json; this profile contains only per-profile fields.
+    // Only profile keys this CLI accepts for a plain loopback Chat provider are emitted.
     // `stream-idle-timeout-ms` is dsflash-only and would be rejected as model-config.
     // The effective context limit comes from the scenario's arm-specific runtime config
     // (GAP-H7): arm selection must change installed runtime behavior, not just a label.
@@ -124,7 +139,6 @@ fn write_profile(config_home: &Path, scen: &Scenario, base_url: &str) -> Result<
         "modelParams": { "temperature": 0.0 },
         "ephemeralSettings": {
             "auth-key": "ctxeval-loopback-local-stub",
-            "base-url": base_url,
             "context-limit": scen.runtime.context_limit,
             "maxOutputTokens": scen.profile.max_output_tokens,
         },

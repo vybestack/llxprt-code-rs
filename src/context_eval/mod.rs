@@ -30,6 +30,8 @@ mod tests_gate;
 mod tests_inject;
 #[cfg(test)]
 mod tests_records;
+#[cfg(test)]
+mod tests_runner;
 
 use crate::harness::{self, BbResult, ContinuationState, InvocationSpec};
 use grader::{Evidence, Graded, Verdict};
