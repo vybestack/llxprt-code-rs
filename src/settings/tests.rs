@@ -131,25 +131,19 @@ fn env_max_tool_calls_validated_like_cli() {
 fn settings_schema_drift() {
     let wire = serde_json::to_value(SettingsLayer::default()).unwrap();
     let object = wire.as_object().unwrap();
+    assert!(object.is_empty());
+    let wire = serde_json::to_value(SettingsLayer {
+        provider: SettingsProvider {
+            base_url: Some("http://loopback.invalid/v1".into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .unwrap();
     assert_eq!(
-        object.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["budgets", "paths", "provider"]
+        wire,
+        serde_json::json!({"provider": {"base_url": "http://loopback.invalid/v1"}})
     );
-    for (section, keys) in [
-        ("provider", ["base_url", "model", "profile_path"].as_slice()),
-        ("budgets", ["max_tool_calls", "turn_time"].as_slice()),
-        ("paths", ["config_root"].as_slice()),
-    ] {
-        assert_eq!(
-            object[section]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            keys
-        );
-    }
     assert_eq!(SETTINGS_SCHEMA_ID, "https://llxprt.dev/schema/settings-v1");
 }
 
@@ -223,4 +217,22 @@ fn no_settings_env_reads_outside_resolver() {
     let settings = resolve(l).unwrap();
     assert_eq!(settings.budgets.max_tool_calls.value, 31);
     assert_eq!(settings.budgets.max_tool_calls.source, Source::Env);
+}
+
+#[test]
+fn settings_serialize_round_trips_through_strict_loader() {
+    let expected = SettingsLayer {
+        provider: SettingsProvider {
+            base_url: Some("http://127.0.0.1:8080/v1".into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("settings.json"),
+        serde_json::to_vec(&expected).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(load_user_file(temp.path()).unwrap(), expected);
 }
