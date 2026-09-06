@@ -107,6 +107,32 @@ pub struct TransportFailure {
     pub retry_after: Option<Duration>,
 }
 
+/// Recognize a provider's HTTP 400 context-window refusal from its bounded body.
+/// The backend maps this to the vendored typed error before public formatting.
+pub fn context_length_400(
+    error: &serdes_ai::models::ModelError,
+) -> Option<serdes_ai::models::ModelError> {
+    let serdes_ai::models::ModelError::Http {
+        status: 400, body, ..
+    } = error
+    else {
+        return None;
+    };
+    const MARKERS: [&str; 3] = [
+        "context_length_exceeded",
+        "prompt is too long",
+        "maximum context length",
+    ];
+    let body = bounded_prefix(body).to_ascii_lowercase();
+    MARKERS
+        .iter()
+        .any(|marker| body.contains(marker))
+        .then_some(serdes_ai::models::ModelError::ContextLengthExceeded {
+            max_tokens: 0,
+            requested_tokens: 0,
+        })
+}
+
 impl TransportFailure {
     /// Extract the classification from a vendored model error. `None` when the error is
     /// not a transport-layer failure.
@@ -474,6 +500,16 @@ mod tests {
             assert_eq!(rendered.kind, expected, "status {status} body {body}");
             assert_eq!(rendered.transport_key(), expected.key());
         }
+    }
+
+    #[test]
+    fn context_length_400_classified() {
+        let error = serdes_ai::models::ModelError::http(
+            400,
+            r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 4096 tokens."}}"#,
+        );
+        let classified = context_length_400(&error).expect("context body must classify");
+        assert!(classified.to_string().contains("context length exceeded"));
     }
 
     /// The retryability verdict and the envelope key agree for every kind.
