@@ -6,7 +6,7 @@ use crate::config::ConfigHomeRoot;
 use crate::model_api::credentials::{
     parse_credential, Clock, CodexCredential, CredentialError, CredentialSource,
 };
-use crate::model_api::provider_keys;
+use crate::provider_keys;
 
 /// Serialized access to one named-provider-key env selector: the process
 /// environment is global, so tests that set a selector hold this lock, and the
@@ -46,7 +46,7 @@ mod env {
     /// previous value is restored when the guard drops.
     pub(crate) fn lock_named_key(name: &str) -> Guard {
         let _lock = LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let selector = crate::model_api::provider_keys::env_selector(name);
+        let selector = crate::provider_keys::env_selector(name);
         let stored = format!("named-key-{}", std::process::id());
         let previous = std::env::var_os(&selector);
         unsafe {

@@ -10,6 +10,10 @@ pub struct AgentError {
     /// finer `model-<class>` transport key here (for example `model-quota-exhausted`)
     /// while `Self::key` stays `model`, so the process exit code family is unchanged.
     pub envelope_code: Option<&'static str>,
+    /// Terminal outcome the run declared for itself, when it declared one: the malformed
+    /// tool-call collapse (issue 146) and the exhausted truncation retry (issue 153) both
+    /// stay typed failures but carry a distinct verdict the caller can branch on.
+    pub terminal_outcome: Option<&'static str>,
 }
 
 impl AgentError {
@@ -19,6 +23,7 @@ impl AgentError {
             key,
             message: msg.into(),
             envelope_code: None,
+            terminal_outcome: None,
         }
     }
 
@@ -35,6 +40,7 @@ impl AgentError {
             key: "session",
             message: error.to_string(),
             envelope_code: None,
+            terminal_outcome: None,
         }
     }
 }

@@ -2,7 +2,7 @@ use serdes_ai_responses::types::ReasoningSettings;
 
 const CODEX_RESPONSES_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/responses";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CodexEndpointIdentity {
     Production,
 }
@@ -16,6 +16,17 @@ impl CodexEndpointIdentity {
             Self::Production => CODEX_RESPONSES_ENDPOINT,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PromptCaching {
+    Off,
+    Cached,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AnthropicSettingsDraft {
+    pub(crate) prompt_caching: PromptCaching,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,18 +61,7 @@ impl CodexResponsesSettingsDraft {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PromptCaching {
-    Off,
-    Cached,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AnthropicSettingsDraft {
-    pub(crate) prompt_caching: PromptCaching,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct OpenAiResponsesSettingsDraft {
     pub(crate) reasoning_effort: Option<serdes_ai::models::openai::ReasoningEffort>,
     pub(crate) reasoning_summary: Option<serdes_ai::models::openai::ReasoningSummary>,

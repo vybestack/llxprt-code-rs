@@ -244,6 +244,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                     .and_then(|n| i64::try_from(n).ok())
                     .unwrap_or(-1),
                 budget_exhausted: o.run.budget_exhausted,
+                zero_call_tail: o.run.zero_call_tail,
                 prompt_digest: o.run.prompt_digest.clone(),
                 terminal_outcome: declared.terminal_outcome,
             })
@@ -254,11 +255,19 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
             error.profiling_stage.unwrap_or("sample"),
             error.session_status.as_deref().unwrap_or("ok"),
         ),
-        Err(error) => Envelope::error(
-            error_session_id,
-            error.envelope_code.unwrap_or(error.key),
-            error.message.clone(),
-        ),
+        Err(error) => {
+            let mut envelope = Envelope::error(
+                error_session_id,
+                error.envelope_code.unwrap_or(error.key),
+                error.message.clone(),
+            );
+            if let Envelope::Error(detail) = &mut envelope {
+                if let Some(outcome) = error.terminal_outcome {
+                    detail.error.terminal_outcome = Some(outcome.to_string());
+                }
+            }
+            envelope
+        }
     }
 }
 
@@ -354,9 +363,12 @@ pub struct AppError {
     pub session_status: Option<String>,
     /// The stable envelope `error.code` token. `None` means [`Self::key`] is already the
     /// envelope token. A model transport failure carries its finer `model-<class>`
-    /// transport key here (for example `model-quota-exhausted`) while [`Self::key`]
-    /// stays `model`, so the process exit code family is unchanged.
+    /// transport key here (for example `model-quota-exhausted`) while [`Self::key`] stays
+    /// `model`, so the process exit code family is unchanged.
     pub envelope_code: Option<&'static str>,
+    /// Terminal outcome the run declared for itself (issue 146): a collapsed turn the
+    /// caller must be able to distinguish from a finished one.
+    pub terminal_outcome: Option<&'static str>,
 }
 
 impl AppError {
@@ -373,6 +385,7 @@ impl AppError {
             profiling_stage: None,
             session_status: None,
             envelope_code: None,
+            terminal_outcome: None,
         }
     }
 
@@ -395,6 +408,7 @@ impl AppError {
             profiling_stage: Some(stage),
             session_status: Some("ok".into()),
             envelope_code: None,
+            terminal_outcome: None,
         }
     }
 }

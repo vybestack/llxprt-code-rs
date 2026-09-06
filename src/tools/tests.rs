@@ -5,6 +5,7 @@ use std::time::Duration;
 mod advanced;
 mod catalogue;
 mod output_caps;
+mod redaction;
 
 fn cfg(root: &std::path::Path) -> ToolConfig {
     let ws = WorkspaceCap::open(root).unwrap();

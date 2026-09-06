@@ -32,6 +32,9 @@ pub fn expand_fixture(
     block_bytes: usize,
     out_dir: &Path,
 ) -> Result<(Vec<PathBuf>, Vec<String>), String> {
+    if rounds == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
     let seed =
         fs::read(fixtures.join(fixture)).map_err(|e| format!("read fixture {fixture}: {e}"))?;
     let seed_text = String::from_utf8_lossy(&seed).to_string();

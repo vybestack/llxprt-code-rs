@@ -88,7 +88,9 @@ pub fn scrub_secrets(text: &str, secrets: &[String]) -> String {
             out = out.replace(secret, "[redacted]");
         }
     }
-    // Collapse any surviving `scheme://user:pass@host` / query / fragment chunks.
+    // Collapse any surviving `scheme://user:pass@host` / query / fragment chunks. Only a
+    // real URL-shaped chunk is rewritten; a bare `?` or `#` with no `://` scheme
+    // behind it in the same run is ordinary punctuation and round-trips untouched.
     if out.contains('@') || out.contains('?') || out.contains('#') {
         out = scrub_url_parts(&out);
     }
@@ -244,15 +246,69 @@ pub fn truncate_utf8(s: String, max_bytes: usize) -> String {
 }
 
 /// Replace userinfo, query, and fragment chunks inside a string with `[redacted]`.
+///
+/// One forward pass, linear in the input (issue 148 review F2): `i` only ever advances,
+/// and everything a `?`/`#` trigger needs — which run it sits in, and whether a
+/// scheme separator has appeared in that run so far — lives in `ctx`, advanced once per
+/// byte instead of re-derived by a backward walk per trigger character. A punctuation run
+/// of length n therefore costs O(n) rather than O(n^2), so a 16 MiB `read_file` of a
+/// minified asset stays one pass instead of stalling the turn for hours.
 fn scrub_url_parts(text: &str) -> String {
     let mut out: Vec<char> = text.chars().collect();
     let mut i = 0usize;
+    let mut ctx = RunContext::default();
     while i < out.len() {
-        if out[i] == '?' || out[i] == '#' {
-            i = scrub_url_suffix(&mut out, i);
+        // Whitespace ends the run unconditionally. A quote ends only a run that has not
+        // yet proven a scheme: once the run has proven `://`, a quote inside it is an
+        // ordinary URL path byte (`…/v1?next="b"#api_key=…`), not the JSON string boundary
+        // a bare quote in ordinary text is. A scheme-free run still cuts at the quote, so
+        // a JSON string boundary stays a boundary for ordinary text.
+        if is_run_stop(out[i]) && !(out[i] == '"' && ctx.has_scheme) {
+            // Whitespace, or a quote in a scheme-free run, ends the run: the run start
+            // and the scheme progress never carry across that boundary.
+            ctx = RunContext::default();
+            i += 1;
             continue;
         }
+        if ctx.run_start.is_none() {
+            ctx.run_start = Some(i);
+            ctx.scanned = i;
+        }
+        if (out[i] == '?' || out[i] == '#') && i > ctx.run_start.unwrap_or(i) {
+            if !ctx.has_scheme {
+                let to = i;
+                if scan_scheme(&out, &mut ctx.scanned, to) {
+                    ctx.has_scheme = true;
+                }
+            }
+            if ctx.has_scheme {
+                let next = scrub_url_suffix(&mut out, i);
+                // The rewrite stopped at the edge of its chunk. `)`, `}`, and `"` are all
+                // legal unencoded URL path bytes and are deliberately *not* scheme-gate
+                // run boundaries, so a `?`/`#` further along the same URL can sit behind
+                // any of them: the run context — run start, the memoized scheme verdict,
+                // and the scheme-scan cursor — must survive that boundary, or the next
+                // trigger is gated by a scheme-free run and its secret is left in the
+                // clear (issue 148 follow-up).
+                match out.get(next) {
+                    // A path-byte stop: the run keeps its identity and its verdict, and
+                    // the scan resumes on the delimiter itself.
+                    Some(')') | Some('}') | Some('"') => i = next,
+                    // Whitespace, or the end of the input, really does end the run.
+                    _ => {
+                        ctx = RunContext::default();
+                        i = next;
+                    }
+                }
+                // `ctx.scanned` only ever moves forward, so carrying it across the
+                // delimiter rescans nothing and the whole pass stays linear.
+                continue;
+            }
+        }
         if let Some(next) = scrub_url_userinfo(&mut out, i) {
+            // The userinfo rewrite resumes inside the *same* run (the `@` belongs to its
+            // authority), so `ctx` is kept and a query further along the same URL stays
+            // gated by the scheme this run already proved.
             i = next;
             continue;
         }
@@ -261,9 +317,68 @@ fn scrub_url_parts(text: &str) -> String {
     out.into_iter().collect()
 }
 
+/// The characters that end a run for the scheme gate: whitespace, or a quote in a run
+/// that has not proven a scheme yet. Deliberately **not** `)` or `}` — both are legal
+/// unencoded URL path bytes (`…/Foo_(bar)?token=…`, `…/v1/{id}?api_key=…`), so treating them as run
+/// boundaries is exactly what hid a genuine query from the gate (issue 148 review F1).
+/// A quote ends a scheme-free run because a JSON-escaped URL sits inside one
+/// (`"https:\/\/h.example\/v1?token=…"`): the escaped separator
+/// must be recognized *within* the quotes, never across them. Inside a run that has
+/// already proven its scheme, `)`, `}`, and `"` are all ordinary path bytes and the run
+/// (and its memoized verdict) carries across them: see the context preservation after a
+/// suffix rewrite in [`scrub_url_parts`].
+fn is_run_stop(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '"')
+}
+
+/// Forward-scanning run state: where the current run began, how far the scheme scan has
+/// advanced inside it, and whether a scheme separator has been seen. `scanned` only ever
+/// moves forward within a run, so the whole run costs one linear sweep (issue 148
+/// review F2) and the verdict is never a stale `false` for a trigger further along.
+#[derive(Default)]
+struct RunContext {
+    run_start: Option<usize>,
+    scanned: usize,
+    has_scheme: bool,
+}
+
+/// Advance the scheme scan from `*from` up to (not including) `to`, returning whether a
+/// separator was seen. The verdict comes from the run's content rather than from the
+/// separator being *contiguous* with the trigger: `)`, `}`, and `"` are ordinary URL path
+/// bytes, so a real query can sit behind any of them and still belong to a URL whose
+/// scheme sits further back in the same run (issue 148 review F1). Both spellings count:
+/// the literal `://` and the JSON-escaped `:\/\/`, where each `/` becomes
+/// `\/`.
+fn scan_scheme(out: &[char], from: &mut usize, to: usize) -> bool {
+    let mut i = *from;
+    while i + 3 <= to {
+        if out[i] == ':' && out[i + 1] == '/' && out[i + 2] == '/' {
+            *from = i + 1;
+            return true;
+        }
+        if i + 5 <= to
+            && out[i] == ':'
+            && out[i + 1] == '\\'
+            && out[i + 2] == '/'
+            && out[i + 3] == '\\'
+            && out[i + 4] == '/'
+        {
+            *from = i + 1;
+            return true;
+        }
+        i += 1;
+    }
+    *from = i;
+    false
+}
+
+/// Replace the query/fragment suffix of a URL chunk with a `[redacted]` placeholder and
+/// return the offset just past it (a delimiter, or one past the end). The extent keeps the
+/// wider delimiter set (`"`/`)`/`}` plus whitespace) so a rewrite stops at the edge of the
+/// chunk it belongs to instead of eating the text that follows it.
 fn scrub_url_suffix(out: &mut [char], start: usize) -> usize {
     let mut end = start;
-    while end < out.len() && !matches!(out[end], ' ' | '\t' | '\n' | '\r' | '"' | ')' | '}') {
+    while end < out.len() && !is_suffix_stop(out[end]) {
         end += 1;
     }
     out[start..end].fill('-');
@@ -274,6 +389,13 @@ fn scrub_url_suffix(out: &mut [char], start: usize) -> usize {
     end
 }
 
+/// The delimiters that end a query/fragment rewrite.
+fn is_suffix_stop(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '"' | ')' | '}')
+}
+
+/// Collapse URL userinfo (`scheme://name@host`) to a fixed placeholder, returning the
+/// offset of the `@` separator the scan resumes from (still inside the same run).
 fn scrub_url_userinfo(out: &mut [char], scheme_end: usize) -> Option<usize> {
     if out.get(scheme_end..scheme_end + 3) != Some(&[':', '/', '/']) {
         return None;
@@ -443,6 +565,7 @@ fn strip_toml_comment(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn redacts_credentials_full_url_no_path() {
@@ -524,6 +647,179 @@ mod tests {
         assert_eq!(redact_url("merely a string"), "<redacted url>");
         assert_eq!(safe_for_display("/etc/passwd"), "<redacted url>");
         assert_eq!(safe_for_display("http://h/a"), "http://h");
+    }
+
+    /// Issue 148 reproduction: the tool-result scrubber rewrote every bare `<Q>` or
+    /// `#` into a `[r-----` style placeholder, so shell output lost shebangs, Rust
+    /// attribute lines, backslash escapes, and `<Q>`/`#`, and agents copied that
+    /// mangled form back into source files. A run with **no scheme** behind the
+    /// punctuation is ordinary punctuation and round-trips byte-identically. This is the
+    /// same trade-off as origin/main for scheme-free runs only: a run that *does* carry a
+    /// scheme (for example `see(https://h.example/a)?note`) still mangles the trailing
+    /// text, because the rewrite runs to the end of the chunk; that is unchanged from
+    /// main, not a regression.
+    #[test]
+    fn ordinary_punctuation_round_trips_byte_identically() {
+        let corpus = concat!(
+            "#!/bin/sh\n",
+            "#[test]\n",
+            "#[cfg_attr(miri, ignore)]\n",
+            "path = C:\\Users\\me\\src\\lib.rs\n",
+            "let v = s.split('\\n').find(|l| l.starts_with(\"# \"))<Q>;\n",
+            "grep -n #TODO\" src\n",
+            "whoami? root\n",
+        );
+        assert_eq!(scrub_secrets(corpus, &[]), corpus);
+        let secret = "sk-super-fake-marker-777".to_string();
+        assert_eq!(
+            scrub_secrets(corpus, &[secret]),
+            corpus,
+            "an unrelated secret must not drag ordinary punctuation into a rewrite"
+        );
+    }
+
+    /// A genuine secret-shaped span is still replaced, and the replacement is a stable
+    /// marker that ordinary code text can never produce.
+    #[test]
+    fn secret_shaped_url_chunks_are_still_redacted() {
+        let src = concat!(
+            "prefix stays\n",
+            "leak https://h.example/v1?token=sk-fake-query-999&x=1#frag\n",
+            "leak https://re--@h.example/v1?a=b and c",
+        );
+        let out = scrub_secrets(src, &[]);
+        assert!(!out.contains("token=sk-fake-query-999"), "{out}");
+        assert!(!out.contains("frag"), "{out}");
+        assert!(!out.contains("u:pw"), "{out}");
+        assert!(out.starts_with("prefix stays\n"), "{out}");
+        assert!(!out.contains("a=b"), "the query value survived: {out}");
+        assert!(!out.contains("sk-fake"), "{out}");
+
+        // Issue 148 review F1: the gate used to walk back over `)`/`}`/`"` demanding a
+        // contiguous `://`, but those bytes are legal unencoded URL path bytes and JSON
+        // escapes the separator, so each of these genuine URLs was left in the clear.
+        // The verdict now comes from the run's content (any `://`, or its JSON-escaped
+        // `:\\/\\/` spelling, earlier in the same run), so all three are redacted
+        // exactly as origin/main redacted them.
+        for src in [
+            "https://en.wikipedia.org/wiki/Foo_(bar)?token=SECRET",
+            "https://api.example.com/v1/{id}?api_key=SECRET",
+            "{\"url\":\"https:\\/\\/h.example\\/v1?token=SECRET\"}",
+        ] {
+            let out = scrub_secrets(src, &[]);
+            assert!(!out.contains("SECRET"), "leaked from {src}: {out}");
+            assert!(!out.contains("token="), "leaked from {src}: {out}");
+            assert!(!out.contains("api_key="), "leaked from {src}: {out}");
+            // The rewrite lands as the `[r-----` placeholder, the exact shape origin/main
+            // produced for these URLs, so the whole query/fragment is gone.
+            assert!(out.contains("[r"), "no rewrite for {src}: {out}");
+        }
+    }
+
+    /// Issue 148 follow-up: a suffix rewrite stops at `)`, `}`, and `"` even though those
+    /// bytes are deliberately **not** scheme-gate run boundaries. Resetting the run
+    /// context after every rewrite therefore wiped a proven scheme at exactly the wrong
+    /// moment, so the `#`/`?` sitting behind the delimiter was gated by a scheme-free run
+    /// and its secret survived in the clear. The context (run start, memoized scheme
+    /// verdict, and the monotone scheme-scan cursor) now survives those three delimiters
+    /// and is dropped only at a real run stop (whitespace, or a quote in a run that has
+    /// not proven a scheme) or at end of input.
+    #[test]
+    fn url_run_context_survives_suffix_delimiters() {
+        // The pinned reproductions: the parenthesized, braced, and quoted variants of the
+        // same URL, each with a second trigger behind the delimiter.
+        for (src, expected) in [
+            (
+                "https://h.example/v1?next=(b)#token=SECRET",
+                "https://h.example/v1[r------)[r-----------",
+            ),
+            (
+                "https://h.example/v1?next={b}#api_key=SECRET",
+                "https://h.example/v1[r------}[r-------------",
+            ),
+            (
+                "https://h.example/v1?next=\"b\"#api_key=SECRET",
+                "https://h.example/v1[r----\"b\"[r-------------",
+            ),
+        ] {
+            let out = scrub_secrets(src, &[]);
+            assert_eq!(out, expected, "wrong rewrite extent for {src}");
+            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
+            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
+            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
+        }
+
+        // The wider set from the same review: every one must lose its secret material.
+        for src in [
+            "https://h.example/v1?next=(b)?api_key=SECRET",
+            "https://h.example#sec=(a)?api_key=SECRET",
+            "https://search.example/api?q=foo(bar)#api_key=SECRET",
+            "https://app.example/cb?state=(x)#access_token=SECRET",
+            "https://auth.example/oauth/authorize?redirect_uri=https%3A%2F%2Fapp(x)?token=SECRET",
+        ] {
+            let out = scrub_secrets(src, &[]);
+            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
+            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
+            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
+            assert!(
+                !out.contains("access_token="),
+                "secret leaked from {src}: {out}"
+            );
+            assert!(out.contains("[r"), "no rewrite for {src}: {out}");
+        }
+    }
+
+    /// Issue 148 review F2: a punctuation run of length n must cost O(n), not O(n^2).
+    /// Tool output reaches `MAX_TOOL_OUTPUT_DEFAULT` (16 MiB) before this scrubber sees
+    /// it, so a multi-hundred-kilobyte run is scrubbed here under a hard wall-clock
+    /// budget with the whole output still covered.
+    #[test]
+    fn long_punctuation_run_scrubs_in_linear_time() {
+        let n = 400_000usize;
+        // One long run with no scheme anywhere in it: nothing to rewrite.
+        let noise = "?".repeat(n);
+        let quiet = format!("quiet {noise} end");
+        let budget = Duration::from_millis(2_000);
+        let scrubbed = time_bounded(&quiet, &[], budget, "scheme-free run");
+        assert_eq!(scrubbed, quiet, "a scheme-free run must round-trip");
+
+        // The same run shape with a scheme earlier in it: one rewrite covers it all.
+        let url = format!("https://h.example/v1?token=SECRET&{noise}");
+        let out = time_bounded(&url, &[], budget, "post-scheme run");
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(!out.contains("token="), "{out}");
+        assert!(
+            !out.contains("?"),
+            "punctuation survived the rewrite: {out}"
+        );
+        assert!(out.contains("[r"), "no rewrite happened: {out}");
+
+        // Issue 148 follow-up: the run context now survives `)`/`}`/`"`, so this shape —
+        // a scheme-proven run holding n delimiter-separated segments, each with its own
+        // trigger — must stay one linear sweep. `has_scheme` stays memoized and the
+        // scheme-scan cursor stays monotone across each preserved boundary, so no
+        // backward walk and no rescanning can creep back in.
+        let segments = "?a=1)".repeat(n);
+        let chunked = format!("https://h.example/v1?first=SECRET{segments}?end=SECRET");
+        let out = time_bounded(&chunked, &[], budget, "delimited post-scheme run");
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(!out.contains("first="), "{out}");
+        assert!(!out.contains("end="), "{out}");
+        assert!(out.contains("[r"), "no rewrite happened: {out}");
+    }
+
+    /// Scrub under a wall-clock budget so a super-linear scrubber fails the test instead
+    /// of hanging the suite.
+    fn time_bounded(text: &str, secrets: &[String], budget: Duration, label: &str) -> String {
+        let started = Instant::now();
+        let out = scrub_secrets(text, secrets);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed <= budget,
+            "{label} took {elapsed:?} (budget {budget:?}) on a {} byte input",
+            text.len()
+        );
+        out
     }
 
     #[test]

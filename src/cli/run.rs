@@ -118,8 +118,18 @@ fn build_agent(
 
 fn agent_error(error: crate::agent::AgentError) -> AppError {
     if error.code == Code::Profiling {
-        AppError::profiling_at(error.key, error.message)
-    } else {
-        AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code)
+        return AppError::profiling_at(error.key, error.message);
     }
+    let mut app =
+        AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code);
+    if error.terminal_outcome.is_some() {
+        // The run declared its own terminal verdict (issues 146 and 153); carry it into
+        // the stdout envelope so a headless caller can branch on this condition alone.
+        app.terminal_outcome = error.terminal_outcome;
+    } else if error.key == crate::agent::MALFORMED_TOOL_CALL_KEY {
+        // The malformed-tool-call collapse (issue 146) declares the same verdict through
+        // its typed key, so a caller can retry on this condition alone.
+        app.terminal_outcome = Some(crate::agent::MALFORMED_TOOL_CALL_KEY);
+    }
+    app
 }

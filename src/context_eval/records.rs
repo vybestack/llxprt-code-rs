@@ -334,15 +334,39 @@ pub fn max_recorded_phase(records: &Records) -> u8 {
 
 /// Observed red run records that exist for `scenario` at `phase`.
 ///
-/// This is the #116.1 bar and the only bar: a green for phase N is expressible only when
-/// an *observed* red `RunRecord` exists for the same phase, because an expected-status
-/// history entry is a prediction, never an observation.
+/// This is the #116.1 bar and the only bar: an *observed* red `RunRecord` — a red the harness actually
+/// drove and graded — is the only evidence that licenses a green declaration, because
+/// an expected-status history entry is a prediction, never an observation. The green
+/// gate reads the phase-inclusive [`prior_observed_red_through`] variant; this
+/// exact-phase filter stays the primitive the baseline trail sweeps with.
 pub fn prior_observed_red(records: &Records, scenario: &str, phase: u8) -> Vec<RunRecord> {
     load_runs(records, phase)
         .unwrap_or_default()
         .into_iter()
         .filter(|r| r.scenario == scenario && r.observed_status == "red")
         .collect()
+}
+
+/// Observed red run records for `scenario` at any phase `<= through` (inclusive).
+///
+/// This is the citation the green gate reads. Widening the citation to earlier phases
+/// is what makes green reachable at all: the drive that would license phase-N green
+/// also appends a blocking red expectation entry for phase N, so a same-phase-only
+/// citation is jointly unsatisfiable. The gate's manifest-digest cross-check still
+/// refuses any cited red driven from the current manifest's own bytes, so a red
+/// observed under a declaration this manifest has since moved past is exactly the
+/// evidence that turns the new phase green. Predictions never appear here: only graded
+/// `RunRecord`s land in the append-only `runs/` files.
+pub fn prior_observed_red_through(
+    records: &Records,
+    scenario: &str,
+    through: u8,
+) -> Vec<RunRecord> {
+    let mut out = Vec::new();
+    for phase in 0_u8..=through {
+        out.extend(prior_observed_red(records, scenario, phase));
+    }
+    out
 }
 
 /// Machine-checkable summary of the preserved baseline: phase 0 entries must be red
@@ -369,15 +393,15 @@ pub fn baseline_summary(records: &Records, manifest_ids: &[String]) -> Result<Va
         .collect();
     let all_red = missing.is_empty() && non_red.is_empty();
     // Red-then-green trail (#116.1): for every (scenario, phase) carrying a green
-    // observation, the same phase file must also carry that scenario's observed red.
+    // observation, the same phase or any earlier phase must also carry that
+    // scenario's observed red.
     let mut green_without_prior_red: Vec<String> = Vec::new();
     let mut green_scenarios: BTreeMap<String, u8> = BTreeMap::new();
     for phase in 0_u8..=max_recorded_phase(records) {
         let runs = load_runs(records, phase)?;
         for run in runs.iter().filter(|r| r.observed_status == "green") {
-            let has_observed_red = runs
-                .iter()
-                .any(|r| r.scenario == run.scenario && r.observed_status == "red");
+            let has_observed_red =
+                !prior_observed_red_through(records, &run.scenario, run.phase).is_empty();
             if !has_observed_red {
                 green_without_prior_red.push(format!("{}:phase-{phase}", run.scenario));
             }

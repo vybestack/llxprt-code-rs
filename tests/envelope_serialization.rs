@@ -16,8 +16,10 @@ fn success_envelope_bytes_are_pinned() {
             tool_count: 3,
             declared_tool_calls: None,
             budget_exhausted: false,
+            zero_call_tail: 2,
             prompt_digest: "0123456789abcdef".into(),
             status: "ok".into(),
+            terminal_outcome: None,
             branch: false,
             replayed: true,
         },
@@ -25,11 +27,11 @@ fn success_envelope_bytes_are_pinned() {
     let line = cli::envelope(&outcome, "sess_1").to_line();
     assert_eq!(
         String::from_utf8_lossy(&line),
-        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2}\n"
+        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
     assert_eq!(
         line,
-        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2}\n"
+        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
 }
 
@@ -46,6 +48,25 @@ fn nested_error_envelope_bytes_are_pinned() {
         line,
         b"{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n\xe9\x9b\xaa\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
+}
+
+/// An error the run decorated with its own terminal outcome carries that verdict into the
+/// nested error detail (issue 146 malformed tool call, issue 153 exhausted truncation
+/// retry), so a supervisor can branch without parsing the message.
+#[test]
+fn declared_terminal_outcome_rides_the_error_envelope() {
+    for outcome in [
+        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
+        llxprt_code_rs::agent::TRUNCATED_OUTPUT_RETRIED_KEY,
+    ] {
+        let mut error = AppError::new(Code::Model, "finish-reason", "truncated");
+        error.terminal_outcome = Some(outcome);
+        let line = cli::envelope(&Err(error), "sess_1").to_line();
+        let value: serde_json::Value = serde_json::from_slice(&line).unwrap();
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["error"]["code"], "finish-reason");
+        assert_eq!(value["error"]["terminal_outcome"], outcome);
+    }
 }
 
 #[test]

@@ -13,7 +13,11 @@ mod chat;
 mod codex;
 mod openai_responses;
 mod parsing;
-mod provider_settings;
+/// Provider-neutral settings carriers: read by `model_api` when it interprets a
+/// parsed profile, so the types are visible at the crate boundary but the parse
+/// itself stays private.
+pub mod provider_settings;
+mod selection;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -28,11 +32,16 @@ pub struct Profile {
     pub model: String,
     pub model_params: ModelParams,
     pub ephemeral: EphemeralSettings,
-    pub(crate) target: crate::model_api::target::ModelTarget,
-    pub(crate) anthropic_settings: Option<crate::model_api::settings::AnthropicSettingsDraft>,
-    pub(crate) codex_settings: Option<crate::model_api::settings::CodexResponsesSettingsDraft>,
-    pub(crate) openai_responses_settings:
-        Option<crate::model_api::settings::OpenAiResponsesSettingsDraft>,
+    /// Provider identity as documented on disk, plus the optional `api`/`transport`
+    /// selectors. This is *what the operator wrote*, not a resolved backend target:
+    /// `model_api` owns resolution and compatibility.
+    pub provider_selection: crate::target::ProviderId,
+    pub api_selection: Option<crate::target::ApiSelector>,
+    /// Provider-scoped settings carried neutrally; `model_api` interprets these
+    /// into backend drafts.
+    pub(crate) anthropic_settings: Option<provider_settings::AnthropicSettings>,
+    pub(crate) codex_settings: Option<provider_settings::CodexResponsesSettings>,
+    pub(crate) openai_responses_settings: Option<provider_settings::OpenAiResponsesSettings>,
     /// Chat targets only: a dsflash marker is present without the
     /// `modelParams.chat_template_kwargs` discriminator.
     pub(crate) chat_missing_discriminator: Option<String>,
@@ -438,7 +447,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
     let provider_value = obj
         .get("provider")
         .ok_or_else(|| format!("profile {name:?} missing 'provider'"))?;
-    let provider_id = crate::model_api::target::ProviderId::parse(provider_value, name)?;
+    let provider_id = crate::target::ProviderId::parse(provider_value, name)?;
     let provider = provider_id.as_str().to_string();
 
     let model = obj
@@ -450,11 +459,10 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
     validate_model_name(model, name)?;
     let model = model.to_string();
 
-    let target = crate::model_api::target::resolve_model_target(
-        provider_id,
-        obj.get("ephemeralSettings"),
-        name,
-    )?;
+    // The profile stays provider-neutral here: selectors are recorded as written and
+    // provider-scoped settings are carried as validated neutral data. `model_api`
+    // resolves the backend target and interprets those settings.
+    let selection = selection::parse(provider_id, obj.get("ephemeralSettings"), name)?;
     let provider_settings::ParsedProviderSettings {
         ephemeral,
         model_params,
@@ -462,7 +470,7 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         codex_settings,
         openai_responses_settings,
         chat_missing_discriminator,
-    } = provider_settings::parse(obj, name, &model, provider_id, &target)?;
+    } = provider_settings::parse(obj, name, &selection)?;
 
     Ok(Profile {
         name: name.to_string(),
@@ -470,7 +478,8 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         model,
         model_params,
         ephemeral,
-        target,
+        provider_selection: selection.provider,
+        api_selection: selection.api,
         anthropic_settings,
         codex_settings,
         openai_responses_settings,

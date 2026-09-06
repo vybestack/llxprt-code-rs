@@ -255,13 +255,32 @@ fn spawn_redirect_server(status: u16, location: String) -> std::net::SocketAddr 
 fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
     const MAX_HEADER_BYTES: usize = 64 * 1024;
     const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
+    // Loaded runners can starve the loopback reader long enough for EAGAIN
+    // (WouldBlock), so keep retrying past the per-call socket read timeouts
+    // before surfacing a clear timeout error.
+    let deadline = Instant::now() + Duration::from_secs(60);
 
-    let mut reader = std::io::BufReader::new(stream.try_clone()?);
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut request = Vec::new();
     let mut content_length = 0usize;
     loop {
         let mut line = Vec::new();
-        if reader.read_until(b'\n', &mut line)? == 0 {
+        let read = loop {
+            match reader.read_until(b'\n', &mut line) {
+                Ok(read) => break read,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "timed out reading loopback request headers",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        if read == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "request headers ended before the blank line",
@@ -297,7 +316,28 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
     }
     let header_len = request.len();
     request.resize(header_len + content_length, 0);
-    reader.read_exact(&mut request[header_len..])?;
+    let mut filled = header_len;
+    while filled < request.len() {
+        match reader.read(&mut request[filled..]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "request body ended before content-length",
+                ));
+            }
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "timed out reading loopback request body",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(error),
+        }
+    }
     drop(reader);
     Ok(request)
 }
@@ -1073,6 +1113,13 @@ fn spawn_anthropic_request_server() -> (
                 Err(error) => panic!("accept Anthropic request: {error}"),
             }
         };
+        // Accepted sockets inherit the listener's nonblocking flag on darwin,
+        // so reads race EAGAIN under scheduler contention; the read timeout
+        // only means anything on a blocking socket.
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
         let request = read_http_request(&mut stream).expect("read Anthropic request");
         assert!(request.starts_with(b"POST /v1/messages HTTP/1.1\r\n"));
         let body_start = request

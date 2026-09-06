@@ -1,4 +1,2 @@
 # Coupling debt burn-down ledger. Entries may only be removed by the ordinary gate.
 # FROM<TAB>TO<TAB>OPEN_GITHUB_ISSUE
-model	model_api	73
-profile	model_api	73

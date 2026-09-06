@@ -156,6 +156,7 @@ print(json.dumps({
     "tool_calls": 3,
     "declared_tool_calls": 16,
     "budget_exhausted": False,
+    "zero_call_tail": 1,
     "prompt_digest": fnv1a(prompt or ""),
 }))
 sys.exit(0)
