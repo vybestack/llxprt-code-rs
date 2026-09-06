@@ -217,7 +217,10 @@ pub use antigravity::AntigravityModel;
 pub mod mock;
 
 // Re-exports
-pub use error::{ModelError, ModelResult};
+pub use error::{
+    classify_status, ModelError, ModelResult, TransportClass, TransportDetail, TransportOrigin,
+    UrlClass, MAX_TRANSPORT_BODY_PREFIX_BYTES,
+};
 pub use fallback::{FallbackModel, RetryOn};
 pub use mock::{FunctionModel, MockModel, TestModel};
 pub use model::{

@@ -77,7 +77,7 @@ fn construct_chat(
                 error.to_string()
             }
         })?;
-    crate::agent::validate_timeout(config.timeout)?;
+    crate::limits::validate_timeout(config.timeout)?;
     let secret_values = config.secret_values();
     let context_limit = config.context_limit;
     let backend = make_adapter(&config).map_err(|error| error.to_string())?;
@@ -175,7 +175,7 @@ fn construct_openai_responses(
         timeout: Some(std::time::Duration::from_secs(900)),
         ..Default::default()
     };
-    crate::agent::validate_timeout(model_settings.timeout)?;
+    crate::limits::validate_timeout(model_settings.timeout)?;
     let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
         backend: Box::new(ResponsesBackend::new_openai(model, model_settings)?),
@@ -258,7 +258,7 @@ fn construct_anthropic(
     };
     let secret_values = secret_config.secret_values();
     let model_settings = anthropic_model_settings(profile, timeout);
-    crate::agent::validate_timeout(model_settings.timeout)?;
+    crate::limits::validate_timeout(model_settings.timeout)?;
     let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
         .with_timeout(timeout);
@@ -350,7 +350,7 @@ fn construct_codex(
     // parameters travel in `ModelSettings`; the vendored Codex client honors none of
     // them on its own.
     let model_settings = codex_model_settings(profile);
-    crate::agent::validate_timeout(model_settings.timeout)?;
+    crate::limits::validate_timeout(model_settings.timeout)?;
     Ok(ConstructedBackend {
         backend: Box::new(ResponsesBackend::new(model, model_settings)?),
         secret_values,

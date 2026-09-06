@@ -6,6 +6,7 @@
       "description": "Error detail nested in an error envelope.",
       "properties": {
         "code": {
+          "description": "The stable machine token for the failure class: one of the `Code` family keys\n(`usage`, `model-config`, `session`, `model`, `turn`, `mem-profile`) or, for a\nmodel transport failure, the finer `model-<class>` transport key the agent\ncarries on the error, such as `model-quota-exhausted` or\n`model-transient-server`. Free-form text never appears here.",
           "type": "string"
         },
         "message": {

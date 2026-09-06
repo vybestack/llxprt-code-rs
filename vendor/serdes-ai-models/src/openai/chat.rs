@@ -2,12 +2,11 @@
 
 use super::stream::OpenAIStreamParser;
 use super::types::*;
-use crate::error::ModelError;
+use crate::error::{ModelError, TransportDetail};
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{openai_gpt4o_profile, ModelProfile};
 use async_trait::async_trait;
 use base64::Engine;
-use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
     ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs,
@@ -507,17 +506,11 @@ impl OpenAIChatModel {
         })
     }
 
-    fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
-        headers
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_secs)
-    }
-
-    /// Handle API error response.
-    fn handle_error_response(&self, status: u16, _body: &str, headers: &HeaderMap) -> ModelError {
-        crate::response::status_error(status, Self::parse_retry_after(headers))
+    /// Handle API error response. The bounded detail carries the status, the bounded
+    /// body prefix, and any `Retry-After`; the classification is derived from those facts
+    /// rather than the status alone, so a quota hard stop never masquerades as a throttle.
+    fn handle_error_response(&self, _status: u16, detail: TransportDetail) -> ModelError {
+        crate::response::status_transport_error(detail)
     }
 
     /// The exact request route. The host adapter derives the full chat-completions URL via
@@ -574,9 +567,11 @@ impl Model for OpenAIChatModel {
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
-            let headers = response.headers().clone();
-            let body = crate::response::error_text(response).await?;
-            return Err(self.handle_error_response(status, &body, &headers));
+            // The bounded body stays out of the public diagnostic: it is carried as a
+            // typed, bounded prefix so the host can classify (429 throttle versus
+            // quota exhaustion versus 5xx) and render on its own scrubbed path.
+            let detail = crate::response::transport_detail(response).await?;
+            return Err(self.handle_error_response(status, detail));
         }
 
         self.parse_response(crate::response::json::<ChatCompletionResponse>(response).await?)
@@ -613,9 +608,11 @@ impl Model for OpenAIChatModel {
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
-            let headers = response.headers().clone();
-            let body = crate::response::error_text(response).await?;
-            return Err(self.handle_error_response(status, &body, &headers));
+            // The bounded body stays out of the public diagnostic: it is carried as a
+            // typed, bounded prefix so the host can classify (429 throttle versus
+            // quota exhaustion versus 5xx) and render on its own scrubbed path.
+            let detail = crate::response::transport_detail(response).await?;
+            return Err(self.handle_error_response(status, detail));
         }
 
         let parser = OpenAIStreamParser::new(crate::response::stream(response));

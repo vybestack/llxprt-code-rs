@@ -5,6 +5,11 @@ pub struct AgentError {
     pub key: &'static str,
     pub message: String,
     pub code: crate::envelope::Code,
+    /// The stable `error.code` token written to the stdout envelope. `None` means the
+    /// [`Self::key`] is already the envelope token. A model transport failure carries its
+    /// finer `model-<class>` transport key here (for example `model-quota-exhausted`)
+    /// while `Self::key` stays `model`, so the process exit code family is unchanged.
+    pub envelope_code: Option<&'static str>,
     /// Terminal outcome the run declared for itself, when it declared one: the malformed
     /// tool-call collapse (issue 146) and the exhausted truncation retry (issue 153) both
     /// stay typed failures but carry a distinct verdict the caller can branch on.
@@ -17,8 +22,16 @@ impl AgentError {
             code,
             key,
             message: msg.into(),
+            envelope_code: None,
             terminal_outcome: None,
         }
+    }
+
+    /// Carry a finer envelope `error.code` token than [`Self::key`], leaving the process
+    /// exit code family alone.
+    pub fn with_envelope_code(mut self, envelope_code: &'static str) -> Self {
+        self.envelope_code = Some(envelope_code);
+        self
     }
 
     pub fn from_store(error: StoreError) -> Self {
@@ -26,6 +39,7 @@ impl AgentError {
             code: crate::envelope::Code::Session,
             key: "session",
             message: error.to_string(),
+            envelope_code: None,
             terminal_outcome: None,
         }
     }

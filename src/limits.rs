@@ -25,6 +25,36 @@ pub const MAX_TOOL_CALL_ID_BYTES: usize = 256;
 /// Maximum UTF-8 byte length of one provider-supplied tool name.
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
 
+/// Safety margin subtracted from the session lease when validating a request timeout.
+///
+/// This bound mirrors [`crate::session::LEASE_SECONDS`] rather than importing it, keeping this
+/// module a leaf that the agent loop, the session validator, and the model-API registry can all
+/// depend on without forming a cycle.
+pub const TIMEOUT_LEASE_MARGIN_SECONDS: u64 = 60;
+
+/// The session lease the timeout bound is validated against. Kept as a literal copy of
+/// `crate::session::LEASE_SECONDS` so the leaf stays dependency-free; the session module owns
+/// the authoritative value and the two must move together.
+pub const TIMEOUT_LEASE_SECONDS: u64 = 3600;
+
+/// Validate a request timeout against the session lease, preferring a request that always fits
+/// inside one lease: without an independent heartbeat a request of `lease` seconds could outlive
+/// its own lease, so a value at or above the lease minus [`TIMEOUT_LEASE_MARGIN_SECONDS`]
+/// is refused up front.
+pub fn validate_timeout(timeout: Option<std::time::Duration>) -> Result<(), String> {
+    let lease = TIMEOUT_LEASE_SECONDS;
+    let max = lease.saturating_sub(TIMEOUT_LEASE_MARGIN_SECONDS);
+    if let Some(timeout) = timeout {
+        if timeout.as_secs() >= max {
+            return Err(format!(
+                "request timeout {}s must be below the session lease ({lease}s minus a {TIMEOUT_LEASE_MARGIN_SECONDS}s margin)",
+                timeout.as_secs()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// FNV-1a hash of a prompt, used as a compact identity for replay detection.
 pub fn prompt_digest(prompt: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;

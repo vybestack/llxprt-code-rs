@@ -256,7 +256,11 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
             error.session_status.as_deref().unwrap_or("ok"),
         ),
         Err(error) => {
-            let mut envelope = Envelope::error(error_session_id, error.key, error.message.clone());
+            let mut envelope = Envelope::error(
+                error_session_id,
+                error.envelope_code.unwrap_or(error.key),
+                error.message.clone(),
+            );
             if let Envelope::Error(detail) = &mut envelope {
                 if let Some(outcome) = error.terminal_outcome {
                     detail.error.terminal_outcome = Some(outcome.to_string());
@@ -357,6 +361,11 @@ pub struct AppError {
     pub message: String,
     pub profiling_stage: Option<&'static str>,
     pub session_status: Option<String>,
+    /// The stable envelope `error.code` token. `None` means [`Self::key`] is already the
+    /// envelope token. A model transport failure carries its finer `model-<class>`
+    /// transport key here (for example `model-quota-exhausted`) while [`Self::key`] stays
+    /// `model`, so the process exit code family is unchanged.
+    pub envelope_code: Option<&'static str>,
     /// Terminal outcome the run declared for itself (issue 146): a collapsed turn the
     /// caller must be able to distinguish from a finished one.
     pub terminal_outcome: Option<&'static str>,
@@ -375,8 +384,16 @@ impl AppError {
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
             profiling_stage: None,
             session_status: None,
+            envelope_code: None,
             terminal_outcome: None,
         }
+    }
+
+    /// Carry a finer envelope `error.code` token than [`Self::key`], leaving the process
+    /// exit code family alone.
+    pub fn with_envelope_code(mut self, envelope_code: Option<&'static str>) -> Self {
+        self.envelope_code = envelope_code;
+        self
     }
 
     pub fn profiling(error: crate::memory_profile::ProfilingError) -> Self {
@@ -390,6 +407,7 @@ impl AppError {
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
             profiling_stage: Some(stage),
             session_status: Some("ok".into()),
+            envelope_code: None,
             terminal_outcome: None,
         }
     }
