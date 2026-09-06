@@ -24,6 +24,13 @@
             "string",
             "null"
           ]
+        },
+        "terminal_outcome": {
+          "description": "Terminal outcome the run declared for itself (issue 146): a zero-call reply\nwhose text structurally resembles tool-call syntax.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -98,6 +105,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "zero_call_tail": {
+          "description": "Consecutive trailing assistant rounds that parsed to zero tool calls, including\nthe final summary round (so a healthy wrap-up reports `1`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -113,6 +126,7 @@
         "tool_calls",
         "declared_tool_calls",
         "budget_exhausted",
+        "zero_call_tail",
         "prompt_digest"
       ],
       "type": "object"

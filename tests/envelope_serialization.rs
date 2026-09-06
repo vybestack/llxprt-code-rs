@@ -16,8 +16,10 @@ fn success_envelope_bytes_are_pinned() {
             tool_count: 3,
             declared_tool_calls: None,
             budget_exhausted: false,
+            zero_call_tail: 2,
             prompt_digest: "0123456789abcdef".into(),
             status: "ok".into(),
+            terminal_outcome: None,
             branch: false,
             replayed: true,
         },
@@ -25,11 +27,33 @@ fn success_envelope_bytes_are_pinned() {
     let line = cli::envelope(&outcome, "sess_1").to_line();
     assert_eq!(
         String::from_utf8_lossy(&line),
-        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2}\n"
+        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
     assert_eq!(
         line,
-        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2}\n"
+        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
+    );
+}
+
+#[test]
+fn error_envelope_carries_terminal_outcome() {
+    let mut error = AppError::new(
+        Code::Model,
+        llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY,
+        "collapsed turn",
+    );
+    error.terminal_outcome = Some(llxprt_code_rs::agent::MALFORMED_TOOL_CALL_KEY);
+    let outcome: Result<RunOutcome, AppError> = Err(error);
+    let line = cli::envelope(&outcome, "sess_1").to_line();
+    let text = String::from_utf8_lossy(&line).into_owned();
+    assert!(
+        text.contains("\"terminal_outcome\":\"malformed_tool_call\""),
+        "terminal outcome missing from {text}"
+    );
+    let document: serde_json::Value = serde_json::from_str(text.trim_end()).unwrap();
+    assert_eq!(
+        document["error"]["terminal_outcome"],
+        serde_json::json!("malformed_tool_call")
     );
 }
 

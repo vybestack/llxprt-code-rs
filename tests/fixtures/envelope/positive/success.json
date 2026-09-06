@@ -1,1 +1,1 @@
-{"attempt":1,"branch":false,"branch_id":"b1","budget_exhausted":false,"declared_tool_calls":-1,"prompt_digest":"0123456789abcdef","replayed":false,"session_dir":"sessions/demo_1","session_id":"demo_1","status":"ok","summary":"done","tool_calls":0,"turn":1}
+{"attempt":1,"branch":false,"branch_id":"b1","budget_exhausted":false,"declared_tool_calls":-1,"prompt_digest":"0123456789abcdef","replayed":false,"session_dir":"sessions/demo_1","session_id":"demo_1","status":"ok","summary":"done","tool_calls":0,"turn":1,"zero_call_tail":1}
