@@ -17,13 +17,13 @@ use std::fmt;
 
 /// The fixed, value-free failure for an unresolvable named provider key. The name
 /// and the secret are credential surfaces; neither ever travels.
-pub(crate) const RESOLUTION_FAILURE: &str = "auth-key-name could not be resolved; set LLXPRT_PROVIDER_KEY_<NAME> or store the key under the llxprt-code-provider-keys secure-store account";
+pub const RESOLUTION_FAILURE: &str = "auth-key-name could not be resolved; set LLXPRT_PROVIDER_KEY_<NAME> or store the key under the llxprt-code-provider-keys secure-store account";
 
 /// The folded env selector for a named provider key: `LLXPRT_PROVIDER_KEY_`
 /// plus the uppercased name with `-` and `.` folded to `_` (so `zai`, `zAi`, and
 /// `friendli-glm` select `LLXPRT_PROVIDER_KEY_ZAI` and
 /// `LLXPRT_PROVIDER_KEY_FRIENDLI_GLM`). The selector never appears in an error.
-pub(crate) fn env_selector(name: &str) -> String {
+pub fn env_selector(name: &str) -> String {
     let folded: String = name
         .chars()
         .map(|c| match c {
@@ -36,7 +36,7 @@ pub(crate) fn env_selector(name: &str) -> String {
 
 /// Read the named provider key from the process environment. The secret is held for
 /// the transport only; the value never appears in an error or a diagnostic.
-pub(crate) fn from_env(name: &str) -> Option<String> {
+pub fn from_env(name: &str) -> Option<String> {
     let value = std::env::var_os(env_selector(name))?;
     let value = value.into_string().ok()?;
     let value = value.trim().to_string();
@@ -44,21 +44,27 @@ pub(crate) fn from_env(name: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn from_keychain(name: &str) -> Option<String> {
-    super::macos_keychain::read_named_provider_key(name)
+pub fn from_keychain(name: &str) -> Option<String> {
+    use security_framework::passwords::{generic_password, PasswordOptions};
+
+    const SERVICE: &str = "llxprt-code-provider-keys";
+    let bytes = generic_password(PasswordOptions::new_generic_password(SERVICE, name)).ok()?;
+    let value = String::from_utf8(bytes).ok()?;
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 /// The secure store is the native macOS keychain; on every other platform only the
 /// env selector resolves a named key.
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn from_keychain(_name: &str) -> Option<String> {
+pub fn from_keychain(_name: &str) -> Option<String> {
     None
 }
 
 /// A named provider key that could not be resolved through either layer. The fixed
 /// diagnostic never carries the name, the env selector, or the secret.
 #[derive(Debug)]
-pub(crate) struct UnresolvedNamedKey;
+pub struct UnresolvedNamedKey;
 
 impl fmt::Display for UnresolvedNamedKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -71,7 +77,7 @@ impl std::error::Error for UnresolvedNamedKey {}
 /// Resolve `auth-key-name`: the credential env selector first, then the secure
 /// store. Returns the bounded secret for the transport, or the fixed value-free
 /// [`UnresolvedNamedKey`] diagnostic when neither layer holds the key.
-pub(crate) fn resolve_named_key(name: &str) -> Result<String, UnresolvedNamedKey> {
+pub fn resolve_named_key(name: &str) -> Result<String, UnresolvedNamedKey> {
     let key = from_env(name)
         .or_else(|| from_keychain(name))
         .ok_or(UnresolvedNamedKey)?;

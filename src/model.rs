@@ -394,6 +394,21 @@ pub fn validate_base_url(base_url: &str) -> Result<(), ModelError> {
     parse_base_url(base_url).map(|_| ())
 }
 
+/// The API-kind gate is a pure profile check, so both entry points (`from_profile`
+/// and `from_profile_in`) run it before any environment or filesystem access
+/// (PLAN.md: configuration errors before provider access). It reads only the
+/// provider-neutral selection the parser recorded, via the neutral resolution rule in
+/// `crate::target`; the refusal message is unchanged.
+fn ensure_chat_api(profile: &Profile) -> Result<(), ModelError> {
+    let api = crate::target::resolve_api(profile.provider_selection, profile.api_selection);
+    if api != crate::target::ModelApi::ChatCompletions {
+        return Err(ModelError::UnsupportedApiSelection(
+            profile.provider.clone(),
+        ));
+    }
+    Ok(())
+}
+
 impl ModelConfig {
     /// Validate the **full** base URL (including its path prefix) and the plaintext-HTTP
     /// policy. The **display** form hides the path, so it would never exercise the
@@ -405,6 +420,12 @@ impl ModelConfig {
 
     /// Resolve a full model config from a profile.
     ///
+    /// The API-kind gate is a pure profile check, so it runs before this function
+    /// resolves the config root: an unsupported API selection is reported without
+    /// consulting the environment or the filesystem (PLAN.md: configuration errors
+    /// before provider access). `from_profile_in` keeps the same gate for direct
+    /// callers that already hold a config root.
+    ///
     /// `from_file` marks a `--profile-load` profile: when it carries no
     /// `auth-key`/`auth-keyfile` and its base URL is not loopback it fails rather than
     /// touching `settings.json`.
@@ -413,21 +434,9 @@ impl ModelConfig {
         from_file: bool,
         allow_insecure_http: bool,
     ) -> Result<ModelConfig, ModelError> {
-        Self::ensure_chat_api(profile)?;
+        ensure_chat_api(profile)?;
         let config_root = std_profile_dir().map_err(ModelError::SettingsRead)?;
         Self::from_profile_in(profile, from_file, allow_insecure_http, &config_root)
-    }
-
-    /// The API-kind gate is a pure profile check, so every caller runs it before any
-    /// environment or filesystem access (PLAN.md: configuration errors before
-    /// provider access).
-    fn ensure_chat_api(profile: &Profile) -> Result<(), ModelError> {
-        if profile.target.api != crate::model_api::target::ModelApi::ChatCompletions {
-            return Err(ModelError::UnsupportedApiSelection(
-                profile.provider.clone(),
-            ));
-        }
-        Ok(())
     }
 
     pub(crate) fn from_profile_in(
@@ -436,7 +445,7 @@ impl ModelConfig {
         allow_insecure_http: bool,
         config_root: &std::path::Path,
     ) -> Result<ModelConfig, ModelError> {
-        Self::ensure_chat_api(profile)?;
+        ensure_chat_api(profile)?;
 
         let base_url = profile
             .ephemeral
@@ -458,7 +467,7 @@ impl ModelConfig {
             .ephemeral
             .auth_key_name
             .as_deref()
-            .map(crate::model_api::provider_keys::resolve_named_key)
+            .map(crate::provider_keys::resolve_named_key)
             .transpose()
             .map_err(|error| ModelError::UnsupportedSetting(error.to_string()))?;
 
@@ -481,8 +490,16 @@ impl ModelConfig {
                 )));
             }
         }
-        if profile.target.provider == crate::model_api::target::ProviderId::OpenAiVercel
-            && profile.model_params.chat_template_kwargs.is_some()
+
+        // Structural dsflash selection (class 6): a dsflash variant selected on an
+        // OpenAI Vercel Chat target is an incompatible provider setting; it refuses
+        // here, before any settings-file fallback (`resolve_api_key` below). Named-key
+        // resolution above may already have run, so this is not "before all credential
+        // I/O"; it is before the settings file.
+        if !crate::target::dsflash_chat_supported(
+            profile.provider_selection,
+            crate::target::resolve_api(profile.provider_selection, profile.api_selection),
+        ) && profile.model_params.chat_template_kwargs.is_some()
         {
             return Err(ModelError::UnsupportedSetting(
                 "dsflash chat settings are not supported on OpenAI Vercel Chat targets".to_string(),
