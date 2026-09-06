@@ -48,7 +48,7 @@ impl CodingAgent {
     pub(super) fn first_completion(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         requests: &mut Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
     ) -> Result<LlmResult, AgentError> {
@@ -58,14 +58,35 @@ impl CodingAgent {
             output_bytes: 0,
             total_calls: 0,
         };
-        let first = self.opening_round(store, reserved, requests, tools, &usage)?;
+        let first = match self.opening_round(requests, tools, &usage) {
+            Ok(reply) => reply,
+            Err(RoundFailure::Model(first)) if is_context_limit_error(&first) => {
+                self.compact_provider_context(reserved, requests);
+                match self.opening_round(requests, tools, &usage) {
+                    Ok(reply) => reply,
+                    Err(RoundFailure::Model(second)) if is_context_limit_error(&second) => {
+                        return Err(self.provider_context_limit_dead(
+                            store,
+                            reserved,
+                            &first,
+                            &second,
+                            &[],
+                        ));
+                    }
+                    Err(failure) => return Err(self.round_failure(store, reserved, failure, &[])),
+                }
+            }
+            Err(failure) => return Err(self.round_failure(store, reserved, failure, &[])),
+        };
         if !retryable(&[], &first) {
             return Ok(first);
         }
         requests.push(nudge_request());
         self.check_request_budget(store, reserved, requests, tools, &[])?;
         self.renew(store, reserved)?;
-        let second = self.opening_round(store, reserved, requests, tools, &usage)?;
+        let second = self
+            .opening_round(requests, tools, &usage)
+            .map_err(|failure| self.round_failure(store, reserved, failure, &[]))?;
         if is_output_truncation(&second) {
             return Err(self.exhausted_retry(store, reserved));
         }
@@ -75,12 +96,10 @@ impl CodingAgent {
     /// One model call of the turn's opening, with the shared profiling and failure mapping.
     fn opening_round(
         &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
         usage: &TurnUsage,
-    ) -> Result<LlmResult, AgentError> {
+    ) -> Result<LlmResult, RoundFailure> {
         self.profiled_round(
             requests,
             tools,
@@ -89,7 +108,6 @@ impl CodingAgent {
             1,
             usage,
         )
-        .map_err(|failure| self.round_failure(store, reserved, failure, &[]))
     }
 
     /// The single re-issue also truncated: keep the typed finish-reason failure with its

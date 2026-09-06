@@ -346,7 +346,7 @@ impl SessionState {
         if call.name.len() > crate::limits::MAX_TOOL_NAME_BYTES {
             return Err(branch_corrupt(branch, "tool name exceeds its byte cap"));
         }
-        if !crate::tools::is_known_tool_name(&call.name) {
+        if !crate::tools::is_known_tool_name(&call.name) && (call.ok || !call.refused) {
             return Err(branch_corrupt(branch, "unknown tool name"));
         }
         let object = serde_json::from_str::<serde_json::Value>(&call.args)

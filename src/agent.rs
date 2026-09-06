@@ -11,8 +11,8 @@
 //!
 //! The loop inspects `finish_reason` after every round. Only allowed completion
 //! reasons succeed; `length`/`content_filter`/`error`/unknown terminally fail and
-//! are persisted. Empty/duplicate ids, unknown or disabled tools, non-object
-//! arguments, and the exact tool-call budget are all validated before any side effect.
+//! are persisted. //! Empty/duplicate ids, non-object arguments, and the exact tool-call budget are
+//! validated before any side effect; unknown or disabled tools are refused with a correction.
 //! Malformed argument JSON is a hard error, not a normalized `{}` that could execute.
 
 use crate::adapter::{
@@ -25,6 +25,7 @@ use serde_json::Value as JsonValue;
 
 mod finish;
 mod in_flight;
+mod over_limit;
 pub use finish::finish_check;
 
 // Compatibility alias retained while route construction remains owned by the adapter.
@@ -120,8 +121,8 @@ mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
-    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
-    validate_provider_result,
+    final_summary_request, refuse_over_budget, refuse_unknown_tools, split_over_budget,
+    tool_call_record, validate_provider_result,
 };
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
@@ -287,6 +288,7 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
             .map_err(AgentError::from_store)?;
@@ -300,11 +302,9 @@ impl CodingAgent {
                     ..Default::default()
                 },
             )?;
-            return Ok(self.replayed_run(reserved));
+            return Ok(self.replayed_run(&reserved));
         }
-        self.renew(store, reserved)?;
-        self.validate_history_budget(store, reserved)?;
-        let requests = self.materialize_requests(reserved);
+        let requests = self.preflight_recovery(store, &mut reserved)?;
         self.profile(
             "requests_materialized",
             crate::memory_profile::EventData {
@@ -316,11 +316,11 @@ impl CodingAgent {
         let tools = crate::tools::tool_specs(self.allow_shell);
         let config = self
             .tools_config(self.allow_shell)
-            .map_err(|error| self.dead(store, reserved, "workspace", &error, &[]))?;
-        let mut attempt = self.begin_attempt(store, reserved, requests, &tools)?;
-        self.run_tool_rounds(store, reserved, &tools, &config, &mut attempt)?;
-        let summary = self.resolve_summary(store, reserved, &tools, &mut attempt)?;
-        self.complete_attempt(store, reserved, summary, attempt)
+            .map_err(|error| self.dead(store, &reserved, "workspace", &error, &[]))?;
+        let mut attempt = self.begin_attempt(store, &mut reserved, requests, &tools)?;
+        self.run_tool_rounds(store, &mut reserved, &tools, &config, &mut attempt)?;
+        let summary = self.resolve_summary(store, &reserved, &tools, &mut attempt)?;
+        self.complete_attempt(store, &reserved, summary, attempt)
     }
 
     fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
@@ -344,28 +344,6 @@ impl CodingAgent {
             replayed: true,
             terminal_outcome: None,
         }
-    }
-
-    fn validate_history_budget(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-    ) -> Result<(), AgentError> {
-        let needs_check = history_needs_check(&reserved.history);
-        let within = history_within(
-            &reserved.history,
-            materialization_budget(self.context_limit),
-        );
-        if needs_check && !within {
-            return Err(self.dead(
-                store,
-                reserved,
-                "context-limit",
-                "materialized history would exceed the profile context budget",
-                &[],
-            ));
-        }
-        Ok(())
     }
 
     fn materialize_requests(
@@ -392,7 +370,7 @@ impl CodingAgent {
     fn begin_attempt(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         mut requests: Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
     ) -> Result<AttemptState, AgentError> {
@@ -424,7 +402,7 @@ impl CodingAgent {
     fn run_tool_rounds(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         config: &crate::tools::ToolConfig,
         attempt: &mut AttemptState,
@@ -503,22 +481,19 @@ impl CodingAgent {
     fn request_next_round(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<(), AgentError> {
-        self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
+        self.recover_request_budget(
+            store,
+            reserved,
+            &mut attempt.requests,
+            tools,
+            &attempt.rounds,
+        )?;
         self.renew(store, reserved)?;
-        attempt.current = self
-            .profiled_round(
-                &attempt.requests,
-                tools,
-                "model_call_before",
-                "model_call_after",
-                attempt.rounds.len() + 1,
-                &attempt.usage,
-            )
-            .map_err(|failure| self.round_failure(store, reserved, failure, &attempt.rounds))?;
+        attempt.current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
         self.renew(store, reserved)?;
         attempt.usage.assistant_bytes = attempt
             .usage
@@ -551,7 +526,6 @@ impl CodingAgent {
         }
         Ok(())
     }
-
     fn check_round_limit(
         &self,
         store: &SessionStore,
@@ -678,9 +652,9 @@ impl CodingAgent {
         rounds: &[RoundRecord],
         forced: &LlmResult,
     ) -> Result<(), AgentError> {
-        let calls = validate_calls(ids, forced, self.allow_shell)
+        let (calls, refused) = validate_calls(ids, forced, self.allow_shell)
             .map_err(|error| self.dead(store, reserved, "invalid-tool-call", &error, rounds))?;
-        if !calls.is_empty() {
+        if !calls.is_empty() || !refused.is_empty() {
             return Err(self.dead(
                 store,
                 reserved,
@@ -927,6 +901,11 @@ impl CodingAgent {
 
 /// The budget notice appended to the last tool result of a round so the model
 /// always knows what remains. `None` budget stays silent.
+/// The vendored model error's Display wording is the stable provider verdict.
+fn is_context_limit_error(message: &str) -> bool {
+    message.contains("context length exceeded")
+}
+
 /// Per-call failure kinds that keep the caller's error codes intact.
 enum ToolCallFailure {
     Invalid(String),
@@ -941,3 +920,6 @@ enum RoundFailure {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tool_validation_tests;

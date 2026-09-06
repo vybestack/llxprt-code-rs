@@ -208,3 +208,23 @@ fn prompt_summary_error_lease_and_lifecycle_fields_are_enforced() {
     state.branches[0].error = "e".repeat(crate::redact::MAX_ERROR_TEXT_BYTES + 1);
     assert!(corruption_message(&state).contains("error exceeds"));
 }
+
+#[test]
+fn validator_accepts_refused_unknown_tool_record() {
+    let mut state = valid_state();
+    let call = &mut state.branches[0].rounds[0].calls[0];
+    call.name = "search_file_command".into();
+    call.ok = false;
+    call.refused = true;
+    state.validate().unwrap();
+}
+
+#[test]
+fn validator_rejects_unknown_tool_record_without_refusal_flag() {
+    let mut state = valid_state();
+    let call = &mut state.branches[0].rounds[0].calls[0];
+    call.name = "search_file_command".into();
+    call.ok = false;
+    call.refused = false;
+    assert!(corruption_message(&state).contains("unknown tool name"));
+}
