@@ -125,6 +125,10 @@ fn agent_error(error: crate::agent::AgentError) -> AppError {
         // The run declared its own terminal verdict (issues 146 and 153); carry it into
         // the stdout envelope so a headless caller can branch on this condition alone.
         app.terminal_outcome = error.terminal_outcome;
+    } else if error.key == crate::agent::MALFORMED_TOOL_CALL_KEY {
+        // The malformed-tool-call collapse (issue 146) declares the same verdict through
+        // its typed key, so a caller can retry on this condition alone.
+        app.terminal_outcome = Some(crate::agent::MALFORMED_TOOL_CALL_KEY);
     }
     app
 }

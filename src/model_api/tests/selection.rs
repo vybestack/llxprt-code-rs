@@ -1,12 +1,32 @@
 use serde_json::json;
 
-use crate::model_api::target::{
-    resolve_model_target, ModelApi, ModelTarget, ProviderId, TransportKind,
-};
+use crate::model_api::interpret::ResolvedProfile;
+use crate::model_api::target::{ModelApi, ProviderId, TransportKind};
+use crate::profile::parse_profile_value;
+use crate::target::ModelTarget;
 
+/// Resolve a whole profile: parse the provider-neutral document, then interpret it
+/// on the provider side. This is the seam issue 73 split, exercised end to end.
 fn resolve(provider: &str, settings: serde_json::Value) -> Result<ModelTarget, String> {
-    let provider = ProviderId::parse(&json!(provider), "selection")?;
-    resolve_model_target(provider, Some(&settings), "selection")
+    resolve_model(provider, "m", settings)
+}
+
+/// Same as [`resolve`], with an explicit model name, because the model name must not
+/// influence API selection.
+fn resolve_model(
+    provider: &str,
+    model: &str,
+    settings: serde_json::Value,
+) -> Result<ModelTarget, String> {
+    let profile = parse_profile_value(
+        &json!({
+            "provider": provider,
+            "model": model,
+            "ephemeralSettings": settings,
+        }),
+        "selection",
+    )?;
+    Ok(ResolvedProfile::interpret(&profile)?.target)
 }
 
 #[test]
@@ -90,7 +110,11 @@ fn provider_defaults_and_api_compatibility_are_typed() {
         let target = resolve(provider, json!({})).unwrap();
         assert_eq!(target.api, ModelApi::ChatCompletions, "{provider}");
     }
-    let responses = resolve("openai-responses", json!({})).unwrap();
+    let responses = resolve(
+        "openai-responses",
+        json!({"base-url": "https://api.openai.com/v1"}),
+    )
+    .unwrap();
     assert_eq!(responses.api, ModelApi::Responses);
     assert_eq!(responses.transport, TransportKind::Http);
 
@@ -98,7 +122,25 @@ fn provider_defaults_and_api_compatibility_are_typed() {
     assert_eq!(anthropic.api, ModelApi::AnthropicMessages);
     assert_eq!(anthropic.transport, TransportKind::Http);
 
-    let codex = resolve("codex", json!({})).unwrap();
+    let codex = resolve(
+        "codex",
+        json!({
+            "base-url": "https://chatgpt.com/backend-api/codex",
+            "context-limit": 262144,
+            "maxTurnsPerPrompt": -1,
+            "loopDetectionEnabled": false,
+            "emojifilter": "auto",
+            "reasoning.enabled": true,
+            "reasoning.effort": "high",
+            "reasoning.adaptiveThinking": true,
+            "reasoning.includeInResponse": true,
+            "reasoning.includeInContext": true,
+            "reasoning.stripFromContext": "none",
+            "reasoning.summary": "auto",
+            "text.verbosity": "medium"
+        }),
+    )
+    .unwrap();
     assert_eq!(codex.api, ModelApi::Responses);
     assert_eq!(codex.transport, TransportKind::Http);
 
@@ -120,12 +162,9 @@ fn provider_defaults_and_api_compatibility_are_typed() {
 #[test]
 fn model_names_do_not_select_an_api_and_transport_is_not_profile_selectable() {
     for model in ["gpt-4", "gpt-5.6", "anything-responses"] {
-        let value = json!({"provider": "openai", "model": model});
-        let provider = ProviderId::parse(value.get("provider").unwrap(), "selection").unwrap();
-        let target =
-            resolve_model_target(provider, value.get("ephemeralSettings"), "selection").unwrap();
+        let target = resolve_model("openai", model, json!({})).unwrap();
         assert_eq!(target.api, ModelApi::ChatCompletions, "{model}");
-        assert_eq!(target.transport, TransportKind::Http);
+        assert_eq!(target.transport, TransportKind::Http, "{model}");
     }
 
     let target = resolve("openai", json!({"transport": "websocket"})).unwrap();

@@ -24,10 +24,13 @@ pub(crate) fn construct_backend(
     profile_from_file: bool,
     allow_insecure_http: bool,
 ) -> Result<ConstructedBackend, String> {
+    // The provider-layer seam: interpret the neutral parsed profile once, then
+    // select the registration row for the resolved target.
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(profile)?;
     let registration = dependencies
         .registrations()
         .iter()
-        .find(|registration| registration.target == profile.target)
+        .find(|registration| registration.target == resolved.target)
         .ok_or_else(|| "selected model API is not registered".to_string())?;
     match registration.constructor {
         ConstructorKind::OpenAiChat => construct_chat(
@@ -38,6 +41,7 @@ pub(crate) fn construct_backend(
         ),
         ConstructorKind::OpenAiResponses => construct_openai_responses(
             profile,
+            &resolved,
             session_id,
             dependencies,
             profile_from_file,
@@ -45,11 +49,12 @@ pub(crate) fn construct_backend(
         ),
         ConstructorKind::AnthropicMessages => construct_anthropic(
             profile,
+            &resolved,
             dependencies,
             profile_from_file,
             allow_insecure_http,
         ),
-        ConstructorKind::CodexResponses => construct_codex(profile, dependencies),
+        ConstructorKind::CodexResponses => construct_codex(profile, &resolved, dependencies),
     }
 }
 
@@ -101,6 +106,7 @@ fn resolve_max_rounds(profile: &Profile) -> Result<usize, String> {
 
 fn construct_openai_responses(
     profile: &Profile,
+    resolved: &crate::model_api::interpret::ResolvedProfile,
     session_id: &crate::session::SessionId,
     dependencies: &RuntimeDependencies,
     profile_from_file: bool,
@@ -121,8 +127,8 @@ fn construct_openai_responses(
             error.to_string()
         }
     })?;
-    let draft = profile
-        .openai_responses_settings
+    let draft = resolved
+        .openai_responses
         .as_ref()
         .ok_or_else(|| "OpenAI Responses settings were not resolved".to_string())?;
 
@@ -133,7 +139,7 @@ fn construct_openai_responses(
         .ephemeral
         .auth_key_name
         .as_deref()
-        .map(crate::model_api::provider_keys::resolve_named_key)
+        .map(crate::provider_keys::resolve_named_key)
         .transpose()
         .map_err(|error| error.to_string())?;
 
@@ -200,6 +206,7 @@ fn responses_transport_base(endpoint: &crate::profile::RedactedUrl) -> &str {
 
 fn construct_anthropic(
     profile: &Profile,
+    resolved: &crate::model_api::interpret::ResolvedProfile,
     dependencies: &RuntimeDependencies,
     profile_from_file: bool,
     allow_insecure_http: bool,
@@ -224,7 +231,7 @@ fn construct_anthropic(
         .ephemeral
         .auth_key_name
         .as_deref()
-        .map(crate::model_api::provider_keys::resolve_named_key)
+        .map(crate::provider_keys::resolve_named_key)
         .transpose()
         .map_err(|error| error.to_string())?;
     validate_anthropic_settings(profile)?;
@@ -255,12 +262,12 @@ fn construct_anthropic(
     let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
         .with_timeout(timeout);
-    let model = if profile
-        .anthropic_settings
+    let prompt_caching = resolved
+        .anthropic
         .as_ref()
-        .map(|settings| settings.prompt_caching)
-        == Some(crate::model_api::settings::PromptCaching::Cached)
-    {
+        .ok_or_else(|| "Anthropic Messages settings were not resolved".to_string())?
+        .prompt_caching;
+    let model = if prompt_caching == crate::model_api::settings::PromptCaching::Cached {
         model.with_caching()
     } else {
         model
@@ -309,10 +316,11 @@ fn validate_anthropic_settings(profile: &Profile) -> Result<(), String> {
 
 fn construct_codex(
     profile: &Profile,
+    resolved: &crate::model_api::interpret::ResolvedProfile,
     dependencies: &RuntimeDependencies,
 ) -> Result<ConstructedBackend, String> {
-    let draft = profile
-        .codex_settings
+    let draft = resolved
+        .codex
         .as_ref()
         .ok_or_else(|| "Codex Responses settings were not resolved".to_string())?;
     let credential = dependencies

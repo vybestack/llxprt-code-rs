@@ -1,12 +1,11 @@
 use super::chat::{numeric_setting, parse_ephemeral, parse_model_params};
+use super::provider_settings::{OpenAiResponsesSettings, PromptCachingSetting};
 use super::{EphemeralSettings, ModelParams};
-use crate::model_api::settings::{OpenAiResponsesSettingsDraft, PromptCaching};
-use serdes_ai::models::openai::{ReasoningEffort, ReasoningSummary, TextVerbosity};
 
 pub(super) struct Parsed {
     pub(super) ephemeral: EphemeralSettings,
     pub(super) model_params: ModelParams,
-    pub(super) draft: OpenAiResponsesSettingsDraft,
+    pub(super) settings: OpenAiResponsesSettings,
 }
 
 pub(super) fn parse(
@@ -60,12 +59,12 @@ pub(super) fn parse(
     }
     ephemeral.max_output_tokens = max_output_tokens.or(ephemeral.max_output_tokens);
 
-    let draft = parse_draft(enabled, effort, summary, verbosity, prompt_caching, name)?;
+    let settings = parse_settings(enabled, effort, summary, verbosity, prompt_caching, name)?;
 
     Ok(Parsed {
         ephemeral,
         model_params,
-        draft,
+        settings,
     })
 }
 
@@ -120,14 +119,18 @@ fn reject_inert_dsflash_settings(
     Ok(())
 }
 
-fn parse_draft(
+/// Validate the reasoning/verbosity/caching spellings and carry them as neutral
+/// settings. Enum mapping onto the backend's typed values is provider-layer policy
+/// and lives in `model_api`; here a bad spelling is still a parse error with the
+/// same on-disk message.
+fn parse_settings(
     enabled: bool,
     effort: Option<String>,
     summary: Option<String>,
     verbosity: Option<String>,
     prompt_caching: Option<String>,
     name: &str,
-) -> Result<OpenAiResponsesSettingsDraft, String> {
+) -> Result<OpenAiResponsesSettings, String> {
     let (reasoning_effort, reasoning_summary) = if enabled {
         let effort = effort.ok_or_else(|| {
             format!("profile {name:?}: enabled reasoning requires 'reasoning.effort'")
@@ -135,10 +138,9 @@ fn parse_draft(
         let summary = summary.ok_or_else(|| {
             format!("profile {name:?}: enabled reasoning requires 'reasoning.summary'")
         })?;
-        (
-            Some(parse_effort(&effort, name)?),
-            Some(parse_summary(&summary, name)?),
-        )
+        validate_effort(&effort, name)?;
+        validate_summary(&summary, name)?;
+        (Some(effort), Some(summary))
     } else {
         if effort.is_some() || summary.is_some() {
             return Err(format!(
@@ -147,20 +149,19 @@ fn parse_draft(
         }
         (None, None)
     };
-    let text_verbosity = verbosity
-        .as_deref()
-        .map(|value| parse_verbosity(value, name))
-        .transpose()?;
-    let prompt_caching = match prompt_caching.as_deref() {
-        None | Some("1h" | "24h") => PromptCaching::Cached,
-        Some("off") => PromptCaching::Off,
-        Some(_) => {
-            return Err(format!(
-                "profile {name:?}: 'prompt-caching' must be off, 1h, or 24h"
-            ));
+    let text_verbosity = match verbosity.as_deref() {
+        Some(value) => {
+            validate_verbosity(value, name)?;
+            Some(value.to_string())
         }
+        None => None,
     };
-    Ok(OpenAiResponsesSettingsDraft {
+    let prompt_caching = Some(
+        PromptCachingSetting::openai_responses(prompt_caching.as_deref())
+            .map_err(|_| format!("profile {name:?}: 'prompt-caching' must be off, 1h, or 24h"))?,
+    );
+    Ok(OpenAiResponsesSettings {
+        reasoning_enabled: Some(enabled),
         reasoning_effort,
         reasoning_summary,
         text_verbosity,
@@ -307,33 +308,27 @@ fn parse_max_output(
     Ok(selected)
 }
 
-fn parse_effort(value: &str, name: &str) -> Result<ReasoningEffort, String> {
+fn validate_effort(value: &str, name: &str) -> Result<(), String> {
     match value {
-        "low" => Ok(ReasoningEffort::Low),
-        "medium" => Ok(ReasoningEffort::Medium),
-        "high" => Ok(ReasoningEffort::High),
+        "low" | "medium" | "high" => Ok(()),
         _ => Err(format!(
             "profile {name:?}: reasoning effort must be low, medium, or high"
         )),
     }
 }
 
-fn parse_summary(value: &str, name: &str) -> Result<ReasoningSummary, String> {
+fn validate_summary(value: &str, name: &str) -> Result<(), String> {
     match value {
-        "concise" => Ok(ReasoningSummary::Concise),
-        "detailed" => Ok(ReasoningSummary::Detailed),
-        "auto" => Ok(ReasoningSummary::Auto),
+        "concise" | "detailed" | "auto" => Ok(()),
         _ => Err(format!(
             "profile {name:?}: reasoning summary must be concise, detailed, or auto"
         )),
     }
 }
 
-fn parse_verbosity(value: &str, name: &str) -> Result<TextVerbosity, String> {
+fn validate_verbosity(value: &str, name: &str) -> Result<(), String> {
     match value {
-        "low" => Ok(TextVerbosity::Low),
-        "medium" => Ok(TextVerbosity::Medium),
-        "high" => Ok(TextVerbosity::High),
+        "low" | "medium" | "high" => Ok(()),
         _ => Err(format!(
             "profile {name:?}: text verbosity must be low, medium, or high"
         )),

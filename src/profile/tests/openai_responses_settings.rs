@@ -34,25 +34,19 @@ fn openai_responses_settings_are_strict_and_typed() {
     .unwrap();
 
     assert_eq!(
-        profile.target.api,
-        crate::model_api::target::ModelApi::Responses
+        crate::target::resolve_api(profile.provider_selection, profile.api_selection),
+        crate::target::ModelApi::Responses
     );
     assert_eq!(profile.ephemeral.max_output_tokens, Some(4096));
     assert_eq!(profile.model_params.temperature, Some(0.25));
     assert_eq!(profile.model_params.top_p, Some(0.75));
+    // The parser carries validated spellings; enum mapping is provider-layer
+    // policy covered by `model_api::interpret` tests.
     let settings = profile.openai_responses_settings.unwrap();
-    assert_eq!(
-        settings.reasoning_effort,
-        Some(serdes_ai::models::openai::ReasoningEffort::High)
-    );
-    assert_eq!(
-        settings.reasoning_summary,
-        Some(serdes_ai::models::openai::ReasoningSummary::Auto)
-    );
-    assert_eq!(
-        settings.text_verbosity,
-        Some(serdes_ai::models::openai::TextVerbosity::Medium)
-    );
+    assert_eq!(settings.reasoning_enabled, Some(true));
+    assert_eq!(settings.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(settings.reasoning_summary.as_deref(), Some("auto"));
+    assert_eq!(settings.text_verbosity.as_deref(), Some("medium"));
 }
 
 #[test]

@@ -535,6 +535,14 @@ impl ProposalOnlyController {
         {
             return;
         }
+        if outcome == "quiesce_unwritable" {
+            // Only the write-failure refusal wedges across a restart: the store
+            // was durably unwritable, and a later writable wrap-up must not
+            // silently reopen what the marker says was refused. A restored
+            // rate quiesce stays supersible, matching wrap_up's contract that
+            // an explicit writable wrap-up supersedes a rate terminal.
+            self.terminal_write_failed = true;
+        }
         self.terminal_outcome = Some(outcome);
         self.terminal_fit_saturated = fit_saturated;
     }

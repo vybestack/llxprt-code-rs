@@ -723,6 +723,27 @@ pub(crate) fn finalize_context(store: &SessionStore) -> Result<(), StoreError> {
             "context store unwritable, refusing to record completion: {reason}"
         )));
     }
+    // #135: a quiesced policy blocks completion even when the artifacts could
+    // still land - the quiesce marker is recorded beside the session so an
+    // operator can read why. A rate quiesce that wrap_up superseded is not a
+    // terminal here (the policy holds `wrap_up`), so this reads the policy,
+    // never the session-side flag.
+    if matches!(
+        state.policy.terminal_outcome(),
+        Some("quiesce_rate") | Some("quiesce_unwritable")
+    ) {
+        let outcome = state
+            .policy
+            .terminal_outcome()
+            .unwrap_or("quiesce_unwritable");
+        state.quiesce = Some(outcome.to_string());
+        state.detail = Some("wrap-up refused by the context policy".to_string());
+        record_quiesce_manifest(store, state);
+        record_quiesce_fallback(store, state);
+        return Err(StoreError::Invalid(format!(
+            "context policy quiesced ({outcome}), refusing to record completion"
+        )));
+    }
     Ok(())
 }
 
