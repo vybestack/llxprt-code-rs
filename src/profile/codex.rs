@@ -1,8 +1,8 @@
 use serde_json::{Map, Value};
 
 use super::chat::btree;
+use super::provider_settings::CodexResponsesSettings;
 use super::{EphemeralSettings, MaxToolCalls, ModelParams};
-use crate::model_api::settings::CodexResponsesSettingsDraft;
 
 const CODEX_PROFILE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_CONTEXT_LIMIT: u64 = 262_144;
@@ -10,14 +10,10 @@ const CODEX_CONTEXT_LIMIT: u64 = 262_144;
 pub(super) struct ParsedCodexSettings {
     pub(super) ephemeral: EphemeralSettings,
     pub(super) model_params: ModelParams,
-    pub(super) draft: CodexResponsesSettingsDraft,
+    pub(super) settings: CodexResponsesSettings,
 }
 
-pub(super) fn parse(
-    obj: &Map<String, Value>,
-    name: &str,
-    model: String,
-) -> Result<ParsedCodexSettings, String> {
+pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexSettings, String> {
     let ephemeral = object_field(obj, "ephemeralSettings", name)?;
     let model_params = object_field(obj, "modelParams", name)?;
     let mut settings = EphemeralSettings::default();
@@ -32,7 +28,7 @@ pub(super) fn parse(
     Ok(ParsedCodexSettings {
         ephemeral: settings,
         model_params,
-        draft: CodexResponsesSettingsDraft::new(model, reasoning_enabled),
+        settings: CodexResponsesSettings { reasoning_enabled },
     })
 }
 

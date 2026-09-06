@@ -45,16 +45,14 @@ fn top_level_profile_shape_is_strict() {
 /// A strict profile type table: `ephemeralSettings`/`modelParams` must be JSON
 
 #[test]
-fn parsed_profile_stores_the_resolved_target() {
+fn parsed_profile_stores_the_neutral_selection() {
     let chat =
         parse_profile_value(&json!({"provider": "openai", "model": "gpt-5.6"}), "chat").unwrap();
+    assert_eq!(chat.provider_selection, crate::target::ProviderId::OpenAi);
+    assert_eq!(chat.api_selection, None);
     assert_eq!(
-        chat.target.api,
-        crate::model_api::target::ModelApi::ChatCompletions
-    );
-    assert_eq!(
-        chat.target.transport,
-        crate::model_api::target::TransportKind::Http
+        crate::target::resolve_api(chat.provider_selection, chat.api_selection),
+        crate::target::ModelApi::ChatCompletions
     );
 
     let codex_value: serde_json::Value = serde_json::from_str(include_str!(
@@ -62,14 +60,8 @@ fn parsed_profile_stores_the_resolved_target() {
     ))
     .unwrap();
     let codex = parse_profile_value(&codex_value, "gpt56solhigh").unwrap();
-    assert_eq!(
-        codex.target.api,
-        crate::model_api::target::ModelApi::Responses
-    );
-    assert_eq!(
-        codex.target.transport,
-        crate::model_api::target::TransportKind::Http
-    );
+    assert_eq!(codex.provider_selection, crate::target::ProviderId::Codex);
+    assert_eq!(codex.api_selection, None);
     assert_eq!(codex.ephemeral.context_limit, Some(262_144));
     assert_eq!(codex.ephemeral.max_output_tokens, Some(40_000));
     assert_eq!(codex.ephemeral.max_turns_per_prompt, Some(-1));
@@ -88,8 +80,8 @@ fn zai_anthropic_fixture_resolves_messages_target() {
     assert_eq!(profile.provider, "anthropic");
     assert_eq!(profile.model, "glm-5.3");
     assert_eq!(
-        profile.target.api,
-        crate::model_api::target::ModelApi::AnthropicMessages
+        crate::target::resolve_api(profile.provider_selection, profile.api_selection),
+        crate::target::ModelApi::AnthropicMessages
     );
     assert_eq!(
         profile.ephemeral.base_url.as_ref().map(RedactedUrl::full),

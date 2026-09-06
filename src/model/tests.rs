@@ -1,3 +1,5 @@
+mod api_selection;
+
 use crate::model::{check_http_policy, classify_loopback, parse_base_url, validate_base_url};
 use crate::profile::parse_profile_value;
 use serde_json::json;
@@ -422,8 +424,8 @@ fn vercel_chat_rejects_the_dsflash_variant_before_credentials() {
     )
     .unwrap();
     assert_eq!(
-        profile.target.provider,
-        crate::model_api::target::ProviderId::OpenAiVercel
+        profile.provider_selection,
+        crate::target::ProviderId::OpenAiVercel
     );
     let err = crate::model::ModelConfig::from_profile_in(
         &profile,

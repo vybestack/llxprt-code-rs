@@ -1,12 +1,12 @@
+use super::provider_settings::{AnthropicSettings, PromptCachingSetting};
 use super::{chat::parse_chat, EphemeralSettings, ModelParams};
-use crate::model_api::settings::{AnthropicSettingsDraft, PromptCaching};
 
 #[derive(Debug)]
 pub(super) struct Parsed {
     pub(super) ephemeral: EphemeralSettings,
     pub(super) model_params: ModelParams,
     pub(super) chat_missing_discriminator: Option<String>,
-    pub(super) draft: AnthropicSettingsDraft,
+    pub(super) settings: AnthropicSettings,
 }
 
 pub(super) fn parse(
@@ -21,8 +21,12 @@ pub(super) fn parse(
         })?,
     };
     let prompt_caching = match ephemeral.remove("prompt-caching") {
-        None => PromptCaching::Cached,
-        Some(serde_json::Value::String(value)) if value == "off" => PromptCaching::Off,
+        None => None,
+        Some(serde_json::Value::String(value)) => Some(
+            PromptCachingSetting::anthropic(Some(value.as_str())).map_err(|_| {
+                format!("profile \"{name}\": 'ephemeralSettings.prompt-caching' must be 'off'")
+            })?,
+        ),
         Some(_) => {
             return Err(format!(
                 "profile {name:?}: 'ephemeralSettings.prompt-caching' must be 'off'"
@@ -40,7 +44,7 @@ pub(super) fn parse(
         ephemeral,
         model_params,
         chat_missing_discriminator,
-        draft: AnthropicSettingsDraft { prompt_caching },
+        settings: AnthropicSettings { prompt_caching },
     })
 }
 
@@ -109,7 +113,7 @@ mod tests {
     #[test]
     fn caching_defaults_on_and_off_is_accepted() {
         let on = parse(json!({}).as_object().unwrap(), "a").unwrap();
-        assert_eq!(on.draft.prompt_caching, PromptCaching::Cached);
+        assert_eq!(on.settings.prompt_caching, None);
         let off = parse(
             json!({"ephemeralSettings":{"prompt-caching":"off"}})
                 .as_object()
@@ -117,7 +121,7 @@ mod tests {
             "a",
         )
         .unwrap();
-        assert_eq!(off.draft.prompt_caching, PromptCaching::Off);
+        assert_eq!(off.settings.prompt_caching, Some(PromptCachingSetting::Off));
     }
 
     #[test]
