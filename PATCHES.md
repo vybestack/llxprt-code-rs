@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `56d09a29d016b49d57963010dd8b37f8475fd89f54c5aa0b5583b46e56623f26`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `a1a5ebef184ab8ee82e59168ec720705b9999933cfa01b2e77821b9322ef8ea4`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -244,7 +244,10 @@ keeps its historical coarser outcome. The OpenAI chat path reads a failed respon
 `response::transport_detail` instead of `error_text`, so the bounded body is carried as a typed prefix
 the host scrubs and renders on its own bounded path. Those response-side helpers are compiled only
 when the `openai` feature is enabled, because the OpenAI chat path is their single retained caller;
-every other retained feature combination leaves them out rather than carrying dead code.
+every other retained feature combination leaves them out rather than carrying dead code. The
+rate-limited `Display` also no longer invents a retry strategy the provider never supplied: a
+`Retry-After` delay renders verbatim, while a `None` delay reads `Model request rate limited
+(no retry delay supplied)` instead of the old `retry after None` phrasing (issue #159).
 
 
 ## Tests
