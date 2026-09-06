@@ -10,6 +10,16 @@ fn main() {
         println!("{}", cli::json(&outcome, &session_hint));
         std::process::exit(cli::Code::Usage as i32);
     }
+    if args.print_config {
+        match cli::print_config(&args) {
+            Ok(settings) => println!("{settings}"),
+            Err(error) => {
+                println!("{}", cli::json(&Err(error), &session_hint));
+                std::process::exit(cli::Code::Config as i32);
+            }
+        }
+        return;
+    }
     let profiler = match args.mem_profile.as_deref() {
         Some(path) => match Profiler::initialize(path) {
             Ok(profiler) => Some(profiler),
