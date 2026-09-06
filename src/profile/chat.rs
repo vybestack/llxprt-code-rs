@@ -470,6 +470,15 @@ fn redact_keyfile(p: &str) -> String {
     "<redacted keyfile>".into()
 }
 
+/// Accept a typed legacy compatibility flag without retaining or forwarding it.
+fn inert_boolean_model_param(
+    value: &serde_json::Value,
+    name: &str,
+    key: &str,
+) -> Result<(), String> {
+    bool_value(value, name, key).map(|_| ())
+}
+
 pub(super) fn parse_model_params(
     obj: &serde_json::Map<String, serde_json::Value>,
     name: &str,
@@ -513,6 +522,7 @@ pub(super) fn parse_model_params(
                 })?;
                 m.seed = Some(n);
             }
+            "clear_thinking" => inert_boolean_model_param(v, name, k)?,
             // The structural dsflash discriminator: an object with a required
             // `enable_thinking` boolean and an optional six-value `reasoning_effort`.
             "chat_template_kwargs" => {

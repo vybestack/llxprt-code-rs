@@ -4761,9 +4761,9 @@
     },
     {
       "key": "modelParams.clear_thinking",
-      "classification": "rejected",
-      "owner": "dsflash-chat",
-      "note": "clear_thinking rejects"
+      "classification": "exact-compatibility-metadata",
+      "owner": "common",
+      "note": "boolean inert compatibility metadata; never forwarded"
     },
     {
       "key": "modelParams.chat_template_kwargs",
