@@ -258,14 +258,29 @@ impl TransportFailure {
             .and_then(|(_, rest)| rest.split_once(','))
             .map(|(token, _)| token)
             .and_then(kind_from_token)?;
-        // The body prefix ends at the `retry-after` field when one is present.
-        let body_prefix = tail.split_once(" body[").and_then(|(_, rest)| {
-            rest.split_once("]: ")
-                .map(|(_, body)| match body.split_once(" retry-after ") {
+        // The body prefix ends at the `retry-after` field when one is present. The framed
+        // counts carry the retained prefix and the total body length, so the total
+        // survives the round trip instead of being reset to zero here. The trailing
+        // ` bytes` unit is part of the framing, not the number, and a missing or
+        // unparseable total stays zero so the renderer omits it.
+        let body = tail.split_once(" body[").and_then(|(_, rest)| {
+            rest.split_once("]: ").map(|(counts, body)| {
+                let body_bytes = counts
+                    .split_once('/')
+                    .and_then(|(_, total)| total.strip_suffix(" bytes"))
+                    .and_then(|total| total.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let body_prefix = match body.split_once(" retry-after ") {
                     Some((prefix, _)) => prefix.to_string(),
                     None => body.to_string(),
-                })
+                };
+                (body_prefix, body_bytes)
+            })
         });
+        let (body_prefix, body_bytes) = match body {
+            Some((prefix, bytes)) => (Some(prefix), bytes),
+            None => (None, 0),
+        };
         let retry_after = tail
             .split_once(" retry-after ")
             .and_then(|(_, rest)| rest.strip_suffix('s'))
@@ -277,7 +292,7 @@ impl TransportFailure {
             url_class,
             status,
             body_prefix,
-            body_bytes: 0,
+            body_bytes,
             retry_after,
         })
     }
@@ -308,7 +323,8 @@ impl TransportFailure {
     /// class, the classification with its retryability verdict, the bounded body prefix
     /// with its total byte length, and the `Retry-After` hint when one exists. Long
     /// bodies are truncated with the repo's `[truncated]` marker so the total stays
-    /// bounded.
+    /// bounded. A recovered body prefix whose total did not survive re-parsing states
+    /// only the retained length, never a total of zero.
     pub fn diagnostic(&self) -> String {
         let mut out = String::new();
         match self.status {
@@ -329,11 +345,18 @@ impl TransportFailure {
         out.push_str(&format!(", class {}, {verdict})", self.kind.token()));
         if let Some(prefix) = &self.body_prefix {
             let shown = bound_diagnostic(prefix);
-            out.push_str(&format!(
-                " body[{}/{} bytes]: {shown}",
-                shown.len(),
-                self.body_bytes
-            ));
+            // The total is stated only when it is at least the retained prefix: a
+            // recovered total of zero means the framing did not carry one, and printing
+            // it would claim the provider body was smaller than the retained prefix.
+            if self.body_bytes >= shown.len() {
+                out.push_str(&format!(
+                    " body[{}/{} bytes]: {shown}",
+                    shown.len(),
+                    self.body_bytes
+                ));
+            } else {
+                out.push_str(&format!(" body[{} bytes]: {shown}", shown.len()));
+            }
         }
         if let Some(retry_after) = self.retry_after {
             out.push_str(&format!(" retry-after {}s", retry_after.as_secs()));
@@ -532,6 +555,96 @@ mod tests {
             diagnostic.len() <= MAX_TRANSPORT_DIAGNOSTIC_BYTES + 128,
             "diagnostic must stay bounded: {}",
             diagnostic.len()
+        );
+    }
+
+    /// Read the framed `body[<shown>[/<total>] bytes]` counts out of a rendered
+    /// diagnostic, so the test asserts what the human reads.
+    fn framed_counts(diagnostic: &str) -> (usize, Option<usize>) {
+        let counts = diagnostic
+            .split_once(" body[")
+            .and_then(|(_, rest)| rest.split_once("]: "))
+            .map(|(counts, _)| counts)
+            .expect("the diagnostic must frame its body");
+        let parse = |value: &str| -> Option<usize> {
+            value.strip_suffix(" bytes").unwrap_or(value).parse().ok()
+        };
+        match counts.split_once('/') {
+            Some((shown, total)) => (parse(shown).expect("shown count"), parse(total)),
+            None => (parse(counts).expect("shown count"), None),
+        }
+    }
+
+    fn long_body() -> String {
+        "y".repeat(MAX_TRANSPORT_DIAGNOSTIC_BYTES * 4)
+    }
+
+    /// A round-tripped diagnostic never states a total body length smaller than the
+    /// prefix it retained, whatever the provider body held.
+    #[test]
+    fn round_trip_never_states_a_total_below_the_retained_prefix() {
+        // A long body is truncated, so the total is well past the retained prefix.
+        let long = long_body();
+        let cases = [
+            // A short body is shown whole, so shown and total agree.
+            "short body",
+            long.as_str(),
+            // A body carrying the framing separator can only degrade the recovered
+            // prefix, so the stated total still never falls below what is retained.
+            "leak ]: inside the provider body",
+            // A body carrying the `retry-after` framing genuinely truncates the
+            // recovered prefix; the total must still never fall below what is shown.
+            "oops retry-after 3s and then more provider text",
+        ];
+        for body in cases {
+            let rendered = TransportFailure {
+                body_bytes: body.len(),
+                body_prefix: Some(body.to_string()),
+                ..status_failure(503, "", None)
+            };
+            let first = rendered.diagnostic();
+            let round = TransportFailure::from_message(&first)
+                .expect("the framed diagnostic must classify");
+            let second = round.diagnostic();
+            for diagnostic in [&first, &second] {
+                let (shown, total) = framed_counts(diagnostic);
+                if let Some(total) = total {
+                    assert!(
+                        total >= shown,
+                        "total {total} below shown {shown}: {diagnostic}"
+                    );
+                } else {
+                    // An omitted total must not be smuggled in as a bare zero count.
+                    assert!(
+                        shown > 0,
+                        "the retained prefix must stay countable: {diagnostic}"
+                    );
+                }
+            }
+            assert_eq!(round.body_bytes, body.len(), "total survives: {first}");
+            // A body carrying framing text is an accepted degradation: the recovered
+            // prefix can only shrink, never grow past the provider body, and the total
+            // still survives the round trip.
+            let recovered = round.body_prefix.as_deref().unwrap_or("");
+            assert!(
+                recovered.len() <= body.len(),
+                "the recovered prefix must not grow: {first}"
+            );
+        }
+    }
+
+    /// A total that never parses stays omitted instead of being stated as zero, so a
+    /// degraded framing cannot claim a zero-byte provider body.
+    #[test]
+    fn diagnostic_omits_an_absent_total_instead_of_printing_zero() {
+        let degraded = TransportFailure {
+            body_bytes: 0,
+            body_prefix: Some("provider said no".to_string()),
+            ..status_failure(503, "", None)
+        };
+        assert_eq!(
+            degraded.diagnostic(),
+            "model transport failed (status 503, origin status, class transient-server, retryable) body[16 bytes]: provider said no"
         );
     }
 
