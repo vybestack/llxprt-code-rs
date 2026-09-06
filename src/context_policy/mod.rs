@@ -15,6 +15,7 @@ pub mod pressure;
 pub mod progress;
 pub mod queue;
 pub mod runtime;
+pub mod vocabulary;
 
 #[cfg(test)]
 mod tests;

@@ -112,10 +112,17 @@ impl RewriteJournal {
     /// republished journal carries the previous records ahead of the new ones
     /// instead of replacing them (issue 102 restart).
     ///
-    /// The entry's own counters are folded into the running report the same
-    /// way `record` folds a live entry, so a restored journal still yields a
+    /// The entry's own counters are folded into the running report by the
+    /// same `fold_entry` `record` runs, so a restored journal still yields a
     /// report a later publication can render faithfully.
     pub fn restore_entry(&mut self, entry: RewriteEntry) {
+        self.fold_entry(entry);
+    }
+
+    /// The one fold behind `record` and `restore_entry` (issue 122): the
+    /// entry's own counters bump the running report, the entry joins the
+    /// journal, and the derived ratios re-render.
+    fn fold_entry(&mut self, entry: RewriteEntry) {
         let cost = entry.invalidation_cost;
         self.report.rewrite_events = self.report.rewrite_events.saturating_add(1);
         match cost {
@@ -157,24 +164,7 @@ impl RewriteJournal {
     }
 
     pub fn record(&mut self, entry: RewriteEntry) {
-        self.report.rewrite_events = self.report.rewrite_events.saturating_add(1);
-        match entry.invalidation_cost {
-            Some(cost) => {
-                self.report.invalidation_total =
-                    self.report.invalidation_total.saturating_add(cost);
-                self.report.known_cost_events = self.report.known_cost_events.saturating_add(1);
-            }
-            None => {
-                self.report.unknown_cost_events = self.report.unknown_cost_events.saturating_add(1)
-            }
-        }
-        if entry.amortized {
-            self.report.disarmed_rewrites = self.report.disarmed_rewrites.saturating_add(1);
-        } else {
-            self.report.armed_rewrites = self.report.armed_rewrites.saturating_add(1);
-        }
-        self.entries.push(entry);
-        self.refresh_report();
+        self.fold_entry(entry);
     }
 
     pub fn should_rewrite(
@@ -288,5 +278,37 @@ mod tests {
             serde_json::from_str(line).expect("the new spelling must deserialize");
         assert_eq!(entry.bytes_reclaimed, 32);
         assert_eq!(entry.invalidation_cost, Some(8));
+    }
+
+    /// Issue 122: `restore_entry` and `record` share one fold, so replaying
+    /// the same entries onto identical starting journals yields identical
+    /// `CacheReport` deltas whichever path carried them in.
+    #[test]
+    fn restore_entry_and_record_produce_identical_report_deltas() {
+        let entries = [
+            RewriteEntry::new(7, 4096, Some(96), 3),
+            RewriteEntry::new(9, 32, None, 5),
+        ];
+        let mut live = RewriteJournal::new(CacheConfig::default());
+        let mut restored = RewriteJournal::new(CacheConfig::default());
+        // An identical non-empty starting journal, so the derived ratios have
+        // real denominators before the fold under test runs.
+        live.observe_access(true, false);
+        restored.observe_access(true, false);
+        for entry in entries {
+            live.record(entry);
+            restored.restore_entry(entry);
+        }
+        assert_eq!(live.entries(), restored.entries());
+        assert_eq!(live.report(), restored.report());
+        let report = live.report();
+        assert_eq!(report.rewrite_events, 2);
+        assert_eq!(report.known_cost_events, 1);
+        assert_eq!(report.unknown_cost_events, 1);
+        assert_eq!(report.invalidation_total, 96);
+        // `RewriteEntry::new` marks entries amortized, and the fold reads the
+        // amortized flag the same way on both paths.
+        assert_eq!(report.disarmed_rewrites, 2);
+        assert_eq!(report.armed_rewrites, 0);
     }
 }
