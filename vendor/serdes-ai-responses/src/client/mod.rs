@@ -820,6 +820,20 @@ impl OpenResponsesModel {
     }
 }
 
+/// Decode one Responses event payload at the SSE transport boundary.
+///
+/// Codex emits `keepalive` transport frames while a response is running.
+/// They are not Responses semantic events, so they neither reach the model
+/// assembler nor affect stream terminal state. All other event types remain
+/// subject to the closed [`StreamEvent`] protocol enum.
+fn parse_sse_response_event(payload: &str) -> Result<Option<StreamEvent>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(payload)?;
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("keepalive") {
+        return Ok(None);
+    }
+    serde_json::from_value(value).map(Some)
+}
+
 /// Streaming HTTP turn (SSE). Returns the terminal response id when the
 /// stream completed.
 ///
@@ -890,8 +904,11 @@ async fn run_http_stream(
             if payload == "[DONE]" {
                 return Ok(terminal_id);
             }
-            let event: StreamEvent = serde_json::from_str(payload)
-                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
+            let Some(event) = parse_sse_response_event(payload)
+                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?
+            else {
+                continue;
+            };
             if let StreamEvent::ResponseCompleted { response, .. }
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
@@ -927,5 +944,26 @@ async fn run_http_stream(
         Err(ModelError::InvalidResponse(
             "sse stream ended without a terminal event".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_sse_response_event;
+
+    #[test]
+    fn sse_keepalives_are_transport_only_and_other_types_remain_closed() {
+        assert!(parse_sse_response_event(r#"{"type":"keepalive"}"#)
+            .expect("keepalive without a payload must parse")
+            .is_none());
+        assert!(
+            parse_sse_response_event(r#"{"type":"keepalive","payload":{"tick":1}}"#)
+                .expect("keepalive payload must remain transport-only")
+                .is_none()
+        );
+
+        let error = parse_sse_response_event(r#"{"type":"response.not_a_real_event"}"#)
+            .expect_err("unknown semantic response events must remain rejected");
+        assert!(error.to_string().contains("unknown variant"));
     }
 }
