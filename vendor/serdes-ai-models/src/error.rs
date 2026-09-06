@@ -299,8 +299,11 @@ impl std::fmt::Display for ModelError {
             Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
             Self::Api { .. } => f.write_str("Model API error"),
             Self::Timeout => f.write_str("Model request timed out"),
-            Self::RateLimited { retry_after } => {
-                write!(f, "Model request rate limited (retry after {retry_after:?})")
+            Self::RateLimited {
+                retry_after: Some(delay),
+            } => write!(f, "Model request rate limited (retry after {delay:?})"),
+            Self::RateLimited { retry_after: None } => {
+                f.write_str("Model request rate limited (no retry delay supplied)")
             }
             Self::Authentication(_) => f.write_str("Model authentication failed"),
             Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
@@ -543,6 +546,24 @@ mod tests {
 
         let err = ModelError::Timeout;
         assert_eq!(err.retry_after(), None);
+    }
+
+    /// The rate-limited diagnostic never invents a retry-after: a supplied delay renders
+    /// verbatim, and with none supplied the sentence says so instead of implying that a
+    /// retry strategy exists.
+    #[test]
+    fn rate_limited_display_does_not_invent_a_retry_after() {
+        let with_delay = ModelError::rate_limited(Some(Duration::from_secs(42)));
+        let display = with_delay.to_string();
+        assert!(display.contains("retry after 42s"), "display: {display}");
+
+        let without_delay = ModelError::rate_limited(None);
+        let display = without_delay.to_string();
+        assert!(
+            display.contains("no retry delay supplied"),
+            "display: {display}"
+        );
+        assert!(!display.contains("retry after None"), "display: {display}");
     }
 
     #[test]
