@@ -84,6 +84,10 @@ pub struct Args {
     /// Omitted means no time limit.
     #[arg(long, value_name = "DURATION")]
     pub turn_time: Option<String>,
+
+    /// Print the resolved layered settings JSON and exit without constructing a backend.
+    #[arg(long)]
+    pub print_config: bool,
 }
 
 /// Parse a `--turn-time` value: digits plus an `s`/`m`/`h` unit, or a bare
@@ -119,6 +123,80 @@ pub(crate) fn parse_turn_time(raw: &str) -> Result<Option<std::time::Duration>, 
         return Ok(None);
     }
     Ok(Some(std::time::Duration::from_secs(seconds)))
+}
+
+/// Resolve the actual configuration layers for `--print-config` without reading credentials.
+pub fn print_config(args: &Args) -> Result<String, AppError> {
+    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
+    let root = crate::config::std_profile_dir()
+        .map_err(|e| AppError::new(Code::Config, "config-home", e))?;
+    let profile = resolve_profile(args, &root)?;
+    let profile_max = match profile.ephemeral.max_tool_calls_per_prompt {
+        crate::profile::MaxToolCalls::Limited(value) => i64::try_from(value).ok(),
+        crate::profile::MaxToolCalls::Unset | crate::profile::MaxToolCalls::Unlimited => None,
+    };
+    let profile_path = args.profile_load.clone().or_else(|| {
+        args.profile
+            .as_ref()
+            .map(|name| root.join("profiles").join(format!("{name}.json")))
+    });
+    let env = SettingsLayer {
+        provider: SettingsProvider {
+            base_url: std::env::var("LLXPRT_BASE_URL").ok(),
+            ..Default::default()
+        },
+        budgets: SettingsBudgets {
+            max_tool_calls: std::env::var("LLXPRT_MAX_TOOL_CALLS")
+                .ok()
+                .map(|value| {
+                    value.parse().map_err(|_| {
+                        AppError::new(
+                            Code::Config,
+                            "settings-resolve",
+                            "--max-tool-calls must be in the range 1..=512",
+                        )
+                    })
+                })
+                .transpose()?,
+            turn_time: std::env::var("LLXPRT_TURN_TIME").ok(),
+        },
+        ..Default::default()
+    };
+    let cli = SettingsLayer {
+        budgets: SettingsBudgets {
+            max_tool_calls: args.max_tool_calls,
+            turn_time: args.turn_time.clone(),
+        },
+        ..Default::default()
+    };
+    let profile = SettingsLayer {
+        provider: SettingsProvider {
+            base_url: profile
+                .ephemeral
+                .base_url
+                .as_ref()
+                .map(|url| url.full().to_string()),
+            model: Some(profile.model),
+            profile_path,
+        },
+        budgets: SettingsBudgets {
+            max_tool_calls: profile_max,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let user_file = settings::load_user_file(&root)
+        .map_err(|e| AppError::new(Code::Config, "settings-load", e))?;
+    let settings = settings::resolve(SettingsLayers {
+        user_file,
+        profile,
+        env,
+        cli,
+        config_root: root,
+    })
+    .map_err(|e| AppError::new(Code::Config, "settings-resolve", e.to_string()))?;
+    serde_json::to_string(&settings)
+        .map_err(|e| AppError::new(Code::Config, "settings-json", e.to_string()))
 }
 
 /// Outcome of a successful invocation.
@@ -555,5 +633,14 @@ mod tests {
         let hint = session_hint_from(arguments);
         assert_ne!(hint, "../escape");
         assert!(crate::session::SessionId::parse(&hint).is_ok());
+    }
+
+    #[test]
+    fn print_config_resolves_and_exits_before_backend() {
+        let args = Args::try_parse_from(["llxprt-code-rs", "--print-config"]).unwrap();
+        assert!(
+            args.print_config,
+            "main dispatches this flag before profiler/backend setup"
+        );
     }
 }

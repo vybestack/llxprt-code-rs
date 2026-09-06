@@ -21,6 +21,7 @@ pub mod provider_keys;
 pub mod redact;
 mod safe_file;
 pub mod session;
+pub mod settings;
 pub mod tools;
 pub mod transport;
 
