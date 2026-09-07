@@ -7,55 +7,123 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const TOOLCHAIN: &str = "+1.88.0";
 
 pub fn run_release_gates(root: &Path) -> Result<(), String> {
-    require_python(root)?;
-    let archive = command_output(
-        root,
-        "python3",
-        &["scripts/release-version.py", "--value", "archive"],
+    let mut output = io::stdout();
+    let archive =
+        run_release_gate_phase(&mut output, "release metadata and prerequisites", || {
+            require_python(root)?;
+            command_output(
+                root,
+                "python3",
+                &["scripts/release-version.py", "--value", "archive"],
+            )
+        })?;
+
+    run_release_gate_phase(
+        &mut output,
+        "checksum-locked registry source closure",
+        || run(root, "python3", &["scripts/verify-registry-vendor.py"]),
     )?;
-
-    heading("checksum-locked registry source closure");
-    run(root, "python3", &["scripts/verify-registry-vendor.py"])?;
-    run_format(root)?;
-    heading("production module coupling debt");
-    crate::coupling::run(root)?;
-    run_xtask_checks(root)?;
-    run_release_fixtures(root)?;
-    run_vendor_policy_fixtures(root)?;
-    heading("published envelope schema drift");
-    cargo(root, &["xtask", "envelope-schema", "--check"])?;
-    run_workspace_checks(root)?;
-    run_direct_vendor_checks(root)?;
-    run_msrv_and_docs(root)?;
-
-    heading("vendor + license inventory");
-    run(root, "bash", &["scripts/verify-vendor-licenses.sh"])?;
-    run_local_audit(root)?;
-
-    heading("release build (source tree, vendor path deps)");
-    cargo(
-        root,
-        &[
-            "build",
-            "--offline",
-            "--release",
-            "--locked",
-            "--workspace",
-            "--all-features",
-        ],
+    run_release_gate_phase(&mut output, "fmt", || run_format(root))?;
+    run_release_gate_phase(&mut output, "production module coupling debt", || {
+        crate::coupling::run(root)
+    })?;
+    run_release_gate_phase(&mut output, "xtask tests and lint", || {
+        run_xtask_checks(root)
+    })?;
+    run_release_gate_phase(
+        &mut output,
+        "source and release publication adversarial cases",
+        || run_release_fixtures(root),
     )?;
-    build_and_compare_source_bundle(root, &archive)?;
-    println!("all release gates passed");
+    run_release_gate_phase(&mut output, "vendor provenance regression cases", || {
+        run_vendor_policy_fixtures(root)
+    })?;
+    run_release_gate_phase(&mut output, "published envelope schema drift", || {
+        cargo(root, &["xtask", "envelope-schema", "--check"])
+    })?;
+    run_release_gate_phase(&mut output, "workspace checks", || {
+        run_workspace_checks(root)
+    })?;
+    run_release_gate_phase(
+        &mut output,
+        "direct vendored SerdesAI feature surfaces and OpenAI tests",
+        || run_direct_vendor_checks(root),
+    )?;
+    run_release_gate_phase(&mut output, "MSRV and rustdoc", || run_msrv_and_docs(root))?;
+    run_release_gate_phase(&mut output, "vendor + license inventory", || {
+        run(root, "bash", &["scripts/verify-vendor-licenses.sh"])
+    })?;
+    run_release_gate_phase(&mut output, "local cargo audit", || run_local_audit(root))?;
+
+    run_release_gate_phase(
+        &mut output,
+        "release build (source tree, vendor path deps)",
+        || {
+            cargo(
+                root,
+                &[
+                    "build",
+                    "--offline",
+                    "--release",
+                    "--locked",
+                    "--workspace",
+                    "--all-features",
+                ],
+            )
+        },
+    )?;
+    run_release_gate_phase(
+        &mut output,
+        "source bundle build + verify (extract -> test --offline -> build --release --offline)",
+        || build_and_compare_source_bundle(root, &archive),
+    )?;
+    emit_release_gate_heartbeat(&mut output, format_args!("all release gates passed"));
     Ok(())
+}
+
+/// Emits retained, line-buffered status before and after one release-gate phase.
+///
+/// The completion record is emitted before the phase result is propagated, so a CI timeout or
+/// cancellation after a command exits still retains the phase identity and status.
+fn run_release_gate_phase<W, T>(
+    output: &mut W,
+    phase: &str,
+    run: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String>
+where
+    W: Write,
+{
+    emit_release_gate_heartbeat(
+        output,
+        format_args!("== release gate phase started: {phase} =="),
+    );
+    let started = Instant::now();
+    let result = run();
+    let status = if result.is_ok() { "passed" } else { "failed" };
+    emit_release_gate_heartbeat(
+        output,
+        format_args!(
+            "== release gate phase completed: {phase}; status={status}; elapsed={:.3}s ==",
+            started.elapsed().as_secs_f64()
+        ),
+    );
+    result
+}
+
+fn emit_release_gate_heartbeat(output: &mut impl Write, message: std::fmt::Arguments<'_>) {
+    // Explicit flushing makes these records useful in GitHub's retained partial logs, where
+    // stdout is not necessarily attached to a line-buffered terminal.
+    let _ = writeln!(output, "{message}").and_then(|()| output.flush());
 }
 
 pub fn run_release_fixtures(root: &Path) -> Result<(), String> {
@@ -606,7 +674,45 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{source_bundle_usage, vendor_lockfiles, TempDir};
+    use super::{run_release_gate_phase, source_bundle_usage, vendor_lockfiles, TempDir};
+
+    #[test]
+    fn release_gate_phase_reports_success_in_order() {
+        let mut output = Vec::new();
+        run_release_gate_phase(&mut output, "first", || Ok(())).expect("phase passes");
+        run_release_gate_phase(&mut output, "second", || Ok(())).expect("phase passes");
+
+        let output = String::from_utf8(output).expect("heartbeat output is UTF-8");
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "== release gate phase started: first ==");
+        assert!(
+            lines[1].starts_with("== release gate phase completed: first; status=passed; elapsed=")
+        );
+        assert!(lines[1].ends_with("s =="));
+        assert_eq!(lines[2], "== release gate phase started: second ==");
+        assert!(lines[3]
+            .starts_with("== release gate phase completed: second; status=passed; elapsed="));
+        assert!(lines[3].ends_with("s =="));
+    }
+
+    #[test]
+    fn release_gate_phase_reports_failure_before_propagating_it() {
+        let mut output = Vec::new();
+        let error = run_release_gate_phase(&mut output, "failing phase", || {
+            Err::<(), _>("intentional failure".to_string())
+        })
+        .expect_err("phase fails");
+
+        assert_eq!(error, "intentional failure");
+        let output = String::from_utf8(output).expect("heartbeat output is UTF-8");
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines[0], "== release gate phase started: failing phase ==");
+        assert!(lines[1].starts_with(
+            "== release gate phase completed: failing phase; status=failed; elapsed="
+        ));
+        assert!(lines[1].ends_with("s =="));
+    }
 
     #[test]
     fn temporary_directory_is_removed() {
