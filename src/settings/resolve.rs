@@ -26,6 +26,7 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
             &layers,
             |x| &x.provider.profile_path,
         ),
+        model_params_mode: pick_model_params_mode(&layers)?,
     };
     let max = pick(256, &layers, |x| &x.budgets.max_tool_calls);
     validate_max_tool_calls(max.value).map_err(SettingsError::Invalid)?;
@@ -73,6 +74,38 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
         paths: ResolvedPaths { config_root },
     })
 }
+
+/// Resolve the `modelParams` acceptance policy across the layers. The raw spelling is
+/// validated here so an invalid value fails resolution regardless of which layer set it.
+fn pick_model_params_mode(
+    layers: &SettingsLayers,
+) -> Result<Resolved<ModelParamsMode>, SettingsError> {
+    let winner = [
+        (Source::Cli, &layers.cli),
+        (Source::Env, &layers.env),
+        (Source::Profile, &layers.profile),
+        (Source::UserFile, &layers.user_file),
+    ]
+    .into_iter()
+    .find_map(|(source, layer)| {
+        layer
+            .provider
+            .model_params_mode
+            .as_deref()
+            .map(|raw| (source, raw))
+    });
+    Ok(match winner {
+        Some((source, raw)) => Resolved {
+            value: ModelParamsMode::parse(raw).map_err(SettingsError::Invalid)?,
+            source,
+        },
+        None => Resolved {
+            value: ModelParamsMode::default(),
+            source: Source::Default,
+        },
+    })
+}
+
 fn pick<T: Clone>(
     default: T,
     layers: &SettingsLayers,

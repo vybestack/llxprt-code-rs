@@ -23,10 +23,15 @@ pub(crate) fn construct_backend(
     dependencies: &RuntimeDependencies,
     profile_from_file: bool,
     allow_insecure_http: bool,
+    model_params_mode: crate::settings::ModelParamsMode,
 ) -> Result<ConstructedBackend, String> {
     // The provider-layer seam: interpret the neutral parsed profile once, then
     // select the registration row for the resolved target.
     let resolved = crate::model_api::interpret::ResolvedProfile::interpret(profile)?;
+    // The acceptance policy runs after the target resolves: `strict` and
+    // `known-model` refuse unowned keys at load, before credentials are read;
+    // `loose` (default) warns and the provider wire carries them verbatim.
+    apply_model_params_policy(profile, &resolved, model_params_mode)?;
     let registration = dependencies
         .registrations()
         .iter()
@@ -55,6 +60,79 @@ pub(crate) fn construct_backend(
             allow_insecure_http,
         ),
         ConstructorKind::CodexResponses => construct_codex(profile, &resolved, dependencies),
+    }
+}
+
+/// The `modelParams` acceptance policy (issue 64).
+///
+/// `Loose` (default) forwards unrecognized keys on the provider wire and warns for
+/// the keys this build knows but cannot serialize. `KnownModel` compares the
+/// unrecognized keys against the checked-in model registry for the effective provider and
+/// refuses a key the registry does not know. `Strict` refuses every unrecognized or
+/// non-wire key at load.
+fn apply_model_params_policy(
+    profile: &Profile,
+    resolved: &crate::model_api::interpret::ResolvedProfile,
+    mode: crate::settings::ModelParamsMode,
+) -> Result<(), String> {
+    let forwarded: Vec<(String, &serde_json::Value)> = profile
+        .model_params
+        .forwarded
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect();
+    let unsupported: Vec<&String> = profile.model_params.unsupported.iter().collect();
+
+    let refuse = |names: &[String], reason: &str| -> Result<(), String> {
+        if names.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "{reason} unknown or unsupported modelParams key(s): {}",
+            names.join(", ")
+        ))
+    };
+
+    match mode {
+        crate::settings::ModelParamsMode::Loose => {
+            let names: Vec<String> = unsupported.iter().map(|n| n.to_string()).collect();
+            for name in &names {
+                // Unsupported keys cannot reach the wire; name them so the operator
+                // knows they were not forwarded.
+                crate::harness::eprint_status(&format!(
+                    "warning: modelParams key `{name}` cannot be sent to the provider and was not forwarded"
+                ));
+            }
+            let _ = forwarded;
+            Ok(())
+        }
+        crate::settings::ModelParamsMode::KnownModel => {
+            let unknown: Vec<String> = forwarded
+                .iter()
+                .filter(|(name, _)| {
+                    !crate::model_api::model_registry::known_for(resolved.target.provider, name)
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            refuse(&unknown, "known-model mode:")?;
+            let names: Vec<String> = unsupported.iter().map(|n| n.to_string()).collect();
+            for name in &names {
+                crate::harness::eprint_status(&format!(
+                    "warning: modelParams key `{name}` cannot be sent to the provider and was not forwarded"
+                ));
+            }
+            Ok(())
+        }
+        crate::settings::ModelParamsMode::Strict => {
+            let mut names: Vec<String> = forwarded
+                .iter()
+                .map(|(name, _)| name.clone())
+                .chain(unsupported.iter().map(|n| n.to_string()))
+                .collect();
+            names.sort();
+            refuse(&names, "strict mode:")?;
+            Ok(())
+        }
     }
 }
 
@@ -259,9 +337,12 @@ fn construct_anthropic(
     let secret_values = secret_config.secret_values();
     let model_settings = anthropic_model_settings(profile, timeout);
     crate::limits::validate_timeout(model_settings.timeout)?;
-    let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
+    let mut model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
         .with_timeout(timeout);
+    // Unrecognized `modelParams` keys travel as a flattened extra map on each
+    // Messages request body (issue 64).
+    model = model.with_extra(profile.model_params.forwarded.clone());
     let prompt_caching = resolved
         .anthropic
         .as_ref()

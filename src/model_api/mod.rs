@@ -4,6 +4,7 @@ pub(crate) mod dependencies;
 pub(crate) mod interpret;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_keychain;
+pub(crate) mod model_registry;
 pub(crate) mod registry;
 mod responses_backend;
 pub(crate) mod settings;

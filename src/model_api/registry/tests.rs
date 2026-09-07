@@ -126,6 +126,7 @@ fn chat_registry_construction_does_not_load_native_credentials() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .unwrap();
 
@@ -159,6 +160,7 @@ fn zai_anthropic_backend_constructs_offline_without_native_credentials() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("z.ai-shaped Anthropic profile must construct without a request");
 
@@ -263,6 +265,7 @@ fn zai_anthropic_backend_constructs_from_a_named_provider_key() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("the named key must resolve from the env selector");
 
@@ -299,6 +302,7 @@ fn zai_named_provider_key_unresolved_reports_the_fixed_refusal() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     ) {
         Ok(_) => panic!("an unresolvable named key must not construct"),
         Err(error) => error,
@@ -344,6 +348,7 @@ fn chat_named_provider_key_resolves_from_the_env_selector() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("the named key must resolve from the env selector");
 
@@ -374,6 +379,7 @@ fn codex_registry_construction_loads_native_credentials_once() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .unwrap();
 
@@ -465,6 +471,7 @@ fn both_public_responses_targets_construct_without_native_credentials() {
             &dependencies,
             true,
             false,
+            crate::settings::ModelParamsMode::default(),
         )
         .unwrap();
 
@@ -504,6 +511,7 @@ fn responses_endpoint_rejection_precedes_credential_io() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     ) {
         Ok(_) => panic!("invalid Responses route must fail"),
         Err(error) => error,
@@ -556,4 +564,111 @@ fn responses_endpoint_routes_normalize_to_one_suffix() {
     ] {
         assert!(normalize_responses_endpoint(raw).is_err(), "{raw}");
     }
+}
+
+#[test]
+fn loose_mode_forwards_unknown_keys_and_warns_for_unsupported() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "chat-model",
+            "modelParams": {
+                "custom_wire_param": {"a": 1},
+                "top_k": 16,
+                "stop": ["END"]
+            },
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key": "chat-secret"
+            }
+        }),
+        "chat",
+    )
+    .unwrap();
+    // `custom_wire_param` lands in forwarded; `top_k`/`stop` are typed but not
+    // wire-serializable for OpenAI Chat and land in unsupported.
+    assert!(profile
+        .model_params
+        .forwarded
+        .contains_key("custom_wire_param"));
+    assert!(profile
+        .model_params
+        .unsupported
+        .contains(&"top_k".to_string()));
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+    // Loose accepts the profile; unsupported keys warn (never an error).
+    assert!(apply_model_params_policy(
+        &profile,
+        &resolved,
+        crate::settings::ModelParamsMode::Loose
+    )
+    .is_ok());
+}
+
+#[test]
+fn strict_mode_refuses_unowned_keys_at_load() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "chat-model",
+            "modelParams": {"custom_wire_param": {"a": 1}},
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key": "chat-secret"
+            }
+        }),
+        "chat",
+    )
+    .unwrap();
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+    let err = apply_model_params_policy(
+        &profile,
+        &resolved,
+        crate::settings::ModelParamsMode::Strict,
+    )
+    .unwrap_err();
+    assert!(err.contains("custom_wire_param"), "{err}");
+}
+
+#[test]
+fn known_model_mode_accepts_registry_keys_and_refuses_unknown() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "anthropic",
+            "model": "claude-3-5",
+            "modelParams": {"top_k": 16},
+            "ephemeralSettings": {
+                "base-url": "https://api.anthropic.com",
+                "auth-key": "anthropic-secret"
+            }
+        }),
+        "anthropic",
+    )
+    .unwrap();
+    // `top_k` is typed but not wire-serializable for Anthropic Messages, so the
+    // policy-level check uses a forwarded key the registry knows.
+    let mut profile2 = profile.clone();
+    profile2
+        .model_params
+        .forwarded
+        .insert("stop_sequences".to_string(), serde_json::json!(["END"]));
+    let resolved2 = crate::model_api::interpret::ResolvedProfile::interpret(&profile2).unwrap();
+    assert!(apply_model_params_policy(
+        &profile2,
+        &resolved2,
+        crate::settings::ModelParamsMode::KnownModel
+    )
+    .is_ok());
+
+    let mut bad = profile2.clone();
+    bad.model_params
+        .forwarded
+        .insert("definitely_not_a_param".to_string(), serde_json::json!(1));
+    let err = apply_model_params_policy(
+        &bad,
+        &resolved2,
+        crate::settings::ModelParamsMode::KnownModel,
+    )
+    .unwrap_err();
+    assert!(err.contains("definitely_not_a_param"), "{err}");
 }

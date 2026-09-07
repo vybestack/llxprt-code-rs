@@ -99,6 +99,13 @@ pub struct Args {
     #[arg(long, value_name = "BYTES")]
     pub max_turn_output: Option<u64>,
 
+    /// How `modelParams` keys this build does not itself type are handled:
+    /// `loose` (default) forwards them verbatim on the provider wire,
+    /// `known-model` checks them against the checked-in model registry at load,
+    /// `strict` refuses them at load.
+    #[arg(long, value_name = "MODE")]
+    pub model_params_mode: Option<crate::settings::ModelParamsMode>,
+
     /// Print the resolved layered settings JSON and exit without constructing a backend.
     #[arg(long)]
     pub print_config: bool,
@@ -123,6 +130,10 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
     let env = settings::environment_layer()
         .map_err(|e| AppError::new(Code::Config, "settings-resolve", e))?;
     let cli = SettingsLayer {
+        provider: SettingsProvider {
+            model_params_mode: args.model_params_mode.map(|mode| mode.as_str().to_string()),
+            ..Default::default()
+        },
         budgets: SettingsBudgets {
             max_tool_calls: args.max_tool_calls,
             turn_time: args.turn_time.clone(),
@@ -141,6 +152,7 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
                 .map(|url| url.full().to_string()),
             model: Some(profile.model),
             profile_path,
+            model_params_mode: None,
         },
         budgets: SettingsBudgets {
             max_tool_calls: profile_max,
