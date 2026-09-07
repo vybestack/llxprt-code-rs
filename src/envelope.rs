@@ -23,6 +23,34 @@ pub enum Code {
 pub const SCHEMA_ID: &str =
     "https://github.com/vybestack/llxprt-code-rs/schemas/stdout-envelope-v1";
 
+/// Resolved per-run output caps (issue 77): the per-result shell and tool caps plus the
+/// aggregate per-turn tool-output cap. Defaults come from the compile-time constants in
+/// `crate::tools::output_limits` and `crate::limits`; the settings resolver overrides
+/// them per run. The type lives here, next to the wire format that carries it; `agent`
+/// re-exports it for its historical path.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct OutputCaps {
+    /// Cap on one shell success or error string.
+    pub shell: usize,
+    /// Cap on one tool result.
+    pub tool: usize,
+    /// Cap on the combined tool-result bytes of one turn.
+    pub turn: usize,
+}
+
+impl Default for OutputCaps {
+    fn default() -> Self {
+        Self {
+            shell: crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT,
+            tool: crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT,
+            turn: crate::limits::MAX_TURN_OUTPUT_BYTES,
+        }
+    }
+}
+
 /// The exactly-one-object stdout shape, discriminated by `status`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -58,6 +86,10 @@ pub struct OkEnvelope {
     /// the final summary round (so a healthy wrap-up reports `1`).
     pub zero_call_tail: u64,
     pub prompt_digest: String,
+    /// Resolved output caps (issue 77): per-result shell/tool caps and the aggregate
+    /// per-turn tool-output cap.
+    #[serde(default)]
+    pub output_caps: OutputCaps,
     /// Terminal context-store outcome declared by the runtime, when one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_outcome: Option<String>,
