@@ -238,7 +238,7 @@ fn parse_ephemeral_primary(
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
         "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
-        "apiMode" | "responsesMode" | "responses-mode" | "openaiResponsesEnabled" => {}
+        "apiMode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;
             let url = parse_url(raw)?;
