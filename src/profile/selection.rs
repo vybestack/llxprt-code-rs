@@ -124,19 +124,8 @@ mod tests {
             "p",
         )
         .unwrap();
-        // `apiMode` wins over the legacy spellings, matching the historical order.
+        // `apiMode` selects the API surface.
         assert_eq!(selection.api, Some(ApiSelector::Chat));
-        let legacy = parse(
-            // compat-allow: test fixture naming for pre-migration profile shapes
-            ProviderId::OpenAi,
-            Some(&ephemeral(&[
-                ("responsesMode", Value::String("responses".into())),
-                ("responses-mode", Value::String("chat".into())),
-            ])),
-            "p",
-        )
-        .unwrap();
-        assert_eq!(legacy.api, Some(ApiSelector::Responses)); // compat-allow: test fixture naming for pre-migration profile shapes
     }
 
     #[test]

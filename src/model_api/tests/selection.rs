@@ -105,8 +105,7 @@ fn response_metadata_does_not_select_an_api() {
 }
 
 #[test]
-fn provider_defaults_and_api_compatibility_are_typed() {
-    // compat-allow: provider API surface test name
+fn provider_defaults_and_api_surfaces_are_typed() {
     for provider in ["openai", "openaivercel", "openai-compatible"] {
         let target = resolve(provider, json!({})).unwrap();
         assert_eq!(target.api, ModelApi::ChatCompletions, "{provider}");
