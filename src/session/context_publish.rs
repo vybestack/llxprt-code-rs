@@ -5,26 +5,37 @@
 use std::path::Path;
 
 use crate::session::context_persist::{
-    context_dir, ContextManifest, ContextState, DurableCheckpoint,
+    context_dir, ContextManifest, ContextState, DurableCheckpoint, CONTEXT_COMMITTED_DIR,
+    CONTEXT_PREV_DIR, CONTEXT_STAGE_DIR,
 };
 use crate::session::context_recover::write_artifact;
-use crate::session::SessionStore;
+use crate::session::{ensure_private_subdir, SessionStore};
 
-/// Writes the sanitized spine, the vault snapshot, and the manifest under `context/`.
+/// Writes the sanitized spine, the vault snapshot, and the manifest as ONE
+/// generation: every artifact lands in a private staging directory first, and
+/// publication is a single rename of that directory onto the committed slot,
+/// so a crash can never leave a new spine beside an old vault or manifest
+/// (issue 137).
 pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Result<(), String> {
-    let dir =
+    let root =
         context_dir(store).map_err(|error| format!("open context directory failed: {error}"))?;
-    let root = store.session_dir.join("context");
-    write_artifact(&dir, &root, "sanitized", &state.store.spine_bytes())?;
+    let context = store.session_dir.join("context");
+    let stage = context.join(CONTEXT_STAGE_DIR);
+    // A stage a crashed publisher left behind is garbage -- the committed slot
+    // still holds the published generation -- so it is removed before reuse.
+    let _ = std::fs::remove_dir_all(&stage);
+    let dir = ensure_private_subdir(&root, CONTEXT_STAGE_DIR)
+        .map_err(|error| format!("open context staging directory failed: {error}"))?;
+    write_artifact(&dir, &stage, "sanitized", &state.store.spine_bytes())?;
     let vault = serde_json::to_vec(&state.store.vault_snapshot())
         .map_err(|error| format!("encode vault snapshot failed: {error}"))?;
-    write_artifact(&dir, &root, "vault", &vault)?;
-    write_artifact(&dir, &root, "events.log", policy_events(state)?.as_bytes())?;
+    write_artifact(&dir, &stage, "vault", &vault)?;
+    write_artifact(&dir, &stage, "events.log", policy_events(state)?.as_bytes())?;
     let checkpoints = checkpoint_lines(state)?;
-    write_artifact(&dir, &root, "checkpoints", checkpoints.as_bytes())?;
+    write_artifact(&dir, &stage, "checkpoints", checkpoints.as_bytes())?;
     write_artifact(
         &dir,
-        &root,
+        &stage,
         "rewrite-journal.log",
         journal_lines(state).as_bytes(),
     )?;
@@ -36,8 +47,34 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         "chain": state.kernel_chain.1,
     }))
     .map_err(|error| format!("encode kernel chain failed: {error}"))?;
-    write_artifact(&dir, &root, "kernel-chain", &kernel_chain)?;
-    write_context_manifest(&dir, &root, state)
+    write_artifact(&dir, &stage, "kernel-chain", &kernel_chain)?;
+    // The manifest is written INSIDE the staging generation and names it, so a
+    // slot whose manifest is missing or unparsable is a torn publication (137).
+    write_context_manifest(&dir, &stage, state, state.generation.saturating_add(1))?;
+    commit_generation(&root, &context)
+}
+
+/// Swaps the staged generation in: the committed slot moves aside to `.prev`,
+/// then ONE rename publishes the stage as the committed generation. The
+/// aside-move is reversible -- a crash before the final rename leaves the
+/// committed slot missing and recovery falls back to `.prev` -- while the
+/// final rename is the single atomic step every reader observes, so no reader
+/// can ever see one generation's spine beside another's vault (issue 137).
+fn commit_generation(root: &openat::Dir, context: &Path) -> Result<(), String> {
+    let committed = context.join(CONTEXT_COMMITTED_DIR);
+    let previous = context.join(CONTEXT_PREV_DIR);
+    if committed.is_dir() {
+        let _ = std::fs::remove_dir_all(&previous);
+        std::fs::rename(&committed, &previous)
+            .map_err(|error| format!("set aside context generation failed: {error}"))?;
+    }
+    std::fs::rename(context.join(CONTEXT_STAGE_DIR), &committed)
+        .map_err(|error| format!("publish context generation failed: {error}"))?;
+    let _ = root.open_file(".").and_then(|handle| handle.sync_all());
+    // Best effort: a completed publication keeps at most the committed slot and
+    // the previous one, so generations never accumulate without bound (137).
+    let _ = std::fs::remove_dir_all(&previous);
+    Ok(())
 }
 
 /// Encodes the durable `events.log`: one JSON `PolicyEvent` per line.
@@ -152,8 +189,10 @@ fn write_context_manifest(
     dir: &openat::Dir,
     root: &Path,
     state: &ContextState,
+    generation: u64,
 ) -> Result<(), String> {
     let manifest = ContextManifest {
+        generation,
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
@@ -240,6 +279,7 @@ mod tests {
     fn the_persisted_record_carries_terminal_fit_saturation() {
         use crate::session::context_persist::PersistedManifest;
         let borrowed = ContextManifest {
+            generation: 3,
             mode: "read-write",
             quiesce: None,
             detail: None,
@@ -256,9 +296,11 @@ mod tests {
         assert_eq!(reloaded.terminal_outcome.as_deref(), Some("wrap_up"));
         assert_eq!(reloaded.terminal_fit_saturated, Some(false));
         assert_eq!(reloaded.terminal_fit_available, Some(1 << 20));
+        assert_eq!(reloaded.generation, 3, "the generation rides the manifest");
         // The saturated refusal carries the opposite spelling with the room it
         // was refused against, so the two terminals never read the same.
         let saturated = ContextManifest {
+            generation: 4,
             mode: "read-write",
             quiesce: Some("quiesce_unwritable"),
             detail: None,
