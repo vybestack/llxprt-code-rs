@@ -68,6 +68,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
             args_json: r#"{"path":".","pattern":"x"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        usage: LlmUsage::default(),
     };
     let read = LlmResult {
         text: String::new(),
@@ -77,11 +78,13 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
             args_json: r#"{"path":"missing"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        usage: LlmUsage::default(),
     };
     let done = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![unknown, read, done])),

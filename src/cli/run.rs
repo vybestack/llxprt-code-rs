@@ -141,6 +141,7 @@ fn build_agent(
         .with_max_tool_calls(max_tool_calls)
         .with_turn_time(turn_time)
         .with_output_caps(resolved_output_caps(settings))
+        .with_request_timeout(Some(settings.budgets.request_timeout.value))
         .with_profiler(profiler);
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)
