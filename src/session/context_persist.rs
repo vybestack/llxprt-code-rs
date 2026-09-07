@@ -45,6 +45,10 @@ pub(crate) const CHECKPOINT_RELOAD_MAX: usize = 8 << 20;
 /// Lazily opened phase-2 context store with its filter registry and quiesce state.
 pub(crate) struct ContextState {
     pub(crate) store: crate::context_store::store::ContextStore,
+    /// Generation this process recovered (0 for a fresh session or a
+    /// pre-generation layout); the next publication commits `generation + 1`
+    /// into the committed slot (issue 137).
+    pub(crate) generation: u64,
     pub(crate) filters: crate::context_ingress::filter::FilterRegistry,
     pub(crate) quiesce: Option<String>,
     pub(crate) detail: Option<String>,
@@ -73,6 +77,10 @@ pub(crate) struct ContextState {
 /// Durable context-store facts the CLI envelope re-reads after the run.
 #[derive(Serialize)]
 pub(crate) struct ContextManifest<'a> {
+    /// The generation this publication commits (issue 137): one more than the
+    /// generation the process recovered, so a reopened store can tell its own
+    /// generations apart and a torn slot fails validation.
+    pub(crate) generation: u64,
     pub(crate) mode: &'a str,
     pub(crate) quiesce: Option<&'a str>,
     pub(crate) detail: Option<&'a str>,
@@ -92,6 +100,11 @@ pub(crate) struct ContextManifest<'a> {
 /// Owned form of [`ContextManifest`] used when reloading it from disk.
 #[derive(serde::Deserialize)]
 pub(crate) struct PersistedManifest {
+    /// Generation the previous process committed (issue 137). Absent on the
+    /// layouts earlier builds wrote, so it defaults to generation 0 and those
+    /// directories still reload exactly as they did before.
+    #[serde(default)]
+    pub(crate) generation: u64,
     pub(crate) mode: String,
     pub(crate) quiesce: Option<String>,
     pub(crate) detail: Option<String>,
@@ -237,6 +250,7 @@ pub(crate) fn ensure_vault_key(
 pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> ContextState {
     ContextState {
         store: crate::context_store::store::ContextStore::open(&key),
+        generation: 0,
         filters: crate::context_ingress::filter::FilterRegistry::new(),
         quiesce: None,
         detail: None,
@@ -912,6 +926,7 @@ pub fn read_context_page(
 /// parses either location.
 pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState) {
     let manifest = ContextManifest {
+        generation: state.generation,
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
@@ -931,6 +946,17 @@ pub(crate) fn record_quiesce_fallback(store: &SessionStore, state: &ContextState
     let _ = std::fs::write(store.session_dir.join("context-quiesce.json"), &bytes);
 }
 
+/// Staging slot of the generation layout (issue 137): every artifact of one
+/// publication lands here first, and the directory is renamed onto the
+/// committed slot as the single atomic step of the publication.
+pub(crate) const CONTEXT_STAGE_DIR: &str = ".stage";
+/// The committed slot: the only generation a recovering process reads.
+pub(crate) const CONTEXT_COMMITTED_DIR: &str = "committed";
+/// The previous generation, held aside by the slot rotation until the
+/// publication completes; recovery falls back to it when the committed slot
+/// is torn.
+pub(crate) const CONTEXT_PREV_DIR: &str = ".prev";
+
 /// Opens (or creates) the private `context` subdirectory of the session.
 ///
 /// An existing directory is never re-chmodded: an operator or harness that made the
@@ -945,6 +971,7 @@ pub(crate) fn context_dir(store: &SessionStore) -> Result<openat::Dir, StoreErro
 /// Best-effort in-place manifest update when an atomic replace is impossible.
 pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState) {
     let manifest = ContextManifest {
+        generation: state.generation,
         mode: state.store.mode().name(),
         quiesce: state.quiesce.as_deref(),
         detail: state.detail.as_deref(),
@@ -964,6 +991,9 @@ pub(crate) fn record_quiesce_manifest(store: &SessionStore, state: &ContextState
     let Ok(dir) = context_dir(store) else {
         return;
     };
+    // The update targets the generation a reader opens (137): the committed
+    // slot when the store publishes generations, else the flat directory.
+    let dir = dir.sub_dir(CONTEXT_COMMITTED_DIR).unwrap_or(dir);
     let Ok(mut file) = open_regular_at(
         &dir,
         "manifest.json",
