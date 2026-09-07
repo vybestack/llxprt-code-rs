@@ -29,6 +29,27 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
     };
     let max = pick(16, &layers, |x| &x.budgets.max_tool_calls);
     validate_max_tool_calls(max.value).map_err(SettingsError::Invalid)?;
+    let max_shell_output = pick(
+        u64::try_from(crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT).unwrap_or(u64::MAX),
+        &layers,
+        |x| &x.budgets.max_shell_output,
+    );
+    let max_tool_output = pick(
+        u64::try_from(crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT).unwrap_or(u64::MAX),
+        &layers,
+        |x| &x.budgets.max_tool_output,
+    );
+    let max_turn_output = pick(
+        u64::try_from(crate::limits::MAX_TURN_OUTPUT_BYTES).unwrap_or(u64::MAX),
+        &layers,
+        |x| &x.budgets.max_turn_output,
+    );
+    validate_output_caps(
+        max_shell_output.value,
+        max_tool_output.value,
+        max_turn_output.value,
+    )
+    .map_err(SettingsError::Invalid)?;
     let raw_time = pick_optional(&layers, |x| &x.budgets.turn_time);
     let turn_time = Resolved {
         value: raw_time
@@ -44,6 +65,9 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
         provider,
         budgets: ResolvedBudgets {
             max_tool_calls: max,
+            max_shell_output,
+            max_tool_output,
+            max_turn_output,
             turn_time,
         },
         paths: ResolvedPaths { config_root },

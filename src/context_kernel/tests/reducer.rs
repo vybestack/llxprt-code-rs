@@ -372,10 +372,11 @@ fn reducer_refuses_appends_to_unopened_scopes() {
     );
 }
 
-/// GREEN: a fold that refuses one claim of an append leaves the state untouched:
-/// no item of that append lands, not even the claims that minted cleanly. The
-/// refused append is one whose second claim cannot become an item, so the refusal
-/// happens after the first claim minted.
+/// GREEN: an append whose second claim duplicates the first claim's identity is
+/// refused after the first identifier has already been minted and staged, and
+/// the typed state the refusal leaves behind is byte-identical to the state
+/// before the event: no item of the refused append lands and the append
+/// watermark is not spent.
 #[test]
 fn a_refused_append_leaves_the_state_untouched() {
     let payload = b"0123456789abcdefghij"; // 20 bytes
@@ -390,41 +391,49 @@ fn a_refused_append_leaves_the_state_untouched() {
     let before = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
     assert_eq!(before.conversation_ir.len(), 1);
 
-    // An append whose second claim names an append-namespace id over no bytes, so
-    // the claim cannot become an item: the append is refused on its second claim
-    // while its first claim minted cleanly.
-    let mut refused = EventKind::Append {
+    // The second claim duplicates the first claim's identity exactly: same span
+    // and same class, so the first identifier mints and stages cleanly before
+    // the duplicate is refused by the uniqueness pre-check over the staged set.
+    let halves = contiguous(payload, &[10, 10]);
+    let refused = EventKind::Append {
         source: AppendSource::User,
         sanitized: payload.to_vec(),
         scope: 1,
-        claims: contiguous(payload, &[10, 10]),
+        claims: vec![halves[0].clone(), halves[0].clone()],
     };
-    if let EventKind::Append { claims, .. } = &mut refused {
-        claims[1].span.length = 0;
-    }
     let refused_event = sequencer.append(refused, log.store_version());
     log.append(refused_event).unwrap();
 
-    let error = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap_err();
+    // Fold into the live state the refusal hits: the append is the log's last
+    // event, so `live` is the state mid-fold at the moment the refusal fires.
+    let mut live = TypedState::genesis(IDLENESS_WINDOW, log.store_version());
+    let error = match Reducer::new(IDLENESS_WINDOW).fold_from(&mut live, &log) {
+        Err(error) => error,
+        Ok(_) => panic!("a duplicate-identity append must be refused"),
+    };
     assert!(
-        matches!(error, ReducerError::Ir(IrError::ClaimsDontCover { .. })),
-        "the refusal is the claim list, not a different defect: {error:?}"
+        matches!(
+            error,
+            ReducerError::Ir(IrError::DuplicateItem { .. })
+                | ReducerError::Ir(IrError::ClaimsDontCover { .. })
+        ),
+        "the refusal is the duplicated claim identity, not another defect: {error:?}"
     );
-    // The state the refused append reached is byte-identical to the state before.
-    let untouched = Reducer::new(IDLENESS_WINDOW).fold(&log.prefix(2)).unwrap();
+    // fold() stamps the state hash only on success, so stamp the live state the
+    // same way: the byte comparison below must differ only on a real mutation.
+    live.state_hash = Reducer::new(IDLENESS_WINDOW).hash(&live);
     assert_eq!(
-        encode_state(&untouched),
+        encode_state(&live),
         encode_state(&before),
-        "a refused append leaves no partially applied claims behind"
+        "a refusal that fired after the first identifier minted leaves the state byte-identical"
     );
     assert_eq!(
-        untouched.conversation_ir.len(),
+        live.conversation_ir.len(),
         before.conversation_ir.len(),
         "no claim of the refused append landed"
     );
     assert_eq!(
-        untouched
-            .conversation_ir
+        live.conversation_ir
             .namespace_watermark(ItemNamespace::Append),
         before
             .conversation_ir

@@ -759,6 +759,7 @@ fn cli_and_harness_share_one_prompt_digest() {
         let outcome = RunOutcome {
             session: SessionId::parse("s").unwrap(),
             session_dir: std::path::PathBuf::from("/config/code-rs-sessions/s"),
+            output_caps: crate::agent::OutputCaps::default(),
             run: CompletedRun {
                 turn: 1,
                 attempt: 1,
