@@ -249,17 +249,6 @@ fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError
     }
     let slot = match serde_json::from_slice::<StateSlot>(&bytes) {
         Ok(slot) => slot,
-        Err(_) if name == "session.json" => match serde_json::from_slice::<SessionState>(&bytes) {
-            Ok(state) => StateSlot {
-                store_generation: 0,
-                state,
-            },
-            Err(_) => {
-                return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-                    "session state is not valid JSON".into(),
-                )))
-            }
-        },
         Err(_) => {
             return Ok(SlotRead::Corrupt(StoreError::Corrupt(
                 "session state slot is not valid JSON".into(),
@@ -272,7 +261,7 @@ fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError
     Ok(SlotRead::Valid(slot))
 }
 
-fn read_legacy_state_with_generation(
+fn read_state_with_generation(
     dir: &openat::Dir,
 ) -> Result<Option<(u64, SessionState)>, StoreError> {
     let primary = read_state_slot(dir, "session.json")?;
@@ -292,15 +281,8 @@ fn read_legacy_state_with_generation(
     Ok(Some((selected.store_generation, selected.state)))
 }
 
-#[cfg(test)]
-fn read_state_with_generation(
-    dir: &openat::Dir,
-) -> Result<Option<(u64, SessionState)>, StoreError> {
-    read_legacy_state_with_generation(dir)
-}
-
-fn read_legacy_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
-    Ok(read_legacy_state_with_generation(dir)?.map(|(_, state)| state))
+fn read_flat_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
+    Ok(read_state_with_generation(dir)?.map(|(_, state)| state))
 }
 
 fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, StoreError> {
