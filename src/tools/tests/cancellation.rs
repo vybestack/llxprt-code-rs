@@ -18,25 +18,83 @@ fn spawn_cancellation_child() -> std::process::Child {
         .unwrap()
 }
 
-/// Read the tool pgid the helper prints once its `run_cmd` registers the group.
-fn read_reported_pgid(child: &mut std::process::Child) -> libc::pid_t {
+/// Read the `"<pgid> [<starttime>]"` line the helper prints once its `run_cmd` registers the
+/// group. The starttime (present on Linux) anchors the cohort identity for the liveness probe.
+fn read_reported_pgid(child: &mut std::process::Child) -> (libc::pid_t, Option<u64>) {
     use std::io::BufRead;
     let stdout = child.stdout.take().unwrap();
     for line in std::io::BufReader::new(stdout).lines() {
         let line = line.unwrap();
-        if let Ok(pgid) = line.trim().parse::<i32>() {
+        // split_whitespace already skips leading/trailing blanks, so no trim() first.
+        let mut parts = line.split_whitespace();
+        if let Some(Ok(pgid)) = parts.next().map(str::parse::<i32>) {
             assert!(pgid > 0, "helper reported a non-group pgid: {pgid}");
-            return pgid;
+            // The helper prints 0 when it could not read the leader's stat; treat that as
+            // "cohort unknown" (bare pgrp match) rather than a window no member can satisfy.
+            let starttime = parts
+                .next()
+                .and_then(|token| token.parse::<u64>().ok())
+                .filter(|start| *start > 0);
+            return (pgid, starttime);
         }
     }
     panic!("helper exited before reporting its tool pgid");
 }
 
-/// `["pid state comm"]` for every LIVE (non-zombie) member of `pgid`, judged from `/proc` so
-/// that orphan zombies left on a non-reaping subreaper and pids reused by successor processes
-/// after our reap both read correctly. `None` when `/proc` is unreadable.
+/// One live (non-zombie) `/proc` member of the group, with the `starttime` field that
+/// distinguishes processes spawned in the supervised cohort from pid-recycled strangers.
 #[cfg(target_os = "linux")]
-fn live_group_snapshot(pgid: libc::pid_t) -> Option<Vec<String>> {
+#[derive(Debug)]
+struct LiveMember {
+    pid: i32,
+    state: char,
+    comm: String,
+    starttime: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl std::fmt::Display for LiveMember {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} {} (start {})",
+            self.pid, self.state, self.comm, self.starttime
+        )
+    }
+}
+
+/// Parse `/proc/<pid>/stat` down to `(state, pgrp, starttime, comm)`. `None` when the file is
+/// unreadable (process exited or non-Linux path).
+#[cfg(target_os = "linux")]
+fn proc_stat(pid: libc::pid_t) -> Option<(u8, libc::pid_t, u64, String)> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The comm field can contain spaces and parens — the classic /proc stat parsing trap — so
+    // parse AFTER the last ')', which closes comm. Tokens after it are, in order: state(f3),
+    // ppid(f4), pgrp(f5), ... starttime(f22, token index 19).
+    let after_comm = stat.rsplit_once(')')?;
+    let comm = after_comm
+        .0
+        .split_once('(')
+        .map_or("?".to_string(), |(_, c)| c.to_string());
+    let mut fields = after_comm.1.split_whitespace();
+    let state = fields.next()?.as_bytes().first().copied()?;
+    fields.next(); // ppid
+    let pgrp: libc::pid_t = fields.next()?.parse().ok()?;
+    let starttime: u64 = fields.nth(16)?.parse().ok()?;
+    Some((state, pgrp, starttime, comm))
+}
+
+/// `starttime` of the group leader — the moment the supervised cohort was born. Registered
+/// before the kill, so any process with a later `starttime` cannot be a cohort remnant.
+#[cfg(target_os = "linux")]
+fn leader_starttime(pgid: libc::pid_t) -> Option<u64> {
+    proc_stat(pgid).map(|(_, _, starttime, _)| starttime)
+}
+
+/// Every LIVE (non-zombie) `/proc` member whose pgrp matches `pgid`. `None` when `/proc` is
+/// unreadable.
+#[cfg(target_os = "linux")]
+fn live_group_snapshot(pgid: libc::pid_t) -> Option<Vec<LiveMember>> {
     let entries = std::fs::read_dir("/proc").ok()?;
     let mut members = Vec::new();
     for entry in entries.flatten() {
@@ -48,37 +106,36 @@ fn live_group_snapshot(pgid: libc::pid_t) -> Option<Vec<String>> {
         else {
             continue; // not a pid directory: self, thread-self, acpi, ...
         };
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+        let Some((state, pgrp, starttime, comm)) = proc_stat(pid) else {
             continue; // process exited between readdir and read
         };
-        // The comm field can contain spaces and parens — the classic /proc stat parsing
-        // trap — so parse AFTER the last ')', which closes comm. Fields after it are, in
-        // order: state, ppid, pgrp.
-        let Some(after_comm) = stat.rsplit_once(')') else {
-            continue;
-        };
-        let mut fields = after_comm.1.split_whitespace();
-        let state = fields
-            .next()
-            .and_then(|field| field.as_bytes().first().copied());
-        fields.next(); // ppid: not needed, but must be consumed to reach pgrp
-        let pgrp = fields.next();
-        if pgrp.and_then(|value| value.parse::<i32>().ok()) == Some(pgid) && state != Some(b'Z') {
-            // comm is bracketed by the first '(' and the final ')'.
-            let comm = after_comm.0.split_once('(').map_or("?", |(_, comm)| comm);
-            let state = state.unwrap_or(b'?') as char;
-            members.push(format!("{pid} {state} {comm}"));
+        if pgrp == pgid && state != b'Z' {
+            members.push(LiveMember {
+                pid,
+                state: state as char,
+                comm,
+                starttime,
+            });
         }
     }
     Some(members)
 }
 
-/// True when the process group still has a LIVE (non-zombie) member on Linux, judged from
-/// `/proc` so that orphan zombies left on a non-reaping subreaper and pids reused after our
-/// reap both read correctly. `None` when `/proc` is unreadable; callers keep polling then.
+/// True when the group still has a LIVE member from the supervised cohort. The kill frees the
+/// leader's pid; under CI fork churn that pid can be reissued to an unrelated `setsid` shell
+/// whose group then numerically equals ours, so a bare pgrp match is not identity. A member
+/// counts only when its `starttime` falls within the cohort window: no later than the leader's
+/// own birth plus one second of fork slack (the `sleep` child is forked milliseconds after the
+/// leader execs). `cohort == None` (leader stat unreadable) keeps the bare pgrp match so the
+/// test still catches true survivors. `None` when `/proc` is unreadable; callers keep polling.
 #[cfg(target_os = "linux")]
-fn group_has_live_member(pgid: libc::pid_t) -> Option<bool> {
-    live_group_snapshot(pgid).map(|members| !members.is_empty())
+fn group_has_live_member(pgid: libc::pid_t, cohort: Option<u64>) -> Option<bool> {
+    let members = live_group_snapshot(pgid)?;
+    Some(
+        members
+            .iter()
+            .any(|m| cohort.is_none_or(|born| m.starttime <= born + 100)),
+    )
 }
 
 #[test]
@@ -93,6 +150,11 @@ fn cancelling_the_worker_subprocess_helper() {
         loop {
             let pgid = crate::process::active_group();
             if pgid > 0 {
+                // The leader's `starttime` travels with the pgid so the parent can later reject
+                // pid-recycled stranger groups that numerically reuse the dead pgid.
+                #[cfg(target_os = "linux")]
+                println!("{} {}", pgid, leader_starttime(pgid).unwrap_or(0));
+                #[cfg(not(target_os = "linux"))]
                 println!("{pgid}");
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
@@ -106,8 +168,10 @@ fn cancelling_the_worker_subprocess_helper() {
 
 /// `kill(pgid, 0)` — the v1 probe — counts orphan zombies (unreaped by non-reaping subreaper
 /// ancestors on busy CI runners) and pids reused by successor processes as alive; the release
-/// job's second test invocation hits both. `/proc` pgrp + state is the truthful live-member
-/// signal, so on Linux group death is judged from it; other hosts keep the legacy probe.
+/// job's second test invocation hits both. v2 moved to a `/proc` pgrp + state scan, but a
+/// REISSUED pid can lead an unrelated `setsid` group whose pgrp numerically equals the dead
+/// one, so v3 pins cohort identity: a member counts as a survivor only when its `starttime`
+/// places it inside the supervised cohort's birth window. Other hosts keep the legacy probe.
 #[test]
 fn cancelling_the_worker_kills_the_active_tool_group() {
     // On Linux, make this test process a child subreaper so that descendants orphaned by the
@@ -127,7 +191,10 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
         );
     }
     let mut child = spawn_cancellation_child();
-    let pgid = read_reported_pgid(&mut child);
+    let (pgid, cohort) = read_reported_pgid(&mut child);
+    // `cohort` anchors the Linux /proc probe; the legacy probe on other hosts never reads it.
+    #[cfg(not(target_os = "linux"))]
+    let _ = cohort;
     // Let the helper settle into its supervised wait before cancelling it.
     std::thread::sleep(Duration::from_millis(100));
     // Safety: signal the helper pid only, exactly like `kill -TERM` on a headless worker.
@@ -146,7 +213,7 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
             // Truthful /proc verdict: scan succeeded and no live (non-zombie) member remains.
             // Some(true) keeps polling; None (/proc unreadable) keeps polling to the deadline
             // rather than declaring early victory.
-            if matches!(group_has_live_member(pgid), Some(false)) {
+            if matches!(group_has_live_member(pgid, cohort), Some(false)) {
                 break;
             }
         }
@@ -162,8 +229,10 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
         #[cfg(target_os = "linux")]
         assert!(
             std::time::Instant::now() < deadline,
-            "active tool process group survived worker cancellation (live members: {:?})",
-            live_group_snapshot(pgid)
+            "active tool process group survived worker cancellation (cohort start {:?}, live members: {:?}, helper status: {:?})",
+            cohort,
+            live_group_snapshot(pgid),
+            child.try_wait().ok().flatten(),
         );
         #[cfg(not(target_os = "linux"))]
         assert!(
