@@ -21,7 +21,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
     let reasoning_enabled = parse_reasoning(&ephemeral, name)?;
-    validate_codex_compatibility(&ephemeral, name)?; // compat-allow: provider API constraint validation, not format compat
+    validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
     let model_params = parse_model_params(&model_params, name, &mut settings)?;
 
@@ -112,8 +112,7 @@ fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String>
     Ok(true)
 }
 
-fn validate_codex_compatibility(map: &Map<String, Value>, name: &str) -> Result<(), String> {
-    // compat-allow: provider API constraint validation, not format compat
+fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result<(), String> {
     require_exact_bool(map, "reasoning.adaptiveThinking", true, name)?;
     require_exact_bool(map, "reasoning.includeInResponse", true, name)?;
     require_exact_bool(map, "reasoning.includeInContext", true, name)?;

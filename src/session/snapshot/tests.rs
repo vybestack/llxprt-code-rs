@@ -31,25 +31,15 @@ fn reservation_event(prompt: &str) -> log::Event {
 }
 
 #[test]
-fn failed_current_validation_preserves_legacy_slots() {
-    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
+fn flat_session_without_manifest_is_rejected() {
     let root = tempfile::tempdir().unwrap();
     let dir = open(root.path());
-    let legacy = serde_json::to_vec(&SessionState::empty("legacy")).unwrap(); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    std::fs::write(root.path().join("session.json"), &legacy).unwrap(); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-
-    let state = SessionState::empty("legacy"); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    let manifest = initial_manifest(&dir, &state, 0, [0; 16], None).unwrap();
-    std::fs::write(root.path().join(&manifest.current.snapshot), b"corrupt").unwrap();
-
+    let flat = serde_json::to_vec(&SessionState::empty("flat")).unwrap();
+    std::fs::write(root.path().join("session.json"), &flat).unwrap();
     assert!(matches!(
-        load_or_migrate(&dir, "legacy"), // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
+        load_state(&dir, "flat"),
         Err(StoreError::Corrupt(_))
     ));
-    assert_eq!(
-        std::fs::read(root.path().join("session.json")).unwrap(),
-        legacy // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    );
 }
 
 #[test]
@@ -70,7 +60,7 @@ fn oversize_current_segment_recovers_retained_previous_set() {
         .set_len(log::max_replay_bytes() + 1)
         .unwrap();
 
-    let recovered = load_or_migrate(&dir, "fallback").unwrap();
+    let recovered = load_state(&dir, "fallback").unwrap();
     assert_eq!(recovered.state.branches.len(), 1);
     assert_eq!(recovered.state.branches[0].prompt, "committed");
 }
@@ -89,7 +79,7 @@ fn compaction_error_is_returned_after_committed_append() {
 
     assert!(matches!(result, Err(StoreError::CommittedMaintenance(_))));
     std::fs::remove_dir(root.path().join("snapshot-1-1.json")).unwrap();
-    let reopened = load_or_migrate(&dir, "compact-error").unwrap();
+    let reopened = load_state(&dir, "compact-error").unwrap();
     assert_eq!(reopened.state.branches.len(), 1);
 }
 
@@ -147,7 +137,7 @@ fn replaced_snapshot_retains_a_loadable_previous_set() {
     )
     .unwrap();
 
-    let recovered = load_or_migrate(&dir, "replace-fallback").unwrap();
+    let recovered = load_state(&dir, "replace-fallback").unwrap();
     assert_eq!(recovered.state.branches.len(), 1);
     assert_eq!(recovered.state.branches[0].prompt, "retained");
 }
@@ -209,7 +199,7 @@ fn dual_recovery_failure_preserves_causes_and_io_semantics() {
         .write_all(b"corrupt retained segment")
         .unwrap();
 
-    let error = match load_or_migrate(&dir, "dual-failure") {
+    let error = match load_state(&dir, "dual-failure") {
         Ok(_) => panic!("dual recovery failure unexpectedly loaded"),
         Err(error) => error,
     };

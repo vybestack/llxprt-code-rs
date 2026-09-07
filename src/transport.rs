@@ -239,8 +239,7 @@ impl TransportFailure {
     /// anything unrecognized falls back to the plain model error.
     pub fn from_message(message: &str) -> Option<Self> {
         Self::from_framed(message).or_else(|| {
-            Self::legacy_message(message).map(|kind| Self {
-                // compat-allow: provider legacy-prose classifier, not a session-format reader
+            Self::provider_prose(message).map(|kind| Self {
                 kind,
                 origin: "unknown",
                 url_class: None,
@@ -326,8 +325,7 @@ impl TransportFailure {
 
     /// Recognize the transport sentences the vendored crate and the host backends have
     /// always emitted, so pre-existing failures classify too.
-    fn legacy_message(message: &str) -> Option<TransportKind> {
-        // compat-allow: provider legacy-prose classifier, not a session-format reader
+    fn provider_prose(message: &str) -> Option<TransportKind> {
         if message.contains("rate limited") {
             Some(TransportKind::RateLimit)
         } else if message.contains("connection failed")
@@ -687,10 +685,9 @@ mod tests {
     }
 
     /// The framed host rendering round trips back into the classification the envelope
-    /// reports, and legacy prose still classifies.
+    /// reports, and provider prose still classifies.
     #[test]
-    fn framed_and_legacy_messages_classify() {
-        // compat-allow: provider legacy-prose classifier, not a session-format reader
+    fn framed_and_provider_prose_messages_classify() {
         let rendered = status_failure(429, "slow down", Some(Duration::from_secs(3)));
         let round = TransportFailure::from_message(&rendered.diagnostic())
             .expect("the framed diagnostic must classify");
@@ -702,10 +699,10 @@ mod tests {
         assert_eq!(round.body_prefix.as_deref(), Some("slow down"));
         assert_eq!(round.transport_key(), "model-rate-limit");
 
-        let legacy = TransportFailure::from_message("Model network request failed") // compat-allow: provider legacy-prose classifier, not a session-format reader
-            .expect("legacy connectivity prose must classify"); // compat-allow: provider legacy-prose classifier, not a session-format reader
-        assert_eq!(legacy.kind, TransportKind::Connectivity); // compat-allow: provider legacy-prose classifier, not a session-format reader
-        assert_eq!(legacy.origin, "unknown"); // compat-allow: provider legacy-prose classifier, not a session-format reader
+        let prose = TransportFailure::from_message("Model network request failed")
+            .expect("provider connectivity prose must classify");
+        assert_eq!(prose.kind, TransportKind::Connectivity);
+        assert_eq!(prose.origin, "unknown");
         assert!(TransportFailure::from_message("Model operation failed").is_none());
     }
 
