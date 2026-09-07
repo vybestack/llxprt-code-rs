@@ -18,6 +18,7 @@ use serdes_ai_core::{
     RequestUsage,
 };
 use serdes_ai_tools::ToolDefinition;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Anthropic Claude model.
@@ -37,6 +38,9 @@ pub struct AnthropicModel {
     enable_caching: bool,
     /// Anthropic API version.
     api_version: String,
+    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
+    /// verbatim and flattened into the request body.
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl std::fmt::Debug for AnthropicModel {
@@ -66,6 +70,7 @@ impl AnthropicModel {
             thinking_budget: None,
             enable_caching: false,
             api_version: "2023-06-01".to_string(),
+            extra: BTreeMap::new(),
         }
     }
 
@@ -119,6 +124,13 @@ impl AnthropicModel {
     #[must_use]
     pub fn with_api_version(mut self, version: impl Into<String>) -> Self {
         self.api_version = version.into();
+        self
+    }
+
+    /// Forward unrecognized `modelParams` keys verbatim on every request.
+    #[must_use]
+    pub fn with_extra(mut self, extra: BTreeMap<String, serde_json::Value>) -> Self {
+        self.extra = extra;
         self
     }
 
@@ -478,6 +490,7 @@ impl AnthropicModel {
             metadata: None,
             stream: if stream { Some(true) } else { None },
             thinking,
+            extra: self.extra.clone(),
         }
     }
 
@@ -743,6 +756,29 @@ mod tests {
         assert_eq!(request.messages.len(), 1);
         assert_eq!(request.temperature, Some(0.7));
         assert!(request.stream.is_none());
+        // A default model forwards nothing; the flattened key stays absent.
+        assert!(request.extra.is_empty());
+        let wire = serde_json::to_value(&request).unwrap();
+        assert!(wire.get("extra").is_none());
+    }
+
+    #[test]
+    fn test_build_request_forwards_extra_flattened() {
+        let model =
+            AnthropicModel::new("claude-3-5-sonnet-20241022", "key").with_extra(BTreeMap::from([
+                ("custom_param".to_string(), serde_json::json!({"x": 1})),
+            ]));
+        let mut req = ModelRequest::new();
+        req.add_user_prompt("Hello!");
+        let request = model.build_request(
+            &[req],
+            &ModelSettings::default(),
+            &Default::default(),
+            false,
+        );
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["custom_param"], serde_json::json!({"x": 1}));
+        assert!(wire.get("extra").is_none());
     }
 
     #[test]

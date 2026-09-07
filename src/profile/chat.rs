@@ -493,6 +493,42 @@ fn inert_boolean_model_param(
     bool_value(value, name, key).map(|_| ())
 }
 
+/// Parse the structural dsflash discriminator: an object with a required
+/// `enable_thinking` boolean and an optional six-value `reasoning_effort`.
+fn parse_chat_template_kwargs(
+    v: &serde_json::Value,
+    name: &str,
+) -> Result<ChatTemplateKwargsSpec, String> {
+    let object = v
+        .as_object()
+        .ok_or_else(|| format!("profile {name:?}: 'chat_template_kwargs' must be an object"))?;
+    let enable_thinking = object
+        .get("enable_thinking")
+        .and_then(|value| value.as_bool())
+        .ok_or_else(|| {
+            format!("profile {name:?}: 'chat_template_kwargs.enable_thinking' must be a boolean")
+        })?;
+    let reasoning_effort = match object.get("reasoning_effort") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(effort)) => {
+            Some(DsflashEffort::parse(effort).ok_or_else(|| {
+                format!(
+                    "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be one of minimal, low, medium, high, xhigh, max"
+                )
+            })?)
+        }
+        Some(_) => {
+            return Err(format!(
+                "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be a string"
+            ));
+        }
+    };
+    Ok(ChatTemplateKwargsSpec {
+        enable_thinking,
+        reasoning_effort,
+    })
+}
+
 pub(super) fn parse_model_params(
     obj: &serde_json::Map<String, serde_json::Value>,
     name: &str,
@@ -506,6 +542,7 @@ pub(super) fn parse_model_params(
     };
     let mut m = ModelParams::default();
     let mut unsupported: Vec<String> = Vec::new();
+    let mut forwarded: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for (k, v) in &map {
         match k.as_str() {
             "temperature" => {
@@ -537,47 +574,23 @@ pub(super) fn parse_model_params(
                 m.seed = Some(n);
             }
             "clear_thinking" => inert_boolean_model_param(v, name, k)?,
-            // The structural dsflash discriminator: an object with a required
-            // `enable_thinking` boolean and an optional six-value `reasoning_effort`.
             "chat_template_kwargs" => {
-                let object = v.as_object().ok_or_else(|| {
-                    format!("profile {name:?}: 'chat_template_kwargs' must be an object")
-                })?;
-                let enable_thinking = object
-                    .get("enable_thinking")
-                    .and_then(|value| value.as_bool())
-                    .ok_or_else(|| {
-                        format!(
-                            "profile {name:?}: 'chat_template_kwargs.enable_thinking' must be a boolean"
-                        )
-                    })?;
-                let reasoning_effort = match object.get("reasoning_effort") {
-                    None | Some(serde_json::Value::Null) => None,
-                    Some(serde_json::Value::String(effort)) => {
-                        Some(DsflashEffort::parse(effort).ok_or_else(|| {
-                            format!(
-                                "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be one of minimal, low, medium, high, xhigh, max"
-                            )
-                        })?)
-                    }
-                    Some(_) => {
-                        return Err(format!(
-                            "profile {name:?}: 'chat_template_kwargs.reasoning_effort' must be a string"
-                        ));
-                    }
-                };
-                m.chat_template_kwargs = Some(ChatTemplateKwargsSpec {
-                    enable_thinking,
-                    reasoning_effort,
-                });
+                m.chat_template_kwargs = Some(parse_chat_template_kwargs(v, name)?)
             }
             other if MODELPARAM_OUTPUT_AFFECTING.contains(&other) => {
                 unsupported.push(k.clone());
             }
-            other => unsupported.push(other.to_string()),
+            // Unknown keys are not a profile error: the parser stays lossless and
+            // neutral here. `model_api` decides per the resolved acceptance policy
+            // whether the key is forwarded verbatim (loose), checked against the
+            // known-model registry, or refused (strict).
+            _ => {
+                forwarded.insert(k.clone(), v.clone());
+            }
         }
     }
     m.unsupported = unsupported;
+    m.forwarded = forwarded;
     Ok(m)
 }
 

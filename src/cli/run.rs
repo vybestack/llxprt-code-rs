@@ -33,6 +33,7 @@ pub fn run_profiled(
         &dependencies,
         args.profile_load.is_some(),
         args.allow_insecure_http,
+        settings.provider.model_params_mode.value,
     )
     .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
     let agent = build_agent(
@@ -154,6 +155,7 @@ fn build_agent(
             ),
         )
         .with_output_caps(resolved_output_caps(settings))
+        .with_request_timeout(Some(settings.budgets.request_timeout.value))
         .with_profiler(profiler);
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)

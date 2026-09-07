@@ -116,6 +116,10 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+
+    /// Outbound model-request timeout. `None` (the default) means the backend's
+    /// own default applies.
+    request_timeout: Option<std::time::Duration>,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -191,6 +195,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -225,6 +230,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -255,6 +261,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -264,55 +271,12 @@ impl CodingAgent {
         }
     }
 
-    /// Override the agent's conservative per-request context budget (tests drive budget
-    /// enforcement with an explicit token budget instead of a profile).
-    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
-        self.context_limit = context_limit;
+    /// Override the outbound model-request timeout (`None` = backend default).
+    pub fn with_request_timeout(mut self, timeout: Option<std::time::Duration>) -> CodingAgent {
+        self.request_timeout = timeout;
         self
     }
 
-    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// budgets instead of the uncapped default).
-    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
-        self.max_rounds = max_rounds;
-        self
-    }
-
-    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
-    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
-        self.max_tool_calls = max_tool_calls;
-        self
-    }
-
-    /// Override the wall-clock turn budget (`None` = no time limit).
-    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
-        self.turn_time_budget = budget;
-        self
-    }
-
-    /// Set validated profile shell timeouts. Both remain finite and the parser
-    /// guarantees the default does not exceed the per-command ceiling.
-    pub fn with_shell_timeouts(
-        mut self,
-        default_timeout: std::time::Duration,
-        max_timeout: std::time::Duration,
-    ) -> CodingAgent {
-        self.shell_default_timeout = default_timeout;
-        self.shell_max_timeout = max_timeout;
-        self
-    }
-
-    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
-    /// aggregate per-turn tool-output bound enforced by the turn loop.
-    pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
-        self.output_caps = caps;
-        self
-    }
-
-    /// The resolved output caps this agent enforces.
-    pub fn output_caps(&self) -> OutputCaps {
-        self.output_caps
-    }
     /// Attach the optional process-memory event sink.
     pub fn with_profiler(
         mut self,
@@ -347,7 +311,7 @@ impl CodingAgent {
         store
             .verify_workspace_identity(self.workspace.identity())
             .map_err(AgentError::from_store)?;
-        self.profile_store(store, "session_read", 0)?;
+        self.profile_store(store, "session_read", 0, None)?;
         if reserved.replay {
             self.profile(
                 "replay_resolved",
@@ -760,7 +724,12 @@ impl CodingAgent {
             .finalize(reserved, &summary, &attempt.rounds)
             .map_err(AgentError::from_store)?;
         self.update_profile_usage(&attempt.usage);
-        self.profile_store(store, "session_written", attempt.rounds.len())?;
+        self.profile_store(
+            store,
+            "session_written",
+            attempt.rounds.len(),
+            Some(attempt.started.elapsed()),
+        )?;
         Ok(CompletedRun {
             turn: reserved.turn,
             attempt: reserved.attempt,
@@ -768,7 +737,10 @@ impl CodingAgent {
             summary,
             tool_count: attempt.usage.total_calls,
             declared_tool_calls: self.max_tool_calls,
-            budget_exhausted: attempt.budget_exhausted,
+            budget_exhausted: attempt.budget_exhausted
+                || self
+                    .max_tool_calls
+                    .is_some_and(|cap| attempt.usage.total_calls >= cap),
             zero_call_tail: malformed_tool_call::zero_call_tail(&attempt.rounds),
             prompt_digest: prompt_digest(&reserved.prompt),
             status: "ok".into(),
@@ -784,7 +756,7 @@ impl CodingAgent {
         store
             .renew_lease(reserved)
             .map_err(AgentError::from_store)?;
-        self.profile_store(store, "session_written", 0)
+        self.profile_store(store, "session_written", 0, None)
     }
 
     fn check_finish(
@@ -819,7 +791,7 @@ impl CodingAgent {
         let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
         match store.fail(reserved, &bounded, rounds) {
             Ok(()) => {
-                let profile = self.profile_store(store, "session_written", rounds.len());
+                let profile = self.profile_store(store, "session_written", rounds.len(), None);
                 match profile {
                     Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
                     Err(profile_error) => profile_error,
@@ -974,3 +946,6 @@ mod tests;
 
 #[cfg(test)]
 mod tool_validation_tests;
+
+#[cfg(test)]
+mod over_limit_tests;

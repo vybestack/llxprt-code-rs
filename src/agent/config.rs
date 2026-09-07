@@ -1,3 +1,5 @@
+use super::{CodingAgent, OutputCaps};
+
 /// Build the coding-agent system prompt.
 pub fn coding_system_prompt(
     cwd: &std::path::Path,
@@ -35,6 +37,56 @@ pub fn round_limit_message(max_rounds: usize) -> String {
 }
 
 impl super::CodingAgent {
+    /// Override the agent's conservative per-request context budget (tests drive budget
+    /// enforcement with an explicit token budget instead of a profile).
+    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
+        self.context_limit = context_limit;
+        self
+    }
+
+    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
+    /// budgets instead of the uncapped default).
+    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
+        self.max_rounds = max_rounds;
+        self
+    }
+
+    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
+    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
+        self.max_tool_calls = max_tool_calls;
+        self
+    }
+
+    /// Override the wall-clock turn budget (`None` = no time limit).
+    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
+        self.turn_time_budget = budget;
+        self
+    }
+
+    /// Set validated profile shell timeouts. Both remain finite and the parser
+    /// guarantees the default does not exceed the per-command ceiling.
+    pub fn with_shell_timeouts(
+        mut self,
+        default_timeout: std::time::Duration,
+        max_timeout: std::time::Duration,
+    ) -> CodingAgent {
+        self.shell_default_timeout = default_timeout;
+        self.shell_max_timeout = max_timeout;
+        self
+    }
+
+    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
+    /// aggregate per-turn tool-output bound enforced by the turn loop.
+    pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
+        self.output_caps = caps;
+        self
+    }
+
+    /// The resolved output caps this agent enforces.
+    pub fn output_caps(&self) -> OutputCaps {
+        self.output_caps
+    }
+
     /// Build the tool configuration from the resolved output and shell-timeout policy.
     pub(super) fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
         Ok(crate::tools::ToolConfig {

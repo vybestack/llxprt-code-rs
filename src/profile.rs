@@ -62,6 +62,14 @@ pub struct ModelParams {
     /// The structural dsflash discriminator: a bounded kwargs object. Presence
     /// selects the dsflash Chat settings variant regardless of the profile name.
     pub chat_template_kwargs: Option<ChatTemplateKwargsSpec>,
+    /// `modelParams` keys this parser does not itself type, carried verbatim with
+    /// their JSON values. The profile stays lossless here; `model_api` owns whether
+    /// they are forwarded on the provider wire, checked against the model registry,
+    /// or refused.
+    pub forwarded: BTreeMap<String, serde_json::Value>,
+    /// Recognized keys the chat-completions wire cannot serialize (the max-output
+    /// alias family, `top_k`). Recorded, never silently dropped: every name reaches
+    /// the operator through the acceptance policy on the `model_api` side.
     pub unsupported: Vec<String>,
 }
 
