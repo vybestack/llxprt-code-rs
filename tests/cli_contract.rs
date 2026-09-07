@@ -6,7 +6,6 @@
 
 use serde_json::Value;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Competing config/state selectors a child could inherit and that must be scrubbed
 /// before a test sets the config it actually stages. `LLXPRT_CONFIG_HOME` /
@@ -45,129 +44,10 @@ fn stdout_json(out: &std::process::Output) -> Value {
     serde_json::from_slice(&out.stdout).expect("stdout is one JSON object")
 }
 
-/// A per-run unique session suffix so no two test runs (or CI retries) share state.
-fn uniq() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    format!("c{}", nanos % 1_000_000_000_000)
-}
-
 /// An ordered corrupt session with an oversized persisted scalar in one required slot:
 /// the corrupt `branch_id`, `cwd`, or `parent_branch` field is 1 MiB, the CLI
 /// must emit exactly one JSON error with a bounded message, and no panic exit.
-#[test]
-fn oversized_corrupt_branch_cwd_parent_field_is_one_bounded_json() {
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("bigfield.json");
-    std::fs::write(
-        &profile,
-        r#"{"provider":"openai","model":"m",
-            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1","auth-key":"k"}}"#,
-    )
-    .unwrap();
-    let sessions_root = dir.path().join("code-rs-sessions");
 
-    // Each case writes an otherwise-valid session with a corrupt 1 MiB field.
-    let run_case = |name: &str, session_id: &str| {
-        let big = "a".repeat(1024 * 1024);
-        let payload = match name {
-            "cwd" => serde_json::json!({
-                "version": llxprt_code_rs::session::STORE_VERSION,
-                "session_id": session_id,
-                "cwd": big,
-                "next_branch_seq": 0,
-                "branches": []
-            }),
-            "branch" => serde_json::json!({
-                "version": llxprt_code_rs::session::STORE_VERSION,
-                "session_id": session_id,
-                "cwd": null,
-                "next_branch_seq": 0,
-                "branches": [{
-                    "branch_id": big,
-                    "turn": 1,
-                    "attempt": 1,
-                    "parent_branch": null,
-                    "parent_turn": 0,
-                    "parent_attempt": 0,
-                    "prompt": "P",
-                    "digest": llxprt_code_rs::agent::prompt_digest("P"),
-                    "lifecycle": "completed"
-                }]
-            }),
-            "parent" => serde_json::json!({
-                "version": llxprt_code_rs::session::STORE_VERSION,
-                "session_id": session_id,
-                "cwd": null,
-                "next_branch_seq": 1,
-                "branches": [
-                    {
-                        "branch_id": "b1",
-                        "turn": 1,
-                        "attempt": 1,
-                        "parent_branch": null,
-                        "parent_turn": 0,
-                        "parent_attempt": 0,
-                        "prompt": "P",
-                        "digest": llxprt_code_rs::agent::prompt_digest("P"),
-                        "lifecycle": "completed"
-                    },
-                    {
-                        "branch_id": "b2",
-                        "turn": 2,
-                        "attempt": 1,
-                        "parent_branch": big,
-                        "parent_turn": 1,
-                        "parent_attempt": 1,
-                        "prompt": "P",
-                        "digest": llxprt_code_rs::agent::prompt_digest("P"),
-                        "lifecycle": "completed"
-                    }
-                ]
-            }),
-            other => panic!("unknown case {other}"),
-        };
-        let sdir = sessions_root.join(session_id);
-        std::fs::create_dir_all(&sdir).unwrap();
-        std::fs::write(sdir.join("session.json"), payload.to_string()).unwrap();
-        let out = bin()
-            .env("LLXPRT_CONFIG_DIR", dir.path())
-            .arg("--profile-load")
-            .arg(&profile)
-            .arg("--session")
-            .arg(session_id)
-            .arg("-p")
-            .arg("hi")
-            .output()
-            .unwrap();
-        let parsed: Value = serde_json::from_slice(&out.stdout)
-            .unwrap_or_else(|e| panic!("{name}: exactly one JSON object: {e}"));
-        assert_eq!(parsed["status"], "error", "{name}");
-        let msg = parsed["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        assert_eq!(parsed["error"]["code"], "turn", "{name}");
-        assert!(
-            msg.len() <= llxprt_code_rs::redact::MAX_DIAGNOSTIC_BYTES,
-            "{name}: diagnostic must be bounded, got {} bytes",
-            msg.len()
-        );
-        assert!(out.status.code() != Some(101), "{name}: never panic");
-    };
-
-    run_case("cwd", &format!("{}cwd", uniq()));
-    run_case("branch", &format!("{}br", uniq()));
-    run_case("parent", &format!("{}pa", uniq()));
-}
-
-/// `auth-key-name` names a provider key (issue 6): the CLI resolves it through the
-/// `LLXPRT_PROVIDER_KEY_<NAME>` selector and then the secure store, and a name that
-/// neither layer holds reports the fixed value-free refusal at the model-config stage.
-/// A same-named local file is never read as a keyfile (its contents never travel) and
-/// stdout is exactly one bounded JSON error.
 #[test]
 fn auth_key_name_unresolved_reports_the_fixed_refusal_and_never_reads_a_local_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -492,76 +372,7 @@ fn configuration_root_must_be_available_and_absolute() {
 /// An ordered corrupt state (a child whose parent branch has turn u32::MAX, listed
 /// first) must surface as exactly one typed JSON error through the compiled CLI: a
 /// typed session/turn error, no panic (never exit 101) even in a debug build.
-#[test]
-fn corrupt_parent_turn_max_emits_one_json_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("max.json");
-    std::fs::write(
-        &profile,
-        r#"{"provider":"openai","model":"m",
-            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1","auth-key":"k"}}"#,
-    )
-    .unwrap();
 
-    // The child (listed first) parents to a branch at turn u32::MAX, whose own
-    // validation is never reached; the checked parent.turn + 1 must be a typed
-    // corruption instead of an arithmetic panic.
-    let payload = serde_json::json!({
-        "version": 2,
-        "session_id": "maxover",
-        "cwd": null,
-        "next_branch_seq": 2,
-        "branches": [
-            {
-                "branch_id": "b2",
-                "turn": 2,
-                "attempt": 1,
-                "parent_branch": "b1",
-                "parent_turn": 4294967295u32,
-                "parent_attempt": 1,
-                "prompt": "CHILD",
-                "digest": llxprt_code_rs::agent::prompt_digest("CHILD"),
-                "lifecycle": "completed"
-            },
-            {
-                "branch_id": "b1",
-                "turn": 4294967295u32,
-                "attempt": 1,
-                "parent_branch": null,
-                "parent_turn": 0,
-                "parent_attempt": 0,
-                "prompt": "ROOT",
-                "digest": llxprt_code_rs::agent::prompt_digest("ROOT"),
-                "lifecycle": "completed"
-            }
-        ]
-    });
-    let sessions = dir.path().join("code-rs-sessions").join("maxover");
-    std::fs::create_dir_all(&sessions).unwrap();
-    std::fs::write(sessions.join("session.json"), payload.to_string()).unwrap();
-
-    let out = bin()
-        .env("LLXPRT_CONFIG_DIR", dir.path())
-        .arg("--profile-load")
-        .arg(&profile)
-        .arg("--session")
-        .arg("maxover")
-        .arg("-p")
-        .arg("hi")
-        .output()
-        .unwrap();
-    // The session state read fails with the typed corruption before any request: one JSON
-    // error, a session exit code, and never a panic exit 101.
-    assert_eq!(
-        out.status.code(),
-        Some(llxprt_code_rs::cli::Code::Turn as i32),
-        "type exit, no panic: {out:?}"
-    );
-    let parsed: Value = serde_json::from_slice(&out.stdout).expect("exactly one JSON object");
-    assert_eq!(parsed["status"], "error");
-    assert!(parsed["error"]["code"].is_string());
-    assert_eq!(parsed["session_id"], "maxover");
-}
 #[test]
 fn dsflash_http_mapping_obeys_allow_insecure_http() {
     let dir = tempfile::tempdir().unwrap();

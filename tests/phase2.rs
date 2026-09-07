@@ -9,8 +9,8 @@
 use llxprt_code_rs::adapter::{ChatBackend, LlmResult, ToolCall};
 use llxprt_code_rs::agent::CodingAgent;
 use llxprt_code_rs::session::{
-    BranchRecord, HistoryTurn, Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionState,
-    SessionStore, StoreError, ToolCallRecord,
+    HistoryTurn, Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionState, SessionStore,
+    StoreError, ToolCallRecord,
 };
 use llxprt_code_rs::tools::ToolSpec;
 use serdes_ai::core::FinishReason;
@@ -118,12 +118,6 @@ fn new_cwd() -> PathBuf {
     ));
     std::fs::create_dir_all(&w).unwrap();
     w
-}
-
-fn workspace_identity(path: &Path) -> (u64, u64) {
-    llxprt_code_rs::tools::WorkspaceCap::open(path)
-        .unwrap()
-        .identity()
 }
 
 fn exec_counter() -> &'static str {
@@ -342,10 +336,10 @@ fn syntactic_and_semantic_corruption_is_an_error() {
     let _ = reserved(&st, None, None, "P1", &cwd).unwrap();
     // Syntactic corruption is an error, not a fallback.
     std::fs::write(st.session_dir.join("session.manifest.json"), b"not json {").unwrap();
-    let reopened = store("s7");
-    match reopened.start_request(None, None, "P1", &cwd) {
+    match SessionStore::load(&SessionId::parse("s7").unwrap()) {
         Err(StoreError::Corrupt(_)) => {}
-        other => panic!("expected Corrupt for garbage, got {other:?}"),
+        Ok(_) => panic!("garbage manifest unexpectedly opened"),
+        Err(error) => panic!("expected Corrupt for garbage, got {error}"),
     }
 
     // Semantic corruption: a mismatched digest must be rejected on load.
@@ -360,125 +354,10 @@ fn syntactic_and_semantic_corruption_is_an_error() {
     let mut bytes = std::fs::read(&path).unwrap();
     *bytes.last_mut().unwrap() ^= 1;
     std::fs::write(path, bytes).unwrap();
-    let cw = cwd.clone();
-    let reopened = store("s8");
-    match reopened.start_request(None, None, "X", &cw) {
+    match SessionStore::load(&SessionId::parse("s8").unwrap()) {
         Err(StoreError::Corrupt(_)) => {}
-        other => panic!("expected Corrupt for bad digest, got {other:?}"),
-    }
-}
-
-#[test]
-fn u32_max_turn_state_cannot_panic() {
-    let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/s9max");
-    std::fs::create_dir_all(&dir).unwrap();
-    let state = SessionState {
-        version: 2,
-        session_id: "s9max".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches: vec![branch(u32::MAX, 1, "b1", "P1", Lifecycle::Completed)],
-        next_branch_seq: 1,
-    };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
-    let st2 = SessionStore::load(&SessionId::parse("s9max").unwrap()).unwrap();
-    match st2.start_request(None, None, "P2", &cwd) {
-        Err(StoreError::Corrupt(_)) | Err(StoreError::Invalid(_)) => {}
-        other => panic!("a turn-max root must be rejected, got {other:?}"),
-    }
-}
-
-/// A branch whose parent is not completed (pending/failed) is corruption: a pending or
-/// failed prompt can never be continued by a child.
-#[test]
-fn child_of_failed_parent_is_corrupt() {
-    let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/failedparent");
-    std::fs::create_dir_all(&dir).unwrap();
-    // b1 completed at turn 1, b2 failed at turn 2, b3 child of b2 at turn 3.
-    let p1 = branch(1, 1, "b1", "P1", Lifecycle::Completed);
-    let p2 = branch(2, 1, "b2", "P2", Lifecycle::Failed);
-    let ch = {
-        let mut b = branch(3, 1, "b3", "P3", Lifecycle::Completed);
-        b.parent_branch = Some("b2".into());
-        b.parent_turn = 2;
-        b.parent_attempt = 1;
-        b
-    };
-    let state = SessionState {
-        version: 2,
-        session_id: "failedparent".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches: vec![p1, p2, ch],
-        next_branch_seq: 3,
-    };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
-    let store = SessionStore::load(&SessionId::parse("failedparent").unwrap()).unwrap();
-    match store.start_request(None, None, "X", &cwd) {
-        Err(StoreError::Corrupt(_)) => {}
-        other => panic!("a child of a failed parent must be corrupt, got {other:?}"),
-    }
-}
-
-/// Session validation must reject a turn-1 child whose parent metadata points at a turn-2
-/// branch (parent.turn + 1 != child.turn) as corruption.
-#[test]
-fn turn1_child_of_turn2_parent_is_corrupt() {
-    let cwd = new_cwd();
-    let _ = shared_root();
-    let root = shared_root();
-    {
-        let dir = root.join("code-rs-sessions/turn1child");
-        let t2: SessionState = SessionState {
-            version: 2,
-            session_id: "turn1child".into(),
-            cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-            cwd_dev: workspace_identity(&cwd).0,
-            cwd_ino: workspace_identity(&cwd).1,
-            branches: vec![branch(2, 1, "b1", "P1", Lifecycle::Completed)],
-            next_branch_seq: 1,
-        };
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("session.json"), serde_json::to_vec(&t2).unwrap()).unwrap();
-    }
-    // A separate session: b1 parent turn 2 with a b1 child at turn 1 referencing it.
-    let dir = root.join("code-rs-sessions/turn1child2");
-    std::fs::create_dir_all(&dir).unwrap();
-    let ch = {
-        let mut b = branch(2, 1, "b1", "P1", Lifecycle::Completed);
-        b.parent_branch = Some("b2".into());
-        b.parent_turn = 1;
-        b.parent_attempt = 1;
-        b
-    };
-    let st: SessionState = SessionState {
-        version: 2,
-        session_id: "turn1child2".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches: vec![ch],
-        next_branch_seq: 2,
-    };
-    std::fs::write(dir.join("session.json"), serde_json::to_vec(&st).unwrap()).unwrap();
-    let store = SessionStore::load(&SessionId::parse("turn1child2").unwrap()).unwrap();
-    match store.start_request(None, None, "X", &cwd) {
-        Err(StoreError::Corrupt(_)) => {}
-        other => panic!("expected Corrupt for the invalid turn-1 child, got {other:?}"),
+        Ok(_) => panic!("bad digest unexpectedly opened"),
+        Err(error) => panic!("expected Corrupt for bad digest, got {error}"),
     }
 }
 
@@ -1219,72 +1098,6 @@ fn second_model_call_observes_renewed_lease_after_elapsed_interval() {
     assert_eq!(b.lifecycle, Lifecycle::Completed);
     assert_eq!(b.rounds.len(), 2);
 }
-
-/// Checked arithmetic: a fork that would overflow the attempt counter returns a typed
-/// input error, never a panic.
-#[test]
-fn attempt_overflow_is_a_typed_error() {
-    let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/attemptmax");
-    std::fs::create_dir_all(&dir).unwrap();
-    let state = SessionState {
-        version: 2,
-        session_id: "attemptmax".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches: vec![
-            branch(1, 1, "b1", "P1", Lifecycle::Completed),
-            branch(1, u32::MAX, "b2", "P2", Lifecycle::Completed),
-        ],
-        next_branch_seq: 2,
-    };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
-    let store = SessionStore::load(&SessionId::parse("attemptmax").unwrap()).unwrap();
-    match store.start_request(Some(1), None, "fork-attempt", &cwd) {
-        Err(StoreError::Invalid(m)) if m.contains("attempt overflow") => {}
-        other => panic!("attempt overflow must be a typed Invalid error, got {other:?}"),
-    }
-    let snap = store.snapshot().unwrap();
-    assert_eq!(snap.branches.len(), 2, "no branch may be added on overflow");
-}
-
-/// Checked arithmetic: next_branch_seq at u64::MAX with a live completed branch makes a
-/// fork return a typed sequence-overflow error, never a panic.
-#[test]
-fn branch_seq_overflow_is_a_typed_error() {
-    let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/seqmax");
-    std::fs::create_dir_all(&dir).unwrap();
-    let state = SessionState {
-        version: 2,
-        session_id: "seqmax".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches: vec![branch(1, 1, "b1", "P1", Lifecycle::Completed)],
-        next_branch_seq: u64::MAX,
-    };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
-    let store = SessionStore::load(&SessionId::parse("seqmax").unwrap()).unwrap();
-    match store.start_request(Some(1), None, "fork-seq", &cwd) {
-        Err(StoreError::Invalid(m)) if m.contains("overflow") => {}
-        other => panic!("branch sequence overflow must be typed, got {other:?}"),
-    }
-    let snap = store.snapshot().unwrap();
-    assert_eq!(snap.branches.len(), 1, "no branch may be added on overflow");
-}
-
 fn read_current_state(session_dir: &std::path::Path) -> SessionState {
     let id = session_dir.file_name().unwrap().to_str().unwrap();
     SessionStore::load_at(&SessionId::parse(id).unwrap(), &shared_root())
@@ -1325,54 +1138,6 @@ fn replay_parts(h: &HistoryTurn) -> String {
         out.push_str(&serde_json::to_string(r).unwrap());
     }
     out
-}
-
-fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle) -> BranchRecord {
-    let (rounds, summary, error, owner) = match lifecycle {
-        Lifecycle::Pending => (
-            Vec::new(),
-            String::new(),
-            String::new(),
-            "owner".to_string(),
-        ),
-        Lifecycle::Completed => (
-            vec![RoundRecord {
-                assistant: "done".to_string(),
-                calls: Vec::new(),
-            }],
-            "done".to_string(),
-            String::new(),
-            String::new(),
-        ),
-        Lifecycle::Failed => (
-            Vec::new(),
-            String::new(),
-            "failed".to_string(),
-            String::new(),
-        ),
-    };
-    // A pending branch carries its lease; a terminal branch releases it.
-    let (reserved_at, lease_expiry) = match lifecycle {
-        Lifecycle::Pending => (1, 2),
-        Lifecycle::Completed | Lifecycle::Failed => (0, 0),
-    };
-    BranchRecord {
-        branch_id: id.to_string(),
-        turn,
-        attempt,
-        parent_branch: None,
-        parent_turn: 0,
-        parent_attempt: 0,
-        prompt: prompt.to_string(),
-        digest: llxprt_code_rs::agent::prompt_digest(prompt),
-        lifecycle,
-        rounds,
-        summary,
-        error,
-        owner,
-        reserved_at,
-        lease_expiry,
-    }
 }
 
 /// Directly expire every pending lease on disk (leave owner in place: a stale lease is

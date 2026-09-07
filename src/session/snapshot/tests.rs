@@ -31,24 +31,99 @@ fn reservation_event(prompt: &str) -> log::Event {
 }
 
 #[test]
-fn failed_current_validation_preserves_legacy_slots() {
+fn current_manifest_and_log_load_the_store_they_describe() {
     let root = tempfile::tempdir().unwrap();
     let dir = open(root.path());
-    let legacy = serde_json::to_vec(&SessionState::empty("legacy")).unwrap();
-    std::fs::write(root.path().join("session.json"), &legacy).unwrap();
-
-    let state = SessionState::empty("legacy");
+    let state = SessionState::empty("current-store");
     let manifest = initial_manifest(&dir, &state, 0, [0; 16], None).unwrap();
-    std::fs::write(root.path().join(&manifest.current.snapshot), b"corrupt").unwrap();
+    let mut loaded = load(&dir).unwrap();
+    append(&dir, &mut loaded, vec![reservation_event("committed")]).unwrap();
 
-    assert!(matches!(
-        load_or_migrate(&dir, "legacy"),
-        Err(StoreError::Corrupt(_))
-    ));
+    let reopened = load(&dir).unwrap();
+    assert_eq!(reopened.state.session_id, "current-store");
+    assert_eq!(reopened.state.branches[0].prompt, "committed");
     assert_eq!(
-        std::fs::read(root.path().join("session.json")).unwrap(),
-        legacy
+        std::fs::read(root.path().join("session.manifest.json")).unwrap(),
+        serde_json::to_vec(&manifest).unwrap(),
+        "appending changes only the manifest-selected segment"
     );
+}
+
+#[test]
+fn missing_manifest_rejects_unrecognized_files_without_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let session = SessionId::parse("old").unwrap();
+    let path = root.path().join("code-rs-sessions").join(&session.id);
+    std::fs::create_dir_all(&path).unwrap();
+    let primary = path.join("session.json");
+    let alternate = path.join("session.alt.json");
+    std::fs::write(
+        &primary,
+        serde_json::to_vec(&SessionState::empty("old")).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &alternate,
+        br#"{"store_generation":7,"state":{"version":2,"session_id":"old","cwd":null,"cwd_dev":0,"cwd_ino":0,"branches":[],"next_branch_seq":0}}"#,
+    )
+    .unwrap();
+    let before = [
+        std::fs::read(&primary).unwrap(),
+        std::fs::read(&alternate).unwrap(),
+    ];
+
+    let error = match SessionStore::load_at(&session, root.path()) {
+        Ok(_) => panic!("unrecognized directory unexpectedly loaded"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, StoreError::Corrupt(_)));
+    assert_eq!(
+        error.to_string(),
+        "corrupt session state: session manifest is missing"
+    );
+    assert_eq!(
+        [
+            std::fs::read(&primary).unwrap(),
+            std::fs::read(&alternate).unwrap()
+        ],
+        before,
+        "rejection neither converts nor removes unrecognized files"
+    );
+    assert_eq!(
+        {
+            let mut names = std::fs::read_dir(&path)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        },
+        vec![
+            std::ffi::OsString::from("session.alt.json"),
+            std::ffi::OsString::from("session.json")
+        ],
+        "rejection creates no store artifacts"
+    );
+}
+
+#[test]
+fn malformed_current_manifest_is_corrupt() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = open(root.path());
+    std::fs::write(root.path().join("session.manifest.json"), b"not json").unwrap();
+
+    assert!(matches!(load(&dir), Err(StoreError::Corrupt(_))));
+}
+
+#[test]
+fn malformed_current_log_is_corrupt() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = open(root.path());
+    let state = SessionState::empty("bad-log");
+    let manifest = initial_manifest(&dir, &state, 0, [0; 16], None).unwrap();
+    std::fs::write(root.path().join(manifest.current.segment), vec![b'x'; 56]).unwrap();
+
+    assert!(matches!(load(&dir), Err(StoreError::Corrupt(_))));
 }
 
 #[test]
@@ -69,7 +144,7 @@ fn oversize_current_segment_recovers_retained_previous_set() {
         .set_len(log::max_replay_bytes() + 1)
         .unwrap();
 
-    let recovered = load_or_migrate(&dir, "fallback").unwrap();
+    let recovered = load(&dir).unwrap();
     assert_eq!(recovered.state.branches.len(), 1);
     assert_eq!(recovered.state.branches[0].prompt, "committed");
 }
@@ -88,7 +163,7 @@ fn compaction_error_is_returned_after_committed_append() {
 
     assert!(matches!(result, Err(StoreError::CommittedMaintenance(_))));
     std::fs::remove_dir(root.path().join("snapshot-1-1.json")).unwrap();
-    let reopened = load_or_migrate(&dir, "compact-error").unwrap();
+    let reopened = load(&dir).unwrap();
     assert_eq!(reopened.state.branches.len(), 1);
 }
 
@@ -146,7 +221,7 @@ fn replaced_snapshot_retains_a_loadable_previous_set() {
     )
     .unwrap();
 
-    let recovered = load_or_migrate(&dir, "replace-fallback").unwrap();
+    let recovered = load(&dir).unwrap();
     assert_eq!(recovered.state.branches.len(), 1);
     assert_eq!(recovered.state.branches[0].prompt, "retained");
 }
@@ -208,7 +283,7 @@ fn dual_recovery_failure_preserves_causes_and_io_semantics() {
         .write_all(b"corrupt retained segment")
         .unwrap();
 
-    let error = match load_or_migrate(&dir, "dual-failure") {
+    let error = match load(&dir) {
         Ok(_) => panic!("dual recovery failure unexpectedly loaded"),
         Err(error) => error,
     };

@@ -1,4 +1,4 @@
-//! Snapshots, manifest publication, migration, recovery-set selection, and compaction.
+//! Snapshots, manifest publication, recovery-set selection, and compaction.
 
 use super::*;
 use log::{ReplayCursor, ReplayResult};
@@ -48,32 +48,31 @@ pub(super) struct LoadedStore {
     pub repaired_tail: bool,
 }
 
-pub(super) fn load_or_migrate(
-    dir: &openat::Dir,
-    session_id: &str,
-) -> Result<LoadedStore, StoreError> {
-    match read_manifest(dir)? {
-        Some(manifest) => {
-            let loaded = match load_set(dir, &manifest, &manifest.current, true) {
-                Ok(loaded) => loaded,
-                Err(current_error) => {
-                    let Some(previous) = manifest.previous.as_ref() else {
-                        return Err(current_error);
-                    };
-                    match load_set(dir, &manifest, previous, false) {
-                        Ok(previous_loaded) => {
-                            recover_previous(dir, previous_loaded, previous.clone())?
-                        }
-                        Err(previous_error) => {
-                            return Err(combined_recovery_error(current_error, previous_error));
-                        }
-                    }
-                }
+pub(super) fn initialize(dir: &openat::Dir, session_id: &str) -> Result<LoadedStore, StoreError> {
+    let state = SessionState::empty(session_id);
+    let manifest = initial_manifest(dir, &state, 0, [0; 16], None)?;
+    load_set(dir, &manifest, &manifest.current, true)
+}
+
+pub(super) fn require_manifest(dir: &openat::Dir) -> Result<(), StoreError> {
+    read_manifest(dir)?.ok_or_else(|| StoreError::Corrupt("session manifest is missing".into()))?;
+    Ok(())
+}
+
+pub(super) fn load(dir: &openat::Dir) -> Result<LoadedStore, StoreError> {
+    let manifest = read_manifest(dir)?
+        .ok_or_else(|| StoreError::Corrupt("session manifest is missing".into()))?;
+    match load_set(dir, &manifest, &manifest.current, true) {
+        Ok(loaded) => Ok(loaded),
+        Err(current_error) => {
+            let Some(previous) = manifest.previous.as_ref() else {
+                return Err(current_error);
             };
-            cleanup_legacy(dir)?;
-            Ok(loaded)
+            match load_set(dir, &manifest, previous, false) {
+                Ok(previous_loaded) => recover_previous(dir, previous_loaded, previous.clone()),
+                Err(previous_error) => Err(combined_recovery_error(current_error, previous_error)),
+            }
         }
-        None => migrate_legacy(dir, session_id),
     }
 }
 
@@ -81,7 +80,7 @@ pub(super) fn replace_materialized(
     dir: &openat::Dir,
     state: &SessionState,
 ) -> Result<LoadedStore, StoreError> {
-    let loaded = load_or_migrate(dir, &state.session_id)?;
+    let loaded = load(dir)?;
     let previous = seal_current(dir, &loaded)?;
     let manifest = initial_manifest(
         dir,
@@ -94,19 +93,18 @@ pub(super) fn replace_materialized(
 }
 
 pub(super) fn catch_up(dir: &openat::Dir, loaded: &mut LoadedStore) -> Result<(), StoreError> {
-    let manifest = read_manifest(dir)?.ok_or_else(|| {
-        StoreError::Corrupt("session manifest disappeared after migration".into())
-    })?;
+    let manifest = read_manifest(dir)?
+        .ok_or_else(|| StoreError::Corrupt("session manifest disappeared".into()))?;
     if manifest.generation != loaded.manifest.generation
         || manifest.current.segment != loaded.manifest.current.segment
     {
-        *loaded = load_or_migrate(dir, &loaded.state.session_id)?;
+        *loaded = load(dir)?;
         return Ok(());
     }
     let mut file = super::open_regular_at(dir, &manifest.current.segment, libc::O_RDWR, 0)
         .map_err(|_| StoreError::Io("open active session segment failed".into()))?;
     if log::identity(&file)? != loaded.segment_identity {
-        *loaded = load_or_migrate(dir, &loaded.state.session_id)?;
+        *loaded = load(dir)?;
         return Ok(());
     }
     let mut candidate = loaded.state.clone();
@@ -190,15 +188,6 @@ pub(super) fn append(
     Ok(())
 }
 
-fn migrate_legacy(dir: &openat::Dir, session_id: &str) -> Result<LoadedStore, StoreError> {
-    let state = super::read_legacy_state(dir)?.unwrap_or_else(|| SessionState::empty(session_id));
-    check_logical_read(&state)?;
-    let manifest = initial_manifest(dir, &state, 0, [0; 16], None)?;
-    let loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?;
-    Ok(loaded)
-}
-
 fn recover_previous(
     dir: &openat::Dir,
     mut loaded: LoadedStore,
@@ -212,7 +201,6 @@ fn recover_previous(
         Some(previous),
     )?;
     loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?;
     Ok(loaded)
 }
 
@@ -561,21 +549,6 @@ fn check_logical_write(state: &SessionState) -> Result<(), StoreError> {
         return Err(StoreError::Invalid(format!(
             "session state exceeds the {MAX_SESSION_BYTES} byte cap"
         )));
-    }
-    Ok(())
-}
-
-fn cleanup_legacy(dir: &openat::Dir) -> Result<(), StoreError> {
-    let mut changed = false;
-    for name in ["session.json", "session.alt.json"] {
-        match dir.remove_file(name) {
-            Ok(()) => changed = true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(StoreError::Io("remove migrated session slot failed".into())),
-        }
-    }
-    if changed {
-        sync_dir(dir)?;
     }
     Ok(())
 }

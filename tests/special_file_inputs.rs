@@ -142,12 +142,12 @@ fn settings_and_session_special_entries_fail_without_blocking() {
 
     std::fs::remove_file(session_dir.join(".lock")).unwrap();
     std::fs::write(session_dir.join(".lock"), "").unwrap();
-    mkfifo(&session_dir.join("session.json"));
+    mkfifo(&session_dir.join("session.manifest.json"));
     assert!(!run_bounded(command(temp.path(), "valid", "bad-session"))
         .status
         .success());
 
-    std::fs::remove_file(session_dir.join("session.json")).unwrap();
+    std::fs::remove_file(session_dir.join("session.manifest.json")).unwrap();
     std::fs::remove_file(session_dir.join(".lock")).unwrap();
     std::fs::write(session_dir.join("lock-target"), "").unwrap();
     std::os::unix::fs::symlink("lock-target", session_dir.join(".lock")).unwrap();
@@ -157,14 +157,15 @@ fn settings_and_session_special_entries_fail_without_blocking() {
 
     std::fs::remove_file(session_dir.join(".lock")).unwrap();
     std::fs::write(session_dir.join(".lock"), "").unwrap();
-    std::fs::write(session_dir.join("state-target"), "{}").unwrap();
-    std::os::unix::fs::symlink("state-target", session_dir.join("session.json")).unwrap();
+    std::fs::write(session_dir.join("manifest-target"), "{}").unwrap();
+    std::os::unix::fs::symlink("manifest-target", session_dir.join("session.manifest.json"))
+        .unwrap();
     assert!(!run_bounded(command(temp.path(), "valid", "bad-session"))
         .status
         .success());
 
-    std::fs::remove_file(session_dir.join("session.json")).unwrap();
-    mkfifo(&session_dir.join("session.alt.json"));
+    std::fs::remove_file(session_dir.join("session.manifest.json")).unwrap();
+    mkfifo(&session_dir.join("session.manifest.json"));
     assert!(!run_bounded(command(temp.path(), "valid", "bad-session"))
         .status
         .success());

@@ -190,11 +190,12 @@ Example success object:
   earlier turn, that becomes a new branch with explicit parent lineage and a fresh `branch_id`
   and does not corrupt the other turns' transcripts. Turn 0 is a usage error; a gap above
   `latest+1` is rejected.
-- The transcript stores each turn's `prompt`, FNV-1a `digest`, and observed tool entries in
-  generation-numbered `session.json` and `session.alt.json` slots under a per-session `flock`.
-  Writes use retained directory and file descriptors, file and directory syncs, and post-sync
-  identity checks. Readers select the newest valid generation and can recover from one malformed
-  slot. Replays read the persisted record; they never rewrite history.
+- The transcript stores each turn's `prompt`, FNV-1a `digest`, and observed tool entries in a
+  versioned `session.manifest.json`, authenticated snapshot, and framed append-only segment under
+  a per-session `flock`. Writes use retained directory and file descriptors, file and directory
+  syncs, and post-sync identity checks. Readers recover only from the manifest's authenticated
+  retained recovery set; a missing or malformed current store is a session error. Replays read
+  the persisted record; they never rewrite history.
 - `--cwd` is pinned to the session on its first turn; subsequent turns on the same session
   with a different cwd are rejected. `-p`/`--prompt` sets the prompt; when it is
   omitted the entire stdin is the prompt.
@@ -307,7 +308,7 @@ The session store and subprocess runner are Unix-only by design; there is no Win
 
 ## cwd safety
 
-Sessions are pinned to a working directory (`session.json["cwd"]`) on their first turn
+Sessions are pinned to a working directory (the materialized session state's `cwd`) on their first turn
 and enforce it on every later turn (`cwd-mismatch`). File tools retain one descriptor-relative
 workspace capability for the complete turn; path arguments cannot escape it through `..`,
 absolute paths, symlinks, or a concurrent rename of the workspace path. `run_shell_command`

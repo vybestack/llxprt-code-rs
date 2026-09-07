@@ -1,7 +1,6 @@
 //! Versioned session storage for the headless agent: a framed append-only
 //! transaction log plus validated snapshots providing crash recovery and
-//! bounded replay. Legacy generation-numbered state slots are migrated
-//! atomically on first open. The materialized state holds `session_id`, the
+//! bounded replay. The materialized state holds `session_id`, the
 //! canonical pinned `cwd`, and an explicit list of `branches`. Each branch
 //! carries its own `branch_id`, parent lineage (parent `branch_id` + turn +
 //! attempt), a 1-based `turn`, an `attempt` id, the exact prompt and its
@@ -23,9 +22,8 @@ pub const LEASE_SECONDS: u64 = 3600;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
 pub const MAX_PROMPT_BYTES: usize = 512 * 1024;
-/// Hard cap on one state slot (bytes). Each slot is read bounded (`cap + 1`) so an
-/// oversized state file is rejected before any allocation, and every write checks the serialized
-/// size before modifying the inactive slot.
+/// Hard cap on materialized session state (bytes). Snapshots and replay are bounded so an
+/// oversized session artifact is rejected before unbounded allocation.
 pub const MAX_SESSION_BYTES: usize = 32 * 1024 * 1024;
 /// Hard cap on the number of branches in one session.
 pub const MAX_BRANCHES: usize = 4096;
@@ -108,7 +106,7 @@ pub enum StoreError {
     Busy(String),
     Lock(String),
     LockTimeout,
-    /// A state-slot update completed, but retained-directory durability was not confirmed.
+    /// A session-artifact update completed, but retained-directory durability was not confirmed.
     InstalledDurabilityUnknown,
     /// The event is durable, but post-commit snapshot maintenance failed.
     CommittedMaintenance(String),
@@ -216,93 +214,6 @@ pub(crate) fn open_regular_at(
     Ok(file)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct StateSlot {
-    store_generation: u64,
-    state: SessionState,
-}
-
-enum SlotRead {
-    Missing,
-    Valid(StateSlot),
-    Corrupt(StoreError),
-}
-
-fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError> {
-    let mut bytes = Vec::new();
-    let f = match open_regular_at(dir, name, libc::O_RDONLY, 0) {
-        Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(SlotRead::Missing),
-        Err(_) => {
-            return Err(StoreError::Io(
-                "session state could not be opened safely".into(),
-            ));
-        }
-    };
-    f.take(MAX_SESSION_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| StoreError::Io("session state could not be read".into()))?;
-    if bytes.len() > MAX_SESSION_BYTES {
-        return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-            "session state exceeds the session byte cap".into(),
-        )));
-    }
-    let slot = match serde_json::from_slice::<StateSlot>(&bytes) {
-        Ok(slot) => slot,
-        Err(_) if name == "session.json" => match serde_json::from_slice::<SessionState>(&bytes) {
-            Ok(state) => StateSlot {
-                store_generation: 0,
-                state,
-            },
-            Err(_) => {
-                return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-                    "session state is not valid JSON".into(),
-                )))
-            }
-        },
-        Err(_) => {
-            return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-                "session state slot is not valid JSON".into(),
-            )))
-        }
-    };
-    if let Err(error) = slot.state.validate() {
-        return Ok(SlotRead::Corrupt(error));
-    }
-    Ok(SlotRead::Valid(slot))
-}
-
-fn read_legacy_state_with_generation(
-    dir: &openat::Dir,
-) -> Result<Option<(u64, SessionState)>, StoreError> {
-    let primary = read_state_slot(dir, "session.json")?;
-    let alternate = read_state_slot(dir, "session.alt.json")?;
-    let selected = match (primary, alternate) {
-        (SlotRead::Valid(a), SlotRead::Valid(b)) => {
-            if a.store_generation >= b.store_generation {
-                a
-            } else {
-                b
-            }
-        }
-        (SlotRead::Valid(slot), _) | (_, SlotRead::Valid(slot)) => slot,
-        (SlotRead::Missing, SlotRead::Missing) => return Ok(None),
-        (SlotRead::Corrupt(error), _) | (_, SlotRead::Corrupt(error)) => return Err(error),
-    };
-    Ok(Some((selected.store_generation, selected.state)))
-}
-
-#[cfg(test)]
-fn read_state_with_generation(
-    dir: &openat::Dir,
-) -> Result<Option<(u64, SessionState)>, StoreError> {
-    read_legacy_state_with_generation(dir)
-}
-
-fn read_legacy_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
-    Ok(read_legacy_state_with_generation(dir)?.map(|(_, state)| state))
-}
-
 fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, StoreError> {
     use std::os::unix::fs::MetadataExt as _;
     let a = a
@@ -318,24 +229,33 @@ pub(crate) fn ensure_private_subdir(
     parent: &openat::Dir,
     name: &str,
 ) -> Result<openat::Dir, StoreError> {
-    if parent.sub_dir(name).is_err() {
+    let (dir, _) = open_subdir(parent, name)?;
+    make_private_dir(&dir)?;
+    Ok(dir)
+}
+
+fn open_subdir(parent: &openat::Dir, name: &str) -> Result<(openat::Dir, bool), StoreError> {
+    let created = if parent.sub_dir(name).is_ok() {
+        false
+    } else {
         match parent.create_dir(name, 0o700) {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-            Err(_) => {
-                return Err(StoreError::Io("create session directory failed".into()));
-            }
+            Ok(()) => true,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
+            Err(_) => return Err(StoreError::Io("create session directory failed".into())),
         }
-    }
+    };
     let dir = parent
         .sub_dir(name)
         .map_err(|_| StoreError::Io("open session directory safely failed".into()))?;
+    Ok((dir, created))
+}
+
+fn make_private_dir(dir: &openat::Dir) -> Result<(), StoreError> {
     use std::os::fd::AsRawFd as _;
     let permission_handle = dir
         .open_file(".")
         .map_err(|_| StoreError::Io("open retained session descriptor failed".into()))?;
-    fchmod(permission_handle.as_raw_fd(), 0o700)?;
-    Ok(dir)
+    fchmod(permission_handle.as_raw_fd(), 0o700)
 }
 
 impl SessionId {
@@ -375,12 +295,16 @@ impl SessionStore {
         let config = crate::tools::open_root(config_path)
             .map_err(|_| StoreError::Io("open configuration directory safely failed".into()))?;
         let sessions = ensure_private_subdir(&config, "code-rs-sessions")?;
-        let dir_cap = ensure_private_subdir(&sessions, &session.id)?;
+        let (dir_cap, created) = open_subdir(&sessions, &session.id)?;
+        if !created {
+            snapshot::require_manifest(&dir_cap)?;
+        }
+        make_private_dir(&dir_cap)?;
         let file = open_regular_at(&dir_cap, ".lock", libc::O_RDWR | libc::O_CREAT, 0o600)
             .map_err(|_| StoreError::Lock("lock could not be opened safely".into()))?;
         use std::os::fd::AsRawFd as _;
         fchmod(file.as_raw_fd(), 0o600)?;
-        Ok(SessionStore {
+        let store = SessionStore {
             session_dir: config_path.join("code-rs-sessions").join(&session.id),
             session_id: session.id.clone(),
             dir: dir_cap,
@@ -389,7 +313,21 @@ impl SessionStore {
             cache: Mutex::new(None),
             operation_metrics: Mutex::new(StoreMetrics::default()),
             context: Mutex::new(None),
-        })
+        };
+        store.locked(|| {
+            let loaded = if created {
+                snapshot::initialize(&store.dir, &store.session_id)?
+            } else {
+                snapshot::load(&store.dir)?
+            };
+            *store
+                .cache
+                .lock()
+                .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))? =
+                Some(loaded);
+            Ok(())
+        })?;
+        Ok(store)
     }
 
     /// Open (or create) the store for a session.
@@ -497,7 +435,7 @@ impl SessionStore {
         let before = cache.as_ref().map_or(0, |loaded| loaded.cursor.offset);
         match cache.as_mut() {
             Some(loaded) => snapshot::catch_up(&self.dir, loaded)?,
-            None => *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?),
+            None => *cache = Some(snapshot::load(&self.dir)?),
         }
         let loaded = cache.as_ref().expect("session cache initialized");
         let input = loaded.cursor.offset.saturating_sub(before);
@@ -511,7 +449,7 @@ impl SessionStore {
             .lock()
             .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
         if cache.is_none() {
-            *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?);
+            *cache = Some(snapshot::load(&self.dir)?);
         }
         let loaded = cache.as_mut().expect("session cache initialized");
         let before = loaded.cursor.offset;

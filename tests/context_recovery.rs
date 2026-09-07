@@ -994,17 +994,18 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
         !String::from_utf8_lossy(&manifest).contains(SECRET),
         "the manifest never carries a secret"
     );
-    // Both session-state slots are scanned: the durable state is the
-    // transcript the next process would replay.
-    for name in ["session.json", "session.alt.json"] {
-        let path = store.session_dir.join(name);
-        if !path.exists() {
+    // Every current session-store artifact is scanned: snapshots and framed
+    // log segments are the transcript a later process can replay.
+    for entry in std::fs::read_dir(&store.session_dir).unwrap() {
+        let entry = entry.unwrap();
+        if !entry.file_type().unwrap().is_file() {
             continue;
         }
-        let state = std::fs::read_to_string(&path).unwrap();
+        let bytes = std::fs::read(entry.path()).unwrap();
         assert!(
-            !state.contains(SECRET),
-            "{name} never carries an unscanned secret"
+            !String::from_utf8_lossy(&bytes).contains(SECRET),
+            "{} never carries an unscanned secret",
+            entry.file_name().to_string_lossy()
         );
     }
     let quiesce = store.session_dir.join("context-quiesce.json");

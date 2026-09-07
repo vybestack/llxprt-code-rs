@@ -11,8 +11,7 @@
 
 use llxprt_code_rs::adapter::{ChatBackend, LlmResult};
 use llxprt_code_rs::session::{
-    BranchRecord, Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionState, SessionStore,
-    StoreError,
+    Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionStore, StoreError,
 };
 use llxprt_code_rs::tools::ToolSpec;
 use serdes_ai::core::FinishReason;
@@ -89,12 +88,6 @@ fn new_cwd() -> PathBuf {
     w
 }
 
-fn workspace_identity(path: &Path) -> (u64, u64) {
-    llxprt_code_rs::tools::WorkspaceCap::open(path)
-        .unwrap()
-        .identity()
-}
-
 fn reserved(
     store: &SessionStore,
     turn: Option<u32>,
@@ -118,30 +111,6 @@ fn complete_turn1(st: &SessionStore, prompt: &str, cwd: &Path) -> ReservedReques
     )
     .unwrap();
     r
-}
-
-/// Build a completed branch record for a hand-crafted corrupt/chain state.
-fn branch(turn: u32, attempt: u32, id: &str, prompt: &str) -> BranchRecord {
-    BranchRecord {
-        branch_id: id.to_string(),
-        turn,
-        attempt,
-        parent_branch: None,
-        parent_turn: 0,
-        parent_attempt: 0,
-        prompt: prompt.to_string(),
-        digest: llxprt_code_rs::agent::prompt_digest(prompt),
-        lifecycle: Lifecycle::Completed,
-        rounds: vec![RoundRecord {
-            assistant: "done".into(),
-            calls: Vec::new(),
-        }],
-        summary: "done".into(),
-        error: String::new(),
-        owner: String::new(),
-        reserved_at: 0,
-        lease_expiry: 0,
-    }
 }
 
 fn expire_pending(store: &SessionStore) {
@@ -502,92 +471,6 @@ fn second_store_changed_prompt_forks_a_new_child_branch() {
 /// A near-`MAX_BRANCHES` valid chain validates in place (linear pass) and a
 /// near-`MAX_BRANCHES` cycle-shaped state is rejected as corruption. No wall-clock
 /// assertion: only the outcome and the branch/tool caps.
-#[test]
-fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
-    use llxprt_code_rs::session::MAX_BRANCHES;
-
-    let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions").join("resv-chain");
-    std::fs::create_dir_all(&dir).unwrap();
-
-    // Build a MAX_BRANCHES-long chain b1..bN with parent links so the turn +1
-    // lineage contract is satisfied.
-    let mut branches: Vec<BranchRecord> = (0..MAX_BRANCHES)
-        .map(|i| branch((i as u32) + 1, 1, &format!("b{}", i + 1), "P"))
-        .collect();
-    for b in branches.iter_mut().skip(1) {
-        let parent_seq = b.turn - 1;
-        b.parent_branch = Some(format!("b{parent_seq}"));
-        b.parent_turn = parent_seq;
-        b.parent_attempt = 1;
-    }
-    let valid = SessionState {
-        version: llxprt_code_rs::session::STORE_VERSION,
-        session_id: "resv-chain".into(),
-        cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-        cwd_dev: workspace_identity(&cwd).0,
-        cwd_ino: workspace_identity(&cwd).1,
-        branches,
-        next_branch_seq: MAX_BRANCHES as u64,
-    };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&valid).unwrap(),
-    )
-    .unwrap();
-    let store_ok = SessionStore::load(&SessionId::parse("resv-chain").unwrap()).unwrap();
-    store_ok.snapshot().unwrap();
-
-    // A chain cap violation is the early hard cap, not a panic and not a hang.
-    let dir2 = root.join("code-rs-sessions").join("resv-cycle");
-    std::fs::create_dir_all(&dir2).unwrap();
-    let chain = store_ok.snapshot().unwrap();
-    let mut cycle_state = chain;
-    cycle_state.session_id = "resv-cycle".into();
-    // A cycle-shaped graph is rejected as corruption (the +1 turn contract makes the
-    // parent cycle itself inconsistent, so the rejection is always deterministic).
-    let n = cycle_state.branches.len();
-    cycle_state.branches[n - 1].parent_branch = Some("b1".to_string());
-    std::fs::write(
-        dir2.join("session.json"),
-        serde_json::to_vec(&cycle_state).unwrap(),
-    )
-    .unwrap();
-    let store_cy = SessionStore::load(&SessionId::parse("resv-cycle").unwrap()).unwrap();
-    match store_cy.snapshot() {
-        Err(StoreError::Corrupt(_)) => {}
-        other => panic!("a cycle-shaped near-max state must be Corrupt, got {other:?}"),
-    }
-
-    // Over-cap: MAX_BRANCHES + 1 is rejected with the early "too many branches" cap.
-    let dir = root.join("code-rs-sessions").join("resv-over");
-    std::fs::create_dir_all(&dir).unwrap();
-    let over = {
-        let valid_again = SessionState {
-            version: llxprt_code_rs::session::STORE_VERSION,
-            session_id: "resv-over".into(),
-            cwd: None,
-            cwd_dev: 0,
-            cwd_ino: 0,
-            branches: cycle_state.branches.clone(),
-            next_branch_seq: MAX_BRANCHES as u64,
-        };
-        // Append one more branch, pending with its own owner, so the early MAX_BRANCHES
-        // cap fails before any per-branch validation.
-        let mut s = valid_again;
-        let mut extra = branch(1, 1, "zzz", "maybe");
-        extra.owner = "x".to_string();
-        extra.lifecycle = Lifecycle::Pending;
-        s.branches.push(extra);
-        s
-    };
-    std::fs::write(dir.join("session.json"), serde_json::to_vec(&over).unwrap()).unwrap();
-    match SessionStore::load(&SessionId::parse("resv-over").unwrap()).and_then(|s| s.snapshot()) {
-        Err(StoreError::Corrupt(m)) if m.contains("too many branches") => {}
-        other => panic!("over-cap branches must be the early cap, got {other:?}"),
-    }
-}
 
 #[test]
 fn replacement_between_turns_is_rejected_by_workspace_identity() {

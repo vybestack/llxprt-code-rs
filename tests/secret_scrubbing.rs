@@ -6,7 +6,7 @@
 //! profile also carries) inside an HTTP 400 OpenAI error body. The subprocess must
 //! exit with a model error whose error JSON is exactly one object, and neither marker may
 //! survive anywhere: raw stdout, raw stderr, the parsed error fields, or any byte of
-//! the persisted `session.json`. A `[redacted]` marker must appear in their place.
+//! the persisted append-only session-store artifacts. A `[redacted]` marker must appear in their place.
 //!
 //! Markers are generated per test run and are never printed on an assertion failure.
 

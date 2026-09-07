@@ -29,7 +29,7 @@ pub(crate) const PRESERVED_SPAN_LIMIT: usize = 64;
 pub(crate) const DIGEST_SPAN_LIMIT: usize = 4;
 /// Byte budget for the preserved-span block of one compact CTXDIGEST record.
 pub(crate) const DIGEST_SPAN_BYTES: usize = 1024;
-/// Read bound for a reloaded sanitized spine (session slot cap).
+/// Read bound for a reloaded sanitized spine (session state cap).
 pub(crate) const SPINE_RELOAD_MAX: usize = 32 << 20;
 /// Read bound for a reloaded vault snapshot.
 pub(crate) const VAULT_RELOAD_MAX: usize = 8 << 20;
@@ -374,7 +374,7 @@ fn sequence_admission(
     }
 }
 
-/// `B` bound of the admission region: the sum of the session slot cap
+/// `B` bound of the admission region: the sum of the session state cap
 /// (`SPINE_RELOAD_MAX`) and the bulk work budget. Unit B (#121-c) enforces it
 /// region-wide: every admission sums its projected occupancy (the units
 /// already admitted plus this payload's bound) against `B - R - H`, so the

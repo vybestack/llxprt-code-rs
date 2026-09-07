@@ -1,15 +1,18 @@
 #![cfg(unix)]
 
+use llxprt_code_rs::session::{SessionId, SessionStore};
+use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[test]
-fn cross_process_session_lock_times_out_without_mutating_slots() {
+fn cross_process_session_lock_times_out_without_mutating_store() {
     let temp = tempfile::tempdir().unwrap();
     let profiles = temp.path().join("profiles");
     let session_dir = temp.path().join("code-rs-sessions/lock-contention");
     std::fs::create_dir_all(&profiles).unwrap();
-    std::fs::create_dir_all(&session_dir).unwrap();
+    let session = SessionId::parse("lock-contention").unwrap();
+    let store = SessionStore::load_at(&session, temp.path()).unwrap();
     std::fs::write(
         profiles.join("lock.json"),
         serde_json::json!({
@@ -25,6 +28,14 @@ fn cross_process_session_lock_times_out_without_mutating_slots() {
     .unwrap();
 
     let lock_path = session_dir.join(".lock");
+    let before: BTreeMap<_, _> = std::fs::read_dir(&session_dir)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    drop(store);
     let ready = temp.path().join("holder-ready");
     let script = "import fcntl, pathlib, sys, time\n\
                   f = open(sys.argv[1], 'a+b')\n\
@@ -89,8 +100,17 @@ fn cross_process_session_lock_times_out_without_mutating_slots() {
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["status"], "error");
     assert!(response.to_string().contains("session lock timed out"));
-    assert!(!session_dir.join("session.json").exists());
-    assert!(!session_dir.join("session.alt.json").exists());
+    let after: BTreeMap<_, _> = std::fs::read_dir(&session_dir)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        after, before,
+        "lock timeout must not mutate the current store"
+    );
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

@@ -1,8 +1,7 @@
 //! The plain persisted record types of the session store: one round of the
 //! turn loop, a recorded tool call, the branch lifecycle, one addressable
-//! branch attempt, and the versioned state slot payload. Moved verbatim from
-//! `src/session.rs` so the session module owns its records; `src/session.rs`
-//! re-exports them so every existing path keeps compiling unchanged.
+//! branch attempt, and the materialized session state. The session module
+//! re-exports these records for its public API.
 
 use crate::session::STORE_VERSION;
 use serde::{Deserialize, Serialize};
@@ -87,7 +86,7 @@ pub struct BranchRecord {
     pub lease_expiry: u64,
 }
 
-/// The versioned persistent payload stored inside each state slot.
+/// The versioned persistent payload materialized from the current store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub version: u32,
