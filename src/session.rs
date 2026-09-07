@@ -310,14 +310,34 @@ impl SessionStore {
         let config = crate::tools::open_root(config_path)
             .map_err(|_| StoreError::Io("open configuration directory safely failed".into()))?;
         let sessions = ensure_private_subdir(&config, "code-rs-sessions")?;
+        // This lock lives beside, rather than inside, the session directory. Every
+        // opener holds it from before target-directory creation through initialization
+        // or current-manifest validation/load. In particular, an unknown pre-existing
+        // directory is rejected without adding `.lock` (or any other artifact) to it.
+        let initialization_name = format!(".{}-initialization.lock", session.id);
+        let initialization = open_regular_at(
+            &sessions,
+            &initialization_name,
+            libc::O_RDWR | libc::O_CREAT,
+            0o600,
+        )
+        .map_err(|_| StoreError::Lock("initialization lock could not be opened safely".into()))?;
+        use std::os::fd::AsRawFd as _;
+        fchmod(initialization.as_raw_fd(), 0o600)?;
+        let _initialization_guard =
+            lock_file_with_timeout(&initialization, SESSION_LOCK_TIMEOUT, Some(&session.id))?;
+
         let (dir_cap, created) = open_subdir(&sessions, &session.id)?;
         if !created {
             snapshot::require_manifest(&dir_cap)?;
         }
+        #[cfg(test)]
+        if created {
+            test_open_hook::pause_after_directory_creation(&session.id);
+        }
         make_private_dir(&dir_cap)?;
         let file = open_regular_at(&dir_cap, ".lock", libc::O_RDWR | libc::O_CREAT, 0o600)
             .map_err(|_| StoreError::Lock("lock could not be opened safely".into()))?;
-        use std::os::fd::AsRawFd as _;
         fchmod(file.as_raw_fd(), 0o600)?;
         let store = SessionStore {
             session_dir: config_path.join("code-rs-sessions").join(&session.id),
@@ -426,17 +446,7 @@ impl SessionStore {
                 Err(TryLockError::WouldBlock) => wait_for_lock(deadline)?,
             }
         };
-        loop {
-            match FileExt::try_lock_exclusive(&self.file) {
-                Ok(()) => break,
-                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    wait_for_lock(deadline)?;
-                }
-                Err(_) => return Err(StoreError::Lock("lock operation failed".into())),
-            }
-        }
-        let _file_guard = SessionFileLock(&self.file);
+        let _file_guard = lock_file_until(&self.file, deadline, None)?;
         f()
     }
 
@@ -817,6 +827,44 @@ impl SessionStore {
     }
 }
 
+fn lock_file_with_timeout<'a>(
+    file: &'a std::fs::File,
+    timeout: Duration,
+    session_id: Option<&str>,
+) -> Result<SessionFileLock<'a>, StoreError> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or(StoreError::LockTimeout)?;
+    lock_file_until(file, deadline, session_id)
+}
+
+fn lock_file_until<'a>(
+    file: &'a std::fs::File,
+    deadline: Instant,
+    session_id: Option<&str>,
+) -> Result<SessionFileLock<'a>, StoreError> {
+    let mut notified_waiter = false;
+    loop {
+        match FileExt::try_lock_exclusive(file) {
+            Ok(()) => return Ok(SessionFileLock(file)),
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                #[cfg(test)]
+                if !notified_waiter {
+                    if let Some(session_id) = session_id {
+                        test_open_hook::notify_waiter(session_id);
+                    }
+                    notified_waiter = true;
+                }
+                #[cfg(not(test))]
+                let _ = (&session_id, &mut notified_waiter);
+                wait_for_lock(deadline)?;
+            }
+            Err(_) => return Err(StoreError::Lock("lock operation failed".into())),
+        }
+    }
+}
+
 fn wait_for_lock(deadline: Instant) -> Result<(), StoreError> {
     let now = Instant::now();
     if now >= deadline {
@@ -844,6 +892,75 @@ pub(crate) fn load_session_store_in(
     config_root: &crate::config::ConfigHomeRoot,
 ) -> Result<SessionStore, String> {
     SessionStore::load_in(session, config_root).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod test_open_hook {
+    use std::sync::{mpsc, Arc, Mutex, OnceLock};
+
+    pub(super) struct Hook {
+        session_id: String,
+        directory_created: mpsc::Sender<()>,
+        release_creator: Mutex<mpsc::Receiver<()>>,
+        waiter_blocked: mpsc::Sender<()>,
+    }
+
+    static HOOK: OnceLock<Mutex<Option<Arc<Hook>>>> = OnceLock::new();
+
+    fn hook_for(session_id: &str) -> Option<Arc<Hook>> {
+        HOOK.get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("open test hook lock poisoned")
+            .as_ref()
+            .filter(|hook| hook.session_id == session_id)
+            .cloned()
+    }
+
+    pub(super) fn install(
+        session_id: String,
+        directory_created: mpsc::Sender<()>,
+        release_creator: mpsc::Receiver<()>,
+        waiter_blocked: mpsc::Sender<()>,
+    ) {
+        let mut hook = HOOK
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("open test hook lock poisoned");
+        assert!(hook.is_none(), "open test hook already installed");
+        *hook = Some(Arc::new(Hook {
+            session_id,
+            directory_created,
+            release_creator: Mutex::new(release_creator),
+            waiter_blocked,
+        }));
+    }
+
+    pub(super) fn clear() {
+        *HOOK
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("open test hook lock poisoned") = None;
+    }
+
+    pub(super) fn pause_after_directory_creation(session_id: &str) {
+        let Some(hook) = hook_for(session_id) else {
+            return;
+        };
+        hook.directory_created
+            .send(())
+            .expect("test must await directory creation");
+        hook.release_creator
+            .lock()
+            .expect("open test release lock poisoned")
+            .recv()
+            .expect("test must release directory creator");
+    }
+
+    pub(super) fn notify_waiter(session_id: &str) {
+        if let Some(hook) = hook_for(session_id) {
+            let _ = hook.waiter_blocked.send(());
+        }
+    }
 }
 
 #[cfg(test)]

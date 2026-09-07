@@ -138,3 +138,56 @@ fn manifest_generation_overflow_is_corrupt() {
     assert!(matches!(error, StoreError::Corrupt(_)));
     assert!(error.to_string().contains("generation overflow"));
 }
+
+#[test]
+fn concurrent_open_waits_for_new_store_initialization() {
+    use std::sync::mpsc;
+
+    let root = tempfile::tempdir().unwrap();
+    let session = SessionId::parse("initialization-race").unwrap();
+    let (directory_created_tx, directory_created_rx) = mpsc::channel();
+    let (release_creator_tx, release_creator_rx) = mpsc::channel();
+    let (waiter_blocked_tx, waiter_blocked_rx) = mpsc::channel();
+    super::test_open_hook::install(
+        session.id.clone(),
+        directory_created_tx,
+        release_creator_rx,
+        waiter_blocked_tx,
+    );
+
+    let creator_root = root.path().to_path_buf();
+    let creator_session = session.clone();
+    let creator =
+        std::thread::spawn(move || SessionStore::load_at(&creator_session, &creator_root));
+    directory_created_rx
+        .recv()
+        .expect("creator pauses after making the session directory");
+
+    let opener_root = root.path().to_path_buf();
+    let opener_session = session.clone();
+    let (opened_tx, opened_rx) = mpsc::channel();
+    let opener_thread = std::thread::spawn(move || {
+        opened_tx
+            .send(SessionStore::load_at(&opener_session, &opener_root))
+            .expect("test must receive second opener result");
+    });
+    waiter_blocked_rx
+        .recv()
+        .expect("second opener waits on the external initialization lock");
+    assert!(
+        matches!(opened_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "second opener cannot observe the uninitialized directory"
+    );
+
+    release_creator_tx.send(()).unwrap();
+    let creator = creator.join().unwrap().expect("creator initializes store");
+    let opener = opened_rx
+        .recv()
+        .expect("second opener returns after initialization")
+        .expect("second opener loads initialized store");
+    opener_thread.join().unwrap();
+    super::test_open_hook::clear();
+
+    assert_eq!(creator.snapshot().unwrap().session_id, session.id);
+    assert_eq!(opener.snapshot().unwrap().session_id, session.id);
+}
