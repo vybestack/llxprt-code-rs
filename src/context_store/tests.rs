@@ -563,6 +563,22 @@ fn the_flow_lands_swaps_and_verifies_in_its_scopes() {
         V3,
         "the swap is the visibility switch"
     );
+    // `seal` sets `published` unconditionally, so asserting the sealed field
+    // alone can never fail. Land the sealed build into an inactive slot and
+    // swap it in, then assert `published` on a pair whose state the assertion
+    // can actually contradict: a landing or swap bug leaves the pair
+    // unpublished while the descriptor still claims `published`.
+    let mut sealed_pair = SlotPair::genesis(V2, v2_bytes.len() as u64, log.head_checksum());
+    sealed_pair
+        .land(Generation::Built {
+            store_version: V3,
+            bytes: copied.len() as u64,
+            checksum: descriptor.build_checksum,
+        })
+        .unwrap();
+    sealed_pair.swap(descriptor.selection_chain).unwrap();
+    assert!(sealed_pair.published());
+    assert!(descriptor.published);
     assert!(descriptor.verify_build(&copied));
     assert!(descriptor.verify_chain(&log));
 

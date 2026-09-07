@@ -265,12 +265,14 @@ impl Reducer {
 /// append with no recorded claims is the pre-segmentation append: it is one claim
 /// over the whole payload, so its lane is the source fallback.
 ///
-/// Identifiers come from the IR's own append mint, never from the event sequence.
-/// One append can mint several identifiers while the log's sequences are strictly
-/// consecutive, so minting from the sequence would hand a multi-claim append
-/// identifiers that the next event's append re-mints. The mint raises the append
-/// watermark once per minted identifier, and only when the append commits, so
-/// no later mint ever repeats one and a refused append spends nothing.
+/// Identifiers come from the IR's own append watermark, never from the event
+/// sequence. One append can mint several identifiers while the log's sequences
+/// are strictly consecutive, so minting from the sequence would hand a
+/// multi-claim append identifiers that the next event's append re-mints. The
+/// staging loop derives identifiers from the watermark without raising it;
+/// `note_minted_id` raises it once per minted identifier, and only when the
+/// append commits, so no later mint ever repeats one and a refused append —
+/// even one whose first identifier was already staged — spends nothing.
 ///
 /// The append is atomic: every item is minted and validated before any of them
 /// reaches the caller's state, so a refusal on any claim leaves the state
