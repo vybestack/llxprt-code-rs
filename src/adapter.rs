@@ -28,12 +28,25 @@ pub struct ToolCall {
     pub args_json: String,
 }
 
+/// Token accounting carried across the backend boundary, cache counters
+/// included, so downstream consumers can act on what the transport already
+/// parsed (issue 80). `None` fields mean the provider did not report them.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LlmUsage {
+    pub request_tokens: Option<u64>,
+    pub response_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+}
+
 /// The model's reply for one round.
 #[derive(Debug)]
 pub struct LlmResult {
     pub text: String,
     pub calls: Vec<ToolCall>,
     pub finish_reason: Option<FinishReason>,
+    pub usage: LlmUsage,
 }
 
 impl From<&ModelResponse> for LlmResult {
@@ -58,10 +71,21 @@ impl From<&ModelResponse> for LlmResult {
             }
         }
         let finish_reason = resp.finish_reason.clone();
+        let usage = resp
+            .usage
+            .as_ref()
+            .map_or(LlmUsage::default(), |u| LlmUsage {
+                request_tokens: u.request_tokens,
+                response_tokens: u.response_tokens,
+                total_tokens: u.total_tokens,
+                cache_creation_tokens: u.cache_creation_tokens,
+                cache_read_tokens: u.cache_read_tokens,
+            });
         LlmResult {
             text,
             calls,
             finish_reason,
+            usage,
         }
     }
 }
@@ -177,6 +201,18 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         .unwrap_or(std::time::Duration::from_millis(900_000));
     // The structural dsflash discriminator travels as per-model request settings;
     // Standard Chat keeps the default (the wire key stays absent).
+    // Unrecognized `modelParams` keys travel as a flattened extra map on the
+    // request body (issue 64). The structural dsflash discriminator is a separate
+    // typed channel that stays absent for Standard Chat.
+    let forwarded = config
+        .model_params
+        .as_ref()
+        .map(|params| params.forwarded.clone())
+        .unwrap_or_default();
+    let mut request_settings = serdes_ai::models::openai::OpenAIChatModelRequestSettings {
+        chat_template_kwargs: None,
+        extra: forwarded,
+    };
     let mut model = openai_chat_model(&config.model, &config.api_key, &base_url, timeout);
     if let Some(spec) = config
         .model_params
@@ -203,15 +239,13 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
                 serdes_ai::models::openai::ChatTemplateReasoningEffort::Max
             }
         });
-        model = model.with_request_settings(
-            serdes_ai::models::openai::OpenAIChatModelRequestSettings {
-                chat_template_kwargs: Some(serdes_ai::models::openai::ChatTemplateKwargs {
-                    enable_thinking: spec.enable_thinking,
-                    reasoning_effort: wire_effort,
-                }),
-            },
-        );
+        request_settings.chat_template_kwargs =
+            Some(serdes_ai::models::openai::ChatTemplateKwargs {
+                enable_thinking: spec.enable_thinking,
+                reasoning_effort: wire_effort,
+            });
     }
+    model = model.with_request_settings(request_settings);
     Ok(ModelAdapter {
         inner: model,
         timeout,
@@ -449,5 +483,28 @@ mod tests {
         let rendered = format!("{model:?}");
         assert!(!rendered.contains(marker));
         assert!(rendered.contains("[redacted]"));
+    }
+
+    #[test]
+    fn llm_result_carries_cache_counters_from_response_usage() {
+        let mut resp = serdes_ai::core::ModelResponse::new();
+        resp.usage = Some(serdes_ai::core::RequestUsage {
+            request_tokens: Some(100),
+            response_tokens: Some(20),
+            total_tokens: Some(120),
+            cache_creation_tokens: Some(5),
+            cache_read_tokens: Some(80),
+            details: None,
+        });
+        let result = super::LlmResult::from(&resp);
+        assert_eq!(result.usage.request_tokens, Some(100));
+        assert_eq!(result.usage.response_tokens, Some(20));
+        assert_eq!(result.usage.total_tokens, Some(120));
+        assert_eq!(result.usage.cache_creation_tokens, Some(5));
+        assert_eq!(result.usage.cache_read_tokens, Some(80));
+
+        let none_resp = serdes_ai::core::ModelResponse::new();
+        let result = super::LlmResult::from(&none_resp);
+        assert_eq!(result.usage, super::LlmUsage::default());
     }
 }

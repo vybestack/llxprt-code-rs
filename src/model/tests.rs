@@ -280,6 +280,7 @@ fn unknown_output_setting_fails() {
             seed: None,
             max_output_tokens: None,
             chat_template_kwargs: None,
+            forwarded: Default::default(),
             unsupported: vec!["stop".into()],
         },
         ..base_profile()
@@ -467,17 +468,19 @@ fn friendliglm_ladder_first_failures_in_order() {
         format!("unsupported profile setting(s): {NAMED_KEY_RESOLUTION_FAILURE}")
     );
 
-    // Rung 2: drop auth-key-name; `max_tokens` folds into the max-output cap,
-    // so the unsupported model parameter `parse_reasoning` is the first failure.
+    // Rung 2: drop auth-key-name. `parse_reasoning` is no longer a profile
+    // error (issue 64): the parser carries it as a forwarded key for the
+    // acceptance policy to decide, so it never names an unsupported setting.
     let mut rung2 = installed.clone();
     rung2["ephemeralSettings"]
         .as_object_mut()
         .unwrap()
         .remove("auth-key-name");
-    assert_eq!(
-        ladder_error(&rung2, "friendliglm"),
-        "unsupported profile setting(s): parse_reasoning"
-    );
+    let profile = parse_profile_value(&rung2, "friendliglm").unwrap();
+    assert!(profile
+        .model_params
+        .forwarded
+        .contains_key("parse_reasoning"));
 
     // Rung 3: drop parse_reasoning too; the dsflash discriminator survives and
     // the config resolves with an inline key.

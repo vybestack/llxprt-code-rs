@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `befb9bd7dcd4eb82079585783970c3f38778d5d34a8dc1925ecd2c2172ba5856`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `0144b4e99ac63adf0daf17985a6e3fdb53d6c59f08c36c03b06308d519c3f660`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -253,14 +253,33 @@ rate-limited `Display` also no longer invents a retry strategy the provider neve
 `Retry-After` delay renders verbatim, while a `None` delay reads `Model request rate limited
 (no retry delay supplied)` instead of the old `retry after None` phrasing (issue #159).
 
+## Patch 13 - verbatim forwarding of untyped modelParams keys
+(`vendor/serdes-ai-models/src/anthropic/model.rs`, `AnthropicModel.extra` + `with_extra`;
+`vendor/serdes-ai-models/src/anthropic/types.rs`, `MessagesRequest.extra`;
+`vendor/serdes-ai-models/src/openai/chat.rs`, `OpenAIChatModelRequestSettings.extra`;
+`vendor/serdes-ai-models/src/openai/types.rs`, `ChatCompletionRequest.extra`)
+
+`MessagesRequest` and `ChatCompletionRequest` each gain a flattened `extra` map of
+`BTreeMap<String, serde_json::Value>` that serializes only when non-empty, so a default-constructed
+request body is byte-for-byte unchanged. The model builders carry the map as a single value set by the host:
+`AnthropicModel::with_extra` and `OpenAIChatModelRequestSettings.extra` (already carried through
+`with_request_settings`). The host fills those maps from the neutral parser's `forwarded` set, so every
+unrecognized `modelParams` key reaches the provider wire verbatim at its original top-level JSON value. The map
+is never reinterpreted into `ModelSettings`; the typed `chat_template_kwargs` channel from Patch 9 stays a
+separate field, and a forwarded key colliding with a typed wire key cannot reach the wire because the parser routes
+recognized names into typed fields, not the map. Direct model tests pin the flattened serialized shape (including
+nested objects), the absence of an `extra` shell key when the map is empty, and the absence of the map for a
+default-constructed model.
 
 ## Tests
 
 Both the patched behavior and the rest of the transport are exercised by the host tests
 `tests/provider.rs` (raw finish reason, malformed tool-call arguments, strict parity
 envelope, endpoint-route matrix plus loopback request-path coverage), direct all-feature model tests
-(provider-specific malformed-argument handling, missing and unknown terminal reasons, and public
-redaction), `src/adapter.rs` round-replay tests, and `tests/cli_contract.rs` / `tests/phase2.rs`
+(provider-specific malformed-argument handling, missing and unknown terminal reasons, public redaction, and the
+Patch 13 flattened-extra wire shapes), `src/model_api/registry/tests.rs` (the `loose`,
+`known-model`, and `strict` acceptance policies plus the checked-in model registry), and
+`src/adapter.rs` round-replay tests, and `tests/cli_contract.rs` / `tests/phase2.rs`
 (offline, no configured endpoint request). The end-to-end release
 gate is `cargo xtask release-gates` (release build of the source tree with the vendor
 path deps plus the vendor/license file checks); `cargo package` is not a release gate.

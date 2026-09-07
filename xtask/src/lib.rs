@@ -8,6 +8,7 @@
 //! module's production Rust files, and enforces a checked-in burn-down debt ledger.
 
 pub mod analyze;
+pub mod compat;
 pub mod complexity;
 pub mod coupling;
 mod coupling_graph;

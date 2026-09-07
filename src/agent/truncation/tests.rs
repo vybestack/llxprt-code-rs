@@ -1,6 +1,7 @@
 //! Turn-retry tests for a first-completion output truncation (issue 153).
 
 use super::*;
+use crate::adapter::LlmUsage;
 use crate::agent::tests::{shared_config_home, MockBackend};
 use crate::session::{Lifecycle, SessionId, SessionStore};
 
@@ -10,6 +11,7 @@ fn truncated(text: &str) -> LlmResult {
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
+        usage: LlmUsage::default(),
     }
 }
 
@@ -19,6 +21,7 @@ fn healthy(text: &str) -> LlmResult {
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
     }
 }
 
@@ -67,6 +70,8 @@ fn truncated_first_turn_with_calls_is_not_executed_before_retry() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::Length),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![truncated_with_call, healthy("done")])),
@@ -126,6 +131,8 @@ fn mid_work_truncation_after_tool_calls_stays_fatal() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, truncated("half")])),
@@ -171,6 +178,8 @@ fn retried_turn_can_continue_into_tool_work() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![

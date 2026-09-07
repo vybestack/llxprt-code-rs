@@ -149,6 +149,10 @@ pub(super) fn refuse_unknown_tools(
             "error: unknown or disabled tool {}; available: {roster}",
             call.name
         );
+        // The errored call still consumes a budget slot and is recorded in history like
+        // every other call (the restore path derives `total_calls` from all round calls),
+        // so a model that keeps hallucinating names cannot spin forever for free.
+        attempt.usage.total_calls += 1;
         attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
         attempt.requests.push(super::tool_return_request(
             &call.name, &call.id, false, &text,
