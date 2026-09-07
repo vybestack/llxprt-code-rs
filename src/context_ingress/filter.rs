@@ -121,12 +121,19 @@ impl Vocabulary {
 pub enum RejectedUpdate {
     /// Tightening requires the offline channel; named explicitly, never silent.
     TighteningRequiresOffline { from: u64, to: u64 },
+    /// A persisted history claimed the baseline version but carried rules that
+    /// are not the code's baseline rules; restoring it would silently redefine
+    /// what version 1 resolves to (issue #141).
+    BaselineRulesMismatch { version: u64 },
 }
 
 impl RejectedUpdate {
     /// Stable name for reports.
     pub fn name(&self) -> &'static str {
-        "tightening-requires-offline"
+        match self {
+            Self::TighteningRequiresOffline { .. } => "tightening-requires-offline",
+            Self::BaselineRulesMismatch { .. } => "baseline-rules-mismatch",
+        }
     }
 }
 
@@ -295,8 +302,9 @@ impl FilterRegistry {
     }
 
     /// Restores the versioned histories from a durable artifact. Each history
-    /// must be non-empty, begin at version 1, and advance by strictly
-    /// increasing versions that are legal relaxations of their predecessor;
+    /// must be non-empty, begin at version 1 whose rules equal the code's
+    /// baseline ([`FilterRules::v1`]), and advance by strictly increasing
+    /// versions that are legal relaxations of their predecessor;
     /// anything else is a typed refusal instead of a silent rewrite (issue
     /// #118).
     pub fn restore_histories(&mut self, rules: Vec<FilterRules>) -> Result<(), RejectedUpdate> {
@@ -304,6 +312,16 @@ impl FilterRegistry {
             return Err(RejectedUpdate::TighteningRequiresOffline {
                 from: 1,
                 to: rules.first().map(|rules| rules.version).unwrap_or(0),
+            });
+        }
+        // Version 1 is not merely an ordinal: it names the code's seeded
+        // baseline rule set. A persisted entry claiming version 1 but carrying
+        // tighter or looser rules would silently redefine what every digest
+        // resolved at version 1 means, so its rules must equal the code's
+        // baseline before the sequence is accepted (issue #141).
+        if rules[0] != FilterRules::v1() {
+            return Err(RejectedUpdate::BaselineRulesMismatch {
+                version: rules[0].version,
             });
         }
         let mut current = rules[0].clone();
