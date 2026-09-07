@@ -386,7 +386,7 @@ impl Sequencer {
     /// appends follows `log`'s head checksum and carries the next sequence number.
     pub fn continuing(log: &EventLog, epoch: u64, recorded_unix_ms: u64) -> Self {
         Self::resume(
-            log.len() as u64 + FIRST_SEQUENCE,
+            log.next_sequence(),
             log.head_checksum(),
             epoch,
             recorded_unix_ms,
@@ -447,8 +447,52 @@ pub enum LogError {
     ChecksumMismatch { sequence: u64 },
     /// The record's schema version is not the log's schema version.
     SchemaVersion { sequence: u64, found: u64 },
-    /// The record was written under a different context-store version.
-    StoreVersion { sequence: u64, log: u64, event: u64 },
+    /// The record was written under a known OLDER context-store version than
+    /// the log: the store should be migrated up before the record appends.
+    StoreVersionOlder { sequence: u64, log: u64, event: u64 },
+    /// The record was written under a known NEWER context-store version than
+    /// the log: this build cannot read it, so the append is refused.
+    StoreVersionNewer { sequence: u64, log: u64, event: u64 },
+    /// The record was written under a context-store version no migration
+    /// defines: unrecognized, so the append is refused.
+    StoreVersionUnknown { sequence: u64, log: u64, event: u64 },
+}
+
+impl LogError {
+    /// Classifies a context-store version disagreement between `log` and
+    /// `event`. This is the only place the split is decided, so a migration
+    /// selector reads a typed variant instead of parsing a message: a known
+    /// older store is migratable, a known newer store and an unrecognized
+    /// version are refused (132).
+    pub fn store_version(sequence: u64, log: u64, event: u64) -> LogError {
+        use crate::context_kernel::migration::{V2, V3};
+        let known = |version: u64| version == V2 || version == V3;
+        if known(log) && known(event) && event < log {
+            LogError::StoreVersionOlder {
+                sequence,
+                log,
+                event,
+            }
+        } else if known(log) && known(event) {
+            LogError::StoreVersionNewer {
+                sequence,
+                log,
+                event,
+            }
+        } else {
+            LogError::StoreVersionUnknown {
+                sequence,
+                log,
+                event,
+            }
+        }
+    }
+
+    /// Whether the disagreement is one a migration can resolve: only a known
+    /// older store is migratable.
+    pub fn migratable(&self) -> bool {
+        matches!(self, LogError::StoreVersionOlder { .. })
+    }
 }
 
 /// Append-only log of recorded events.
@@ -456,6 +500,12 @@ pub enum LogError {
 pub struct EventLog {
     events: Vec<RecordedEvent>,
     store_version: u64,
+    /// Durable prefix an empty log resumes: the next sequence it assigns and
+    /// the head checksum of that prefix. `None` for a log at genesis. A log
+    /// that resumes a recorded chain assigns the recorded next sequence and
+    /// chains onto the recorded head instead of restarting the total order
+    /// (132).
+    resume: Option<(u64, Digest)>,
 }
 
 impl EventLog {
@@ -464,12 +514,36 @@ impl EventLog {
         Self {
             events: Vec::new(),
             store_version,
+            resume: None,
+        }
+    }
+
+    /// Creates an empty log that resumes a durable prefix: the first event it
+    /// appends carries `next_sequence` and commits to `last_checksum`, so a
+    /// recovered writer continues the recorded chain instead of re-minting
+    /// sequence numbers the prefix already used (132).
+    pub fn resuming(store_version: u64, next_sequence: u64, last_checksum: Digest) -> Self {
+        Self {
+            events: Vec::new(),
+            store_version,
+            resume: Some((next_sequence, last_checksum)),
         }
     }
 
     /// Context-store version this log was written under.
     pub fn store_version(&self) -> u64 {
         self.store_version
+    }
+
+    /// Next sequence the log assigns: the recorded resume point of a log that
+    /// resumes a durable prefix, or the position after its last event.
+    pub fn next_sequence(&self) -> u64 {
+        match self.resume {
+            // A resuming log keeps its base: the k events appended since the
+            // resume continue past the recorded next sequence, not past 1.
+            Some((next, _)) => next + self.events.len() as u64,
+            None => self.events.len() as u64 + FIRST_SEQUENCE,
+        }
     }
 
     /// Number of recorded events.
@@ -491,13 +565,15 @@ impl EventLog {
     pub fn head_checksum(&self) -> Digest {
         match self.events.last() {
             Some(event) => event.checksum,
-            None => GENESIS_CHECKSUM,
+            None => self
+                .resume
+                .map_or(GENESIS_CHECKSUM, |(_, checksum)| checksum),
         }
     }
 
     /// Appends an event after validating continuity, checksum chain, and versions.
     pub fn append(&mut self, event: RecordedEvent) -> Result<u64, LogError> {
-        let expected = self.len() as u64 + FIRST_SEQUENCE;
+        let expected = self.next_sequence();
         if event.schema_version != EVENT_SCHEMA_VERSION {
             return Err(LogError::SchemaVersion {
                 sequence: event.sequence,
@@ -505,11 +581,11 @@ impl EventLog {
             });
         }
         if event.store_version != self.store_version {
-            return Err(LogError::StoreVersion {
-                sequence: event.sequence,
-                log: self.store_version,
-                event: event.store_version,
-            });
+            return Err(LogError::store_version(
+                event.sequence,
+                self.store_version,
+                event.store_version,
+            ));
         }
         if event.sequence != expected {
             return Err(LogError::SequenceGap {
@@ -531,6 +607,7 @@ impl EventLog {
         EventLog {
             events: self.events.iter().take(count).cloned().collect(),
             store_version: self.store_version,
+            resume: self.resume,
         }
     }
 

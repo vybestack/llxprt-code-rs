@@ -44,6 +44,27 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
         .store
         .load_spine_typed(&spine_bytes)
         .map_err(|error| format!("context spine corrupt: {error:?}"))?;
+    // The recorded kernel chain (132): the next sequence and head checksum the
+    // previous process's executor reached. Recovery reads it back so the
+    // session resumes the chain instead of restarting the total order at
+    // genesis; an absent artifact is a session that never recorded one.
+    match crate::safe_file::read_artifact(&dir, "kernel-chain", 64) {
+        Ok(bytes) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("context kernel chain unreadable: {error}"))?;
+            let next_sequence = value
+                .get("next_sequence")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| "context kernel chain carries no sequence".to_string())?;
+            let chain = value
+                .get("chain")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| "context kernel chain carries no checksum".to_string())?;
+            state.kernel_chain = (next_sequence, chain);
+        }
+        Err(crate::safe_file::ArtifactError::NotFound { .. }) => {}
+        Err(error) => return Err(format!("context kernel chain unreadable: {error}")),
+    }
     recover_durable_policy_artifacts(&dir, &mut state)?;
     if let Some((outcome, saturated)) = recover_manifest_artifacts(&dir, &mut state)? {
         state.policy.restore_terminal_outcome(outcome, saturated);

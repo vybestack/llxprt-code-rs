@@ -694,11 +694,7 @@ fn every_event_binds_the_version_it_was_written_under() {
     let foreign = sequencer.append(user("v3 bytes", 1), V3);
     assert_eq!(
         log.append(foreign).unwrap_err(),
-        crate::context_kernel::events::LogError::StoreVersion {
-            sequence: 4,
-            log: V2,
-            event: V3
-        },
+        crate::context_kernel::events::LogError::store_version(4, V2, V3),
         "a v3-framed event never lands in a v2 log"
     );
 

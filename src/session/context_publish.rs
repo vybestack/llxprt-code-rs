@@ -28,6 +28,15 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
         "rewrite-journal.log",
         journal_lines(state).as_bytes(),
     )?;
+    // The recorded kernel chain (132): the next sequence and head checksum the
+    // session's executor reached, so a recovered process resumes the chain
+    // instead of re-minting used sequence numbers.
+    let kernel_chain = serde_json::to_vec(&serde_json::json!({
+        "next_sequence": state.kernel_chain.0,
+        "chain": state.kernel_chain.1,
+    }))
+    .map_err(|error| format!("encode kernel chain failed: {error}"))?;
+    write_artifact(&dir, &root, "kernel-chain", &kernel_chain)?;
     write_context_manifest(&dir, &root, state)
 }
 

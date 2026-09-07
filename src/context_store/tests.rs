@@ -387,8 +387,8 @@ use crate::context_kernel::events::{
 };
 use crate::context_kernel::ir::StoreRange;
 use crate::context_kernel::migration::{
-    decide, Generation, MigrationDescriptor, MigrationPlan, PrivateBuild, Publication, SlotPair,
-    V2, V3,
+    decide, Generation, MigrationDescriptor, MigrationPlan, PrivateBuild, Publication,
+    PublicationError, SlotPair, V2, V3,
 };
 use crate::context_kernel::reducer::{Reducer, IDLENESS_WINDOW};
 
@@ -546,4 +546,66 @@ fn the_flow_lands_swaps_and_verifies_in_its_scopes() {
     let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
     assert_eq!(state.store_version, V2);
     assert_eq!(state.selected_store_version, Some(V3));
+}
+
+/// GREEN (132): a plan is framed against the spine position it was computed at,
+/// so a live append that lands while the build runs refuses publication instead
+/// of publishing a stale prefix; a plan re-computed from the current head
+/// publishes.
+#[test]
+fn migration_plan_refuses_publication_after_live_append() {
+    let (v2_bytes, mut log, mut sequencer) = v2_store_for_the_flow();
+    let ranges = || {
+        vec![
+            StoreRange {
+                offset: 0,
+                length: 16,
+            },
+            StoreRange {
+                offset: 16,
+                length: 16,
+            },
+        ]
+    };
+
+    let plan = MigrationPlan::for_log(V3, ranges(), &log);
+    assert_eq!(
+        plan.planned_sequence, 3,
+        "the plan carries the spine position it was computed at"
+    );
+
+    // A live append lands while the private build runs.
+    append(user("during the build", 1), &mut sequencer, &mut log);
+    let mut stale = PrivateBuild::start(plan);
+    let mut copied = Vec::new();
+    for range in &stale.plan.ranges {
+        copied.extend_from_slice(&v2_bytes[range.offset as usize..range.end() as usize]);
+    }
+    stale.complete_with(&copied);
+    assert_eq!(
+        Publication::adopt(&stale, &log).unwrap_err(),
+        PublicationError::SpineAdvanced {
+            planned: 3,
+            recorded: 4
+        },
+        "a plan drawn from a stale prefix never publishes"
+    );
+
+    // Re-planned from the current head, the same build publishes.
+    let replanned = MigrationPlan::for_log(V3, ranges(), &log);
+    assert_eq!(
+        replanned.planned_sequence, 4,
+        "the re-plan follows the head"
+    );
+    let mut build = PrivateBuild::start(replanned);
+    let mut fresh = Vec::new();
+    for range in &build.plan.ranges {
+        fresh.extend_from_slice(&v2_bytes[range.offset as usize..range.end() as usize]);
+    }
+    build.complete_with(&fresh);
+    let publication = Publication::adopt(&build, &log).unwrap();
+    assert!(
+        publication.verify_build(&fresh),
+        "the re-planned build publishes"
+    );
 }

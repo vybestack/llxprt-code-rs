@@ -58,6 +58,11 @@ pub(crate) struct ContextState {
     /// advances. Each admission acquires a strictly newer epoch, so a stale
     /// writer holding an older lease is fenced out.
     pub(crate) fencing_clock: crate::context_txn::executor::FencingClock,
+    /// Recorded kernel chain the session's executor has reached: the next
+    /// sequence it will assign and the head checksum of the prefix it resumes.
+    /// Persisted and recovered so a restarted process continues the recorded
+    /// chain instead of re-minting used sequence numbers (132).
+    pub(crate) kernel_chain: (u64, crate::context_kernel::canonical::Digest),
     /// Durable checkpoint lines a previous process published, reloaded on
     /// recovery so a republished `checkpoints` artifact preserves them ahead
     /// of this generation's own line instead of truncating them away
@@ -239,6 +244,10 @@ pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> C
         policy: crate::context_policy::runtime::ProposalOnlyController::default(),
         region_admitted: 0,
         fencing_clock: crate::context_txn::executor::FencingClock::new(),
+        kernel_chain: (
+            crate::context_kernel::events::FIRST_SEQUENCE,
+            crate::context_kernel::events::GENESIS_CHECKSUM,
+        ),
         recovered_checkpoints: None,
     }
 }
@@ -254,12 +263,19 @@ pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> C
 /// `commit_fenced`.
 fn admission_executor(
     epoch: crate::context_txn::executor::Epoch,
+    chain: (u64, crate::context_kernel::canonical::Digest),
     governed: u64,
     tool_declarations: usize,
 ) -> crate::context_txn::executor::Executor {
     use crate::context_txn::executor::Executor;
-    let mut executor = Executor::new(
+    // The executor resumes the recorded chain - the one the previous
+    // admission of this process, or the previous process itself, reached - so
+    // a recovered session never re-mints a sequence number the durable chain
+    // already used (132).
+    let mut executor = Executor::resuming(
         epoch,
+        chain.0,
+        chain.1,
         crate::context_kernel::legality::RenderContract::generous(1),
     );
     // Issue 105-4: the bound comes from the bound [`AccountingPort`], never from
@@ -321,7 +337,7 @@ fn sequence_admission(
     // declared surface yet), so the disagreement `validate` checks stays a
     // real caller-invented-number test; the region total lives on the state,
     // and re-basing the claim on it is S1 (F2) territory, untouched here.
-    let mut executor = admission_executor(epoch, 0, 0);
+    let mut executor = admission_executor(epoch, state.kernel_chain, 0, 0);
     executor.arm_region_accounting(budget.commit_ceiling());
     executor
         .propose("admit-ingress", parent_version)
@@ -337,6 +353,10 @@ fn sequence_admission(
         .map_err(|error| executor_refusal(&error))?;
     match executor.commit_fenced(parent_version, &state.fencing_clock, effect, payload_bound) {
         Ok(CommitOutcome::Applied) => {
+            // Record the chain position this admission reached, so the next
+            // admission - in this process or a recovered one - resumes the
+            // recorded chain instead of restarting the total order (132).
+            state.kernel_chain = executor.chain_head();
             // F2: the session total ACCUMULATES across admissions instead of
             // being overwritten by the last payload applied, so the region a
             // later admission projects against is every unit already admitted
@@ -997,3 +1017,79 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
 }
 
 pub(crate) use crate::session::context_recover::{context_store_error, ingress_error};
+
+#[cfg(test)]
+mod kernel_chain_tests {
+    use super::*;
+
+    fn admission_effect(bytes: u64) -> crate::context_kernel::events::EventKind {
+        crate::context_kernel::events::EventKind::OperationCommit {
+            class: crate::context_kernel::events::OperationClass::AdmitIngress,
+            subject: crate::context_txn::executor::SESSION_SCOPE,
+            argument: bytes,
+        }
+    }
+
+    fn admission_budget() -> crate::context_txn::budget::Budget {
+        crate::context_txn::budget::Budget {
+            b: ADMISSION_REGION_BUDGET,
+            r: ADMISSION_RECLAMATION_RESERVE,
+            h: ADMISSION_HEADROOM,
+        }
+    }
+
+    /// One admission through the production sequencing path: the same
+    /// `sequence_admission` seam `ingest_bulk_committed` drives.
+    fn admit(state: &mut ContextState, bytes: u64) {
+        let parent_version = state.store.index().len() as u64;
+        let bound = bytes + crate::context_txn::budget::Margins::V1.commit_frame;
+        sequence_admission(
+            state,
+            parent_version,
+            bound,
+            bytes,
+            Some(admission_effect(bytes)),
+            &admission_budget(),
+            bytes,
+        )
+        .expect("the admission commits");
+    }
+
+    /// GREEN (132): the production admission path records the kernel chain it
+    /// reaches, and a process that reopens the recorded chain - what recovery
+    /// hands a restarted session - continues it instead of re-minting used
+    /// sequence numbers from genesis.
+    #[test]
+    fn recovery_resumes_recorded_sequence_in_production_path() {
+        let mut first = new_context_state([0u8; 32].into());
+        assert_eq!(
+            first.kernel_chain.0,
+            crate::context_kernel::events::FIRST_SEQUENCE,
+            "a fresh session starts at genesis"
+        );
+        admit(&mut first, 8);
+        let (next, checksum) = first.kernel_chain;
+        assert!(
+            next > crate::context_kernel::events::FIRST_SEQUENCE,
+            "the first admission advanced the recorded chain"
+        );
+        assert_ne!(
+            checksum,
+            crate::context_kernel::events::GENESIS_CHECKSUM,
+            "the recorded chain commits to the appended events"
+        );
+
+        // Recovery: the next process reopens the recorded chain (issue 132).
+        let mut recovered = new_context_state([0u8; 32].into());
+        recovered.kernel_chain = (next, checksum);
+        admit(&mut recovered, 8);
+        assert!(
+            recovered.kernel_chain.0 > next,
+            "the recovered process continues the recorded chain"
+        );
+        assert_ne!(
+            recovered.kernel_chain.1, checksum,
+            "the recovered process chains onto the recorded head"
+        );
+    }
+}

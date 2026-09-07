@@ -651,3 +651,55 @@ fn partial_claims_are_refused() {
         "a claim list that drops bytes is a typed refusal"
     );
 }
+
+/// GREEN (132): a context-store version disagreement is a typed variant the
+/// migration selector matches, never a message to parse: a known older store is
+/// migratable, a known newer store and an unrecognized version are refused.
+#[test]
+fn store_version_outcomes_are_typed() {
+    use crate::context_kernel::events::LogError;
+    use crate::context_kernel::migration::{V2, V3};
+
+    let older = LogError::store_version(1, V3, V2);
+    assert!(
+        matches!(
+            older,
+            LogError::StoreVersionOlder {
+                sequence: 1,
+                log: V3,
+                event: V2
+            }
+        ),
+        "a known older store is typed Older"
+    );
+    assert!(
+        older.migratable(),
+        "the migration selector migrates a known older store"
+    );
+
+    let newer = LogError::store_version(1, V2, V3);
+    assert!(
+        matches!(newer, LogError::StoreVersionNewer { .. }),
+        "a known newer store is typed Newer"
+    );
+    assert!(!newer.migratable(), "a known newer store is refused");
+
+    let unknown = LogError::store_version(1, V2, 9);
+    assert!(
+        matches!(unknown, LogError::StoreVersionUnknown { .. }),
+        "an unrecognized store is typed Unknown"
+    );
+    assert!(!unknown.migratable(), "an unrecognized store is refused");
+
+    // The log itself raises the typed refusal, so no caller parses a message.
+    let mut log = EventLog::new(V2);
+    let foreign = Sequencer::new(FIRST_SEQUENCE, 1, 1_000).append(
+        EventKind::OperationCommit {
+            class: OperationClass::ScopeOpen,
+            subject: 1,
+            argument: 0,
+        },
+        V3,
+    );
+    assert_eq!(log.append(foreign).unwrap_err(), newer);
+}
