@@ -9,7 +9,7 @@
 //! The two stores share the same on-disk session (two independent `SessionStore`
 //! values under one config home). All checks are structural.
 
-use llxprt_code_rs::adapter::{ChatBackend, LlmResult};
+use llxprt_code_rs::adapter::{ChatBackend, LlmResult, LlmUsage};
 use llxprt_code_rs::session::{
     BranchRecord, Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionState, SessionStore,
     StoreError,
@@ -32,6 +32,7 @@ impl ChatBackend for CountingBackend {
     ) -> Result<LlmResult, String> {
         *self.calls.lock().unwrap() += 1;
         Ok(LlmResult {
+            usage: LlmUsage::default(),
             text: "done".to_string(),
             calls: Vec::new(),
             finish_reason: Some(FinishReason::Stop),

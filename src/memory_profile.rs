@@ -49,6 +49,8 @@ pub struct EventData {
     pub session_slot_output_bytes: Option<u64>,
     pub branch_count: Option<u64>,
     pub round_count: Option<u64>,
+    pub request_timeout_ms: Option<u64>,
+    pub turn_elapsed_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -75,6 +77,8 @@ struct Event<'a> {
     turn_output_bytes: u64,
     branch_count: Option<u64>,
     round_count: Option<u64>,
+    request_timeout_ms: Option<u64>,
+    turn_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     outcome: Option<&'a str>,
 }
@@ -224,8 +228,10 @@ impl Profiler {
             turn_assistant_bytes: state.assistant_bytes,
             turn_args_bytes: state.args_bytes,
             turn_output_bytes: state.output_bytes,
-            branch_count: state.branch_count,
-            round_count: state.round_count,
+            branch_count: data.branch_count,
+            round_count: data.round_count,
+            request_timeout_ms: data.request_timeout_ms,
+            turn_elapsed_ms: data.turn_elapsed_ms,
             outcome,
         };
         state

@@ -126,6 +126,7 @@ fn chat_registry_construction_does_not_load_native_credentials() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .unwrap();
 
@@ -159,6 +160,7 @@ fn zai_anthropic_backend_constructs_offline_without_native_credentials() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("z.ai-shaped Anthropic profile must construct without a request");
 
@@ -263,6 +265,7 @@ fn zai_anthropic_backend_constructs_from_a_named_provider_key() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("the named key must resolve from the env selector");
 
@@ -299,6 +302,7 @@ fn zai_named_provider_key_unresolved_reports_the_fixed_refusal() {
         &dependencies,
         false,
         false,
+        crate::settings::ModelParamsMode::default(),
     ) {
         Ok(_) => panic!("an unresolvable named key must not construct"),
         Err(error) => error,
@@ -344,6 +348,7 @@ fn chat_named_provider_key_resolves_from_the_env_selector() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .expect("the named key must resolve from the env selector");
 
@@ -374,6 +379,7 @@ fn codex_registry_construction_loads_native_credentials_once() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     )
     .unwrap();
 
@@ -428,6 +434,57 @@ fn codex_settings_forward_the_profile_output_bound() {
 }
 
 #[test]
+fn request_timeout_resolved_policy_defaults_to_900s_for_every_provider_path() {
+    // No provider `timeoutMs` on this profile: every provider path consumes the single
+    // 900s policy default through `resolved_timeout`, exactly preserving today's
+    // hardcoded 900s (chat via `from_profile_in` keeps its own path).
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+    assert!(profile.ephemeral.timeout_ms.is_none());
+    assert_eq!(
+        resolved_timeout(&profile),
+        std::time::Duration::from_secs(900)
+    );
+    assert_eq!(
+        codex_model_settings(&profile).timeout,
+        Some(std::time::Duration::from_secs(900))
+    );
+}
+
+#[test]
+fn request_timeout_codex_consumes_provider_timeout_data() {
+    // A provider `timeoutMs` is data at the resolver and flows onto the profile, so
+    // the codex path honors it now (previously it ignored the field).
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    let mut profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+    profile.ephemeral.timeout_ms = Some(120_000);
+    assert_eq!(
+        resolved_timeout(&profile),
+        std::time::Duration::from_secs(120)
+    );
+    let settings = codex_model_settings(&profile);
+    assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(120)));
+    crate::limits::validate_timeout(settings.timeout)
+        .expect("120s Codex timeout must clear the lease bound");
+}
+
+#[test]
+fn request_timeout_at_lease_margin_still_fails_validation() {
+    // A resolved timeout at/above lease minus the margin is refused by the leaf the
+    // registry enforces for every provider.
+    let high = std::time::Duration::from_secs(3600);
+    let error =
+        crate::limits::validate_timeout(Some(high)).expect_err("3600s must exceed the lease bound");
+    assert!(error.contains("session lease"), "{error}");
+}
+
+#[test]
 fn both_public_responses_targets_construct_without_native_credentials() {
     for value in [
         serde_json::json!({
@@ -465,6 +522,7 @@ fn both_public_responses_targets_construct_without_native_credentials() {
             &dependencies,
             true,
             false,
+            crate::settings::ModelParamsMode::default(),
         )
         .unwrap();
 
@@ -504,6 +562,7 @@ fn responses_endpoint_rejection_precedes_credential_io() {
         &dependencies,
         true,
         false,
+        crate::settings::ModelParamsMode::default(),
     ) {
         Ok(_) => panic!("invalid Responses route must fail"),
         Err(error) => error,
@@ -556,4 +615,111 @@ fn responses_endpoint_routes_normalize_to_one_suffix() {
     ] {
         assert!(normalize_responses_endpoint(raw).is_err(), "{raw}");
     }
+}
+
+#[test]
+fn loose_mode_forwards_unknown_keys_and_warns_for_unsupported() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "chat-model",
+            "modelParams": {
+                "custom_wire_param": {"a": 1},
+                "top_k": 16,
+                "stop": ["END"]
+            },
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key": "chat-secret"
+            }
+        }),
+        "chat",
+    )
+    .unwrap();
+    // `custom_wire_param` lands in forwarded; `top_k`/`stop` are typed but not
+    // wire-serializable for OpenAI Chat and land in unsupported.
+    assert!(profile
+        .model_params
+        .forwarded
+        .contains_key("custom_wire_param"));
+    assert!(profile
+        .model_params
+        .unsupported
+        .contains(&"top_k".to_string()));
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+    // Loose accepts the profile; unsupported keys warn (never an error).
+    assert!(apply_model_params_policy(
+        &profile,
+        &resolved,
+        crate::settings::ModelParamsMode::Loose
+    )
+    .is_ok());
+}
+
+#[test]
+fn strict_mode_refuses_unowned_keys_at_load() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "chat-model",
+            "modelParams": {"custom_wire_param": {"a": 1}},
+            "ephemeralSettings": {
+                "base-url": "https://api.example.com/v1",
+                "auth-key": "chat-secret"
+            }
+        }),
+        "chat",
+    )
+    .unwrap();
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+    let err = apply_model_params_policy(
+        &profile,
+        &resolved,
+        crate::settings::ModelParamsMode::Strict,
+    )
+    .unwrap_err();
+    assert!(err.contains("custom_wire_param"), "{err}");
+}
+
+#[test]
+fn known_model_mode_accepts_registry_keys_and_refuses_unknown() {
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "anthropic",
+            "model": "claude-3-5",
+            "modelParams": {"top_k": 16},
+            "ephemeralSettings": {
+                "base-url": "https://api.anthropic.com",
+                "auth-key": "anthropic-secret"
+            }
+        }),
+        "anthropic",
+    )
+    .unwrap();
+    // `top_k` is typed but not wire-serializable for Anthropic Messages, so the
+    // policy-level check uses a forwarded key the registry knows.
+    let mut profile2 = profile.clone();
+    profile2
+        .model_params
+        .forwarded
+        .insert("stop_sequences".to_string(), serde_json::json!(["END"]));
+    let resolved2 = crate::model_api::interpret::ResolvedProfile::interpret(&profile2).unwrap();
+    assert!(apply_model_params_policy(
+        &profile2,
+        &resolved2,
+        crate::settings::ModelParamsMode::KnownModel
+    )
+    .is_ok());
+
+    let mut bad = profile2.clone();
+    bad.model_params
+        .forwarded
+        .insert("definitely_not_a_param".to_string(), serde_json::json!(1));
+    let err = apply_model_params_policy(
+        &bad,
+        &resolved2,
+        crate::settings::ModelParamsMode::KnownModel,
+    )
+    .unwrap_err();
+    assert!(err.contains("definitely_not_a_param"), "{err}");
 }

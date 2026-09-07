@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use xtask::release::{run_release_fixtures, run_release_gates, run_source_bundle};
-use xtask::{coupling, run_gate, Gate};
+use xtask::{compat, coupling, run_gate, Gate};
 
 fn main() -> ExitCode {
     match real_main() {
@@ -25,6 +25,7 @@ fn real_main() -> Result<(), String> {
         "coupling-check" => parse_coupling_args(&remaining)
             .and_then(|options| coupling::run_with_options(&root, &options)),
         "quality" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::All)),
+        "compat" => no_args(&remaining).and_then(|()| compat::run(&root)),
         "lint" => no_args(&remaining).and_then(|()| run_lint(&root)),
         "release-gates" => no_args(&remaining).and_then(|()| run_release_gates(&root)),
         "envelope-schema" => run_envelope_schema(&root, &remaining),

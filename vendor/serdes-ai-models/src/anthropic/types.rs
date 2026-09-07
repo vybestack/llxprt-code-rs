@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 
 // ============================================================================
 // Request Types
@@ -48,6 +49,10 @@ pub struct MessagesRequest {
     /// Extended thinking configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
+    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
+    /// verbatim. Flattened into the request object; absent when empty.
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl MessagesRequest {
@@ -67,6 +72,7 @@ impl MessagesRequest {
             metadata: None,
             stream: None,
             thinking: None,
+            extra: BTreeMap::new(),
         }
     }
 }
