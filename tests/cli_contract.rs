@@ -629,6 +629,8 @@ fn inherited_higher_precedence_config_home_cannot_redirect_staged_fixture() {
 #[test]
 fn shared_settings_root_no_longer_blocks_startup() {
     let dir = shared_root_config("{}");
+    let settings_path = dir.path().join("settings.json");
+    let original_settings = std::fs::read(&settings_path).unwrap();
 
     let out = bin()
         .env("LLXPRT_CONFIG_DIR", dir.path())
@@ -668,6 +670,11 @@ fn shared_settings_root_no_longer_blocks_startup() {
     assert_eq!(
         parsed["error"]["code"], "profile-missing",
         "the shared settings root must not be the failure; the later profile stage owns it"
+    );
+    assert_eq!(
+        std::fs::read(settings_path).unwrap(),
+        original_settings,
+        "reading configuration must not rewrite foreign shared-root data"
     );
 }
 

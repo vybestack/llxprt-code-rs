@@ -72,7 +72,9 @@ impl Region {
 /// cross-sequence reservation.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ItemNamespace {
-    /// Identifiers minted for whole appends, from the event sequence.
+    /// Identifiers minted for whole appends, from the IR's append watermark: the
+    /// watermark rises only when a committed append mints, so the value never
+    /// tracks the event sequence and a refused append spends nothing.
     Append,
     /// Identifiers minted by resegmentation for claim-atomic children.
     Split,
@@ -108,7 +110,8 @@ pub struct ItemId {
 }
 
 impl ItemId {
-    /// Wraps an append identifier: the event sequence that produced the append.
+    /// Wraps an append identifier: a value minted from the IR's append watermark,
+    /// never the sequence of the event that produced it.
     pub fn append(value: u64) -> Self {
         Self {
             namespace: ItemNamespace::Append,
@@ -331,10 +334,12 @@ pub fn slice_into(ranges: &[StoreRange], parts: usize) -> Vec<Vec<StoreRange>> {
     pieces
 }
 
-/// Explicit placement state of an item. The four states are recorded on the item
-/// itself, never inferred from the absence of a placement, so initial items,
-/// explicit unplacement, collapsed placeholders, and vaulted redactions are
-/// distinguishable in the typed state.
+/// Explicit placement state of an item. The state is recorded on the item
+/// itself, never inferred from the absence of a placement, but fewer situations
+/// are distinguishable than the old doc promised: a fresh item, an explicit
+/// unplacement, and vaulted-or-returned bytes all share the one `StoreOnly`
+/// value, so the typed state distinguishes only placed, phantom, and
+/// store-only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Placement {
     /// The item is claimed into a region and its units are charged there.

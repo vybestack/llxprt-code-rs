@@ -42,6 +42,9 @@ pub struct ResolvedProvider {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedBudgets {
     pub max_tool_calls: Resolved<i64>,
+    pub max_shell_output: Resolved<u64>,
+    pub max_tool_output: Resolved<u64>,
+    pub max_turn_output: Resolved<u64>,
     #[serde(with = "duration_option")]
     pub turn_time: Resolved<Option<Duration>>,
 }
@@ -82,11 +85,33 @@ pub struct SettingsBudgets {
     pub max_tool_calls: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_time: Option<String>,
+    #[serde(
+        rename = "max-shell-output",
+        alias = "max_shell_output",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_shell_output: Option<u64>,
+    #[serde(
+        rename = "max-tool-output",
+        alias = "max_tool_output",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_tool_output: Option<u64>,
+    #[serde(
+        rename = "max-turn-output",
+        alias = "max_turn_output",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_turn_output: Option<u64>,
 }
 
 impl SettingsBudgets {
     fn is_empty(&self) -> bool {
-        self.max_tool_calls.is_none() && self.turn_time.is_none()
+        self.max_tool_calls.is_none()
+            && self.turn_time.is_none()
+            && self.max_shell_output.is_none()
+            && self.max_tool_output.is_none()
+            && self.max_turn_output.is_none()
     }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -127,9 +152,37 @@ pub fn environment_layer() -> Result<SettingsLayer, String> {
                 })
                 .transpose()?,
             turn_time: std::env::var("LLXPRT_TURN_TIME").ok(),
+            max_shell_output: env_byte_cap("LLXPRT_MAX_SHELL_OUTPUT", "--max-shell-output")?,
+            max_tool_output: env_byte_cap("LLXPRT_MAX_TOOL_OUTPUT", "--max-tool-output")?,
+            max_turn_output: env_byte_cap("LLXPRT_MAX_TURN_OUTPUT", "--max-turn-output")?,
         },
         ..Default::default()
     })
+}
+
+/// Read one byte-cap setting from the environment, validating it like the CLI flag.
+fn env_byte_cap(var: &str, flag: &str) -> Result<Option<u64>, String> {
+    std::env::var(var)
+        .ok()
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("{flag} must be an integer byte count (got {value})"))
+        })
+        .transpose()
+}
+
+/// Validate the resolved output caps (issue 77): a per-result cap above the aggregate
+/// turn cap is a typed configuration error naming both values, never a silent clamp.
+pub fn validate_output_caps(shell: u64, tool: u64, turn: u64) -> Result<(), String> {
+    for (flag, value) in [("--max-shell-output", shell), ("--max-tool-output", tool)] {
+        if value > turn {
+            return Err(format!(
+                "{flag} ({value}) exceeds --max-turn-output ({turn})"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Validate the max-tool-call setting used by both CLI-equivalent layers.

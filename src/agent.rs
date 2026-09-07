@@ -92,6 +92,10 @@ pub struct CompletedRun {
     pub replayed: bool,
 }
 
+/// Resolved per-run output caps (issue 77). Defined in [`crate::envelope`] beside the
+/// wire field that carries it and re-exported here for its established path.
+pub use crate::envelope::OutputCaps;
+
 /// The headless agent: drives the turn loop using a [`ChatBackend`].
 pub struct CodingAgent {
     backend: std::sync::Arc<dyn ChatBackend>,
@@ -105,6 +109,9 @@ pub struct CodingAgent {
     /// Wall-clock budget for one prompt turn. `None` (the default) means no
     /// time limit; set from the CLI `--turn-time` flag.
     turn_time_budget: Option<std::time::Duration>,
+    /// Resolved output caps (issue 77): per-result shell/tool caps and the live
+    /// per-turn tool-output bound. Defaults until the resolver overrides them.
+    output_caps: OutputCaps,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -173,6 +180,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_caps: OutputCaps::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -200,6 +208,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_caps: OutputCaps::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -223,6 +232,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_caps: OutputCaps::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -256,6 +266,18 @@ impl CodingAgent {
     pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
         self.turn_time_budget = budget;
         self
+    }
+
+    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
+    /// aggregate per-turn tool-output bound enforced by the turn loop.
+    pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
+        self.output_caps = caps;
+        self
+    }
+
+    /// The resolved output caps this agent enforces.
+    pub fn output_caps(&self) -> OutputCaps {
+        self.output_caps
     }
 
     /// Attach the optional process-memory event sink.
@@ -434,7 +456,10 @@ impl CodingAgent {
         // the signature stay inside clippy's argument budget now that the session store
         // handle is threaded in for pre-entry compaction.
         let (index, total) = position;
-        let remaining_output = MAX_TURN_OUTPUT_BYTES.saturating_sub(attempt.usage.output_bytes);
+        let remaining_output = self
+            .output_caps
+            .turn
+            .saturating_sub(attempt.usage.output_bytes);
         if remaining_output == 0 {
             return Err(ToolCallFailure::OutputCap);
         }
@@ -816,12 +841,15 @@ impl CodingAgent {
                 rounds,
             ));
         }
-        if output_bytes > MAX_TURN_OUTPUT_BYTES {
+        if output_bytes > self.output_caps.turn {
             return Err(self.dead(
                 store,
                 reserved,
                 "turn-budget",
-                &format!("turn tool output would exceed the {MAX_TURN_OUTPUT_BYTES} byte cap",),
+                &format!(
+                    "turn tool output would exceed the {} byte cap",
+                    self.output_caps.turn
+                ),
                 rounds,
             ));
         }
@@ -891,9 +919,9 @@ impl CodingAgent {
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
         Ok(crate::tools::ToolConfig {
             ws: self.workspace.try_clone()?,
-            max_output_bytes: crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT,
+            max_output_bytes: self.output_caps.tool,
             shell: crate::tools::ShellConfig {
-                max_shell_output: crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT,
+                max_shell_output: self.output_caps.shell,
                 max_shell_timeout: std::time::Duration::from_secs(120),
                 allow_shell: shell_on,
             },
