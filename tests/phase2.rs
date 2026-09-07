@@ -789,6 +789,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
                 args_json: format!(r#"{{"path":"n{i}.txt","content":"x"}}"#),
             }],
             finish_reason: Some(FinishReason::ToolCall),
+            usage: LlmUsage::default(),
         })
         .collect();
     let mut replies = calls;
@@ -797,6 +798,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
         text: "all done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
     });
     let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(2));
     let run = a.run(&st, &r).expect("capped run completes");
@@ -823,12 +825,14 @@ fn natural_wrapup_below_cap_reports_budget_available() {
             args_json: r#"{"path":"one.txt","content":"x"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        usage: LlmUsage::default(),
     };
     let done = LlmResult {
         usage: LlmUsage::default(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
     };
     let a =
         agent(Box::new(MockBackend::new(vec![call, done])), &cwd).with_max_tool_calls(Some(256));

@@ -201,6 +201,18 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
         .unwrap_or(std::time::Duration::from_millis(900_000));
     // The structural dsflash discriminator travels as per-model request settings;
     // Standard Chat keeps the default (the wire key stays absent).
+    // Unrecognized `modelParams` keys travel as a flattened extra map on the
+    // request body (issue 64). The structural dsflash discriminator is a separate
+    // typed channel that stays absent for Standard Chat.
+    let forwarded = config
+        .model_params
+        .as_ref()
+        .map(|params| params.forwarded.clone())
+        .unwrap_or_default();
+    let mut request_settings = serdes_ai::models::openai::OpenAIChatModelRequestSettings {
+        chat_template_kwargs: None,
+        extra: forwarded,
+    };
     let mut model = openai_chat_model(&config.model, &config.api_key, &base_url, timeout);
     if let Some(spec) = config
         .model_params
@@ -227,15 +239,13 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
                 serdes_ai::models::openai::ChatTemplateReasoningEffort::Max
             }
         });
-        model = model.with_request_settings(
-            serdes_ai::models::openai::OpenAIChatModelRequestSettings {
-                chat_template_kwargs: Some(serdes_ai::models::openai::ChatTemplateKwargs {
-                    enable_thinking: spec.enable_thinking,
-                    reasoning_effort: wire_effort,
-                }),
-            },
-        );
+        request_settings.chat_template_kwargs =
+            Some(serdes_ai::models::openai::ChatTemplateKwargs {
+                enable_thinking: spec.enable_thinking,
+                reasoning_effort: wire_effort,
+            });
     }
+    model = model.with_request_settings(request_settings);
     Ok(ModelAdapter {
         inner: model,
         timeout,

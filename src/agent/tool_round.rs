@@ -44,7 +44,7 @@ impl CodingAgent {
             .checkpoint(reserved, &attempt.rounds)
             .map_err(AgentError::from_store)?;
         self.update_profile_usage(&attempt.usage);
-        self.profile_store(store, "session_written", attempt.rounds.len())?;
+        self.profile_store(store, "session_written", attempt.rounds.len(), None)?;
         Ok(truncated)
     }
     fn execute_calls(
