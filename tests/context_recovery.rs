@@ -545,7 +545,7 @@ fn branch_completion_requires_durable_context_artifacts() {
 /// the transaction appends anything: the spine stays untouched, so the
 /// transaction core really is the only path that adds spine bytes.
 #[test]
-fn oversized_admission_is_refused_without_touching_the_spine() {
+fn compact_tool_result_surfaces_ingest_failure_when_store_present() {
     let cwd = workspace();
     let store = store("admission-refused");
     let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
@@ -557,11 +557,10 @@ fn oversized_admission_is_refused_without_touching_the_spine() {
     // executor's `bound <= B - R - H` precondition, so the admission is
     // refused before any spine byte is written.
     let oversized = 40 << 20;
-    let compacted = store.compact_tool_result("read_file", &"h".repeat(oversized));
-    assert!(
-        compacted.starts_with("CTXDIGEST v1") || compacted.contains("quiesce"),
-        "the refusal still yields a bounded record, not raw bytes: {compacted}"
-    );
+    let error = store
+        .compact_tool_result("read_file", &"h".repeat(oversized))
+        .expect_err("a present store's failed ingestion must fail the turn");
+    assert!(!error.to_string().is_empty());
     let after = artifact(&store, "sanitized").len();
     assert_eq!(
         after, before,
@@ -779,7 +778,9 @@ fn a_result_exactly_at_the_bulk_threshold_compacts() {
     // Exactly 1024 bytes: the threshold itself, not one byte above it.
     let exactly = "x".repeat(1024);
     assert_eq!(exactly.len(), 1024);
-    let compacted = store.compact_tool_result("read_file", &exactly);
+    let compacted = store
+        .compact_tool_result("read_file", &exactly)
+        .expect("compact tool result");
     // The record is no longer the raw payload: the threshold result was
     // admitted through the transaction and replaced by its digest record.
     assert_ne!(
@@ -797,7 +798,9 @@ fn a_result_exactly_at_the_bulk_threshold_compacts() {
     // so only strictly-smaller results skip the seam.
     let below = "y".repeat(1023);
     let untouched_before = artifact(&store, "sanitized").len();
-    let verbatim = store.compact_tool_result("read_file", &below);
+    let verbatim = store
+        .compact_tool_result("read_file", &below)
+        .expect("compact tool result");
     assert_eq!(
         verbatim, below,
         "a strictly smaller result is returned verbatim"
@@ -937,7 +940,9 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
         "noise line 0000\n".repeat(96)
     );
     assert!(payload.len() > 1024, "the corpus is bulk evidence");
-    let compacted = store.compact_tool_result("read_file", &payload);
+    let compacted = store
+        .compact_tool_result("read_file", &payload)
+        .expect("compact tool result");
     assert!(
         compacted.starts_with("CTXDIGEST v1 tool=read_file "),
         "the bulk corpus is digested on the production path: {compacted}"
@@ -1157,49 +1162,60 @@ fn checkpoint_line_count(store: &SessionStore) -> usize {
     nonempty_lines(&artifact(store, "checkpoints")).len()
 }
 
-/// F10: the store-free digest fallback never emits unsanitized content.
-///
-/// When the store refuses the write, the compact record is still computed in memory so
-/// no raw bulk bytes ride the request list. That in-memory record must receive the same
-/// redaction treatment the durable append path applies: the corpus secret is replaced
-/// before the verdict, digest, or verbatim return ever see the bytes, so neither the
-/// record the caller receives nor any durable artifact can carry the secret.
+/// A present store whose ingress succeeds but whose context directory cannot be
+/// published returns the persistence error rather than an in-memory digest.
 #[test]
-fn memory_digest_sanitizes_before_the_record_is_emitted() {
-    const SECRET: &str = "CTXEVAL-SECRET-A1B2C3D4E5";
+fn compact_tool_result_surfaces_persist_failure_when_store_present() {
     let cwd = workspace();
-    let store = store("memory-digest-sanitized");
+    let store = store("persist-refused");
     let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
     let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
     a.run(&store, &first_turn).expect("first turn runs");
 
-    // A bulk payload larger than the admission region forces the store to refuse
-    // the write, which is the exact condition under which `memory_digest` runs.
-    let payload = format!(
-        "marker: {SECRET}\nexact error span: bytes 4096..4131 \"unexpected trailing frame\"\n{}",
-        "noise line 0000\n".repeat(96)
-    );
-    assert!(payload.len() > 1024, "the corpus is bulk evidence");
-    let oversized = 40 << 20;
-    let huge = format!("{payload}{}", "h".repeat(oversized));
-    let compacted = store.compact_tool_result("read_file", &huge);
+    // Ingress can mutate the in-memory context store, but publication is forced
+    // to fail afterwards: the context directory becomes a regular file.
+    let context = store.session_dir.join("context");
+    std::fs::remove_dir_all(&context).expect("remove context directory");
+    std::fs::write(&context, "blocked").expect("replace context directory with file");
+    let error = store
+        .compact_tool_result("read_file", &"bulk evidence\n".repeat(128))
+        .expect_err("a present store's failed persistence must fail the turn");
     assert!(
-        !compacted.contains(SECRET),
-        "the in-memory fallback record never emits unsanitized content: {compacted}"
+        error
+            .to_string()
+            .contains("publish context artifact sanitized failed"),
+        "the injected failure is persist_context, not ingest: {error}"
     );
+}
 
-    // A vault-quarantine fallback also emits only the placeholder: a detector
-    // that fails outright routes the payload to the vault, and the byte-length
-    // stable placeholder is what the caller sees, never the plaintext.
-    let placeholder_path = store.compact_tool_result("read_file", &huge);
-    assert!(
-        !placeholder_path.contains(SECRET),
-        "the fallback cannot re-introduce the secret on a second call"
-    );
-    assert!(
-        !placeholder_path.is_empty() && placeholder_path.len() < huge.len(),
-        "the fallback record is bounded, not the raw payload"
-    );
+/// An explicitly store-free context mode still returns a bounded in-memory digest.
+#[test]
+fn compact_tool_result_falls_back_to_memory_digest_in_store_free_mode() {
+    let cwd = workspace();
+    let store = store("store-free-digest");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+
+    // Store mode is recovered from the durable manifest. Reopen so compaction
+    // exercises the public recovery seam rather than mutating private state.
+    let manifest = store.session_dir.join("context/manifest.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest).expect("read manifest"))
+            .expect("parse manifest");
+    value["mode"] = serde_json::Value::String("unavailable".to_string());
+    std::fs::write(
+        &manifest,
+        serde_json::to_vec(&value).expect("encode manifest"),
+    )
+    .expect("write unavailable mode");
+    let store = reopen(&store);
+
+    let compacted = store
+        .compact_tool_result("read_file", &"bulk evidence\n".repeat(128))
+        .expect("Unavailable is the explicit memory-only fallback");
+    assert!(compacted.starts_with("CTXDIGEST v1 tool=read_file "));
+    assert!(compacted.len() < "bulk evidence\n".repeat(128).len());
 }
 
 /// F11: the content-addressed handle and the sanitized-bytes record are derived from
@@ -1229,8 +1245,12 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
     let mut second = first.clone();
     second.push_str("\ndistinguishing tail A");
     assert!(first.len() >= 1024 && second.len() >= 1024);
-    let record_a = store.compact_tool_result("read_file", &first);
-    let record_b = store.compact_tool_result("read_file", &second);
+    let record_a = store
+        .compact_tool_result("read_file", &first)
+        .expect("compact tool result");
+    let record_b = store
+        .compact_tool_result("read_file", &second)
+        .expect("compact tool result");
     let handle_a = digest_handle(&record_a);
     let handle_b = digest_handle(&record_b);
     assert_ne!(
@@ -1257,7 +1277,9 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
     // raw input would differ, and this is the mismatch F11 forbids.
     let mut raw = format!("marker: {SECRET}\n{base}");
     raw.push_str(&"y".repeat(1024));
-    let record_raw = store.compact_tool_result("read_file", &raw);
+    let record_raw = store
+        .compact_tool_result("read_file", &raw)
+        .expect("compact tool result");
     let handle_raw = digest_handle(&record_raw);
     assert!(
         handle_raw.starts_with("content-") && handle_raw.len() == "content-".len() + 16,
