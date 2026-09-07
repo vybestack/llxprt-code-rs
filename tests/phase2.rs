@@ -618,6 +618,7 @@ fn normalized_empty_object_cannot_execute() {
         ws: llxprt_code_rs::tools::WorkspaceCap::open(&cwd).unwrap(),
         max_output_bytes: 4096,
         shell: llxprt_code_rs::tools::ShellConfig {
+            default_shell_timeout: std::time::Duration::from_secs(5),
             max_shell_output: 4096,
             max_shell_timeout: std::time::Duration::from_secs(5),
             allow_shell: false,

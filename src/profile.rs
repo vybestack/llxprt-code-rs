@@ -228,6 +228,12 @@ pub enum MaxToolCalls {
 /// nor the profile field declares one (the historical hardcoded 16).
 pub const DEFAULT_CALLS: usize = 16;
 
+/// Default and hard ceiling for a single shell command. The two-hour ceiling matches
+/// the profile task-timeout policy, while keeping every command finite even when a
+/// turn has no wall-clock budget.
+pub const DEFAULT_SHELL_TIMEOUT_SECONDS: u64 = 120;
+pub const MAX_SHELL_TIMEOUT_SECONDS: u64 = 7_200;
+
 impl MaxToolCalls {
     /// Strict parse in the file's sibling-key error style: only a JSON
     /// integer is accepted; 0, out-of-range values, strings, floats, and
@@ -287,6 +293,12 @@ pub struct EphemeralSettings {
     /// loop detection is not configurable from a profile.
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
+    /// `shell-default-timeout-seconds`: positive seconds used when a tool call
+    /// omits `timeout_seconds`.
+    pub shell_default_timeout_seconds: Option<u64>,
+    /// `shell-max-timeout-seconds`: positive per-command ceiling. Both shell
+    /// timeout settings are bounded by [`MAX_SHELL_TIMEOUT_SECONDS`].
+    pub shell_max_timeout_seconds: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
     /// final component are never both shown if one of them looks like a key name).
     pub auth_keyfile_orig: Option<String>,
@@ -344,6 +356,11 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)
             .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
+            .field(
+                "shell_default_timeout_seconds",
+                &self.shell_default_timeout_seconds,
+            )
+            .field("shell_max_timeout_seconds", &self.shell_max_timeout_seconds)
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)
@@ -471,6 +488,17 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         openai_responses_settings,
         chat_missing_discriminator,
     } = provider_settings::parse(obj, name, &selection)?;
+    let shell_default = ephemeral
+        .shell_default_timeout_seconds
+        .unwrap_or(DEFAULT_SHELL_TIMEOUT_SECONDS);
+    let shell_max = ephemeral
+        .shell_max_timeout_seconds
+        .unwrap_or(DEFAULT_SHELL_TIMEOUT_SECONDS);
+    if shell_default > shell_max {
+        return Err(format!(
+            "profile {name}: 'shell-default-timeout-seconds' must not exceed 'shell-max-timeout-seconds'"
+        ));
+    }
 
     Ok(Profile {
         name: name.to_string(),

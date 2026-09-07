@@ -362,6 +362,8 @@ pub struct ToolConfig {
 #[derive(Debug)]
 pub struct ShellConfig {
     pub max_shell_output: usize,
+    /// Timeout used when a shell call omits `timeout_seconds`.
+    pub default_shell_timeout: std::time::Duration,
     /// Ceiling for any single shell command, independent of what the model asks for.
     pub max_shell_timeout: std::time::Duration,
     /// Whether `run_shell_command` is registered (`--allow-shell` gate).
@@ -919,6 +921,7 @@ fn list_directory_tool(
 fn shell_tool(
     fd: i32,
     args: &BTreeMap<String, JsonValue>,
+    default_timeout: std::time::Duration,
     max_timeout: std::time::Duration,
     max_output: usize,
 ) -> Result<String, String> {
@@ -927,14 +930,12 @@ fn shell_tool(
     if command.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let timeout = bounded(
-        arg_u64(args, "timeout_seconds")?,
-        max_timeout.as_secs() as usize,
-        max_timeout.as_secs() as usize,
-    );
-    let timeout = std::time::Duration::from_secs(u64::from(
-        u32::try_from(timeout.max(1)).unwrap_or(u32::MAX),
-    ));
+    let requested = arg_u64(args, "timeout_seconds")?
+        .unwrap_or(default_timeout.as_secs())
+        .max(1);
+    let effective = requested.min(max_timeout.as_secs());
+    let clamped = requested != effective;
+    let timeout = std::time::Duration::from_secs(effective);
     let o = crate::process::run_cmd(crate::process::CmdSpec {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), command.to_string()],
@@ -953,8 +954,13 @@ fn shell_tool(
     // value, framing and combined output included, to `max_output`.
     let s = if o.timed_out {
         format!(
-            "command timed out after {} ms; output:\n{}",
+            "command timed out after {} ms{}; output:\n{}",
             timeout.as_millis(),
+            if clamped {
+                format!(" (requested timeout {requested}s; effective timeout {effective}s)")
+            } else {
+                String::new()
+            },
             combined.trim_end()
         )
     } else {
@@ -969,6 +975,11 @@ fn shell_tool(
                 combined.trim_end()
             ),
         }
+    };
+    let s = if clamped && !o.timed_out {
+        format!("{s}\n[requested timeout {requested}s; effective timeout {effective}s]")
+    } else {
+        s
     };
     let bounded = truncate(&s, max_output);
     if o.timed_out {
@@ -1036,6 +1047,7 @@ pub(crate) fn execute_tool_with_limit(
                 shell_tool(
                     crate::tools::shell_cwd_fd(&config.ws),
                     &map,
+                    config.shell.default_shell_timeout,
                     config.shell.max_shell_timeout,
                     config.shell.max_shell_output.min(output_limit),
                 )

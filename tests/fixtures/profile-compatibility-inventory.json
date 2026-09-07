@@ -4419,15 +4419,15 @@
     },
     {
       "key": "shell-default-timeout-seconds",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "rejected"
+      "note": "positive integer seconds; defaults to 120 and must not exceed shell-max-timeout-seconds"
     },
     {
       "key": "shell-max-timeout-seconds",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "rejected"
+      "note": "positive integer seconds; finite maximum 7200; clamps per-call shell timeout"
     },
     {
       "key": "shell-inactivity-timeout-seconds",

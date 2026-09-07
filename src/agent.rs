@@ -105,6 +105,8 @@ pub struct CodingAgent {
     /// Wall-clock budget for one prompt turn. `None` (the default) means no
     /// time limit; set from the CLI `--turn-time` flag.
     turn_time_budget: Option<std::time::Duration>,
+    shell_default_timeout: std::time::Duration,
+    shell_max_timeout: std::time::Duration,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -173,6 +175,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -200,6 +208,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -223,6 +237,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -255,6 +275,18 @@ impl CodingAgent {
     /// Override the wall-clock turn budget (`None` = no time limit).
     pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
         self.turn_time_budget = budget;
+        self
+    }
+
+    /// Set validated profile shell timeouts. Both remain finite and the parser
+    /// guarantees the default does not exceed the per-command ceiling.
+    pub fn with_shell_timeouts(
+        mut self,
+        default_timeout: std::time::Duration,
+        max_timeout: std::time::Duration,
+    ) -> CodingAgent {
+        self.shell_default_timeout = default_timeout;
+        self.shell_max_timeout = max_timeout;
         self
     }
 
@@ -894,7 +926,8 @@ impl CodingAgent {
             max_output_bytes: crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT,
             shell: crate::tools::ShellConfig {
                 max_shell_output: crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT,
-                max_shell_timeout: std::time::Duration::from_secs(120),
+                default_shell_timeout: self.shell_default_timeout,
+                max_shell_timeout: self.shell_max_timeout,
                 allow_shell: shell_on,
             },
         })

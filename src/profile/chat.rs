@@ -238,6 +238,12 @@ fn parse_ephemeral_primary(
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
         "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
+        "shell-default-timeout-seconds" => {
+            settings.shell_default_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
+        }
+        "shell-max-timeout-seconds" => {
+            settings.shell_max_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
+        }
         "apiMode" | "responsesMode" | "responses-mode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;
@@ -575,6 +581,20 @@ pub(super) fn btree(
         out.insert(k.clone(), v.clone());
     }
     out
+}
+
+fn shell_timeout_seconds(value: &serde_json::Value, key: &str, name: &str) -> Result<u64, String> {
+    let seconds = value
+        .as_u64()
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| format!("profile {name}: '{key}' must be a positive integer"))?;
+    if seconds > crate::profile::MAX_SHELL_TIMEOUT_SECONDS {
+        return Err(format!(
+            "profile {name}: '{key}' must be at most {} seconds",
+            crate::profile::MAX_SHELL_TIMEOUT_SECONDS
+        ));
+    }
+    Ok(seconds)
 }
 
 fn nonneg_u64(v: &serde_json::Value) -> Option<u64> {

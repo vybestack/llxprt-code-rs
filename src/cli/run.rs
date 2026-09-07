@@ -133,6 +133,20 @@ fn build_agent(
         .with_max_rounds(constructed.max_rounds)
         .with_max_tool_calls(max_tool_calls)
         .with_turn_time(turn_time)
+        .with_shell_timeouts(
+            std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_default_timeout_seconds
+                    .unwrap_or(crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS),
+            ),
+            std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_max_timeout_seconds
+                    .unwrap_or(crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS),
+            ),
+        )
         .with_profiler(profiler);
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)

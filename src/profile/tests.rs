@@ -70,6 +70,35 @@ fn parsed_profile_stores_the_neutral_selection() {
 }
 
 #[test]
+fn shell_timeout_profile_values_are_typed_bounded_and_ordered() {
+    let parse = |settings| {
+        parse_profile_value(
+            &json!({"provider": "openai", "model": "m", "ephemeralSettings": settings}),
+            "shell-timeouts",
+        )
+    };
+    let defaults = parse(json!({})).unwrap();
+    assert_eq!(defaults.ephemeral.shell_default_timeout_seconds, None);
+    assert_eq!(defaults.ephemeral.shell_max_timeout_seconds, None);
+    let configured =
+        parse(json!({"shell-default-timeout-seconds": 240, "shell-max-timeout-seconds": 600}))
+            .unwrap();
+    assert_eq!(
+        configured.ephemeral.shell_default_timeout_seconds,
+        Some(240)
+    );
+    assert_eq!(configured.ephemeral.shell_max_timeout_seconds, Some(600));
+    for bad in [json!("120"), json!(0), json!(-1), json!(7201)] {
+        let error = parse(json!({"shell-default-timeout-seconds": bad})).unwrap_err();
+        assert!(error.contains("shell-default-timeout-seconds"), "{error}");
+    }
+    let error =
+        parse(json!({"shell-default-timeout-seconds": 601, "shell-max-timeout-seconds": 600}))
+            .unwrap_err();
+    assert!(error.contains("must not exceed"), "{error}");
+}
+
+#[test]
 fn zai_anthropic_fixture_resolves_messages_target() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/profiles/zai.anthropic.synthetic.json"

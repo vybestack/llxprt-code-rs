@@ -265,6 +265,7 @@ fn crate_tools_shell(cmd: &str) -> (bool, String) {
         ws,
         max_output_bytes: 16 * 1024,
         shell: llxprt_code_rs::tools::ShellConfig {
+            default_shell_timeout: Duration::from_secs(3),
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(3),
             allow_shell: true,

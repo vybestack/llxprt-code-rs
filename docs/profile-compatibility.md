@@ -143,6 +143,12 @@ Duplicate definitions:
 | `subagents.async.enabled` | boolean |  | registry-entries-2.ts |
 | `shell-default-timeout-seconds` | number |  | profileApplication.ts, registry-entries-2.ts |
 | `shell-max-timeout-seconds` | number |  | profileApplication.ts, registry-entries-2.ts |
+
+Shell timeout compatibility: `shell-default-timeout-seconds` and
+`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to
+120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy
+ceiling), and the default may not exceed the maximum. A requested per-call timeout
+above the configured maximum is clamped and reports its requested and effective values.
 | `shell-inactivity-timeout-seconds` | number |  | registry-entries-2.ts |
 | `shell-output-retention-max-bytes` | number |  | profileApplication.ts, registry-entries-2.ts |
 | `token-usage-log` | boolean |  | registry-entries-2.ts |

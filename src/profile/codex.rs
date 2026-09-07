@@ -83,6 +83,14 @@ fn parse_common(
         Some(value) => MaxToolCalls::parse(value, name)?,
         None => MaxToolCalls::Unset,
     };
+    if let Some(value) = map.get("shell-default-timeout-seconds") {
+        settings.shell_default_timeout_seconds =
+            Some(shell_timeout(value, "shell-default-timeout-seconds", name)?);
+    }
+    if let Some(value) = map.get("shell-max-timeout-seconds") {
+        settings.shell_max_timeout_seconds =
+            Some(shell_timeout(value, "shell-max-timeout-seconds", name)?);
+    }
     let loop_detection = required_bool(map, "loopDetectionEnabled", name)?;
     if loop_detection {
         return Err(format!(
@@ -95,6 +103,20 @@ fn parse_common(
     settings.disabled_tools = parse_disabled_tools(map, name)?;
     parse_allowed_tools(map, name)?;
     Ok(())
+}
+
+fn shell_timeout(value: &Value, key: &str, name: &str) -> Result<u64, String> {
+    let seconds = value
+        .as_u64()
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| format!("profile {name}: '{key}' must be a positive integer"))?;
+    if seconds > crate::profile::MAX_SHELL_TIMEOUT_SECONDS {
+        return Err(format!(
+            "profile {name}: '{key}' must be at most {} seconds",
+            crate::profile::MAX_SHELL_TIMEOUT_SECONDS
+        ));
+    }
+    Ok(seconds)
 }
 
 fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String> {
@@ -255,6 +277,8 @@ fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), 
         "stream-idle-timeout-ms",
         "task-default-timeout-seconds",
         "task-max-timeout-seconds",
+        "shell-default-timeout-seconds",
+        "shell-max-timeout-seconds",
     ];
     if let Some(key) = btree(map)
         .keys()
