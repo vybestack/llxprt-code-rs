@@ -7,6 +7,10 @@ pub fn run_profiled(
 ) -> Result<RunOutcome, AppError> {
     let session_id =
         SessionId::parse(&args.session).map_err(|m| AppError::new(Code::Usage, "session", m))?;
+    // Validate raw CLI limits before reading a prompt or resolving settings.  In
+    // particular, invalid limits must not trigger stdin, profile/config, backend,
+    // credential, or keychain access (issue 60).
+    validate_cli_limits(&args)?;
     let prompt = match args.prompt.clone() {
         Some(prompt) => prompt,
         None => read_stdin_prompt()?,
@@ -83,6 +87,24 @@ fn resolve_cwd(args: &Args) -> Result<PathBuf, AppError> {
         ));
     }
     Ok(cwd.canonicalize().unwrap_or(cwd))
+}
+
+/// Validate CLI-provided limits without resolving a profile or any other settings layer.
+///
+/// The settings resolver performs the same validation for every source.  It cannot be
+/// the first validation point, though: resolving settings reads profile/config layers,
+/// whereas the CLI contract requires malformed command-line limits to fail before even
+/// consuming stdin.
+fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if let Some(value) = args.max_tool_calls {
+        crate::settings::validate_max_tool_calls(value)
+            .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;
+    }
+    if let Some(raw) = args.turn_time.as_deref() {
+        crate::settings::parse_turn_time(raw)
+            .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?;
+    }
+    Ok(())
 }
 
 fn build_agent(

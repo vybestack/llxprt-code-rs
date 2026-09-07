@@ -153,7 +153,7 @@ pub fn parse_turn_time(raw: &str) -> Result<Option<Duration>, String> {
         '\0' if digits == "0" => return Ok(None),
         '\0' => {
             return Err(format!(
-                "--turn-time needs an s/m/h unit (got {raw}); pass 0 to disable"
+                "--turn-time needs an s/m/h unit (got {raw:?}); pass 0 to disable"
             ))
         }
         's' => 1,

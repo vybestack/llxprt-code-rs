@@ -627,3 +627,61 @@ fn help_is_a_protocol_exception() {
     assert!(s.contains("--allow-insecure-http"));
     assert!(s.contains("--allow-shell"));
 }
+
+/// CLI flag validation ordering (issue 60): an invalid `--max-tool-calls` or
+/// `--turn-time` is a usage error (exit 2) that must be reported **before** any
+/// profile resolution or credential access. The named profile here does not exist
+/// and the config dir carries no credentials at all, so on the pre-fix ordering
+/// the run would fail earlier with `profile-missing` (exit 3) instead of the
+/// limit's usage error, proving the credential/profile path was reached first.
+#[test]
+fn invalid_tool_call_limit_fails_before_profile_and_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("does-not-exist-codex")
+        .arg("--max-tool-calls")
+        .arg("0")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "max-tool-calls",
+        "the invalid --max-tool-calls value must win over the missing profile"
+    );
+    assert_eq!(
+        parsed["error"]["message"],
+        "--max-tool-calls must be -1 or an integer from 1 through 512 (got 0)"
+    );
+}
+
+#[test]
+fn invalid_turn_time_fails_before_profile_and_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("does-not-exist-codex")
+        .arg("--turn-time")
+        .arg("90")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "turn-time",
+        "the invalid --turn-time value must win over the missing profile"
+    );
+    assert_eq!(
+        parsed["error"]["message"],
+        "--turn-time needs an s/m/h unit (got \"90\"); pass 0 to disable"
+    );
+}
