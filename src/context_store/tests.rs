@@ -257,53 +257,81 @@ fn vault_seals_and_erases_with_tombstones() {
 fn store_modes_block_state_advancing_turns() {
     let mut store = ContextStore::open(&key());
     assert_eq!(store.mode(), StoreMode::Normal);
-    store.sanitized_append(Some("h0"), b"bytes").unwrap();
+    store.sanitized_append(b"bytes").unwrap();
     for mode in [StoreMode::ReadOnly, StoreMode::Unavailable] {
         store.set_mode(mode);
         assert_eq!(
             store.begin_state_advancing_turn().unwrap_err(),
             StoreBlocked::Mode { mode: mode.name() }
         );
-        assert!(store.sanitized_append(Some("h1"), b"more").is_err());
+        assert!(store.sanitized_append(b"more").is_err());
         assert!(store.vault_put(b"raw", "why").is_err());
         // Reads still work: only state advancement and side effects are blocked.
         assert_eq!(store.read_page(0..5, 16).unwrap().bytes, b"bytes");
     }
     store.set_mode(StoreMode::Normal);
-    store.sanitized_append(Some("h2"), b"again").unwrap();
+    store.sanitized_append(b"again").unwrap();
 }
 
 #[test]
 fn store_index_rebuild_and_range_selector() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append(Some("h0"), b"aaaa").unwrap();
-    store.sanitized_append(Some("h1"), b"bbbb").unwrap();
-    store.sanitized_append(Some("h2"), b"cccc").unwrap();
+    store.sanitized_append(b"aaaa").unwrap();
+    let (h1, _) = store.sanitized_append(b"bbbb").unwrap();
+    store.sanitized_append(b"cccc").unwrap();
     assert_eq!(store.rebuild_index(), 3);
     let hits = store.select(4..8);
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].handle, "h1");
+    assert_eq!(hits[0].handle, h1);
     assert_eq!(store.select(100..200).len(), 0);
 }
 
 #[test]
 fn store_checkpoint_tail_replay_is_exact() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append(Some("h0"), b"one").unwrap();
+    store.sanitized_append(b"one").unwrap();
     let checkpoint = store.checkpoint();
-    store.sanitized_append(Some("h1"), b"two").unwrap();
-    store.sanitized_append(Some("h2"), b"three").unwrap();
+    let (h1, _) = store.sanitized_append(b"two").unwrap();
+    let (h2, _) = store.sanitized_append(b"three").unwrap();
     let tail = store.replay_tail(checkpoint);
     let handles: Vec<&str> = tail.iter().map(|record| record.handle.as_str()).collect();
-    assert_eq!(handles, ["h1", "h2"]);
+    assert_eq!(handles, [h1.as_str(), h2.as_str()]);
     assert_eq!(store.latest_checkpoint(), Some(checkpoint));
 }
 
+/// Issue #140: the returned handle is the canonical content-stable identity,
+/// and a durable spine round trip resolves the SAME handles, ranges, and bytes
+/// with no mutation and no duplicate index entries.
+#[test]
+fn canonical_handles_survive_spine_round_trip() {
+    let mut store = ContextStore::open(&key());
+    let (h0, r0) = store.sanitized_append(b"alpha").unwrap();
+    let (h1, r1) = store.sanitized_append(b"beta").unwrap();
+    let (h2, r2) = store.sanitized_append(b"gamma").unwrap();
+    for handle in [&h0, &h1, &h2] {
+        assert!(handle.starts_with("sanitized-"), "{handle} is canonical");
+    }
+    let encoded = store.spine_bytes();
+    let mut fresh = ContextStore::open(&key());
+    assert_eq!(fresh.load_spine(&encoded), 0);
+    assert_eq!(fresh.rebuild_index(), 3);
+    for (handle, range, bytes) in [
+        (&h0, r0.clone(), &b"alpha"[..]),
+        (&h1, r1.clone(), &b"beta"[..]),
+        (&h2, r2.clone(), &b"gamma"[..]),
+    ] {
+        let hits = fresh.select(range.clone());
+        assert_eq!(hits.len(), 1, "no duplicate index entries");
+        assert_eq!(&hits[0].handle, handle);
+        assert_eq!(hits[0].ranges, vec![range.clone()]);
+        assert_eq!(fresh.read_page(range, bytes.len()).unwrap().bytes, bytes);
+    }
+}
 #[test]
 fn store_loads_encoded_spine_and_rebuilds_the_index() {
     let mut store = ContextStore::open(&key());
-    store.sanitized_append(Some("h0"), b"one").unwrap();
-    store.sanitized_append(Some("h1"), b"two").unwrap();
+    store.sanitized_append(b"one").unwrap();
+    store.sanitized_append(b"two").unwrap();
     let encoded = store.spine_bytes();
     let mut fresh = ContextStore::open(&key());
     assert_eq!(fresh.load_spine(&encoded), 0);
@@ -430,12 +458,8 @@ fn v2_store_for_the_flow() -> (Vec<u8>, EventLog, Sequencer) {
     }
     let key = VaultKey::from(raw);
     let mut v2_store = ContextStore::open(&key);
-    v2_store
-        .sanitized_append(Some("v2-record-a"), &[1_u8; 16])
-        .unwrap();
-    v2_store
-        .sanitized_append(Some("v2-record-b"), &[2_u8; 16])
-        .unwrap();
+    v2_store.sanitized_append(&[1_u8; 16]).unwrap();
+    v2_store.sanitized_append(&[2_u8; 16]).unwrap();
     let v2_bytes = v2_store.spine_bytes();
 
     let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
