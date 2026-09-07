@@ -116,7 +116,9 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
     let Some(session_dir) = session_dir else {
         return cache_block();
     };
-    let Ok(text) = std::fs::read_to_string(session_dir.join("context/rewrite-journal.log")) else {
+    let Ok(text) = std::fs::read_to_string(
+        crate::session::context_artifact_dir(session_dir).join("rewrite-journal.log"),
+    ) else {
         return cache_block();
     };
     let mut entries = 0_u64;
