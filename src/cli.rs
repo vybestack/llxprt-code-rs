@@ -204,9 +204,11 @@ fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
     // Both readable locations are consulted independently: the manifest keeps
     // supplying `preserved`, while the best-effort marker the store drops beside
     // the session when only `context/` is unwritable wins for `quiesce`.
-    let manifest = std::fs::read_to_string(session_dir.join("context").join("manifest.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let manifest = std::fs::read_to_string(
+        crate::session::context_artifact_dir(session_dir).join("manifest.json"),
+    )
+    .ok()
+    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
     let marker = std::fs::read_to_string(session_dir.join("context-quiesce.json"))
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());

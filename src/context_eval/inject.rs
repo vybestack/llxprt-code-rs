@@ -256,7 +256,9 @@ impl Drop for StoreUnwritableInjection {
 /// Returns once the fault is applied (or the deadline passes, which the scenario's own
 /// verdict reports as missing evidence).
 fn inject_unwritable(context: PathBuf) -> bool {
-    let manifest = context.join("manifest.json");
+    // The store publishes whole generations into `context/committed/` (137),
+    // so the poll watches whichever layout this build's store actually wrote.
+    let manifest = readable_slot(&context).join("manifest.json");
     let deadline = std::time::Instant::now() + FAULT_POLL_TIMEOUT;
     while std::time::Instant::now() < deadline {
         if manifest.is_file() {
@@ -268,14 +270,9 @@ fn inject_unwritable(context: PathBuf) -> bool {
         return false;
     }
     // File modes first: a read-only directory alone does not stop a write that re-opens
-    // an existing `0o600` file with O_TRUNC through an open directory handle.
-    if let Ok(entries) = fs::read_dir(&context) {
-        for entry in entries.flatten() {
-            if entry.path().is_file() {
-                let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o400));
-            }
-        }
-    }
+    // an existing `0o600` file with O_TRUNC through an open directory handle. The whole
+    // tree is walked so a store publishing into a generation slot fails too (137).
+    chmod_tree(&context, 0o400, 0o500);
     if fs::set_permissions(&context, fs::Permissions::from_mode(0o500)).is_ok() {
         harness::eprint_status("context-evals fault: session context store made unwritable");
         return true;
@@ -285,14 +282,36 @@ fn inject_unwritable(context: PathBuf) -> bool {
 
 /// Restores the session `context/` tree so later phases read a clean, usable store.
 fn restore_writable(context: &Path) {
-    if let Ok(entries) = fs::read_dir(context) {
+    chmod_tree(context, 0o600, 0o700);
+}
+
+/// The directory a reader of this session's context artifacts must open: the
+/// committed generation slot when the store publishes generations (137), else
+/// the flat `context/` directory.
+fn readable_slot(context: &Path) -> PathBuf {
+    let committed = context.join("committed");
+    if committed.is_dir() {
+        committed
+    } else {
+        context.to_path_buf()
+    }
+}
+
+/// Applies one mode pair to a whole directory tree: files get `file_mode`,
+/// directories `dir_mode`, deepest first for the unwinding direction the fault
+/// and the restore each need.
+fn chmod_tree(root: &Path, file_mode: u32, dir_mode: u32) {
+    if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
-            if entry.path().is_file() {
-                let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o600));
+            let path = entry.path();
+            if path.is_dir() {
+                chmod_tree(&path, file_mode, dir_mode);
+            } else {
+                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(file_mode));
             }
         }
     }
-    let _ = fs::set_permissions(context, fs::Permissions::from_mode(0o700));
+    let _ = fs::set_permissions(root, fs::Permissions::from_mode(dir_mode));
 }
 
 /// Files a consistent session `context/` store must carry. A store that is missing them
@@ -310,6 +329,9 @@ pub fn store_shape_consistent(context: &Path) -> bool {
     if !context.is_dir() {
         return false;
     }
+    // Whole generations live in `context/committed/` (137); the flat directory
+    // is the pre-generation store earlier builds wrote.
+    let context = readable_slot(context);
     for name in STORE_FILES {
         if !context.join(name).is_file() {
             return false;
