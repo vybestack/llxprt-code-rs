@@ -153,6 +153,22 @@ pub trait IngressSink {
     fn mode(&self) -> &'static str;
 }
 
+/// One slot's validated outcome: the bytes the spine will receive plus the
+/// segmentation already computed during validation, so the write reuses the
+/// detector work instead of repeating it (issue 136).
+enum ValidatedSlot {
+    Sanitized {
+        bytes: Vec<u8>,
+        segments: Vec<Segment>,
+        redactions: usize,
+    },
+    Vaulted {
+        placeholder: Vec<u8>,
+        segments: Vec<Segment>,
+        reason: VaultReason,
+    },
+}
+
 /// The ingress transaction.
 pub struct IngressTxn {
     capture: CaptureBuffer,
@@ -214,12 +230,13 @@ impl IngressTxn {
         // byte-identical to before the attempt (all-or-nothing admission):
         // a coverage failure in any slot appends nothing at all.
         let slots = self.capture.drain();
+        let mut validated = Vec::with_capacity(slots.len());
         for slot in slots.iter() {
-            self.validate_slot(&slot.bytes)?;
+            validated.push(self.validate_slot(&slot.bytes)?);
         }
         let mut records = Vec::new();
-        for slot in slots {
-            let record = self.transact_one(sink, slot.source, &slot.bytes)?;
+        for (slot, validated) in slots.into_iter().zip(validated) {
+            let record = self.transact_one(sink, slot.source, &slot.bytes, validated)?;
             self.quarantine
                 .extend(record.secret_digests.iter().copied());
             records.push(record);
@@ -235,9 +252,13 @@ impl IngressTxn {
     /// Pure validation of one slot's sanitized bytes: the coverage check runs
     /// BEFORE the durable append, so a rejected payload never leaves bytes in
     /// the spine (issue 107 regression).
-    fn validate_slot(&self, raw: &[u8]) -> Result<(), IngressError> {
+    ///
+    /// Returns the slot's validated outcome: the bytes the spine will receive
+    /// plus the segmentation already computed during validation, so the write
+    /// reuses the detector work instead of repeating it (issue 136).
+    fn validate_slot(&self, raw: &[u8]) -> Result<ValidatedSlot, IngressError> {
         match self.redactor.redact(raw) {
-            RedactionOutcome::Sanitized { bytes, .. } => {
+            RedactionOutcome::Sanitized { bytes, redactions } => {
                 if bytes.is_empty() {
                     return Err(IngressError::EmptyPreservedSpine);
                 }
@@ -247,10 +268,14 @@ impl IngressTxn {
                         sanitized_len: bytes.len(),
                     });
                 }
-                Ok(())
+                Ok(ValidatedSlot::Sanitized {
+                    bytes,
+                    segments,
+                    redactions: redactions.len(),
+                })
             }
             RedactionOutcome::Vaulted { reason, byte_len } => {
-                let placeholder = vault_placeholder(reason, byte_len);
+                let placeholder = vault_placeholder(reason.clone(), byte_len);
                 if placeholder.is_empty() {
                     return Err(IngressError::EmptyPreservedSpine);
                 }
@@ -260,7 +285,11 @@ impl IngressTxn {
                         sanitized_len: placeholder.len(),
                     });
                 }
-                Ok(())
+                Ok(ValidatedSlot::Vaulted {
+                    placeholder,
+                    segments,
+                    reason,
+                })
             }
         }
     }
@@ -270,11 +299,15 @@ impl IngressTxn {
         sink: &mut dyn IngressSink,
         source: CaptureSource,
         raw: &[u8],
+        validated: ValidatedSlot,
     ) -> Result<IngressRecord, IngressError> {
-        let outcome = self.redactor.redact(raw);
-        match outcome {
-            RedactionOutcome::Sanitized { bytes, redactions } => {
-                let (placement, segments) = Self::place_on_spine(sink, &bytes)?;
+        match validated {
+            ValidatedSlot::Sanitized {
+                bytes,
+                segments,
+                redactions,
+            } => {
+                let (placement, segments) = Self::place_on_spine(sink, &bytes, segments)?;
                 let payload = IngressPayload {
                     handle: placement.handle.clone(),
                     ranges: vec![placement.range.clone()],
@@ -286,20 +319,23 @@ impl IngressTxn {
                     payload,
                     sanitized: bytes,
                     segments,
-                    redactions: redactions.len(),
+                    redactions,
                     vault: None,
                     secret_digests: secret_token_digests(raw),
                     spine: Some(placement),
                 })
             }
-            RedactionOutcome::Vaulted { reason, byte_len } => {
+            ValidatedSlot::Vaulted {
+                placeholder,
+                segments,
+                reason,
+            } => {
                 // The placeholder depends only on the quarantine reason and the
                 // raw byte length, never on where the spine places it, so it
                 // is built and landed on the spine BEFORE the vault write: a
                 // spine refusal must not leave already-durable raw plaintext
                 // in the vault with no spine reference naming it (issue 130).
-                let placeholder = vault_placeholder(reason.clone(), byte_len);
-                let (placement, segments) = Self::place_on_spine(sink, &placeholder)?;
+                let (placement, segments) = Self::place_on_spine(sink, &placeholder, segments)?;
                 let handle = sink.vault_put(raw, reason.name()).map_err(|refusal| {
                     IngressError::StoreBlocked {
                         mode: sink_refusal_mode(&refusal),
@@ -321,7 +357,7 @@ impl IngressTxn {
                     vault: Some(VaultReference {
                         handle,
                         reason: reason.name().to_string(),
-                        placeholder,
+                        placeholder: placeholder.clone(),
                         content_digest: digest(raw),
                     }),
                     spine: Some(placement),
@@ -346,6 +382,7 @@ impl IngressTxn {
     fn place_on_spine(
         sink: &mut dyn IngressSink,
         bytes: &[u8],
+        segments: Vec<Segment>,
     ) -> Result<(SpinePlacement, Vec<Segment>), IngressError> {
         let placement =
             sink.sanitized_append(bytes)
@@ -359,7 +396,6 @@ impl IngressTxn {
         if placement.range.is_empty() {
             return Err(IngressError::EmptyPreservedSpine);
         }
-        let segments = segment(bytes);
         if !coverage_is_total(&segments, bytes.len()) {
             return Err(IngressError::Coverage {
                 sanitized_len: bytes.len(),

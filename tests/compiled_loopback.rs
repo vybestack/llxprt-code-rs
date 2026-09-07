@@ -1214,3 +1214,204 @@ fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
 fn contains(h: &[u8], needle: &[u8]) -> bool {
     h.windows(needle.len()).any(|w| w == needle)
 }
+/// Spawn a loopback server that captures the request body as JSON and answers a
+/// valid OpenAI Chat Completions success, mirroring `spawn_anthropic_request_server`.
+fn spawn_openai_request_server() -> (
+    String,
+    std::sync::mpsc::Receiver<Value>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind OpenAI server");
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "timed out waiting for OpenAI request"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept OpenAI request: {error}"),
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        let request = read_http_request(&mut stream).expect("read OpenAI request");
+        let body_start = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("request header terminator")
+            + 4;
+        sender
+            .send(serde_json::from_slice(&request[body_start..]).expect("OpenAI JSON request"))
+            .unwrap();
+        let body = r#"{"id":"1","object":"chat.completion","created":1,"model":"loopback","choices":[{"index":0,"message":{"role":"assistant","content":"loopback complete"},"finish_reason":"stop"}]}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    });
+    (format!("http://{address}"), receiver, thread)
+}
+
+/// `known-model` mode forwards a `modelParams` key only when the model registry
+/// knows it for the effective provider: `stop_sequences` for Anthropic and
+/// `top_logprobs` for OpenAI Chat, each refused on the other wire.
+#[test]
+fn compiled_loopback_known_model_override_changes_wire_body_per_provider() {
+    for (provider, model, capture, expect, forwarded, absent) in [
+        (
+            "anthropic",
+            "claude-loopback",
+            spawn_anthropic_request_server
+                as fn() -> (
+                    String,
+                    std::sync::mpsc::Receiver<Value>,
+                    std::thread::JoinHandle<()>,
+                ),
+            "stop_sequences",
+            serde_json::json!(["END"]),
+            "top_logprobs",
+        ),
+        (
+            "openai",
+            "claude-loopback",
+            spawn_openai_request_server
+                as fn() -> (
+                    String,
+                    std::sync::mpsc::Receiver<Value>,
+                    std::thread::JoinHandle<()>,
+                ),
+            "top_logprobs",
+            serde_json::json!(2),
+            "stop_sequences",
+        ),
+    ] {
+        let uid = uniq();
+        let workspace = tempfile::tempdir().unwrap();
+        let ws = workspace.path().to_path_buf();
+        let profiles = ws.join("profiles");
+        std::fs::create_dir_all(&profiles).unwrap();
+        let (base_url, request_rx, server) = capture();
+        let model_params = {
+            let mut params = serde_json::Map::new();
+            params.insert(expect.to_string(), forwarded.clone());
+            Value::Object(params)
+        };
+        let profile = serde_json::json!({
+            "provider": provider,
+            "model": model,
+            "modelParams": model_params,
+            "ephemeralSettings": {
+                "base-url": base_url,
+                "auth-key": format!("sk-zz-{uid}"),
+            }
+        });
+        std::fs::write(profiles.join("lbparams.json"), profile.to_string()).unwrap();
+        let output = bin()
+            .env("LLXPRT_CONFIG_HOME", &ws)
+            .env("LLXPRT_MODEL_PARAMS_MODE", "known-model")
+            .arg("--profile")
+            .arg("lbparams")
+            .arg("--session")
+            .arg(format!("issue64-known-model-{provider}-{uid}"))
+            .arg("--cwd")
+            .arg(&ws)
+            .arg("-p")
+            .arg("Reply with loopback complete")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{provider} process failed\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("receive request body");
+        server.join().unwrap();
+        assert_eq!(
+            request[expect], forwarded,
+            "{provider} body missing forwarded {expect}: {request}"
+        );
+        assert!(
+            request.get(absent).is_none(),
+            "{provider} body unexpectedly carries {absent}: {request}"
+        );
+    }
+}
+
+/// In default `loose` mode an unrecognized `modelParams` key is forwarded
+/// verbatim; when the provider rejects it, the refusal surfaces as an error
+/// envelope with the model exit code and the provider's naming text.
+#[test]
+fn compiled_loopback_provider_refusal_of_forwarded_unknown_key_surfaces_in_envelope() {
+    let uid = uniq();
+    let workspace = tempfile::tempdir().unwrap();
+    let ws = workspace.path().to_path_buf();
+    let profiles = ws.join("profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    let acc = Arc::new(AtomicUsize::new(0));
+    let addr = spawn_body_server(
+        r#"{"error":{"message":"Unknown parameter: 'custom_wire_param' is not a valid parameter"}}"#
+            .to_string(),
+        Arc::clone(&acc),
+    );
+    let profile = serde_json::json!({
+        "provider": "openai",
+        "model": "claude-loopback",
+        "modelParams": {
+            "custom_wire_param": {"a": 1},
+        },
+        "ephemeralSettings": {
+            "base-url": format!("http://{addr}"),
+            "auth-key": format!("sk-zz-{uid}"),
+        }
+    });
+    std::fs::write(profiles.join("lbunknown.json"), profile.to_string()).unwrap();
+    let output = bin()
+        .env("LLXPRT_CONFIG_HOME", &ws)
+        .arg("--profile")
+        .arg("lbunknown")
+        .arg("--session")
+        .arg(format!("issue64-loose-unknown-{uid}"))
+        .arg("--cwd")
+        .arg(&ws)
+        .arg("-p")
+        .arg("Reply with loopback complete")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(5),
+        "a provider refusal is the model exit code\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        acc.load(Ordering::SeqCst),
+        1,
+        "loose mode must forward the unknown key to the provider"
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|e| panic!("one JSON stdout: {e}"));
+    assert_eq!(parsed["status"], "error");
+    let message = parsed["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("custom_wire_param"),
+        "provider naming text missing from envelope: {parsed}"
+    );
+}

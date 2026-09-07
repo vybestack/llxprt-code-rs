@@ -226,8 +226,7 @@ fn recover_manifest_artifacts(
     match crate::safe_file::read_artifact(dir, "vault", VAULT_RELOAD_MAX) {
         Ok(bytes) => {
             let snapshot: crate::context_store::vault::VaultSnapshot =
-                serde_json::from_slice(&bytes)
-                    .map_err(|error| format!("context vault corrupt: {error}"))?;
+                serde_json::from_slice(&bytes).map_err(describe_vault_deser_error)?;
             state.store.restore_vault(snapshot).map_err(|error| {
                 format!(
                     "context vault refused restore: {}",
@@ -268,6 +267,22 @@ fn recover_manifest_artifacts(
         // (issue 102).
         Err(crate::safe_file::ArtifactError::NotFound { .. }) => Ok(None),
         Err(error) => Err(format!("context manifest unreadable: {error}")),
+    }
+}
+
+/// Discriminates a vault-snapshot deserialization failure: a missing field is a
+/// snapshot written by an older build (format skew, never damage - issue 208);
+/// anything else is a genuinely corrupt artifact.
+fn describe_vault_deser_error(error: serde_json::Error) -> String {
+    if error.to_string().contains("missing field") {
+        // Written by an older build before the field existed. This is
+        // format skew, not damage: say so instead of "corrupt" (issue 208).
+        format!(
+            "context vault written by an older build ({error}); \
+             resume needs a session written by this build"
+        )
+    } else {
+        format!("context vault corrupt: {error}")
     }
 }
 
@@ -425,4 +440,33 @@ pub(crate) fn write_artifact(
         open_regular_at(dir, name, flags, mode)
     })
     .map_err(|error| format!("publish context artifact {name} failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe_vault_deser_error;
+
+    #[test]
+    fn missing_vault_field_reports_format_skew_not_corruption() {
+        // A snapshot JSON lacking nonce_prefix is the shape older builds wrote.
+        let missing = serde_json::from_slice::<crate::context_store::vault::VaultSnapshot>(
+            br#"{"slots":[],"next":0}"#,
+        )
+        .err()
+        .unwrap();
+        let error = describe_vault_deser_error(missing);
+        assert!(error.contains("older build"), "got: {error}");
+        assert!(!error.contains("corrupt"), "got: {error}");
+    }
+
+    #[test]
+    fn corrupt_vault_field_reports_corruption() {
+        let corrupt =
+            serde_json::from_slice::<crate::context_store::vault::VaultSnapshot>(b"not json")
+                .err()
+                .unwrap();
+        let error = describe_vault_deser_error(corrupt);
+        assert!(error.contains("corrupt"), "got: {error}");
+        assert!(!error.contains("older build"), "got: {error}");
+    }
 }

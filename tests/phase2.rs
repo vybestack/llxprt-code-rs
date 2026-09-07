@@ -6,7 +6,7 @@
 //! daemon config dir is set **once** to a shared per-process root and every test uses a
 //! unique session id under it. No test mutates the env afterwards.
 
-use llxprt_code_rs::adapter::{ChatBackend, LlmResult, ToolCall};
+use llxprt_code_rs::adapter::{ChatBackend, LlmResult, LlmUsage, ToolCall};
 use llxprt_code_rs::agent::CodingAgent;
 use llxprt_code_rs::session::{
     HistoryTurn, Lifecycle, ReservedRequest, RoundRecord, SessionId, SessionState, SessionStore,
@@ -27,6 +27,7 @@ struct MockBackend {
 
 fn result(text: &str) -> LlmResult {
     LlmResult {
+        usage: LlmUsage::default(),
         text: text.to_string(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -198,6 +199,7 @@ fn multi_tool_turn_persists_call_ids_results_and_turn2_replays_roles() {
     let cwd = new_cwd();
     let st = store("s2");
     let round1 = LlmResult {
+        usage: LlmUsage::default(),
         text: "reading".to_string(),
         calls: vec![
             ToolCall {
@@ -433,6 +435,7 @@ fn length_finish_reason_persists_failed() {
     let st = store("s11");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let truncated = |text: &str| LlmResult {
+        usage: LlmUsage::default(),
         text: text.to_string(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
@@ -466,6 +469,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
     let st = store("s11-mid");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c1".to_string(),
@@ -475,6 +479,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let truncated = LlmResult {
+        usage: LlmUsage::default(),
         text: "half".to_string(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
@@ -521,6 +526,7 @@ fn empty_id_fails_before_side_effect() {
     let cwd = new_cwd();
     let st = store("s12");
     let bad = LlmResult {
+        usage: LlmUsage::default(),
         text: "".to_string(),
         calls: vec![ToolCall {
             id: "".into(),
@@ -545,6 +551,7 @@ fn duplicate_ids_fail() {
     let cwd = new_cwd();
     let st = store("s13");
     let dup = LlmResult {
+        usage: LlmUsage::default(),
         text: "".to_string(),
         calls: vec![
             ToolCall {
@@ -578,6 +585,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
     // default budget is unlimited; caps are opt-in.)
     let mut replies: Vec<LlmResult> = (0..17)
         .map(|i| LlmResult {
+            usage: LlmUsage::default(),
             text: String::new(),
             calls: vec![ToolCall {
                 id: format!("c{i}"),
@@ -588,6 +596,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
         })
         .collect();
     replies.push(LlmResult {
+        usage: LlmUsage::default(),
         text: "wrapped up".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -604,11 +613,81 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
 }
 
 #[test]
+fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
+    // Two fitting calls against a 2-call cap, then the model stops on its own:
+    // total == declared, so the envelope must still report exhaustion — the
+    // next call would have been refused (#15).
+    let cwd = new_cwd();
+    let st = store("s15b");
+    let r = reserved(&st, None, None, "P", &cwd).unwrap();
+    let calls: Vec<LlmResult> = (0..2)
+        .map(|i| LlmResult {
+            text: String::new(),
+            calls: vec![ToolCall {
+                id: format!("c{i}"),
+                name: "write_file".into(),
+                args_json: format!(r#"{{"path":"n{i}.txt","content":"x"}}"#),
+            }],
+            finish_reason: Some(FinishReason::ToolCall),
+            usage: LlmUsage::default(),
+        })
+        .collect();
+    let mut replies = calls;
+    replies.push(LlmResult {
+        text: "all done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
+    });
+    let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(2));
+    let run = a.run(&st, &r).expect("capped run completes");
+    assert_eq!(run.tool_count, 2);
+    assert_eq!(run.declared_tool_calls, Some(2));
+    assert!(
+        run.budget_exhausted,
+        "ending exactly at the cap is cap termination"
+    );
+    assert_eq!(run.status, "ok");
+}
+
+#[test]
+fn natural_wrapup_below_cap_reports_budget_available() {
+    let cwd = new_cwd();
+    let st = store("s15c");
+    let r = reserved(&st, None, None, "P", &cwd).unwrap();
+    let call = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c0".into(),
+            name: "write_file".into(),
+            args_json: r#"{"path":"one.txt","content":"x"}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+        usage: LlmUsage::default(),
+    };
+    let done = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+        usage: LlmUsage::default(),
+    };
+    let a =
+        agent(Box::new(MockBackend::new(vec![call, done])), &cwd).with_max_tool_calls(Some(256));
+    let run = a.run(&st, &r).unwrap();
+    assert_eq!(run.tool_count, 1);
+    assert!(
+        !run.budget_exhausted,
+        "a run that stops well under the cap is natural wrap-up"
+    );
+}
+
+#[test]
 fn failed_state_persists_error() {
     let cwd = new_cwd();
     let st = store("s15");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let bad = LlmResult {
+        usage: LlmUsage::default(),
         text: "".to_string(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::ContentFilter),
@@ -661,6 +740,7 @@ fn later_round_context_overflow_stops_before_next_call() {
     let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
     std::fs::write(cwd.join("big.txt"), "y".repeat(payload_len)).unwrap();
     let round = LlmResult {
+        usage: LlmUsage::default(),
         text: "reading".to_string(),
         calls: vec![ToolCall {
             id: "c0".into(),
@@ -749,6 +829,7 @@ fn aggregate_assistant_bytes_across_rounds_rejected() {
     let st = store("sagg1");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let big_tool = |id: &str, path: &str, ch: char, n: usize| LlmResult {
+        usage: LlmUsage::default(),
         text: ch.to_string().repeat(n),
         calls: vec![ToolCall {
             id: id.to_string(),
@@ -782,6 +863,7 @@ fn aggregate_args_across_rounds_rejected() {
     let st = store("sagg2");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let arg_round = |id: &str, path: &str, ch: char| LlmResult {
+        usage: LlmUsage::default(),
         text: "working".to_string(),
         calls: vec![ToolCall {
             id: id.to_string(),
@@ -831,6 +913,7 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         })
         .collect();
     let tool_round = LlmResult {
+        usage: LlmUsage::default(),
         text: "reading".into(),
         calls,
         finish_reason: Some(FinishReason::ToolCall),
@@ -910,6 +993,7 @@ fn oversized_search_output_is_bounded_before_retention() {
     let st = store("sagg-search-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        usage: LlmUsage::default(),
         text: "searching".into(),
         calls: vec![ToolCall {
             id: "search-1".into(),
@@ -1056,6 +1140,7 @@ fn second_model_call_observes_renewed_lease_after_elapsed_interval() {
     let before = on_disk_lease(&st, &r);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let tool = LlmResult {
+        usage: LlmUsage::default(),
         text: "next".to_string(),
         calls: vec![ToolCall {
             id: "c1".into(),
