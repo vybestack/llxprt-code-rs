@@ -38,6 +38,7 @@ pub struct ResolvedProvider {
     pub base_url: Resolved<String>,
     pub model: Resolved<String>,
     pub profile_path: Resolved<PathBuf>,
+    pub model_params_mode: Resolved<ModelParamsMode>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedBudgets {
@@ -71,11 +72,18 @@ pub struct SettingsProvider {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_path: Option<PathBuf>,
+    /// The `modelParams` acceptance policy: `loose` (default), `known-model`, or
+    /// `strict`. Stored as the on-disk spelling; resolved into [`ModelParamsMode`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_params_mode: Option<String>,
 }
 
 impl SettingsProvider {
     fn is_empty(&self) -> bool {
-        self.base_url.is_none() && self.model.is_none() && self.profile_path.is_none()
+        self.base_url.is_none()
+            && self.model.is_none()
+            && self.profile_path.is_none()
+            && self.model_params_mode.is_none()
     }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -137,9 +145,22 @@ pub struct SettingsLayers {
 
 /// Read the process environment settings layer. This is the sole settings-env reader.
 pub fn environment_layer() -> Result<SettingsLayer, String> {
+    let model_params_mode = std::env::var("LLXPRT_MODEL_PARAMS_MODE")
+        .ok()
+        .map(|value| {
+            ModelParamsMode::parse(&value)
+                .map(|mode| mode.as_str().to_string())
+                .map_err(|_| {
+                    format!(
+                    "LLXPRT_MODEL_PARAMS_MODE must be loose, known-model, or strict (got {value})"
+                )
+                })
+        })
+        .transpose()?;
     Ok(SettingsLayer {
         provider: SettingsProvider {
             base_url: std::env::var("LLXPRT_BASE_URL").ok(),
+            model_params_mode,
             ..Default::default()
         },
         budgets: SettingsBudgets {
@@ -183,6 +204,44 @@ pub fn validate_output_caps(shell: u64, tool: u64, turn: u64) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+/// The `modelParams` acceptance policy (issue 64).
+///
+/// `loose` is the default: unknown `modelParams` keys are forwarded verbatim on the
+/// provider wire and the provider's own error is the validation. `known-model` checks
+/// the profile against the checked-in model registry at load. `strict` refuses unknown
+/// keys at load.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelParamsMode {
+    #[default]
+    Loose,
+    KnownModel,
+    Strict,
+}
+
+impl ModelParamsMode {
+    /// Parse the on-disk spelling used by the settings file, `LLXPRT_MODEL_PARAMS_MODE`,
+    /// and `--model-params-mode`.
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim() {
+            "loose" => Ok(Self::Loose),
+            "known-model" => Ok(Self::KnownModel),
+            "strict" => Ok(Self::Strict),
+            other => Err(format!(
+                "--model-params-mode must be loose, known-model, or strict (got {other})"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Loose => "loose",
+            Self::KnownModel => "known-model",
+            Self::Strict => "strict",
+        }
+    }
 }
 
 /// Validate the max-tool-call setting used by both CLI-equivalent layers.

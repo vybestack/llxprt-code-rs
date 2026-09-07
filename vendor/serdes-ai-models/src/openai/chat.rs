@@ -17,6 +17,7 @@ use serdes_ai_core::{
     RequestUsage,
 };
 use serdes_ai_tools::ToolDefinition;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Build the chat-completions URL from a base URL. Only `chat/completions` is
@@ -67,6 +68,9 @@ pub struct OpenAIChatModel {
 pub struct OpenAIChatModelRequestSettings {
     /// The dsflash request extension; `None` keeps the wire key absent.
     pub chat_template_kwargs: Option<ChatTemplateKwargs>,
+    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
+    /// verbatim and flattened into the request body.
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl std::fmt::Debug for OpenAIChatModel {
@@ -389,6 +393,7 @@ impl OpenAIChatModel {
             ResponseFormat::json_schema("output", schema_value, true)
         });
 
+        let mut request_extra = self.request_settings.extra.clone();
         ChatCompletionRequest {
             model: self.model_name.clone(),
             messages,
@@ -416,6 +421,7 @@ impl OpenAIChatModel {
             logprobs: None,
             top_logprobs: None,
             chat_template_kwargs: self.request_settings.chat_template_kwargs.clone(),
+            extra: std::mem::take(&mut request_extra),
         }
     }
 
@@ -641,6 +647,7 @@ mod tests {
                     enable_thinking: true,
                     reasoning_effort: Some(ChatTemplateReasoningEffort::High),
                 }),
+                extra: BTreeMap::new(),
             },
         );
         let request =
@@ -658,6 +665,7 @@ mod tests {
                     enable_thinking: false,
                     reasoning_effort: None,
                 }),
+                extra: BTreeMap::new(),
             },
         );
         let request = without_effort.build_request(
@@ -853,5 +861,36 @@ mod tests {
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].headers.get("authorization").is_none());
+    }
+
+    #[test]
+    fn test_forwarded_extra_flattens_into_request_body() {
+        // A model constructed with forwarded modelParams carries them flattened at the
+        // top level of the serialized body; an empty map keeps them absent.
+        let mut extra = BTreeMap::new();
+        extra.insert("top_k".to_string(), serde_json::json!(42));
+        extra.insert("nested".to_string(), serde_json::json!({"a": 1}));
+        let model = OpenAIChatModel::new("gpt-4o", "key").with_request_settings(
+            OpenAIChatModelRequestSettings {
+                chat_template_kwargs: None,
+                extra,
+            },
+        );
+        let request =
+            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["top_k"], 42);
+        assert_eq!(wire["nested"], serde_json::json!({"a": 1}));
+
+        let plain = OpenAIChatModel::new("gpt-4o", "key");
+        let wire = serde_json::to_value(plain.build_request(
+            &[],
+            &ModelSettings::default(),
+            &Default::default(),
+            false,
+        ))
+        .unwrap();
+        assert!(wire.get("extra").is_none());
+        assert!(wire.get("top_k").is_none());
     }
 }

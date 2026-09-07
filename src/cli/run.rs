@@ -33,6 +33,7 @@ pub fn run_profiled(
         &dependencies,
         args.profile_load.is_some(),
         args.allow_insecure_http,
+        settings.provider.model_params_mode.value,
     )
     .map_err(|error| AppError::new(Code::Config, "model-config", error))?;
     let agent = build_agent(
