@@ -68,11 +68,13 @@ pub fn run_profiled(
             ..Default::default()
         },
     )?;
+    let output_caps = agent.output_caps();
     let run = agent.run(&store, &reserved).map_err(agent_error)?;
     Ok(RunOutcome {
         session: session_id,
         session_dir: store.session_dir().to_path_buf(),
         run,
+        output_caps,
     })
 }
 
@@ -151,9 +153,22 @@ fn build_agent(
                     .unwrap_or(crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS),
             ),
         )
+        .with_output_caps(resolved_output_caps(settings))
         .with_profiler(profiler);
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)
+}
+
+/// Resolve the output caps (issue 77) the agent enforces and the run reports: per-result
+/// shell/tool caps and the aggregate per-turn tool-output cap. The resolver has already
+/// validated that neither per-result cap exceeds the turn cap.
+fn resolved_output_caps(settings: &Settings) -> crate::agent::OutputCaps {
+    let cap = |value: u64| usize::try_from(value).unwrap_or(usize::MAX);
+    crate::agent::OutputCaps {
+        shell: cap(settings.budgets.max_shell_output.value),
+        tool: cap(settings.budgets.max_tool_output.value),
+        turn: cap(settings.budgets.max_turn_output.value),
+    }
 }
 
 fn agent_error(error: crate::agent::AgentError) -> AppError {

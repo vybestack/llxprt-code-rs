@@ -105,7 +105,10 @@ impl CodingAgent {
                 store,
                 reserved,
                 "limit",
-                &format!("turn tool output reached the {MAX_TURN_OUTPUT_BYTES} byte cap"),
+                &format!(
+                    "turn tool output reached the {} byte cap",
+                    self.output_caps.turn
+                ),
                 rounds,
             ),
         }

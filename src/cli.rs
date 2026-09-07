@@ -86,6 +86,18 @@ pub struct Args {
     #[arg(long, value_name = "DURATION")]
     pub turn_time: Option<String>,
 
+    /// Cap on one shell result in bytes (default 32768).
+    #[arg(long, value_name = "BYTES")]
+    pub max_shell_output: Option<u64>,
+
+    /// Cap on one tool result in bytes (default 16777216).
+    #[arg(long, value_name = "BYTES")]
+    pub max_tool_output: Option<u64>,
+
+    /// Cap on the combined tool-result bytes of one turn (default 16777216).
+    #[arg(long, value_name = "BYTES")]
+    pub max_turn_output: Option<u64>,
+
     /// Print the resolved layered settings JSON and exit without constructing a backend.
     #[arg(long)]
     pub print_config: bool,
@@ -113,6 +125,9 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
         budgets: SettingsBudgets {
             max_tool_calls: args.max_tool_calls,
             turn_time: args.turn_time.clone(),
+            max_shell_output: args.max_shell_output,
+            max_tool_output: args.max_tool_output,
+            max_turn_output: args.max_turn_output,
         },
         ..Default::default()
     };
@@ -167,6 +182,9 @@ pub struct RunOutcome {
     pub session: SessionId,
     pub session_dir: std::path::PathBuf,
     pub run: crate::agent::CompletedRun,
+    /// Resolved output caps (issue 77): per-result shell/tool caps and the aggregate
+    /// per-turn tool-output cap, reported once per run.
+    pub output_caps: crate::agent::OutputCaps,
 }
 
 /// Run the full workflow from parsed args.
@@ -289,6 +307,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 budget_exhausted: o.run.budget_exhausted,
                 zero_call_tail: o.run.zero_call_tail,
                 prompt_digest: o.run.prompt_digest.clone(),
+                output_caps: o.output_caps,
                 terminal_outcome: declared.terminal_outcome,
             })
         }
@@ -598,6 +617,28 @@ mod tests {
         let hint = session_hint_from(arguments);
         assert_ne!(hint, "../escape");
         assert!(crate::session::SessionId::parse(&hint).is_ok());
+    }
+
+    #[test]
+    fn print_config_parses_the_output_cap_flags() {
+        let args = Args::try_parse_from([
+            "llxprt-code-rs",
+            "--print-config",
+            "--max-shell-output",
+            "1048576",
+            "--max-tool-output",
+            "1048576",
+            "--max-turn-output",
+            "20971520",
+        ])
+        .unwrap();
+        assert!(
+            args.print_config,
+            "main dispatches this flag before profiler/backend setup"
+        );
+        assert_eq!(args.max_shell_output, Some(1048576));
+        assert_eq!(args.max_tool_output, Some(1048576));
+        assert_eq!(args.max_turn_output, Some(20971520));
     }
 
     #[test]

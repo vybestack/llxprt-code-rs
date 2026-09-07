@@ -35,6 +35,20 @@ pub fn round_limit_message(max_rounds: usize) -> String {
 }
 
 impl super::CodingAgent {
+    /// Build the tool configuration from the resolved output and shell-timeout policy.
+    pub(super) fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
+        Ok(crate::tools::ToolConfig {
+            ws: self.workspace.try_clone()?,
+            max_output_bytes: self.output_caps.tool,
+            shell: crate::tools::ShellConfig {
+                max_shell_output: self.output_caps.shell,
+                default_shell_timeout: self.shell_default_timeout,
+                max_shell_timeout: self.shell_max_timeout,
+                allow_shell: shell_on,
+            },
+        })
+    }
+
     /// Reason-effort (or other request-side) profile notes to append to the system
     /// prompt. This is a text note about the author's intent; the transport never
     /// forwards a reasoning field. The note is bounded (a profile value is capped at
