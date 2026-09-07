@@ -508,9 +508,7 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
     use llxprt_code_rs::session::MAX_BRANCHES;
 
     let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions").join("resv-chain");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _root = shared_root();
 
     // Build a MAX_BRANCHES-long chain b1..bN with parent links so the turn +1
     // lineage contract is satisfied.
@@ -532,17 +530,11 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
         branches,
         next_branch_seq: MAX_BRANCHES as u64,
     };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&valid).unwrap(),
-    )
-    .unwrap();
     let store_ok = SessionStore::load(&SessionId::parse("resv-chain").unwrap()).unwrap();
+    store_ok.replace_snapshot(&valid).unwrap();
     store_ok.snapshot().unwrap();
 
     // A chain cap violation is the early hard cap, not a panic and not a hang.
-    let dir2 = root.join("code-rs-sessions").join("resv-cycle");
-    std::fs::create_dir_all(&dir2).unwrap();
     let chain = store_ok.snapshot().unwrap();
     let mut cycle_state = chain;
     cycle_state.session_id = "resv-cycle".into();
@@ -550,20 +542,17 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
     // parent cycle itself inconsistent, so the rejection is always deterministic).
     let n = cycle_state.branches.len();
     cycle_state.branches[n - 1].parent_branch = Some("b1".to_string());
-    std::fs::write(
-        dir2.join("session.json"),
-        serde_json::to_vec(&cycle_state).unwrap(),
-    )
-    .unwrap();
     let store_cy = SessionStore::load(&SessionId::parse("resv-cycle").unwrap()).unwrap();
-    match store_cy.snapshot() {
+    // Corruption is rejected when the snapshot is installed.
+    match store_cy
+        .replace_snapshot(&cycle_state)
+        .and_then(|()| store_cy.snapshot())
+    {
         Err(StoreError::Corrupt(_)) => {}
         other => panic!("a cycle-shaped near-max state must be Corrupt, got {other:?}"),
     }
 
     // Over-cap: MAX_BRANCHES + 1 is rejected with the early "too many branches" cap.
-    let dir = root.join("code-rs-sessions").join("resv-over");
-    std::fs::create_dir_all(&dir).unwrap();
     let over = {
         let valid_again = SessionState {
             version: llxprt_code_rs::session::STORE_VERSION,
@@ -583,8 +572,11 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
         s.branches.push(extra);
         s
     };
-    std::fs::write(dir.join("session.json"), serde_json::to_vec(&over).unwrap()).unwrap();
-    match SessionStore::load(&SessionId::parse("resv-over").unwrap()).and_then(|s| s.snapshot()) {
+    let store_over = SessionStore::load(&SessionId::parse("resv-over").unwrap()).unwrap();
+    match store_over
+        .replace_snapshot(&over)
+        .and_then(|()| store_over.snapshot())
+    {
         Err(StoreError::Corrupt(m)) if m.contains("too many branches") => {}
         other => panic!("over-cap branches must be the early cap, got {other:?}"),
     }

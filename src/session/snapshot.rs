@@ -48,10 +48,7 @@ pub(super) struct LoadedStore {
     pub repaired_tail: bool,
 }
 
-pub(super) fn load_or_migrate(
-    dir: &openat::Dir,
-    session_id: &str,
-) -> Result<LoadedStore, StoreError> {
+pub(super) fn load_state(dir: &openat::Dir, session_id: &str) -> Result<LoadedStore, StoreError> {
     match read_manifest(dir)? {
         Some(manifest) => {
             let loaded = match load_set(dir, &manifest, &manifest.current, true) {
@@ -70,10 +67,26 @@ pub(super) fn load_or_migrate(
                     }
                 }
             };
-            cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
             Ok(loaded)
         }
-        None => migrate_legacy(dir, session_id), // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
+        None => {
+            // A directory without a manifest is legitimate only before the
+            // first persist (open creates the directory and its lock file).
+            // State files beside a missing manifest belong to a session
+            // written by an older build; the no-compat policy refuses them.
+            if super::open_regular_at(dir, "session.json", libc::O_RDONLY, 0).is_ok()
+                || super::open_regular_at(dir, "session.alt.json", libc::O_RDONLY, 0).is_ok()
+            {
+                return Err(StoreError::Corrupt(
+                    "no snapshot manifest: the session predates the slot format; start a new session"
+                        .into(),
+                ));
+            }
+            let state = SessionState::empty(session_id);
+            check_logical_read(&state)?;
+            let manifest = initial_manifest(dir, &state, 0, [0; 16], None)?;
+            load_set(dir, &manifest, &manifest.current, true)
+        }
     }
 }
 
@@ -81,7 +94,7 @@ pub(super) fn replace_materialized(
     dir: &openat::Dir,
     state: &SessionState,
 ) -> Result<LoadedStore, StoreError> {
-    let loaded = load_or_migrate(dir, &state.session_id)?;
+    let loaded = load_state(dir, &state.session_id)?;
     let previous = seal_current(dir, &loaded)?;
     let manifest = initial_manifest(
         dir,
@@ -94,19 +107,18 @@ pub(super) fn replace_materialized(
 }
 
 pub(super) fn catch_up(dir: &openat::Dir, loaded: &mut LoadedStore) -> Result<(), StoreError> {
-    let manifest = read_manifest(dir)?.ok_or_else(|| {
-        StoreError::Corrupt("session manifest disappeared after migration".into())
-    })?;
+    let manifest = read_manifest(dir)?
+        .ok_or_else(|| StoreError::Corrupt("session manifest disappeared".into()))?;
     if manifest.generation != loaded.manifest.generation
         || manifest.current.segment != loaded.manifest.current.segment
     {
-        *loaded = load_or_migrate(dir, &loaded.state.session_id)?;
+        *loaded = load_state(dir, &loaded.state.session_id)?;
         return Ok(());
     }
     let mut file = super::open_regular_at(dir, &manifest.current.segment, libc::O_RDWR, 0)
         .map_err(|_| StoreError::Io("open active session segment failed".into()))?;
     if log::identity(&file)? != loaded.segment_identity {
-        *loaded = load_or_migrate(dir, &loaded.state.session_id)?;
+        *loaded = load_state(dir, &loaded.state.session_id)?;
         return Ok(());
     }
     let mut candidate = loaded.state.clone();
@@ -190,16 +202,6 @@ pub(super) fn append(
     Ok(())
 }
 
-fn migrate_legacy(dir: &openat::Dir, session_id: &str) -> Result<LoadedStore, StoreError> {
-    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    let state = super::read_flat_state(dir)?.unwrap_or_else(|| SessionState::empty(session_id));
-    check_logical_read(&state)?;
-    let manifest = initial_manifest(dir, &state, 0, [0; 16], None)?;
-    let loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    Ok(loaded)
-}
-
 fn recover_previous(
     dir: &openat::Dir,
     mut loaded: LoadedStore,
@@ -213,7 +215,6 @@ fn recover_previous(
         Some(previous),
     )?;
     loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     Ok(loaded)
 }
 
@@ -562,22 +563,6 @@ fn check_logical_write(state: &SessionState) -> Result<(), StoreError> {
         return Err(StoreError::Invalid(format!(
             "session state exceeds the {MAX_SESSION_BYTES} byte cap"
         )));
-    }
-    Ok(())
-}
-
-fn cleanup_legacy(dir: &openat::Dir) -> Result<(), StoreError> {
-    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
-    let mut changed = false;
-    for name in ["session.json", "session.alt.json"] {
-        match dir.remove_file(name) {
-            Ok(()) => changed = true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(StoreError::Io("remove migrated session slot failed".into())),
-        }
-    }
-    if changed {
-        sync_dir(dir)?;
     }
     Ok(())
 }
