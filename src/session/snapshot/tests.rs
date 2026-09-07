@@ -32,22 +32,23 @@ fn reservation_event(prompt: &str) -> log::Event {
 
 #[test]
 fn failed_current_validation_preserves_legacy_slots() {
+    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     let root = tempfile::tempdir().unwrap();
     let dir = open(root.path());
-    let legacy = serde_json::to_vec(&SessionState::empty("legacy")).unwrap();
-    std::fs::write(root.path().join("session.json"), &legacy).unwrap();
+    let legacy = serde_json::to_vec(&SessionState::empty("legacy")).unwrap(); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
+    std::fs::write(root.path().join("session.json"), &legacy).unwrap(); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
 
-    let state = SessionState::empty("legacy");
+    let state = SessionState::empty("legacy"); // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     let manifest = initial_manifest(&dir, &state, 0, [0; 16], None).unwrap();
     std::fs::write(root.path().join(&manifest.current.snapshot), b"corrupt").unwrap();
 
     assert!(matches!(
-        load_or_migrate(&dir, "legacy"),
+        load_or_migrate(&dir, "legacy"), // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
         Err(StoreError::Corrupt(_))
     ));
     assert_eq!(
         std::fs::read(root.path().join("session.json")).unwrap(),
-        legacy
+        legacy // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     );
 }
 
