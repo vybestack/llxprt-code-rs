@@ -26,6 +26,15 @@ fn shell_timeout_defaults_clamps_and_reports_effective_value() {
     );
     assert!(ok, "{output}");
     assert_eq!(output, "stable");
+    // A positive explicit value below the maximum preserves ordinary success text.
+    let (ok, output) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command": "printf explicit", "timeout_seconds": 2}),
+        &config,
+    );
+    assert!(ok, "{output}");
+    assert_eq!(output, "explicit");
     let (ok, output) = execute_tool(
         d.path(),
         "run_shell_command",
@@ -94,4 +103,52 @@ fn shell_nonzero_and_signal_return_ok_false() {
         &c2,
     );
     assert!(!ok);
+}
+
+/// `-1` is the explicit unlimited request, which remains bounded by the configured maximum.
+#[test]
+fn shell_unlimited_timeout_uses_the_maximum_and_rejects_other_nonpositive_values() {
+    let d = tempfile::tempdir().unwrap();
+    let config = ToolConfig {
+        ws: WorkspaceCap::open(d.path()).unwrap(),
+        max_output_bytes: 16 * 1024,
+        shell: ShellConfig {
+            default_shell_timeout: Duration::from_secs(1),
+            max_shell_output: 64 * 1024,
+            max_shell_timeout: Duration::from_secs(2),
+            allow_shell: true,
+        },
+    };
+    let (ok, output) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command": "sleep 3", "timeout_seconds": -1}),
+        &config,
+    );
+    assert!(
+        !ok,
+        "unlimited must still use the configured finite maximum: {output}"
+    );
+    assert!(output.contains("timed out after 2000 ms"), "{output}");
+    assert!(
+        output.contains("requested timeout unlimited; effective timeout 2s"),
+        "{output}"
+    );
+
+    let marker = d.path().join("must-not-spawn");
+    let command = format!("touch {}", marker.display());
+    for timeout_seconds in [json!(0), json!(-2)] {
+        let (ok, output) = execute_tool(
+            d.path(),
+            "run_shell_command",
+            json!({"command": command, "timeout_seconds": timeout_seconds}),
+            &config,
+        );
+        assert!(!ok, "nonpositive timeout must be rejected: {output}");
+        assert!(
+            output.contains("must be -1 (unlimited) or a positive integer"),
+            "{output}"
+        );
+        assert!(!marker.exists(), "invalid timeout must reject before spawn");
+    }
 }

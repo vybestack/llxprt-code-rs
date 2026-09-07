@@ -2,6 +2,33 @@
 
 use super::*;
 
+fn shell_timeout_request(
+    args: &BTreeMap<String, JsonValue>,
+    default_timeout: std::time::Duration,
+    max_timeout: std::time::Duration,
+) -> Result<(u64, String, bool), String> {
+    match args.get("timeout_seconds") {
+        None => {
+            let seconds = default_timeout.as_secs().max(1);
+            Ok((seconds, format!("{seconds}s"), false))
+        }
+        Some(JsonValue::Number(value)) if value.as_i64() == Some(-1) => {
+            Ok((max_timeout.as_secs(), "unlimited".to_string(), true))
+        }
+        Some(JsonValue::Number(value)) => {
+            let seconds = value
+                .as_u64()
+                .filter(|seconds| *seconds > 0)
+                .ok_or_else(|| {
+                    "argument 'timeout_seconds' must be -1 (unlimited) or a positive integer"
+                        .to_string()
+                })?;
+            Ok((seconds, format!("{seconds}s"), false))
+        }
+        Some(_) => Err("argument 'timeout_seconds' must be an integer".into()),
+    }
+}
+
 /// Run a shell command via the shared bounded runner. Nonzero exit, a signal, or a timeout
 /// is an `Err` carrying the captured output (the model sees `ok=false`).
 pub(super) fn shell_tool(
@@ -16,13 +43,10 @@ pub(super) fn shell_tool(
     if command.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let requested = arg_u64(args, "timeout_seconds")?
-        .unwrap_or(default_timeout.as_secs())
-        .max(1);
-    let (effective, clamped) = (
-        requested.min(max_timeout.as_secs()),
-        requested > max_timeout.as_secs(),
-    );
+    let (requested, requested_label, unlimited) =
+        shell_timeout_request(args, default_timeout, max_timeout)?;
+    let effective = requested.min(max_timeout.as_secs());
+    let clamped = unlimited || requested > max_timeout.as_secs();
     let timeout = std::time::Duration::from_secs(effective);
     let o = crate::process::run_cmd(crate::process::CmdSpec {
         program: "/bin/sh".to_string(),
@@ -44,7 +68,7 @@ pub(super) fn shell_tool(
     // the bracketed note below. Built as a plain binding so `format!` input stays
     // free of control flow (xtask counts macro control flow as unmeasured code).
     let clamp_note = if clamped {
-        format!(" (requested timeout {requested}s; effective timeout {effective}s)")
+        format!(" (requested timeout {requested_label}; effective timeout {effective}s)")
     } else {
         String::new()
     };
@@ -69,7 +93,7 @@ pub(super) fn shell_tool(
         }
     };
     let s = if clamped && !o.timed_out {
-        format!("{s}\n[requested timeout {requested}s; effective timeout {effective}s]")
+        format!("{s}\n[requested timeout {requested_label}; effective timeout {effective}s]")
     } else {
         s
     };
