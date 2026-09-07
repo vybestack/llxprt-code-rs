@@ -27,7 +27,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// Everything the runner needs to spawn and bound one command.
@@ -87,24 +87,45 @@ const POLL_TICK_MS: i32 = 10;
 /// reads it on a signal-unsafe stack, where locking would be undefined behaviour.
 static ACTIVE_GROUP: AtomicI32 = AtomicI32::new(0);
 
+/// Serializes command supervision because [`ACTIVE_GROUP`] names exactly one cancellable process
+/// group. Without this ownership lock, concurrent callers could overwrite the registry and a
+/// cancellation would kill only the most recently registered tool while an earlier tool survived.
+static ACTIVE_RUN_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquire exclusive ownership of the cancellation registry. A poisoned lock means its former
+/// holder unwound, whose registration drop has already cleared the atomic slot, so ownership is
+/// safe to recover.
+fn active_run_lock() -> MutexGuard<'static, ()> {
+    ACTIVE_RUN_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Owns one registration in [`ACTIVE_GROUP`]; clearing it on drop keeps the registry accurate on
 /// every exit path (normal completion, timeout kill, spawn/supervision error, unwind) the same way
 /// `supervise` always reaps the child.
-struct ActiveGroupGuard(i32);
+struct ActiveGroupGuard {
+    pgid: i32,
+    /// Retained through supervision so no concurrent run can replace this registration.
+    _run_lock: MutexGuard<'static, ()>,
+}
 
 impl ActiveGroupGuard {
-    /// Publish `pgid` as the group a cancellation must kill. One tool runs at a time, so the
-    /// registration is a plain store.
-    fn register(pgid: i32) -> Self {
+    /// Publish `pgid` as the group a cancellation must kill while retaining exclusive ownership
+    /// of the process-global registry.
+    fn register(pgid: i32, run_lock: MutexGuard<'static, ()>) -> Self {
         ACTIVE_GROUP.store(pgid, Ordering::SeqCst);
-        ActiveGroupGuard(pgid)
+        ActiveGroupGuard {
+            pgid,
+            _run_lock: run_lock,
+        }
     }
 }
 
 impl Drop for ActiveGroupGuard {
     fn drop(&mut self) {
         // Compare-exchange so a re-entrant run can never clear a newer registration.
-        let _ = ACTIVE_GROUP.compare_exchange(self.0, 0, Ordering::SeqCst, Ordering::SeqCst);
+        let _ = ACTIVE_GROUP.compare_exchange(self.pgid, 0, Ordering::SeqCst, Ordering::SeqCst);
     }
 }
 
@@ -126,9 +147,11 @@ pub fn kill_active_group(signal: i32) {
 /// Cancellation handler: `SIGKILL` the active tool's whole process group, then exit without
 /// unwinding. `SIGKILL` rather than `SIGTERM` because the operator already chose to cancel, so the
 /// orphan must not be able to ignore it or outlive a graceful TERM escalation. Async-signal-safe:
-/// one relaxed atomic load, `kill`, `_exit`.
+/// one sequentially consistent atomic load, `kill`, `_exit`. The registration store uses the same
+/// ordering, so a cancellation observed after a caller has observed a published group cannot read
+/// the earlier empty slot.
 extern "C" fn cancellation_handler(signal: libc::c_int) {
-    let pgid = ACTIVE_GROUP.load(Ordering::Relaxed);
+    let pgid = ACTIVE_GROUP.load(Ordering::SeqCst);
     if pgid > 0 {
         // Safety: `pgid` was published right after a successful `setsid` spawn.
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
@@ -183,6 +206,8 @@ pub fn run_sh(
 
 /// Spawn, bound, and report on a command. Returns `Err` only if the spawn itself failed.
 pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
+    // The cancellation registry has one slot, so its owner must cover spawn through reap.
+    let run_lock = active_run_lock();
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args);
     // Register setsid first, then fchdir. Both hooks run in order after fork and before exec.
@@ -204,7 +229,7 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
     // Publish the child's process group so a cancellation signal can kill the whole tool tree.
     // The guard clears the registration on every exit path, so a stale group is never signalled
     // after the run that owned it has finished.
-    let _active = ActiveGroupGuard::register(child.id() as i32);
+    let _active = ActiveGroupGuard::register(child.id() as i32, run_lock);
     Ok(supervise_and_collect(
         child,
         deadline,
@@ -529,7 +554,7 @@ mod tests {
         // them; assert the registration/drop invariants of THIS guard instead
         // (no parallel test can register this sentinel pgid).
         {
-            let _guard = ActiveGroupGuard::register(123_456);
+            let _guard = ActiveGroupGuard::register(123_456, active_run_lock());
             assert_eq!(active_group(), 123_456);
         }
         assert_ne!(
@@ -537,6 +562,36 @@ mod tests {
             123_456,
             "dropping the guard must clear its registration"
         );
+    }
+
+    #[test]
+    fn active_group_registration_is_exclusive() {
+        use std::sync::mpsc;
+
+        let owner = active_run_lock();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (registered_tx, registered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let contender = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let guard = ActiveGroupGuard::register(654_321, active_run_lock());
+            assert_eq!(active_group(), 654_321);
+            registered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            drop(guard);
+        });
+
+        started_rx.recv().unwrap();
+        assert_ne!(
+            active_group(),
+            654_321,
+            "a concurrent run must not replace the active cancellation group"
+        );
+        drop(owner);
+        registered_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+        contender.join().unwrap();
+        assert_ne!(active_group(), 654_321);
     }
 
     #[test]

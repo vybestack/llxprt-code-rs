@@ -195,8 +195,9 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
     // `cohort` anchors the Linux /proc probe; the legacy probe on other hosts never reads it.
     #[cfg(not(target_os = "linux"))]
     let _ = cohort;
-    // Let the helper settle into its supervised wait before cancelling it.
-    std::thread::sleep(Duration::from_millis(100));
+    // Reporting happens only after `run_cmd` has registered its freshly spawned session, so the
+    // cancellation can be delivered immediately; no timing delay is needed to make this race
+    // observable.
     // Safety: signal the helper pid only, exactly like `kill -TERM` on a headless worker.
     assert_eq!(
         unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) },
