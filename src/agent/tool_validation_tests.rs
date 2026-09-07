@@ -61,6 +61,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
     let store = SessionStore::load(&SessionId::parse("unknown-tool-budget").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let unknown = LlmResult {
+        usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "unknown-1".into(),
@@ -70,6 +71,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let read = LlmResult {
+        usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "read-1".into(),
@@ -79,6 +81,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let done = LlmResult {
+        usage: LlmUsage::default(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),

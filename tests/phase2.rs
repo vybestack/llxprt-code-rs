@@ -743,6 +743,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let calls: Vec<LlmResult> = (0..2)
         .map(|i| LlmResult {
+            usage: LlmUsage::default(),
             text: String::new(),
             calls: vec![ToolCall {
                 id: format!("c{i}"),
@@ -754,6 +755,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
         .collect();
     let mut replies = calls;
     replies.push(LlmResult {
+        usage: LlmUsage::default(),
         text: "all done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -775,6 +777,7 @@ fn natural_wrapup_below_cap_reports_budget_available() {
     let st = store("s15c");
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let call = LlmResult {
+        usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c0".into(),
@@ -784,6 +787,7 @@ fn natural_wrapup_below_cap_reports_budget_available() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let done = LlmResult {
+        usage: LlmUsage::default(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
