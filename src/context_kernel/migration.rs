@@ -111,15 +111,36 @@ pub struct MigrationPlan {
     pub ranges: Vec<StoreRange>,
     /// Checksum of the recovered log the build started from.
     pub source_checksum: Digest,
+    /// Spine position the plan was computed at: the next sequence the source
+    /// log would assign when the plan was framed. Publication compares it
+    /// against the recorded log, so a plan drawn from a prefix a live append
+    /// has already moved past never publishes (132).
+    pub planned_sequence: u64,
 }
 
 impl MigrationPlan {
     /// Plans a build from `source` to `target`.
+    /// Plans a build from `source` to `target`. The returned plan carries no
+    /// spine snapshot; frame one against a recorded log with
+    /// [`MigrationPlan::for_log`], which is what publication checks.
     pub fn from(target: u64, ranges: Vec<StoreRange>, checksum: Digest) -> Self {
         Self {
             target_version: target,
             ranges,
             source_checksum: checksum,
+            planned_sequence: 0,
+        }
+    }
+
+    /// Plans a build against the recorded log at its current position: the
+    /// plan carries the spine position it was computed at, so publication can
+    /// refuse it if a live append moved the prefix in the meantime (132).
+    pub fn for_log(target: u64, ranges: Vec<StoreRange>, log: &EventLog) -> Self {
+        Self {
+            target_version: target,
+            ranges,
+            source_checksum: log.head_checksum(),
+            planned_sequence: log.next_sequence(),
         }
     }
 
@@ -201,6 +222,23 @@ impl Publication {
             built_checksum: checksum,
             published: false,
         })
+    }
+
+    /// Frames a publication of a completed build, but only when the recorded
+    /// spine still sits at the position the plan was computed at: an append
+    /// that landed while the build ran means the plan copied a stale prefix,
+    /// and publishing it would adopt a build the live log has already moved
+    /// past. The refusal is typed, so the caller re-plans instead of
+    /// publishing against a stale prefix (132).
+    pub fn adopt(build: &PrivateBuild, log: &EventLog) -> Result<Self, PublicationError> {
+        let recorded = log.next_sequence();
+        if build.plan.planned_sequence != recorded {
+            return Err(PublicationError::SpineAdvanced {
+                planned: build.plan.planned_sequence,
+                recorded,
+            });
+        }
+        Publication::of(build).ok_or(PublicationError::BuildIncomplete)
     }
 
     /// Whether `bytes` is the build the publication adopted, verified inside the
@@ -289,6 +327,12 @@ pub enum PublicationError {
     },
     /// The publication already committed; a publication happens at most once.
     AlreadyPublished,
+    /// The build was never completed, so there is nothing to publish.
+    BuildIncomplete,
+    /// The recorded spine advanced past the position the plan was computed
+    /// at, so the plan was drawn from a stale prefix: publication is refused
+    /// and the plan must be recomputed from the current head.
+    SpineAdvanced { planned: u64, recorded: u64 },
 }
 
 /// The two storage slots of a migration. Exactly one slot is active; a build is

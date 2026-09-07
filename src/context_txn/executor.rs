@@ -250,6 +250,33 @@ impl Executor {
         Self::new(epoch, RenderContract::generous(1))
     }
 
+    /// New long-lived executor that resumes a recorded chain at `next_sequence`
+    /// / `last_checksum`: the first event it appends continues the recorded
+    /// prefix instead of restarting the total order at genesis, so a recovered
+    /// process never re-mints a sequence number the durable chain already
+    /// used (132).
+    pub fn resuming(
+        epoch: Epoch,
+        next_sequence: u64,
+        last_checksum: crate::context_kernel::canonical::Digest,
+        contract: RenderContract,
+    ) -> Self {
+        let mut executor = Self::new(epoch, contract);
+        executor.log = crate::context_kernel::events::EventLog::resuming(
+            crate::context_kernel::migration::V2,
+            next_sequence,
+            last_checksum,
+        );
+        executor
+    }
+
+    /// Chain position the executor's next append continues: the next sequence
+    /// and the recorded head checksum. Recovery reads this back and hands it
+    /// to the next process, whose executor resumes it (132).
+    pub fn chain_head(&self) -> (u64, crate::context_kernel::canonical::Digest) {
+        (self.log.next_sequence(), self.log.head_checksum())
+    }
+
     /// Binds the accounting port: from here on the caller cannot invent a
     /// bound, `validate` computes it from the port (#104).
     pub fn bind_port(&mut self, port: std::rc::Rc<dyn AccountingPort>) {
