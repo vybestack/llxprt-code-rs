@@ -32,6 +32,7 @@ pub struct Settings {
     pub provider: ResolvedProvider,
     pub budgets: ResolvedBudgets,
     pub paths: ResolvedPaths,
+    pub tools: ResolvedTools,
 }
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedProvider {
@@ -58,6 +59,8 @@ pub struct SettingsLayer {
     pub budgets: SettingsBudgets,
     #[serde(skip_serializing_if = "SettingsPaths::is_empty")]
     pub paths: SettingsPaths,
+    #[serde(skip_serializing_if = "SettingsTools::is_empty")]
+    pub tools: SettingsTools,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,6 +71,29 @@ pub struct SettingsProvider {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_path: Option<PathBuf>,
+}
+
+/// Resolved tool output caps and their provenance.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedTools {
+    pub max_tool_output: Resolved<usize>,
+    pub max_shell_output: Resolved<usize>,
+}
+
+/// Typed tool output-cap settings: per-call tool results and shell output.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsTools {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tool_output: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_shell_output: Option<usize>,
+}
+
+impl SettingsTools {
+    fn is_empty(&self) -> bool {
+        self.max_tool_output.is_none() && self.max_shell_output.is_none()
+    }
 }
 
 impl SettingsProvider {
@@ -117,6 +143,30 @@ pub fn environment_layer() -> Result<SettingsLayer, String> {
             base_url: std::env::var("LLXPRT_BASE_URL").ok(),
             ..Default::default()
         },
+        tools: SettingsTools {
+            max_tool_output: std::env::var("LLXPRT_MAX_TOOL_OUTPUT")
+                .ok()
+                .map(|value| {
+                    value.parse::<usize>().map_err(|_| {
+                        format!(
+                            "--max-tool-output must be an integer from 1 through {} bytes",
+                            crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT
+                        )
+                    })
+                })
+                .transpose()?,
+            max_shell_output: std::env::var("LLXPRT_MAX_SHELL_OUTPUT")
+                .ok()
+                .map(|value| {
+                    value.parse::<usize>().map_err(|_| {
+                        format!(
+                            "--max-shell-output must be an integer from 1 through {} bytes",
+                            crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT
+                        )
+                    })
+                })
+                .transpose()?,
+        },
         budgets: SettingsBudgets {
             max_tool_calls: std::env::var("LLXPRT_MAX_TOOL_CALLS")
                 .ok()
@@ -130,6 +180,24 @@ pub fn environment_layer() -> Result<SettingsLayer, String> {
         },
         ..Default::default()
     })
+}
+
+fn output_cap_range(flag: &str) -> String {
+    format!(
+        "{flag} must be an integer from 1 through {} bytes",
+        crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT
+    )
+}
+
+/// Validate a tool output-cap setting used by both CLI-equivalent layers. Values above
+/// the aggregate turn-output budget can never take effect (each call is bounded by the
+/// bytes left in that budget), so they are rejected instead of silently clamped.
+pub fn validate_output_cap(value: usize, flag: &str) -> Result<usize, String> {
+    if (1..=crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("{} (got {value})", output_cap_range(flag)))
+    }
 }
 
 /// Validate the max-tool-call setting used by both CLI-equivalent layers.

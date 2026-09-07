@@ -104,6 +104,10 @@ fn build_agent(
         })?),
     };
     let turn_time = settings.budgets.turn_time.value;
+    let output_limits = crate::tools::output_limits::OutputLimits {
+        max_tool_output: settings.tools.max_tool_output.value,
+        max_shell_output: settings.tools.max_shell_output.value,
+    };
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?
         .with_secrets(constructed.secret_values)
@@ -111,6 +115,7 @@ fn build_agent(
         .with_max_rounds(constructed.max_rounds)
         .with_max_tool_calls(max_tool_calls)
         .with_turn_time(turn_time)
+        .with_output_limits(output_limits)
         .with_profiler(profiler);
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)

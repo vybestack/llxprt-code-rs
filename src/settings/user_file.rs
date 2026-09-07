@@ -1,4 +1,4 @@
-use super::{SettingsBudgets, SettingsLayer, SettingsPaths, SettingsProvider};
+use super::{SettingsBudgets, SettingsLayer, SettingsPaths, SettingsProvider, SettingsTools};
 use std::path::Path;
 
 /// The settings file is a small typed config; larger files are a config error
@@ -14,6 +14,8 @@ struct File {
     budgets: SettingsBudgets,
     #[serde(default)]
     paths: SettingsPaths,
+    #[serde(default)]
+    tools: SettingsTools,
 }
 pub fn load_user_file(root: &Path) -> Result<SettingsLayer, String> {
     let path = root.join("settings.json");
@@ -43,5 +45,6 @@ pub fn load_user_file(root: &Path) -> Result<SettingsLayer, String> {
         provider: file.provider,
         budgets: file.budgets,
         paths: file.paths,
+        tools: file.tools,
     })
 }

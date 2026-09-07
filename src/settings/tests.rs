@@ -92,6 +92,7 @@ fn unresolved_layer_defers_downward() {
         paths: SettingsPaths {
             config_root: Some(PathBuf::from("/user-config")),
         },
+        tools: SettingsTools::default(),
     };
     l.profile = SettingsLayer {
         provider: SettingsProvider {
@@ -235,4 +236,99 @@ fn settings_serialize_round_trips_through_strict_loader() {
     )
     .unwrap();
     assert_eq!(load_user_file(temp.path()).unwrap(), expected);
+}
+
+fn caps(tool: Option<usize>, shell: Option<usize>) -> SettingsLayer {
+    SettingsLayer {
+        tools: SettingsTools {
+            max_tool_output: tool,
+            max_shell_output: shell,
+        },
+        ..Default::default()
+    }
+}
+
+#[test]
+fn tool_output_caps_default_to_the_builtin_constants() {
+    let got = resolve(layers()).unwrap();
+    assert_eq!(
+        got.tools.max_tool_output.value,
+        crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT
+    );
+    assert_eq!(
+        got.tools.max_shell_output.value,
+        crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT
+    );
+    assert_eq!(got.tools.max_tool_output.source, Source::Default);
+    assert_eq!(got.tools.max_shell_output.source, Source::Default);
+}
+
+#[test]
+fn tool_output_caps_follow_the_standard_precedence() {
+    let mut l = layers();
+    l.user_file = caps(Some(1 << 20), None);
+    let got = resolve(l).unwrap();
+    assert_eq!(got.tools.max_tool_output.value, 1 << 20);
+    assert_eq!(got.tools.max_tool_output.source, Source::UserFile);
+    assert_eq!(
+        got.tools.max_shell_output.value,
+        crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT
+    );
+
+    let mut l = layers();
+    l.user_file = caps(Some(1 << 20), Some(1 << 18));
+    l.env = caps(None, Some(1 << 17));
+    l.cli = caps(Some(1 << 22), None);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.tools.max_tool_output.value,
+            got.tools.max_tool_output.source
+        ),
+        (1 << 22, Source::Cli)
+    );
+    assert_eq!(
+        (
+            got.tools.max_shell_output.value,
+            got.tools.max_shell_output.source
+        ),
+        (1 << 17, Source::Env)
+    );
+}
+
+#[test]
+fn tool_output_caps_reject_absurd_values() {
+    let ceiling = crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT;
+    for (flag, value) in [
+        ("--max-tool-output", 0usize),
+        ("--max-tool-output", ceiling + 1),
+        ("--max-shell-output", 0),
+        ("--max-shell-output", ceiling + 1),
+    ] {
+        let mut l = layers();
+        if flag == "--max-tool-output" {
+            l.env = caps(Some(value), None);
+        } else {
+            l.env = caps(None, Some(value));
+        }
+        let error = resolve(l).unwrap_err().to_string();
+        assert!(
+            error.starts_with(&format!(
+                "{flag} must be an integer from 1 through {ceiling} bytes (got {value})"
+            )),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn runtime_output_limits_follow_resolver() {
+    let mut l = layers();
+    l.user_file = caps(Some(1 << 20), Some(1 << 15));
+    l.cli = caps(Some(1 << 21), None);
+    let settings = resolve(l).unwrap();
+    assert_eq!(settings.tools.max_tool_output.value, 1 << 21);
+    assert_eq!(settings.tools.max_tool_output.source, Source::Cli);
+    assert_eq!(settings.tools.max_shell_output.value, 1 << 15);
+    assert_eq!(settings.tools.max_shell_output.source, Source::UserFile);
 }

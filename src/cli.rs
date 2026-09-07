@@ -86,6 +86,18 @@ pub struct Args {
     #[arg(long, value_name = "DURATION")]
     pub turn_time: Option<String>,
 
+    /// Per-call tool-output cap in bytes: `1..=16777216`. Overrides the settings file's
+    /// `tools.max_tool_output`; when omitted, the settings resolution order (then
+    /// 16777216) applies.
+    #[arg(long, value_name = "BYTES")]
+    pub max_tool_output: Option<usize>,
+
+    /// Per-command shell-output cap in bytes: `1..=16777216`. Overrides the settings
+    /// file's `tools.max_shell_output`; when omitted, the settings resolution order
+    /// (then 32768) applies.
+    #[arg(long, value_name = "BYTES")]
+    pub max_shell_output: Option<usize>,
+
     /// Print the resolved layered settings JSON and exit without constructing a backend.
     #[arg(long)]
     pub print_config: bool,
@@ -93,7 +105,9 @@ pub struct Args {
 
 /// Resolve the actual configuration layers used both by runtime and `--print-config`.
 pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
-    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
+    use crate::settings::{
+        self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider, SettingsTools,
+    };
 
     let root = crate::config::std_profile_dir()
         .map_err(|e| AppError::new(Code::Config, "config-home", e))?;
@@ -113,6 +127,10 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
         budgets: SettingsBudgets {
             max_tool_calls: args.max_tool_calls,
             turn_time: args.turn_time.clone(),
+        },
+        tools: SettingsTools {
+            max_tool_output: args.max_tool_output,
+            max_shell_output: args.max_shell_output,
         },
         ..Default::default()
     };
@@ -605,5 +623,18 @@ mod tests {
             args.print_config,
             "main dispatches this flag before profiler/backend setup"
         );
+    }
+
+    #[test]
+    fn output_cap_flags_parse_into_the_cli_layer() {
+        let args = Args::try_parse_from([
+            "llxprt-code-rs",
+            "--max-tool-output",
+            "65536",
+            "--max-shell-output=4096",
+        ])
+        .unwrap();
+        assert_eq!(args.max_tool_output, Some(65536));
+        assert_eq!(args.max_shell_output, Some(4096));
     }
 }

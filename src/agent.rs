@@ -105,6 +105,9 @@ pub struct CodingAgent {
     /// Wall-clock budget for one prompt turn. `None` (the default) means no
     /// time limit; set from the CLI `--turn-time` flag.
     turn_time_budget: Option<std::time::Duration>,
+    /// Per-call tool output caps resolved from the settings layers; defaults reproduce
+    /// the built-in constants in [`crate::tools::output_limits`].
+    output_limits: crate::tools::output_limits::OutputLimits,
     max_rounds: usize,
     allow_shell: bool,
     secrets: Vec<String>,
@@ -173,6 +176,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_limits: Default::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: config.secret_values(),
@@ -200,6 +204,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_limits: Default::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -223,6 +228,7 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            output_limits: Default::default(),
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
             secrets: Vec::new(),
@@ -255,6 +261,15 @@ impl CodingAgent {
     /// Override the wall-clock turn budget (`None` = no time limit).
     pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
         self.turn_time_budget = budget;
+        self
+    }
+
+    /// Override the per-call tool output caps (`Default` = the built-in constants).
+    pub fn with_output_limits(
+        mut self,
+        output_limits: crate::tools::output_limits::OutputLimits,
+    ) -> CodingAgent {
+        self.output_limits = output_limits;
         self
     }
 
@@ -889,9 +904,9 @@ impl CodingAgent {
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
         Ok(crate::tools::ToolConfig {
             ws: self.workspace.try_clone()?,
-            max_output_bytes: crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT,
+            max_output_bytes: self.output_limits.max_tool_output,
             shell: crate::tools::ShellConfig {
-                max_shell_output: crate::tools::output_limits::MAX_SHELL_OUTPUT_DEFAULT,
+                max_shell_output: self.output_limits.max_shell_output,
                 max_shell_timeout: std::time::Duration::from_secs(120),
                 allow_shell: shell_on,
             },
