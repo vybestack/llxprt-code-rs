@@ -208,17 +208,7 @@ fn parse_ephemeral_primary(
             settings.max_turns_per_prompt = Some(n);
         }
         "loopDetectionEnabled" => {
-            // Exact false only: this runtime's loop detection is not configurable
-            // from a profile, so `true` (or any non-boolean) is refused rather
-            // than silently ignored. Same value-free bounded error as Codex.
-            if !value.is_boolean() {
-                return Err(format!("profile {name:?}: '{key}' must be a boolean"));
-            }
-            if value.as_bool() == Some(true) {
-                return Err(format!(
-                    "profile {name:?}: loop detection is not supported by this runtime"
-                ));
-            }
+            parse_loop_detection_enabled(value, name, key)?;
             settings.loop_detection_enabled = Some(false);
         }
         "streaming" => {
@@ -272,6 +262,24 @@ fn parse_ephemeral_primary(
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// This runtime does not make loop detection profile-configurable: only an
+/// explicit `false` is accepted, so unsupported input cannot become a no-op.
+fn parse_loop_detection_enabled(
+    value: &serde_json::Value,
+    name: &str,
+    key: &str,
+) -> Result<(), String> {
+    if !value.is_boolean() {
+        return Err(format!("profile {name:?}: '{key}' must be a boolean"));
+    }
+    if value.as_bool() == Some(true) {
+        return Err(format!(
+            "profile {name:?}: loop detection is not supported by this runtime"
+        ));
+    }
+    Ok(())
 }
 
 fn parse_ephemeral_credentials(
