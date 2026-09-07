@@ -203,10 +203,7 @@ mod tests {
     #[test]
     fn checkpoint_lines_stamps_and_propagates_the_current_line() {
         let mut state = crate::session::context_persist::new_context_state(test_key());
-        state
-            .store
-            .sanitized_append(Some("h0"), b"checkpointed bytes")
-            .unwrap();
+        state.store.sanitized_append(b"checkpointed bytes").unwrap();
         let lines = checkpoint_lines(&state).expect("the current line encodes");
         assert_eq!(lines.lines().count(), 1, "exactly one line per publication");
         // The line is JSON whose fields name the position it stamps: read
