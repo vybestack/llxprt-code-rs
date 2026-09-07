@@ -47,11 +47,11 @@ pub(crate) fn over_limit_message(
     format!("estimated request would be {original} bytes over the {budget}-byte heuristic guard; after one compaction attempt, still {after} bytes")
 }
 
-use super::{AttemptState, CodingAgent, RoundFailure};
+use super::{AttemptState, RoundFailure};
 use crate::agent::{AgentError, LlmResult};
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 
-impl CodingAgent {
+impl super::Turn<'_> {
     /// Materialize the first request after one preservation-oriented recovery attempt.
     pub(super) fn preflight_recovery(
         &self,

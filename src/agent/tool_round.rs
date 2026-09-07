@@ -1,6 +1,6 @@
 use super::*;
 
-impl CodingAgent {
+impl super::Turn<'_> {
     pub(super) fn execute_tool_round(
         &self,
         store: &SessionStore,
@@ -9,7 +9,7 @@ impl CodingAgent {
         attempt: &mut AttemptState,
     ) -> Result<bool, AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
-        self.check_time_limit(store, reserved, &attempt.rounds, attempt.started.elapsed())?;
+        self.check_time_limit(store, reserved, &attempt.rounds)?;
         let (mut calls, refused) =
             validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell).map_err(
                 |error| {

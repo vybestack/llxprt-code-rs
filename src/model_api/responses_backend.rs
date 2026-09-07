@@ -16,36 +16,27 @@ enum ResponsesModel {
 pub(crate) struct ResponsesBackend {
     model: ResponsesModel,
     model_settings: ModelSettings,
-    runtime: tokio::runtime::Runtime,
     calls: AtomicUsize,
 }
 
 impl ResponsesBackend {
-    pub(crate) fn new(
-        model: OpenResponsesModel,
-        model_settings: ModelSettings,
-    ) -> Result<Self, String> {
+    pub(crate) fn new(model: OpenResponsesModel, model_settings: ModelSettings) -> Self {
         Self::with_model(ResponsesModel::Codex(model), model_settings)
     }
 
     pub(crate) fn new_openai(
         model: serdes_ai::models::openai::OpenAIResponsesModel,
         model_settings: ModelSettings,
-    ) -> Result<Self, String> {
+    ) -> Self {
         Self::with_model(ResponsesModel::OpenAi(Box::new(model)), model_settings)
     }
 
-    fn with_model(model: ResponsesModel, model_settings: ModelSettings) -> Result<Self, String> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| format!("runtime: {error}"))?;
-        Ok(Self {
+    fn with_model(model: ResponsesModel, model_settings: ModelSettings) -> Self {
+        Self {
             model,
             model_settings,
-            runtime,
             calls: AtomicUsize::new(0),
-        })
+        }
     }
 
     async fn request_async(
@@ -85,16 +76,15 @@ impl ResponsesBackend {
 }
 
 impl ChatBackend for ResponsesBackend {
-    fn request(
-        &self,
-        requests: &[ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        // The turn is bounded in the backend: neither the vendored Codex client nor
-        // its WebSocket applies `ModelSettings::timeout`, so an unbounded `block_on`
-        // here would let one request hang the agent forever.
-        self.runtime.block_on(async {
+    fn request<'a>(
+        &'a self,
+        requests: &'a [ModelRequest],
+        tools: &'a [crate::tools::ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            // Codex HTTP/WebSocket does not apply ModelSettings::timeout itself.
+            // This remains a per-request policy, independent of the turn deadline.
             match self.model_settings.timeout {
                 Some(limit) => tokio::time::timeout(limit, self.request_async(requests, tools))
                     .await
@@ -119,10 +109,12 @@ mod tests {
         let backend = ResponsesBackend::new(
             OpenResponsesModel::new("test-model", "not-a-url"),
             ModelSettings::default(),
-        )
-        .expect("test runtime must build");
-        let error = backend
-            .request(&[ModelRequest::default()], &[])
+        );
+        let error = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("invalid test endpoint must fail");
 
         assert_eq!(backend.request_calls(), 1);
@@ -153,12 +145,14 @@ mod tests {
                 timeout: Some(std::time::Duration::from_secs(1)),
                 ..Default::default()
             },
-        )
-        .expect("test runtime must build");
+        );
 
         let started = std::time::Instant::now();
-        let error = backend
-            .request(&[ModelRequest::default()], &[])
+        let error = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("silent server must trip the backend timeout");
         assert!(
             started.elapsed() < std::time::Duration::from_secs(4),
@@ -215,8 +209,7 @@ mod tests {
                 timeout: Some(std::time::Duration::from_secs(10)),
                 ..Default::default()
             },
-        )
-        .expect("test runtime must build");
+        );
 
         let turn = |text: &str| {
             ModelRequest::with_parts(vec![
@@ -227,11 +220,17 @@ mod tests {
         };
         let first_history = vec![turn("first codex turn")];
         let second_history = vec![turn("first codex turn"), turn("second codex turn")];
-        let first = backend
-            .request(&first_history, &[])
+        let first = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&first_history, &[]))
             .expect("first codex turn");
-        let second = backend
-            .request(&second_history, &[])
+        let second = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&second_history, &[]))
             .expect("second codex turn");
         server.join().expect("server thread");
 
@@ -434,9 +433,12 @@ Connection: close
             format!("http://127.0.0.1:{port}/responses"),
         )
         .codex_http();
-        let backend = ResponsesBackend::new(model, ModelSettings::default()).expect("runtime");
-        let error = backend
-            .request(&[ModelRequest::default()], &[])
+        let backend = ResponsesBackend::new(model, ModelSettings::default());
+        let error = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("JSON body cannot fold into a codex turn");
         assert!(error.contains("sse stream"), "unexpected error: {error}");
         server.join().expect("server");

@@ -40,7 +40,7 @@ fn nudge_request() -> serdes_ai::core::ModelRequest {
     user_request(NUDGE)
 }
 
-impl CodingAgent {
+impl super::Turn<'_> {
     /// Issue the turn's first completion, re-issuing it exactly once when the output cap
     /// truncates it before any tool call. `requests` is the turn's live request list: the
     /// nudge is appended to it and stays for the rest of the turn, while the truncated

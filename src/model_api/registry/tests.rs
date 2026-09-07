@@ -221,14 +221,18 @@ fn anthropic_messages_wire_uses_expected_route_and_headers() {
             timeout: Some(std::time::Duration::from_secs(5)),
             ..Default::default()
         },
-    )
-    .unwrap();
+    );
     let request_message = serdes_ai::core::ModelRequest::with_parts(vec![
         serdes_ai::core::messages::ModelRequestPart::UserPrompt(
             serdes_ai::core::messages::UserPromptPart::new("hello"),
         ),
     ]);
-    backend.request(&[request_message], &[]).unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(backend.request(&[request_message], &[]))
+        .unwrap();
     let request = server.join().unwrap().to_ascii_lowercase();
 
     assert!(request.starts_with("post /api/anthropic/v1/messages http/1.1"));

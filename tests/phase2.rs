@@ -50,24 +50,26 @@ impl MockBackend {
 }
 
 impl ChatBackend for MockBackend {
-    fn request(
-        &self,
-        _requests: &[serdes_ai::core::ModelRequest],
-        _tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        let call_number = {
-            let mut calls = self.calls.lock().unwrap();
-            *calls += 1;
-            *calls
-        };
-        if let Some(observer) = &self.observer {
-            observer(call_number);
-        }
-        let mut q = self.replies.lock().unwrap();
-        Ok(if let Some(r) = q.pop_front() {
-            r
-        } else {
-            result("fallback")
+    fn request<'a>(
+        &'a self,
+        _requests: &'a [serdes_ai::core::ModelRequest],
+        _tools: &'a [ToolSpec],
+    ) -> llxprt_code_rs::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            let call_number = {
+                let mut calls = self.calls.lock().unwrap();
+                *calls += 1;
+                *calls
+            };
+            if let Some(observer) = &self.observer {
+                observer(call_number);
+            }
+            let mut q = self.replies.lock().unwrap();
+            Ok(if let Some(r) = q.pop_front() {
+                r
+            } else {
+                result("fallback")
+            })
         })
     }
 

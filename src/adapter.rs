@@ -90,15 +90,21 @@ impl From<&ModelResponse> for LlmResult {
     }
 }
 
+/// A cooperatively cancellable model request. Dropping it must release the in-flight
+/// transport; implementations must not block the executor. Transport tasks must
+/// stay on the caller's runtime so turn teardown cancels them as well.
+pub type ModelFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, String>> + 'a>>;
+
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
     /// Send the accumulated parts and map the reply. A network/transport error becomes
     /// `Err(String)`; the agent turns that into a terminal failure.
-    fn request(
-        &self,
-        requests: &[ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String>;
+    fn request<'a>(
+        &'a self,
+        requests: &'a [ModelRequest],
+        tools: &'a [crate::tools::ToolSpec],
+    ) -> ModelFuture<'a>;
 
     /// Cumulative number of [`Self::request`] calls. Defaults to `0`; a mock can
     /// override this so replay-vs-network is asserted offline without an HTTP server.
@@ -334,20 +340,15 @@ impl ModelAdapter {
 }
 
 impl ChatBackend for ModelAdapter {
-    fn request(
-        &self,
-        requests: &[ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
-        use std::sync::atomic::Ordering;
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let tools = tools.to_vec();
-        let requests = requests.to_vec();
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("runtime: {e}"))?;
-        rt.block_on(self.request_async(&requests, &tools))
+    fn request<'a>(
+        &'a self,
+        requests: &'a [ModelRequest],
+        tools: &'a [crate::tools::ToolSpec],
+    ) -> ModelFuture<'a> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.request_async(requests, tools).await
+        })
     }
 
     fn request_calls(&self) -> usize {
