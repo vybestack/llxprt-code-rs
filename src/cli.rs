@@ -117,6 +117,25 @@ pub struct Args {
     pub print_config: bool,
 }
 
+/// Validate CLI-provided limits without resolving a profile or any other settings layer.
+///
+/// The settings resolver performs the same validation for every source.  It cannot be
+/// the first validation point, though: resolving settings reads profile/config layers,
+/// whereas the CLI contract requires malformed command-line limits to fail before even
+/// consuming stdin. Call this at the common CLI boundary before dispatching runtime
+/// or `--print-config`.
+pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if let Some(value) = args.max_tool_calls {
+        crate::settings::validate_max_tool_calls(value)
+            .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;
+    }
+    if let Some(raw) = args.turn_time.as_deref() {
+        crate::settings::parse_turn_time(raw)
+            .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?;
+    }
+    Ok(())
+}
+
 /// Resolve the actual configuration layers used both by runtime and `--print-config`.
 pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
     use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};

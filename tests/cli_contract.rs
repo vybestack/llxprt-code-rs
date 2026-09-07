@@ -766,3 +766,99 @@ fn invalid_turn_time_fails_before_profile_and_credentials() {
         "--turn-time needs an s/m/h unit (got \"90\"); pass 0 to disable"
     );
 }
+
+/// Print-config must reject semantic CLI limits before the deliberately missing
+/// profile, just like normal startup, and must not expose supplied profile/prompt data.
+fn assert_print_config_rejects_tool_call_limit(value: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls".to_string(), value.to_string()],
+        vec![format!("--max-tool-calls={value}")],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args([
+                "--print-config",
+                "--profile",
+                "PROFILE_SECRET_SENTINEL",
+                "--prompt",
+                "PROMPT_SECRET_SENTINEL",
+            ])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "invalid limit {value}: {out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["error"]["code"], "max-tool-calls");
+        assert_eq!(
+            parsed["error"]["message"],
+            format!("--max-tool-calls must be -1 or an integer from 1 through 512 (got {value})")
+        );
+        assert!(out.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for forbidden in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "profile-missing",
+            "config",
+        ] {
+            assert!(
+                !stdout.contains(forbidden),
+                "unexpected diagnostic: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
+fn print_config_rejects_above_ceiling_before_profile() {
+    assert_print_config_rejects_tool_call_limit("513");
+}
+
+#[test]
+fn print_config_rejects_zero_before_profile() {
+    assert_print_config_rejects_tool_call_limit("0");
+}
+
+#[test]
+fn print_config_rejects_negative_before_profile() {
+    assert_print_config_rejects_tool_call_limit("-2");
+}
+
+#[test]
+fn print_config_preserves_valid_tool_call_limits_without_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile.json");
+    // No credentials: print-config must not construct a backend or consume stdin.
+    std::fs::write(&profile, r#"{"provider":"openai","model":"m"}"#).unwrap();
+    for (arguments, expected, source) in [
+        (vec![], 256, "default"),
+        (vec!["--max-tool-calls", "-1"], -1, "cli"),
+        (vec!["--max-tool-calls=-1"], -1, "cli"),
+        (vec!["--max-tool-calls", "1"], 1, "cli"),
+        (vec!["--max-tool-calls=7"], 7, "cli"),
+        (vec!["--max-tool-calls", "256"], 256, "cli"),
+        (vec!["--max-tool-calls=512"], 512, "cli"),
+    ] {
+        let out = bin()
+            .env_clear()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--print-config", "--profile-load"])
+            .arg(&profile)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(
+            parsed["budgets"]["max_tool_calls"],
+            serde_json::json!({"value": expected, "source": source})
+        );
+        assert!(
+            parsed.get("status").is_none(),
+            "settings, not a run envelope"
+        );
+        assert!(out.stderr.is_empty());
+    }
+}
