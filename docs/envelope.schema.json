@@ -39,6 +39,36 @@
         "message"
       ],
       "type": "object"
+    },
+    "OutputCaps": {
+      "additionalProperties": false,
+      "description": "Resolved per-run output caps (issue 77): the per-result shell and tool caps plus the\naggregate per-turn tool-output cap. Defaults come from the compile-time constants in\n`crate::tools::output_limits` and `crate::limits`; the settings resolver overrides\nthem per run. The type lives here, next to the wire format that carries it; `agent`\nre-exports it for its historical path.",
+      "properties": {
+        "shell": {
+          "description": "Cap on one shell success or error string.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool": {
+          "description": "Cap on one tool result.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turn": {
+          "description": "Cap on the combined tool-result bytes of one turn.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shell",
+        "tool",
+        "turn"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/vybestack/llxprt-code-rs/schemas/stdout-envelope-v1",
@@ -68,6 +98,15 @@
           "format": "int64",
           "minimum": -1,
           "type": "integer"
+        },
+        "output_caps": {
+          "$ref": "#/$defs/OutputCaps",
+          "default": {
+            "shell": 32768,
+            "tool": 16777216,
+            "turn": 16777216
+          },
+          "description": "Resolved output caps (issue 77): per-result shell/tool caps and the aggregate\nper-turn tool-output cap."
         },
         "prompt_digest": {
           "type": "string"
@@ -128,7 +167,8 @@
         "declared_tool_calls",
         "budget_exhausted",
         "zero_call_tail",
-        "prompt_digest"
+        "prompt_digest",
+        "output_caps"
       ],
       "type": "object"
     },
