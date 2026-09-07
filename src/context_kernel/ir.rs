@@ -72,7 +72,7 @@ impl Region {
 /// cross-sequence reservation.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ItemNamespace {
-    /// Identifiers minted for whole appends, from the event sequence.
+    /// Identifiers minted for whole appends, from the append watermark.
     Append,
     /// Identifiers minted by resegmentation for claim-atomic children.
     Split,
@@ -108,7 +108,7 @@ pub struct ItemId {
 }
 
 impl ItemId {
-    /// Wraps an append identifier: the event sequence that produced the append.
+    /// Wraps an append identifier: the value the append watermark minted it from.
     pub fn append(value: u64) -> Self {
         Self {
             namespace: ItemNamespace::Append,
@@ -331,10 +331,11 @@ pub fn slice_into(ranges: &[StoreRange], parts: usize) -> Vec<Vec<StoreRange>> {
     pieces
 }
 
-/// Explicit placement state of an item. The four states are recorded on the item
-/// itself, never inferred from the absence of a placement, so initial items,
-/// explicit unplacement, collapsed placeholders, and vaulted redactions are
-/// distinguishable in the typed state.
+/// Explicit placement state of an item. The three states are recorded on the item
+/// itself, never inferred from the absence of a placement, so a fresh append
+/// (store-only), an explicitly unplaced or returned item (store-only), and a
+/// collapsed placeholder (phantom) keep their distinct lifecycle states in the typed
+/// view; a placed item is the only state charged to a region.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Placement {
     /// The item is claimed into a region and its units are charged there.
