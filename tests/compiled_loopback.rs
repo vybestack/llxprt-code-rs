@@ -1415,3 +1415,6 @@ fn compiled_loopback_provider_refusal_of_forwarded_unknown_key_surfaces_in_envel
         "provider naming text missing from envelope: {parsed}"
     );
 }
+
+#[path = "compiled_loopback/model_params.rs"]
+mod model_params;

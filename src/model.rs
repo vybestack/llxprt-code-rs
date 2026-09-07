@@ -479,6 +479,7 @@ impl ModelConfig {
             .iter()
             .cloned()
             .chain(profile.model_params.unsupported.iter().cloned())
+            .chain(profile.model_params.top_k.map(|_| "top_k".to_string()))
             .collect();
         if !unsupported.is_empty() {
             return Err(ModelError::UnsupportedSetting(unsupported.join(", ")));

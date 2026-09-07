@@ -550,9 +550,11 @@ pub(super) fn parse_model_params(
                     format!("profile {name:?}: '{k}' must be a non-negative integer")
                 })?);
             }
-            // `top_k` is intentionally NOT an accepted setting: the OpenAI Chat Completions
-            // transport cannot serialize it, so it is rejected as unsupported (listed in
-            // MODELPARAM_OUTPUT_AFFECTING) instead of being silently dropped.
+            "top_k" => {
+                m.top_k = Some(nonneg_u64(v).ok_or_else(|| {
+                    format!("profile {name:?}: 'top_k' must be a non-negative integer")
+                })?);
+            }
             "seed" => {
                 let n = nonneg_u64(v).ok_or_else(|| {
                     format!("profile {name:?}: 'seed' must be a non-negative integer")

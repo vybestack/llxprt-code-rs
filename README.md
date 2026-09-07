@@ -238,6 +238,20 @@ suffix, or that carries an empty path segment, fails with a fixed
 rejected. The redacted
 `scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
 `top_k` field, so a profile that sets it is rejected instead of being silently dropped.
+Anthropic Messages accepts `top_k` and sends it on the request; it rejects `seed` and
+`chat_template_kwargs`. Chat targets support `seed` and (except OpenAI Vercel)
+`chat_template_kwargs`. Codex and public Responses retain their provider-specific
+parameter restrictions.
+
+`--model-params-mode loose|known-model|strict` (also `LLXPRT_MODEL_PARAMS_MODE`)
+controls untyped `modelParams` keys. The default `loose` mode forwards them verbatim
+on Chat and Messages requests. `known-model` checks the shipped registry, including
+its per-provider acceptance overrides; `strict` refuses untyped keys. In every mode,
+known parameters that cannot be applied fail with a key/provider diagnostic, not a
+warning followed by success. Applicability uses the resolved provider/API: a registry
+entry does not add transport support. Responses transports have no extra-field wire
+channel and reject extras rather than silently discarding them. Parameter values are
+not included in these local refusal messages.
 
 ## JSON output contract
 

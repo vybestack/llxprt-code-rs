@@ -46,9 +46,16 @@ pub(super) fn parse(
     let mut model_params = parse_model_params(&cleaned, name)?;
     model_params.temperature = temperature;
     model_params.top_p = top_p;
-    if !ephemeral.unsupported.is_empty() || !model_params.unsupported.is_empty() {
+    let mut unsupported = ephemeral.unsupported.clone();
+    unsupported.extend(model_params.unsupported.iter().cloned());
+    if model_params.top_k.is_some() {
+        unsupported.push("top_k".to_string());
+    }
+    if !unsupported.is_empty() {
+        unsupported.sort();
         return Err(format!(
-            "profile {name:?}: unsupported OpenAI Responses setting"
+            "profile {name:?}: unsupported OpenAI Responses setting(s): {}",
+            unsupported.join(", ")
         ));
     }
     reject_inert_dsflash_settings(&ephemeral, &model_params, name)?;
