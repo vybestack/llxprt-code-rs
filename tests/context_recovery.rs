@@ -175,6 +175,20 @@ fn reopen(store: &SessionStore) -> SessionStore {
     .expect("reopen store")
 }
 
+/// Edits the durable context manifest in place, as an operator-issued update would.
+fn rewrite_manifest(store: &SessionStore, edit: impl FnOnce(&mut serde_json::Value)) {
+    let manifest = store.session_dir.join("context/manifest.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest).expect("read manifest"))
+            .expect("parse manifest");
+    edit(&mut value);
+    std::fs::write(
+        &manifest,
+        serde_json::to_vec(&value).expect("encode manifest"),
+    )
+    .expect("write manifest");
+}
+
 /// The vault key is private per-session entropy, not derivable from the session id.
 #[test]
 fn vault_key_is_stored_privately_and_differs_per_session() {
@@ -1216,6 +1230,92 @@ fn compact_tool_result_falls_back_to_memory_digest_in_store_free_mode() {
         .expect("Unavailable is the explicit memory-only fallback");
     assert!(compacted.starts_with("CTXDIGEST v1 tool=read_file "));
     assert!(compacted.len() < "bulk evidence\n".repeat(128).len());
+}
+
+/// A DropBulk verdict produces the same `CTXDROP v1` stub shape on both compaction
+/// paths: the durable sink (`ingest_bulk_committed`) and the store-free memory
+/// fallback (`memory_digest`) agree on the stub prefix and the `bytes=N` count,
+/// and neither leaks the dropped payload (issue 142).
+#[test]
+fn drop_bulk_outcome_is_equivalent_across_memory_and_durable_sinks() {
+    // DropBulk territory through the PUBLIC seam: a result must clear
+    // BULK_RESULT_BYTES (1024) to enter compaction at all, and under baseline
+    // rules anything at or above size_floor (also 1024) verdicts Digest before
+    // the noise class is consulted. DropBulk is reachable only under RELAXED
+    // rules that raise size_floor, so both sinks install the same legal
+    // history (baseline v1, then a relaxation raising size_floor to 4096)
+    // through the manifest before reopening.
+    let noise = "noise: 7f3a repeated filler block\n".repeat(48);
+    assert!((1024..4096).contains(&noise.len()));
+    let relaxed = serde_json::json!([
+        {"version": 1, "size_floor": 1024, "unknown_bound": 64, "verbatim_tools": []},
+        {"version": 2, "size_floor": 4096, "unknown_bound": 64, "verbatim_tools": []}
+    ]);
+
+    // Durable sink: an available-mode store compacts through ingest_bulk_committed.
+    let cwd = workspace();
+    let durable = store("drop-bulk-durable");
+    let first_turn = reserved(&durable, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&durable, &first_turn).expect("first turn runs");
+    rewrite_manifest(&durable, |value| {
+        value["rules"] = relaxed.clone();
+    });
+    let durable = reopen(&durable);
+    let durable_record = durable
+        .compact_tool_result("read_file", &noise)
+        .expect("compact tool result");
+    assert!(
+        durable_record.starts_with("CTXDROP v1 tool=read_file bytes="),
+        "durable path drops the bulk result with a CTXDROP stub: {durable_record}"
+    );
+
+    // Memory sink: second store, manifest rewritten to unavailable AND carrying
+    // the same relaxed rules, reopened so compaction exercises the public
+    // recovery seam.
+    let store = store("drop-bulk-memory");
+    let first_turn = reserved(&store, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&store, &first_turn).expect("first turn runs");
+    rewrite_manifest(&store, |value| {
+        value["mode"] = serde_json::Value::String("unavailable".to_string());
+        value["rules"] = relaxed.clone();
+    });
+    let store = reopen(&store);
+
+    let memory_record = store
+        .compact_tool_result("read_file", &noise)
+        .expect("Unavailable is the explicit memory-only fallback");
+    assert!(
+        memory_record.starts_with("CTXDROP v1 tool=read_file bytes="),
+        "memory path drops the bulk result with the same CTXDROP stub: {memory_record}"
+    );
+
+    // Both records share the identical bytes=N count for the same payload.
+    let bytes_of = |record: &str| -> u64 {
+        let rest = record
+            .strip_prefix("CTXDROP v1 tool=read_file bytes=")
+            .expect("CTXDROP prefix");
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse::<u64>().expect("byte count digits")
+    };
+    assert_eq!(
+        bytes_of(&durable_record),
+        bytes_of(&memory_record),
+        "both sinks must agree on the dropped byte count"
+    );
+
+    // Neither record leaks the dropped payload, and neither is a digest record.
+    for record in [&durable_record, &memory_record] {
+        assert!(
+            !record.contains("7f3a repeated filler"),
+            "a dropped result must never leak its payload: {record}"
+        );
+        assert!(
+            !record.starts_with("CTXDIGEST v1"),
+            "a DropBulk verdict must not be answered with a CTXDIGEST record: {record}"
+        );
+    }
 }
 
 /// F11: the content-addressed handle and the sanitized-bytes record are derived from

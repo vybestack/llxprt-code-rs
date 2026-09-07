@@ -598,6 +598,13 @@ fn normalized_pressure(bytes: usize) -> f64 {
 /// placeholder, and the verdict, digest, and any verbatim return all consume only the
 /// sanitized bytes. Nothing this function emits is derived from unsanitized content
 /// (issue 130).
+///
+/// The verdict handling mirrors `ingest_bulk_committed` arm for arm, including
+/// `DropBulk`: a dropped bulk result yields the same `CTXDROP v1` stub shape on
+/// both paths, with the stub's `bytes` count being the sanitized length in each
+/// case. Only the `handle` basis differs by construction — the durable path
+/// names the spine handle, this path names a content digest — exactly as the
+/// digest path already differs in `ranges` (issue 142).
 fn memory_digest(state: &mut ContextState, tool: &str, bytes: &[u8]) -> String {
     let sanitized = sanitize_for_digest(bytes);
     let segments = segment(&sanitized);
@@ -608,13 +615,19 @@ fn memory_digest(state: &mut ContextState, tool: &str, bytes: &[u8]) -> String {
         bytes: sanitized.clone(),
         segments: segments.clone(),
     };
-    if state.filters.verdict(tool, &segments, sanitized.len()) == RuleVerdict::PassVerbatim {
-        return String::from_utf8_lossy(&sanitized).into_owned();
+    match state.filters.verdict(tool, &segments, sanitized.len()) {
+        RuleVerdict::PassVerbatim => String::from_utf8_lossy(&sanitized).into_owned(),
+        RuleVerdict::DropBulk => format!(
+            "CTXDROP v1 tool={tool} bytes={} handle={handle}\n",
+            sanitized.len()
+        ),
+        RuleVerdict::Digest => {
+            let digest = state
+                .filters
+                .digest(tool, &handle, Vec::new(), &sanitized, &segments);
+            digest_record(state, tool, &payload, &handle, &digest)
+        }
     }
-    let digest = state
-        .filters
-        .digest(tool, &handle, Vec::new(), &sanitized, &segments);
-    digest_record(state, tool, &payload, &handle, &digest)
 }
 
 /// Redacts `bytes` for a store-free digest, or replaces them with the vault placeholder.
