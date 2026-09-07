@@ -621,11 +621,11 @@ fn inherited_higher_precedence_config_home_cannot_redirect_staged_fixture() {
 /// TypeScript llxprt-code app, which legitimately writes its own top-level keys (`ui`,
 /// `oauthEnabledProviders`, ...). A shared root must never block startup, so the staged
 /// fixture reproduces the reported on-disk shape exactly (no secret material) and proves
-/// the run travels **past** the settings load into the later profile stage.
+/// the run travels **past** the settings load into the refused loopback transport stage.
 ///
 /// Both startup paths are covered: `--print-config` resolves every layer (a clean
-/// resolved document is the strongest startup proof), and a real run must reach the
-/// profile stage (`profile-missing`) instead of dying at `settings-load`.
+/// resolved document is the strongest startup proof), and a real run reaches the
+/// refused loopback model/transport stage instead of dying at `settings-load`.
 #[test]
 fn shared_settings_root_no_longer_blocks_startup() {
     let dir = shared_root_config("{}");
@@ -656,20 +656,25 @@ fn shared_settings_root_no_longer_blocks_startup() {
     assert_eq!(resolved["provider"]["base_url"]["source"], "profile");
     assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 16);
 
-    // A real run reaches the profile stage instead of dying at the settings load.
+    // A real run must read the shared settings before the valid profile reaches the
+    // refused loopback endpoint.
     let out = bin()
         .env("LLXPRT_CONFIG_DIR", dir.path())
         .arg("--profile")
-        .arg("does-not-exist")
+        .arg("issue202-loop")
         .arg("-p")
         .arg("hi")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(3));
-    let parsed = stdout_json(&out);
     assert_eq!(
-        parsed["error"]["code"], "profile-missing",
-        "the shared settings root must not be the failure; the later profile stage owns it"
+        out.status.code(),
+        Some(llxprt_code_rs::cli::Code::Model as i32)
+    );
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "model-connectivity",
+        "the shared settings root must load before the refused loopback transport boundary"
     );
     assert_eq!(
         std::fs::read(settings_path).unwrap(),
