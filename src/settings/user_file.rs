@@ -5,8 +5,17 @@ use std::path::Path;
 /// before any parse, mirroring the profile file cap.
 const MAX_SETTINGS_FILE_BYTES: usize = 4096;
 
+/// The on-disk root of `settings.json`.
+///
+/// That root is a **shared, multi-tool surface**: the TypeScript llxprt-code app writes
+/// its own keys into the same file (`ui`, `oauthEnabledProviders`,
+/// `providerKeyfiles`, ...), so unknown **top-level** siblings are ignored here instead
+/// of failing every launch (issue 202). Tolerance lives on this root struct only: each
+/// section the Rust resolver owns (`provider`, `budgets`, `paths`) keeps its own
+/// `deny_unknown_fields`, so a misspelled owned key, a wrong type, an invalid value, or
+/// a repeated owned key still fails the settings load. There is no fallback reader, no
+/// migration, and no write-back of sibling keys.
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct File {
     #[serde(default)]
     provider: SettingsProvider,
@@ -15,6 +24,7 @@ struct File {
     #[serde(default)]
     paths: SettingsPaths,
 }
+
 pub fn load_user_file(root: &Path) -> Result<SettingsLayer, String> {
     let path = root.join("settings.json");
     if !path.exists() {

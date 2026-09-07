@@ -617,6 +617,134 @@ fn inherited_higher_precedence_config_home_cannot_redirect_staged_fixture() {
     );
 }
 
+/// Regression (issue 202): the user-global `settings.json` root is shared with the
+/// TypeScript llxprt-code app, which legitimately writes its own top-level keys (`ui`,
+/// `oauthEnabledProviders`, ...). A shared root must never block startup, so the staged
+/// fixture reproduces the reported on-disk shape exactly (no secret material) and proves
+/// the run travels **past** the settings load into the later profile stage.
+///
+/// Both startup paths are covered: `--print-config` resolves every layer (a clean
+/// resolved document is the strongest startup proof), and a real run must reach the
+/// profile stage (`profile-missing`) instead of dying at `settings-load`.
+#[test]
+fn shared_settings_root_no_longer_blocks_startup() {
+    let dir = shared_root_config("{}");
+
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("--print-config")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "print-config resolves every layer without the shared root blocking it"
+    );
+    let resolved: Value = serde_json::from_slice(&out.stdout).expect("one JSON object");
+    assert_eq!(
+        resolved["paths"]["config_root"]["value"],
+        Value::String(dir.path().display().to_string())
+    );
+    assert_eq!(
+        resolved["provider"]["base_url"]["value"],
+        "http://127.0.0.1:1/v1"
+    );
+    assert_eq!(resolved["provider"]["base_url"]["source"], "profile");
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 16);
+
+    // A real run reaches the profile stage instead of dying at the settings load.
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("does-not-exist")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    let parsed = stdout_json(&out);
+    assert_eq!(
+        parsed["error"]["code"], "profile-missing",
+        "the shared settings root must not be the failure; the later profile stage owns it"
+    );
+}
+
+/// The same shared root stays non-blocking when a Rust-owned section is present beside
+/// the sibling keys, and the owned value still applies: `max_tool_calls` from the user
+/// file is reported as the resolved budget source by `--print-config`.
+#[test]
+fn shared_settings_root_with_owned_sections_still_applies() {
+    let dir = shared_root_config(r#"{"max_tool_calls": 9}"#);
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("--print-config")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let resolved: Value = serde_json::from_slice(&out.stdout).expect("one JSON object");
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 9);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["source"], "user_file");
+}
+
+/// Strictness is unchanged **inside** the Rust-owned sections: a malformed owned
+/// settings file still fails early and clearly with the `settings-load` classification,
+/// exit 3, and exactly one JSON object on stdout.
+#[test]
+fn malformed_owned_settings_still_fail_early_and_clearly() {
+    // A misspelled owned key inside an owned section, beside an ignored sibling key.
+    let dir = shared_root_config(r#"{"maxToolCalls": 4}"#);
+    let out = bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3), "config errors exit 3");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "settings-load",
+        "a malformed owned section must still fail at the settings load"
+    );
+    let message = parsed["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("unknown field `maxToolCalls`"),
+        "the message must name the misspelled owned key: {message}"
+    );
+}
+
+/// Stage an isolated config home carrying the exact shared-root shape reported in
+/// issue 202 plus an optional Rust-owned `budgets` section, and one loopback profile
+/// with no credential material. The loopback base URL makes the profile valid without
+/// any key, and the refused port keeps the run offline.
+fn shared_root_config(budgets: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        format!(
+            r#"{{"ui": {{"theme": "Green Screen"}},
+                "oauthEnabledProviders": {{"codex": true}},
+                "budgets": {budgets}}}"#
+        ),
+    )
+    .unwrap();
+    let profiles = dir.path().join("profiles");
+    std::fs::create_dir(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("issue202-loop.json"),
+        r#"{"provider":"openai","model":"issue202-fixture",
+            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1"}}"#,
+    )
+    .unwrap();
+    dir
+}
+
 /// `--help` is the only stdout exception and exits 0.
 #[test]
 fn help_is_a_protocol_exception() {
