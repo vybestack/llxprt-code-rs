@@ -26,7 +26,7 @@ use std::io::Read;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -73,6 +73,95 @@ const TERM_GRACE: Duration = Duration::from_millis(200);
 /// Poll tick shared by the reader threads so an abort is observed within this window.
 const POLL_TICK_MS: i32 = 10;
 
+/// Process-group id of the command [`run_cmd`] is currently supervising, or 0 when the runner is
+/// idle.
+///
+/// Cancellation contract (issue 88): a headless worker cancelled with `SIGINT`/`SIGTERM` must not
+/// leave a running tool behind it. The runner puts every command in its own process group
+/// (`setsid`) precisely so the whole tree can be signalled, so publishing that group here lets the
+/// handler installed by [`install_cancellation_signal_handlers`] `SIGKILL` it before the worker
+/// exits: **cancelling the worker kills the active tool's whole process group, so no
+/// repository-mutating command survives cancellation.**
+///
+/// The registry is a single `AtomicI32` (0 = none) rather than a mutex because the signal handler
+/// reads it on a signal-unsafe stack, where locking would be undefined behaviour.
+static ACTIVE_GROUP: AtomicI32 = AtomicI32::new(0);
+
+/// Owns one registration in [`ACTIVE_GROUP`]; clearing it on drop keeps the registry accurate on
+/// every exit path (normal completion, timeout kill, spawn/supervision error, unwind) the same way
+/// `supervise` always reaps the child.
+struct ActiveGroupGuard(i32);
+
+impl ActiveGroupGuard {
+    /// Publish `pgid` as the group a cancellation must kill. One tool runs at a time, so the
+    /// registration is a plain store.
+    fn register(pgid: i32) -> Self {
+        ACTIVE_GROUP.store(pgid, Ordering::SeqCst);
+        ActiveGroupGuard(pgid)
+    }
+}
+
+impl Drop for ActiveGroupGuard {
+    fn drop(&mut self) {
+        // Compare-exchange so a re-entrant run can never clear a newer registration.
+        let _ = ACTIVE_GROUP.compare_exchange(self.0, 0, Ordering::SeqCst, Ordering::SeqCst);
+    }
+}
+
+/// The process group currently supervised by [`run_cmd`], or 0 when no command is active.
+pub fn active_group() -> i32 {
+    ACTIVE_GROUP.load(Ordering::SeqCst)
+}
+
+/// Best-effort delivery of `signal` to the registered process group, if any. Errors (including a
+/// group that already exited) are ignored.
+pub fn kill_active_group(signal: i32) {
+    let pgid = ACTIVE_GROUP.load(Ordering::SeqCst);
+    if pgid > 0 {
+        // Safety: `-pgid` is the recorded process-group id of the supervised command.
+        unsafe { libc::kill(-pgid, signal) };
+    }
+}
+
+/// Cancellation handler: `SIGKILL` the active tool's whole process group, then exit without
+/// unwinding. `SIGKILL` rather than `SIGTERM` because the operator already chose to cancel, so the
+/// orphan must not be able to ignore it or outlive a graceful TERM escalation. Async-signal-safe:
+/// one relaxed atomic load, `kill`, `_exit`.
+extern "C" fn cancellation_handler(signal: libc::c_int) {
+    let pgid = ACTIVE_GROUP.load(Ordering::Relaxed);
+    if pgid > 0 {
+        // Safety: `pgid` was published right after a successful `setsid` spawn.
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    }
+    // Safety: `_exit` is async-signal-safe and never returns. 128+signal is the conventional
+    // status a cancelling operator expects to observe.
+    unsafe { libc::_exit(if signal == libc::SIGINT { 130 } else { 143 }) };
+}
+
+/// Install the `SIGINT`/`SIGTERM` handlers that terminate the active tool's process group before
+/// the worker exits. Idempotent; call it at startup, before the first model request, so no
+/// tool can outlive the worker. Returns `Err` when the platform rejects the `sigaction`.
+pub fn install_cancellation_signal_handlers() -> Result<(), String> {
+    for signal in [libc::SIGINT, libc::SIGTERM] {
+        // Safety: the struct is initialised field-by-field below; `zeroed` supplies an empty
+        // signal mask, so the handler runs with no signals blocked.
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        // Safety: `cancellation_handler` is an `extern "C" fn(c_int)`, the signature the
+        // `sa_sigaction` field names (libc exposes that union field as an integer handle).
+        let handler: extern "C" fn(libc::c_int) = cancellation_handler;
+        action.sa_sigaction = handler as *const () as libc::sighandler_t;
+        action.sa_flags = libc::SA_RESTART;
+        // Safety: registering an action for a valid signal; the previous action is discarded.
+        if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } != 0 {
+            return Err(format!(
+                "sigaction for signal {signal} failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Run `/bin/sh -c <command>` with the same bounds as [`run_cmd`].
 pub fn run_sh(
     command: &str,
@@ -108,11 +197,30 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let (deadline, escalation_deadline) = command_deadlines(Instant::now(), spec.timeout)?;
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .map_err(|e| format!("spawn {} failed: {e}", spec.program))?;
 
-    let budget = Arc::new(ByteBudget::new(spec.max_output));
+    // Publish the child's process group so a cancellation signal can kill the whole tool tree.
+    // The guard clears the registration on every exit path, so a stale group is never signalled
+    // after the run that owned it has finished.
+    let _active = ActiveGroupGuard::register(child.id() as i32);
+    Ok(supervise_and_collect(
+        child,
+        deadline,
+        escalation_deadline,
+        spec.max_output,
+    ))
+}
+
+/// Reader setup, deadline supervision, and output collection for one already-spawned child.
+fn supervise_and_collect(
+    mut child: Child,
+    deadline: Instant,
+    escalation_deadline: Instant,
+    max_output: usize,
+) -> CmdOutcome {
+    let budget = Arc::new(ByteBudget::new(max_output));
     let abort = Arc::new(AtomicBool::new(false));
     let done = Arc::new(AtomicUsize::new(0));
     let mut pipes = 0usize;
@@ -157,7 +265,7 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
         }
     }
     let combined_truncated = stdout_truncated || stderr_truncated;
-    Ok(CmdOutcome {
+    CmdOutcome {
         status,
         timed_out,
         stdout,
@@ -165,7 +273,7 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
         stdout_truncated,
         stderr_truncated,
         combined_truncated,
-    })
+    }
 }
 
 /// A mutex-guarded combined byte budget. `take` never underflows: it returns the smaller of the
@@ -412,6 +520,23 @@ mod tests {
             (nanos / 1_000_000_000) as u64,
             (nanos % 1_000_000_000) as u32,
         )
+    }
+
+    #[test]
+    fn active_group_registry_tracks_only_the_live_registration() {
+        // The slot is process-global and the lib test binary runs tool tests in
+        // parallel that hold real registrations, so empty-slot assertions race
+        // them; assert the registration/drop invariants of THIS guard instead
+        // (no parallel test can register this sentinel pgid).
+        {
+            let _guard = ActiveGroupGuard::register(123_456);
+            assert_eq!(active_group(), 123_456);
+        }
+        assert_ne!(
+            ACTIVE_GROUP.load(Ordering::SeqCst),
+            123_456,
+            "dropping the guard must clear its registration"
+        );
     }
 
     #[test]

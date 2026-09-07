@@ -102,26 +102,25 @@ impl ContextStore {
 
     /// Appends sanitized bytes (the one exempt write) and indexes the handle.
     ///
-    /// `None` derives the canonical content-stable handle
-    /// (`sanitized-<frame digest>`), which survives a reload unchanged.
-    pub fn sanitized_append(
-        &mut self,
-        handle: Option<&str>,
-        bytes: &[u8],
-    ) -> Result<Range<u64>, StoreError> {
+    /// The handle is ALWAYS the canonical content-stable form
+    /// (`sanitized-<frame digest>`), derived here from the frame's start
+    /// offset and bytes. Both spine loaders re-derive it identically on
+    /// reload, so the identity survives a round trip unchanged, and there is
+    /// deliberately no caller-supplied identity: an explicit handle used to
+    /// be stored only in the in-memory index and silently lost it on reload
+    /// (issue #140). Returns the derived handle plus the appended range.
+    pub fn sanitized_append(&mut self, bytes: &[u8]) -> Result<(String, Range<u64>), StoreError> {
         self.begin_state_advancing_turn()
             .map_err(StoreError::Blocked)?;
         let start = self.spine.len();
-        let owned = handle
-            .map(str::to_string)
-            .unwrap_or_else(|| SpineFrame::canonical_handle(start, bytes));
-        let range = self.spine.append(&owned, bytes);
+        let handle = SpineFrame::canonical_handle(start, bytes);
+        let range = self.spine.append(&handle, bytes);
         self.index.push(IndexEntry {
-            handle: owned,
+            handle: handle.clone(),
             ranges: vec![range.clone()],
             labels: Vec::new(),
         });
-        Ok(range)
+        Ok((handle, range))
     }
 
     /// Seals quarantined plaintext into the vault.
@@ -275,18 +274,16 @@ impl crate::context_ingress::ingress::IngressSink for ContextStore {
         &mut self,
         bytes: &[u8],
     ) -> Result<SpinePlacement, crate::context_ingress::ingress::SinkRefusal> {
-        let handle = SpineFrame::canonical_handle(self.spine.len(), bytes);
-        let range =
-            ContextStore::sanitized_append(self, Some(&handle), bytes).map_err(|error| {
-                match error {
-                    // The store's own mode name is carried through typed, so the
-                    // transaction never has to recover it from a rendered string.
-                    StoreError::Blocked(StoreBlocked::Mode { mode }) => {
-                        crate::context_ingress::ingress::SinkRefusal::Mode { mode }
-                    }
-                    _ => crate::context_ingress::ingress::SinkRefusal::Vault,
+        let (handle, range) = ContextStore::sanitized_append(self, bytes).map_err(|error| {
+            match error {
+                // The store's own mode name is carried through typed, so the
+                // transaction never has to recover it from a rendered string.
+                StoreError::Blocked(StoreBlocked::Mode { mode }) => {
+                    crate::context_ingress::ingress::SinkRefusal::Mode { mode }
                 }
-            })?;
+                _ => crate::context_ingress::ingress::SinkRefusal::Vault,
+            }
+        })?;
         Ok(SpinePlacement { handle, range })
     }
 
