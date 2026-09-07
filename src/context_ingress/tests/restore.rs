@@ -149,3 +149,75 @@ fn vocabulary_restore_refuses_an_empty_history() {
     );
     assert_eq!(registry.vocabulary_history().len(), 1);
 }
+
+/// The FIRST persisted entry claims version 1 — the code's own baseline rules,
+/// not just the ordinal. A history whose baseline entry carries tighter or
+/// looser rules would silently redefine what every digest resolved at version 1
+/// means, so restore refuses it with a typed error (issue #141 regression).
+#[test]
+fn restore_refuses_history_with_deviant_baseline_rules() {
+    let mut registry = FilterRegistry::new();
+
+    // Tighter than the code's baseline: a smaller size floor at version 1.
+    let mut tighter = FilterRules::v1();
+    tighter.size_floor = 512;
+    let refused = registry.restore_histories(vec![tighter]).unwrap_err();
+    assert_eq!(
+        refused.name(),
+        "baseline-rules-mismatch",
+        "the refusal is the typed baseline mismatch, not offline tightening"
+    );
+
+    // Looser than the code's baseline: a verbatim tool the code's version 1
+    // never routed verbatim.
+    let mut looser = FilterRules::v1();
+    looser.verbatim_tools = vec!["git".to_string()];
+    assert!(
+        registry.restore_histories(vec![looser]).is_err(),
+        "a looser-than-baseline version 1 is refused too"
+    );
+
+    // Nothing was adopted: the registry still resolves its seeded v1.
+    assert_eq!(registry.rules_history().len(), 1);
+    assert_eq!(registry.rules().size_floor, FilterRules::v1().size_floor);
+    assert_eq!(
+        registry.rules().verbatim_tools,
+        FilterRules::v1().verbatim_tools
+    );
+}
+
+/// A history that is exactly what a legal session produces — the code's own
+/// baseline v1 entry followed by strictly newer relaxations — restores
+/// unchanged, with every recorded version resolving under its own rules.
+#[test]
+fn restore_accepts_legitimate_rule_sequences() {
+    let mut registry = FilterRegistry::new();
+    let mut v2 = FilterRules::v1();
+    v2.version = 2;
+    v2.size_floor = 2048;
+    v2.unknown_bound = 128;
+    v2.verbatim_tools = vec!["git".to_string()];
+    assert_eq!(registry.update_rules(v2.clone()).unwrap(), 2);
+
+    let history = registry.rules_history().to_vec();
+    let mut restarted = FilterRegistry::new();
+    restarted
+        .restore_histories(history.clone())
+        .expect("the code's baseline entry followed by relaxations restores");
+    assert_eq!(restarted.rules().version, 2);
+    assert_eq!(
+        restarted.rules_at(1).map(|rules| rules.size_floor),
+        Some(FilterRules::v1().size_floor),
+        "version 1 still resolves under the code's baseline rules"
+    );
+    assert_eq!(
+        restarted.rules_at(2).map(|rules| rules.size_floor),
+        Some(2048),
+        "version 2 resolves under its own relaxed rules"
+    );
+    assert_eq!(
+        restarted.rules_history().len(),
+        history.len(),
+        "the restore is a round trip over the rule history"
+    );
+}
