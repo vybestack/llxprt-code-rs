@@ -67,7 +67,6 @@ impl CodingAgent {
                     ..Default::default()
                 },
             )?;
-            let output_before = attempt.usage.output_bytes;
             in_flight::mark(store, &call.name);
             let outcome =
                 self.execute_one_call(config, store, attempt, round, call, (index, calls.len()));
@@ -75,13 +74,18 @@ impl CodingAgent {
             outcome
                 .map_err(|failure| self.tool_failure(store, reserved, failure, &attempt.rounds))?;
             self.update_profile_usage(&attempt.usage);
+            // `output_bytes` is charged in LIVE bytes (#66), so the persisted
+            // telemetry reads the size of the record the round actually kept.
+            let persisted_bytes = round
+                .calls
+                .last()
+                .map(|call| call.result.len())
+                .unwrap_or_default();
             self.profile(
                 "tool_exec_after",
                 crate::memory_profile::EventData {
                     round_index: Some(round_index as u64),
-                    tool_result_persisted_bytes: Some(
-                        attempt.usage.output_bytes.saturating_sub(output_before) as u64,
-                    ),
+                    tool_result_persisted_bytes: Some(persisted_bytes as u64),
                     round_count: Some(attempt.rounds.len() as u64),
                     ..Default::default()
                 },

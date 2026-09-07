@@ -418,3 +418,24 @@ fn first_slot_open_failure_does_not_create_or_modify_state() {
     assert!(root.path().join("session.json").is_dir());
     assert!(!root.path().join("session.alt.json").exists());
 }
+
+#[test]
+fn tool_call_record_durable_form_omits_result_live() {
+    let record = ToolCallRecord {
+        id: "call-1".to_string(),
+        name: "read_file".to_string(),
+        args: "{}".to_string(),
+        ok: true,
+        refused: false,
+        result: "persisted-result".to_string(),
+        result_live: "live-bytes".to_string(),
+    };
+
+    let json = serde_json::to_string(&record).unwrap();
+    assert!(!json.contains("result_live"));
+    assert!(json.contains("persisted-result"));
+
+    let reloaded: ToolCallRecord = serde_json::from_str(&json).unwrap();
+    assert_eq!(reloaded.result, "persisted-result");
+    assert_eq!(reloaded.result_live, "");
+}

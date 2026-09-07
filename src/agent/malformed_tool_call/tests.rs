@@ -118,6 +118,7 @@ fn zero_call_tail_counts_trailing_call_free_rounds() {
             name: "list_directory".into(),
             args: "{}".into(),
             result: "[]".into(),
+            result_live: "[]".into(),
             ok: true,
             refused: false,
         }],

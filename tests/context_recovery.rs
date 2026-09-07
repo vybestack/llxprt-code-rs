@@ -8,7 +8,9 @@
 
 use llxprt_code_rs::adapter::{ChatBackend, LlmResult, LlmUsage, ToolCall};
 use llxprt_code_rs::agent::CodingAgent;
-use llxprt_code_rs::session::{Lifecycle, ReservedRequest, SessionId, SessionStore, StoreError};
+use llxprt_code_rs::session::{
+    Lifecycle, ReservedRequest, SessionId, SessionStore, StoreError, ToolResultProjection,
+};
 use llxprt_code_rs::tools::ToolSpec;
 use serdes_ai::core::FinishReason;
 use std::path::{Path, PathBuf};
@@ -806,8 +808,14 @@ fn a_result_exactly_at_the_bulk_threshold_compacts() {
     // The record is no longer the raw payload: the threshold result was
     // admitted through the transaction and replaced by its digest record.
     assert_ne!(
-        compacted, exactly,
+        compacted.persisted, exactly,
         "a result exactly at the threshold is digested, never returned raw"
+    );
+    // The live projection of the same admitted record is still the sanitized
+    // payload the provider request carries (#66).
+    assert_eq!(
+        compacted.live, exactly,
+        "a result exactly at the threshold rides the request list sanitized"
     );
     // The threshold result was admitted: the spine grew by the payload.
     let spine_after = artifact(&store, "sanitized").len();
@@ -824,8 +832,12 @@ fn a_result_exactly_at_the_bulk_threshold_compacts() {
         .compact_tool_result("read_file", &below)
         .expect("compact tool result");
     assert_eq!(
-        verbatim, below,
-        "a strictly smaller result is returned verbatim"
+        verbatim.live, below,
+        "a strictly smaller result is returned verbatim in the live projection"
+    );
+    assert_eq!(
+        verbatim.persisted, below,
+        "a strictly smaller result is persisted verbatim"
     );
     assert_eq!(
         artifact(&store, "sanitized").len(),
@@ -979,12 +991,27 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
         .compact_tool_result("read_file", &payload)
         .expect("compact tool result");
     assert!(
-        compacted.starts_with("CTXDIGEST v1 tool=read_file "),
-        "the bulk corpus is digested on the production path: {compacted}"
+        compacted
+            .persisted
+            .starts_with("CTXDIGEST v1 tool=read_file "),
+        "the bulk corpus is digested on the production path: {}",
+        compacted.persisted
     );
     assert!(
-        !compacted.contains(SECRET),
-        "the compact record carries no unscanned secret"
+        !compacted.persisted.contains(SECRET) && !compacted.live.contains(SECRET),
+        "neither projection carries an unscanned secret"
+    );
+    // The live projection is the sanitized admitted content of the same record,
+    // so the provider sees the evidence rather than only its handle (#66).
+    assert!(
+        compacted.live.contains("exact error span") && compacted.live.contains("noise line 0000"),
+        "the live projection carries the admitted evidence, not the compact stub"
+    );
+    assert!(
+        compacted.live.len() > compacted.persisted.len(),
+        "the live projection is the larger sanitized payload: live {} vs persisted {}",
+        compacted.live.len(),
+        compacted.persisted.len()
     );
 
     // Every durable context artifact and the session log stay free of the
@@ -1249,8 +1276,23 @@ fn compact_tool_result_falls_back_to_memory_digest_in_store_free_mode() {
     let compacted = store
         .compact_tool_result("read_file", &"bulk evidence\n".repeat(128))
         .expect("Unavailable is the explicit memory-only fallback");
-    assert!(compacted.starts_with("CTXDIGEST v1 tool=read_file "));
-    assert!(compacted.len() < "bulk evidence\n".repeat(128).len());
+    assert!(
+        compacted
+            .persisted
+            .starts_with("CTXDIGEST v1 tool=read_file "),
+        "the store-free fallback keeps the compact record: {}",
+        compacted.persisted
+    );
+    assert!(
+        compacted.persisted.len() < "bulk evidence\n".repeat(128).len(),
+        "the store-free fallback record is bounded"
+    );
+    // Store-free mode has nothing to publish, so the in-memory digest is the
+    // same bounded record in both projections (#66).
+    assert_eq!(
+        compacted.live, compacted.persisted,
+        "a store-free fallback releases no separate live bytes"
+    );
 }
 
 /// A DropBulk verdict produces the same `CTXDROP v1` stub shape on both compaction
@@ -1287,8 +1329,11 @@ fn drop_bulk_outcome_is_equivalent_across_memory_and_durable_sinks() {
         .compact_tool_result("read_file", &noise)
         .expect("compact tool result");
     assert!(
-        durable_record.starts_with("CTXDROP v1 tool=read_file bytes="),
-        "durable path drops the bulk result with a CTXDROP stub: {durable_record}"
+        durable_record
+            .persisted
+            .starts_with("CTXDROP v1 tool=read_file bytes="),
+        "durable path drops the bulk result with a CTXDROP stub: {}",
+        durable_record.persisted
     );
 
     // Memory sink: second store, manifest rewritten to unavailable AND carrying
@@ -1308,13 +1353,17 @@ fn drop_bulk_outcome_is_equivalent_across_memory_and_durable_sinks() {
         .compact_tool_result("read_file", &noise)
         .expect("Unavailable is the explicit memory-only fallback");
     assert!(
-        memory_record.starts_with("CTXDROP v1 tool=read_file bytes="),
-        "memory path drops the bulk result with the same CTXDROP stub: {memory_record}"
+        memory_record
+            .persisted
+            .starts_with("CTXDROP v1 tool=read_file bytes="),
+        "memory path drops the bulk result with the same CTXDROP stub: {}",
+        memory_record.persisted
     );
 
     // Both records share the identical bytes=N count for the same payload.
-    let bytes_of = |record: &str| -> u64 {
+    let bytes_of = |record: &ToolResultProjection| -> u64 {
         let rest = record
+            .persisted
             .strip_prefix("CTXDROP v1 tool=read_file bytes=")
             .expect("CTXDROP prefix");
         let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -1326,15 +1375,21 @@ fn drop_bulk_outcome_is_equivalent_across_memory_and_durable_sinks() {
         "both sinks must agree on the dropped byte count"
     );
 
-    // Neither record leaks the dropped payload, and neither is a digest record.
+    // Neither projection leaks the dropped payload, and neither is a digest record.
     for record in [&durable_record, &memory_record] {
         assert!(
-            !record.contains("7f3a repeated filler"),
-            "a dropped result must never leak its payload: {record}"
+            !record.persisted.contains("7f3a repeated filler")
+                && !record.live.contains("7f3a repeated filler"),
+            "a dropped result must never leak its payload in either projection"
         );
         assert!(
-            !record.starts_with("CTXDIGEST v1"),
-            "a DropBulk verdict must not be answered with a CTXDIGEST record: {record}"
+            !record.persisted.starts_with("CTXDIGEST v1")
+                && !record.live.starts_with("CTXDIGEST v1"),
+            "a DropBulk verdict must not be answered with a CTXDIGEST record"
+        );
+        assert_eq!(
+            record.live, record.persisted,
+            "the DropBulk stub stays a stub on BOTH projections (#66)"
         );
     }
 }
@@ -1372,8 +1427,8 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
     let record_b = store
         .compact_tool_result("read_file", &second)
         .expect("compact tool result");
-    let handle_a = digest_handle(&record_a);
-    let handle_b = digest_handle(&record_b);
+    let handle_a = digest_handle(&record_a.persisted);
+    let handle_b = digest_handle(&record_b.persisted);
     assert_ne!(
         handle_a, handle_b,
         "distinct payloads must resolve to distinct content handles"
@@ -1401,7 +1456,7 @@ fn content_and_sanitized_handles_share_one_digest_basis() {
     let record_raw = store
         .compact_tool_result("read_file", &raw)
         .expect("compact tool result");
-    let handle_raw = digest_handle(&record_raw);
+    let handle_raw = digest_handle(&record_raw.persisted);
     assert!(
         handle_raw.starts_with("content-") && handle_raw.len() == "content-".len() + 16,
         "the handle is the canonical 16-hex content form: {handle_raw}"

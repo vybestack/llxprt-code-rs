@@ -33,7 +33,21 @@ pub struct ToolCallRecord {
     /// refused records never count as executed tool calls.
     #[serde(default)]
     pub refused: bool,
+    /// The persisted filter representation of the result: the compact record the
+    /// checkpointed transcript and the context store keep (the CTXDIGEST or drop
+    /// stub, or verbatim bytes below the bulk threshold).
     pub result: String,
+    /// The live projection the provider request carries: the sanitized admitted
+    /// content released only after the same ingress record was admitted and
+    /// published (#66). Diverges from `result` only for bulk evidence.
+    ///
+    /// Transient by design: it is exactly the payload the durable representation
+    /// exists to keep OUT of the transcript, so it is never serialized. The
+    /// in-memory rounds keep it for forced-summary usage reconstruction; a
+    /// reloaded record reads it back as the empty string (the compact `result`
+    /// stays the only persisted form).
+    #[serde(default, skip_serializing)]
+    pub result_live: String,
 }
 
 /// Lifecycle of one branch.

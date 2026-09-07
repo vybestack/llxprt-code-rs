@@ -491,17 +491,26 @@ impl CodingAgent {
         } else {
             format!("{text}\n\n{notice}")
         };
-        // Pre-entry compaction (#39): a bulk tool result is digested before it joins the
-        // request list and the round, so neither the next provider request nor the
-        // checkpointed transcript ever carries raw bulk bytes.
-        let text = store
+        // Pre-entry compaction (#39): a bulk tool result is admitted before it joins
+        // the request list and the round, so neither the next provider request nor
+        // the checkpointed transcript ever carries raw bulk bytes. The same ingress
+        // record yields two projections (#66): the live sanitized admitted content
+        // the provider sees and the turn budget charges, and the compact persisted
+        // representation the round and checkpoint keep.
+        let projection = store
             .compact_tool_result(&call.name, &text)
             .map_err(|error| ToolCallFailure::Invalid(error.to_string()))?;
-        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-        attempt
-            .requests
-            .push(tool_return_request(&call.name, &call.id, ok, &text));
-        round.calls.push(tool_call_record(call, ok, text));
+        attempt.usage.output_bytes = attempt
+            .usage
+            .output_bytes
+            .saturating_add(projection.live.len());
+        attempt.requests.push(tool_return_request(
+            &call.name,
+            &call.id,
+            ok,
+            &projection.live,
+        ));
+        round.calls.push(tool_call_record(call, ok, projection));
         Ok(())
     }
 
@@ -878,10 +887,14 @@ impl CodingAgent {
                 .map(|round| round.assistant.len())
                 .sum(),
             args_bytes: 0,
+            // Forced-summary reconstruction (#66): the unit is what the request
+            // list actually carries, which is the live projection of each call,
+            // so the reconstructed cap matches the live bytes charged while the
+            // rounds were executed.
             output_bytes: persisted_rounds
                 .iter()
                 .flat_map(|round| &round.calls)
-                .map(|call| call.result.len())
+                .map(|call| call.result_live.len())
                 .sum(),
             total_calls: persisted_rounds.iter().map(|round| round.calls.len()).sum(),
         };
