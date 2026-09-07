@@ -422,97 +422,290 @@ fn scrub_url_userinfo(out: &mut [char], scheme_end: usize) -> Option<usize> {
     Some(separator)
 }
 
-/// Every `Authorization` / `x-api-key` / `api-key` / `api_key` style header value
-/// and every standalone `Bearer <token>` chunk is replaced with `[redacted]`. The header
-/// names are matched **case-insensitively** over an ASCII case-folded byte copy (which
-/// preserves byte positions), while the output is rebuilt from the real text, so an
-/// every-size value — including one containing multi-byte codepoints — is replaced whole and
-/// never split. The scan continues **after** each replacement, so duplicate, mixed-case,
-/// and multiline occurrences each become `[redacted]` and never a second distinct value;
-/// the marker contains none of the needles, so an already-redacted value never re-enters
-/// the scan (no slow path and no loop).
-fn scrub_auth_like(text: &str) -> String {
-    // ASCII byte case-folding never changes the byte count, so a needle's matched byte
-    // offset is a valid, UTF-8-aligned offset into the original `text`; the value
-    // region we replace also ends at an ASCII delimiter (newline/whitespace/end), so a
-    // multi-byte codepoint inside the value is removed whole, never split.
-    let low = text.to_ascii_lowercase();
-    let bytes = low.as_bytes();
-    const NEEDLES: [&[u8]; 5] = [
-        b"authorization :",
-        b"authorization:",
-        b"x-api-key:",
-        b"api-key:",
-        b"api_key:",
-    ];
-    let n = bytes.len();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0usize;
-    while i < n {
-        let mut next = None;
-        for needle in NEEDLES {
-            if let Some(p) = find_bytes(&bytes[i..], needle) {
-                let abs = i + p;
-                if next.is_none_or(|cur| abs < cur) {
-                    next = Some(abs);
-                }
-            }
-        }
-        let Some(idx) = next else {
-            out.push_str(&text[i..]);
-            break;
-        };
-        out.push_str(&text[i..idx]);
-        // The headered value runs to the end of its line (or the end of the text);
-        // every occurrence is removed, never just the first. `end` stops at a newline
-        // or end, both UTF-8 boundaries.
-        let mut end = idx;
-        while end < n && bytes[end] != b'\n' && bytes[end] != b'\r' {
-            end += 1;
-        }
-        out.push_str("[redacted]");
-        i = end;
-    }
-    // Any remaining standalone `Bearer <token>` chunk (not attached to a header) has its
-    // token replaced; the scan resumes past it, so many standalone tokens all redact.
-    let text = out;
-    let low = text.to_ascii_lowercase();
-    let bytes = low.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0usize;
-    let n = bytes.len();
-    while i < n {
-        let Some(rel) = find_bytes(&bytes[i..], b"bearer ") else {
-            out.push_str(&text[i..]);
-            break;
-        };
-        let idx = i + rel;
-        // A word-boundary guard keeps `forbearer` / `bearer_token` from matching.
-        if idx > 0 && bytes[idx - 1].is_ascii_alphanumeric() {
-            out.push_str(&text[i..idx + "bearer".len()]);
-            i = idx + "bearer".len();
-            continue;
-        }
-        out.push_str(&text[i..idx + "bearer".len()]);
-        let mut end = idx + "bearer ".len();
-        while end < n && !bytes[end].is_ascii_whitespace() && bytes[end] != b',' {
-            end += 1;
-        }
-        if end > idx + "bearer ".len() {
-            out.push_str("[redacted]");
-        }
-        i = end;
-    }
-    out
+/// Credential names recognized at a header/config boundary. The name check is exact and
+/// case-insensitive (the caller supplies ASCII-folded bytes), including Rust identifier
+/// boundaries, so a field such as `my_api_key` is not mistaken for an `api_key` key.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CredentialName {
+    Authorization,
+    XApiKey,
+    ApiKey,
 }
 
-/// Byte-window search used by [`scrub_auth_like`]: the offset of `needle` in `hay`,
-/// or `None` when absent.
-fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.len() > hay.len() {
+/// Every authorization-like header/config value and standalone bearer token is replaced
+/// with `[redacted]` before tool output or diagnostics become model-visible.
+///
+/// This scanner is deliberately one forward pass. In particular, a rejected source-name
+/// occurrence advances the cursor rather than searching the remaining suffix again; a
+/// tool result containing millions of `api_key` mentions is therefore O(n), not O(n²).
+fn scrub_auth_like(text: &str) -> String {
+    scrub_auth_like_scanned(text).0
+}
+
+/// The implementation also returns the number of input positions examined. Keeping that
+/// count local makes the linear scan invariant directly testable without a timing-based
+/// performance test.
+fn scrub_auth_like_scanned(text: &str) -> (String, usize) {
+    let low = text.to_ascii_lowercase();
+    let bytes = low.as_bytes();
+    let mut state = AuthScanState::default();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        advance_source_state(bytes, i, &mut state);
+        if let Some(end) = credential_replacement_end(
+            bytes,
+            text.as_bytes(),
+            i,
+            state.rust_source,
+            state.doc_comment,
+        ) {
+            state.replace(text, i, end);
+            i = end;
+            continue;
+        }
+        if let Some((start, end)) = bearer_replacement_range(bytes, i) {
+            state.out.push_str(&text[state.copied..start]);
+            state.out.push_str("[redacted]");
+            state.copied = end;
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+    state.out.push_str(&text[state.copied..]);
+    (state.out, bytes.len())
+}
+
+#[derive(Default)]
+struct AuthScanState {
+    out: String,
+    copied: usize,
+    rust_source: bool,
+    doc_comment: bool,
+}
+
+impl AuthScanState {
+    fn replace(&mut self, text: &str, start: usize, end: usize) {
+        self.out.push_str(&text[self.copied..start]);
+        self.out.push_str("[redacted]");
+        self.copied = end;
+    }
+}
+
+fn advance_source_state(bytes: &[u8], i: usize, state: &mut AuthScanState) {
+    if matches!(bytes[i], b'\n' | b'\r') {
+        state.rust_source = false;
+        state.doc_comment = false;
+    } else if bytes.get(i..i + b"///".len()) == Some(b"///") {
+        state.rust_source = true;
+        state.doc_comment = true;
+    } else if rust_source_marker_at(bytes, i) {
+        state.rust_source = true;
+    }
+}
+
+fn credential_replacement_end(
+    bytes: &[u8],
+    original: &[u8],
+    i: usize,
+    rust_source: bool,
+    doc_comment: bool,
+) -> Option<usize> {
+    let (name, name_end) = credential_name_at(bytes, i)?;
+    let (separator, value_start) = credential_separator(bytes, name_end)?;
+    let rust_type = name == CredentialName::ApiKey
+        && separator == b':'
+        && rust_source
+        && (looks_like_rust_type_annotation(bytes, original, value_start)
+            || (doc_comment && looks_like_doc_type_phrase(bytes, value_start)));
+    (!rust_type).then(|| line_end(bytes, value_start))
+}
+
+fn bearer_replacement_range(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
+    if !bearer_at(bytes, i) {
         return None;
     }
-    hay.windows(needle.len()).position(|w| w == needle)
+    let mut start = i + b"bearer".len();
+    while start < bytes.len() && matches!(bytes[start], b' ' | b'\t') {
+        start += 1;
+    }
+    let mut end = start;
+    while end < bytes.len() && !bytes[end].is_ascii_whitespace() && bytes[end] != b',' {
+        end += 1;
+    }
+    (start > i + b"bearer".len() && end > start).then_some((start, end))
+}
+
+/// Return a credential name starting at `i`, only when both edges are outside a Rust
+/// identifier. Treating `_` as an identifier byte is important: `my_api_key` is source,
+/// not a config key named `api_key`.
+fn credential_name_at(bytes: &[u8], i: usize) -> Option<(CredentialName, usize)> {
+    if i > 0 && is_identifier_continue(bytes[i - 1]) {
+        return None;
+    }
+    const NAMES: [(&[u8], CredentialName); 4] = [
+        (b"authorization", CredentialName::Authorization),
+        (b"x-api-key", CredentialName::XApiKey),
+        (b"api-key", CredentialName::XApiKey),
+        (b"api_key", CredentialName::ApiKey),
+    ];
+    for (spelling, name) in NAMES {
+        let end = i + spelling.len();
+        if bytes.get(i..end) == Some(spelling)
+            && bytes
+                .get(end)
+                .is_none_or(|byte| !is_identifier_continue(*byte))
+        {
+            return Some((name, end));
+        }
+    }
+    None
+}
+
+fn is_identifier_continue(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Return a real key/value separator after a credential name. Equality and match-arm
+/// operators are explicitly not assignments: `api_key == expected` and `api_key =>` must
+/// round-trip as Rust source.
+fn credential_separator(bytes: &[u8], name_end: usize) -> Option<(u8, usize)> {
+    let mut separator = name_end;
+    while separator < bytes.len() && matches!(bytes[separator], b' ' | b'\t') {
+        separator += 1;
+    }
+    match bytes.get(separator).copied() {
+        Some(b':') => Some((b':', separator + 1)),
+        Some(b'=') if !matches!(bytes.get(separator + 1), Some(b'=') | Some(b'>')) => {
+            Some((b'=', separator + 1))
+        }
+        _ => None,
+    }
+}
+
+fn line_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() && !matches!(bytes[end], b'\n' | b'\r') {
+        end += 1;
+    }
+    end
+}
+
+/// Detect source markers as the cursor advances. This state is monotone within a line,
+/// so repeated `api_key` fields never re-scan the preceding line prefix.
+fn rust_source_marker_at(bytes: &[u8], i: usize) -> bool {
+    const MARKERS: [&[u8]; 4] = [b"//", b"pub ", b"fn ", b"impl "];
+    MARKERS.into_iter().any(|marker| {
+        bytes.get(i..i + marker.len()) == Some(marker)
+            && (i == 0 || !is_identifier_continue(bytes[i - 1]))
+    })
+}
+
+/// A source type has either a standard Rust root or a PascalCase nominal-type root.
+/// This is a structural exception, not a credential-value heuristic: type spelling is
+/// ordinary source even outside a `pub` or `fn` line, while lowercase unknown values at a
+/// credential boundary remain closed. The root scan is bounded to preserve the scanner's
+/// monotone linear behavior.
+const MAX_RUST_TYPE_ANNOTATION_BYTES: usize = 256;
+
+fn looks_like_rust_type_annotation(bytes: &[u8], original: &[u8], start: usize) -> bool {
+    let bounded_end = bytes[start..]
+        .iter()
+        .take(MAX_RUST_TYPE_ANNOTATION_BYTES)
+        .position(|byte| matches!(*byte, b',' | b';' | b')' | b'{' | b'=' | b'\n' | b'\r'))
+        .map_or_else(
+            || bytes.len().min(start + MAX_RUST_TYPE_ANNOTATION_BYTES),
+            |offset| start + offset,
+        );
+    let mut value = trim_ascii(&bytes[start..bounded_end]);
+    let mut original_value = trim_ascii(&original[start..bounded_end]);
+    if value.first() == Some(&b'&') {
+        original_value = &original_value[1..];
+        value = &value[1..];
+        if value.first() == Some(&b'\'') {
+            while !value.is_empty() && !matches!(value[0], b' ' | b'\t') {
+                value = &value[1..];
+                original_value = &original_value[1..];
+            }
+            value = trim_ascii(value);
+            original_value = trim_ascii(original_value);
+        }
+    }
+    let root_end = value
+        .iter()
+        .position(|byte| !is_identifier_continue(*byte))
+        .unwrap_or(value.len());
+    let root = &value[..root_end];
+    let original_root = &original_value[..root_end];
+    (is_known_rust_type_root(root) || original_root.first().is_some_and(u8::is_ascii_uppercase))
+        && value.get(root_end).is_none_or(|byte| {
+            matches!(
+                *byte,
+                b'<' | b'[' | b':' | b',' | b';' | b')' | b'{' | b'=' | b'\n' | b'\r'
+            )
+        })
+}
+
+/// Doc comments commonly explain a typed field as `api_key: &str is …`. Preserve that
+/// source prose, but do not let arbitrary documentation values bypass the closed
+/// credential boundary.
+fn looks_like_doc_type_phrase(bytes: &[u8], start: usize) -> bool {
+    let value = trim_ascii(&bytes[start..]);
+    let value = value.strip_prefix(b"&").unwrap_or(value);
+    let root_end = value
+        .iter()
+        .position(|byte| !is_identifier_continue(*byte))
+        .unwrap_or(value.len());
+    is_known_rust_type_root(&value[..root_end]) && value[root_end..].starts_with(b" is ")
+}
+
+fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
+    while matches!(bytes.first(), Some(b' ' | b'\t')) {
+        bytes = &bytes[1..];
+    }
+    bytes
+}
+
+fn is_known_rust_type_root(root: &[u8]) -> bool {
+    matches!(
+        root,
+        b"str"
+            | b"string"
+            | b"bool"
+            | b"char"
+            | b"u8"
+            | b"u16"
+            | b"u32"
+            | b"u64"
+            | b"u128"
+            | b"usize"
+            | b"i8"
+            | b"i16"
+            | b"i32"
+            | b"i64"
+            | b"i128"
+            | b"isize"
+            | b"f32"
+            | b"f64"
+            | b"option"
+            | b"vec"
+            | b"result"
+            | b"box"
+            | b"arc"
+            | b"cow"
+            | b"hashmap"
+            | b"btreemap"
+            | b"pathbuf"
+            | b"duration"
+            | b"self"
+    )
+}
+
+fn bearer_at(bytes: &[u8], i: usize) -> bool {
+    let end = i + b"bearer".len();
+    bytes.get(i..end) == Some(b"bearer")
+        && (i == 0 || !is_identifier_continue(bytes[i - 1]))
+        && matches!(bytes.get(end), Some(b' ' | b'\t'))
 }
 
 /// A tiny, targeted `[dependencies]`-table parser for produced `Cargo.toml` files.
@@ -563,459 +756,4 @@ fn strip_toml_comment(line: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn redacts_credentials_full_url_no_path() {
-        let s = redact_url("https://alice:secret@api.example.com:8443/v1/chat");
-        assert!(!s.contains("alice"), "{s}");
-        assert!(!s.contains("secret"), "{s}");
-        assert!(!s.contains("/v1/chat"), "path must be dropped: {s}");
-        assert!(!s.contains("token=abc"), "query dropped: {s}");
-        assert_eq!(s, "https://api.example.com:8443");
-    }
-
-    #[test]
-    fn plaintext_endpoint_is_collapsed() {
-        // The dsflash base URL is a remote plaintext HTTP address; only the
-        // scheme/host/port survive.
-        let u = crate::profile::RedactedUrl::from_unvalidated("http://23.183.40.76:8080/v1");
-        assert_eq!(u.as_display(), "http://23.183.40.76:8080");
-    }
-
-    #[test]
-    fn query_and_fragment_never_survive() {
-        let s = crate::profile::RedactedUrl::from_unvalidated(
-            "https://api.example.com/v1?api-key=ghp_secret#frag",
-        );
-        assert_eq!(s.as_display(), "https://api.example.com");
-        assert!(
-            url_has_rejected_parts("https://api.example.com/v1?k=v"),
-            "queries are flagged"
-        );
-    }
-
-    /// Key material in a URL query never appears in any rendering.
-    #[test]
-    fn api_key_query_value_never_survives_any_rendering() {
-        for raw in [
-            "https://api.example.com/v1?api-key=ghp_secret",
-            "https://api.example.com?key=super-secret",
-            "https://api.example.com/v1#token=super-secret",
-        ] {
-            let rendered = redact_url(raw);
-            assert!(!rendered.contains("secret"), "{rendered}");
-            let disp = crate::profile::RedactedUrl::from_unvalidated(raw)
-                .as_display()
-                .to_string();
-            assert!(!disp.contains("secret"), "{disp}");
-            let safe = safe_for_display(raw);
-            let secret_and_host_are_not_both_visible =
-                !safe.contains("secret") || !safe.contains("api.example.com");
-            assert!(secret_and_host_are_not_both_visible, "{safe}");
-        }
-        assert!(url_has_rejected_parts(
-            "https://api.example.com/v1?state=abc"
-        ));
-    }
-
-    /// Full URL with userinfo, path, query, and fragment collapses to scheme://host:port.
-    #[test]
-    fn endpoint_userinfo_path_query_fragment_all_redacted() {
-        let raw = "https://bob:hunter2@api.example.com:8443/v1/chat?hint=1&token=abc#tail";
-        let r = crate::profile::RedactedUrl::from_unvalidated(raw);
-        assert_eq!(r.as_display(), "https://api.example.com:8443");
-        let s = redact_url(raw);
-        assert_eq!(s, "https://api.example.com:8443");
-        assert!(!s.contains("bob"));
-        assert!(!s.contains("hunter2"));
-        assert!(!s.contains("/v1/chat"));
-        assert!(!s.contains("token"));
-        assert!(!s.contains("#tail"));
-    }
-
-    /// A non-https / non-url string collapses to a bounded rendering, never the raw value.
-    #[test]
-    fn non_https_or_unparseable_collapses() {
-        assert_eq!(
-            redact_url("http://23.183.40.76:8080/v1"),
-            "http://23.183.40.76:8080"
-        );
-        assert_eq!(redact_url("/etc/passwd"), "<redacted url>");
-        assert_eq!(redact_url("merely a string"), "<redacted url>");
-        assert_eq!(safe_for_display("/etc/passwd"), "<redacted url>");
-        assert_eq!(safe_for_display("http://h/a"), "http://h");
-    }
-
-    /// Issue 148 reproduction: the tool-result scrubber rewrote every bare `<Q>` or
-    /// `#` into a `[r-----` style placeholder, so shell output lost shebangs, Rust
-    /// attribute lines, backslash escapes, and `<Q>`/`#`, and agents copied that
-    /// mangled form back into source files. A run with **no scheme** behind the
-    /// punctuation is ordinary punctuation and round-trips byte-identically. This is the
-    /// same trade-off as origin/main for scheme-free runs only: a run that *does* carry a
-    /// scheme (for example `see(https://h.example/a)?note`) still mangles the trailing
-    /// text, because the rewrite runs to the end of the chunk; that is unchanged from
-    /// main, not a regression.
-    #[test]
-    fn ordinary_punctuation_round_trips_byte_identically() {
-        let corpus = concat!(
-            "#!/bin/sh\n",
-            "#[test]\n",
-            "#[cfg_attr(miri, ignore)]\n",
-            "path = C:\\Users\\me\\src\\lib.rs\n",
-            "let v = s.split('\\n').find(|l| l.starts_with(\"# \"))<Q>;\n",
-            "grep -n #TODO\" src\n",
-            "whoami? root\n",
-        );
-        assert_eq!(scrub_secrets(corpus, &[]), corpus);
-        let secret = "sk-super-fake-marker-777".to_string();
-        assert_eq!(
-            scrub_secrets(corpus, &[secret]),
-            corpus,
-            "an unrelated secret must not drag ordinary punctuation into a rewrite"
-        );
-    }
-
-    /// A genuine secret-shaped span is still replaced, and the replacement is a stable
-    /// marker that ordinary code text can never produce.
-    #[test]
-    fn secret_shaped_url_chunks_are_still_redacted() {
-        let src = concat!(
-            "prefix stays\n",
-            "leak https://h.example/v1?token=sk-fake-query-999&x=1#frag\n",
-            "leak https://re--@h.example/v1?a=b and c",
-        );
-        let out = scrub_secrets(src, &[]);
-        assert!(!out.contains("token=sk-fake-query-999"), "{out}");
-        assert!(!out.contains("frag"), "{out}");
-        assert!(!out.contains("u:pw"), "{out}");
-        assert!(out.starts_with("prefix stays\n"), "{out}");
-        assert!(!out.contains("a=b"), "the query value survived: {out}");
-        assert!(!out.contains("sk-fake"), "{out}");
-
-        // Issue 148 review F1: the gate used to walk back over `)`/`}`/`"` demanding a
-        // contiguous `://`, but those bytes are legal unencoded URL path bytes and JSON
-        // escapes the separator, so each of these genuine URLs was left in the clear.
-        // The verdict now comes from the run's content (any `://`, or its JSON-escaped
-        // `:\\/\\/` spelling, earlier in the same run), so all three are redacted
-        // exactly as origin/main redacted them.
-        for src in [
-            "https://en.wikipedia.org/wiki/Foo_(bar)?token=SECRET",
-            "https://api.example.com/v1/{id}?api_key=SECRET",
-            "{\"url\":\"https:\\/\\/h.example\\/v1?token=SECRET\"}",
-        ] {
-            let out = scrub_secrets(src, &[]);
-            assert!(!out.contains("SECRET"), "leaked from {src}: {out}");
-            assert!(!out.contains("token="), "leaked from {src}: {out}");
-            assert!(!out.contains("api_key="), "leaked from {src}: {out}");
-            // The rewrite lands as the `[r-----` placeholder, the exact shape origin/main
-            // produced for these URLs, so the whole query/fragment is gone.
-            assert!(out.contains("[r"), "no rewrite for {src}: {out}");
-        }
-    }
-
-    /// Issue 148 follow-up: a suffix rewrite stops at `)`, `}`, and `"` even though those
-    /// bytes are deliberately **not** scheme-gate run boundaries. Resetting the run
-    /// context after every rewrite therefore wiped a proven scheme at exactly the wrong
-    /// moment, so the `#`/`?` sitting behind the delimiter was gated by a scheme-free run
-    /// and its secret survived in the clear. The context (run start, memoized scheme
-    /// verdict, and the monotone scheme-scan cursor) now survives those three delimiters
-    /// and is dropped only at a real run stop (whitespace, or a quote in a run that has
-    /// not proven a scheme) or at end of input.
-    #[test]
-    fn url_run_context_survives_suffix_delimiters() {
-        // The pinned reproductions: the parenthesized, braced, and quoted variants of the
-        // same URL, each with a second trigger behind the delimiter.
-        for (src, expected) in [
-            (
-                "https://h.example/v1?next=(b)#token=SECRET",
-                "https://h.example/v1[r------)[r-----------",
-            ),
-            (
-                "https://h.example/v1?next={b}#api_key=SECRET",
-                "https://h.example/v1[r------}[r-------------",
-            ),
-            (
-                "https://h.example/v1?next=\"b\"#api_key=SECRET",
-                "https://h.example/v1[r----\"b\"[r-------------",
-            ),
-        ] {
-            let out = scrub_secrets(src, &[]);
-            assert_eq!(out, expected, "wrong rewrite extent for {src}");
-            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
-            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
-            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
-        }
-
-        // The wider set from the same review: every one must lose its secret material.
-        for src in [
-            "https://h.example/v1?next=(b)?api_key=SECRET",
-            "https://h.example#sec=(a)?api_key=SECRET",
-            "https://search.example/api?q=foo(bar)#api_key=SECRET",
-            "https://app.example/cb?state=(x)#access_token=SECRET",
-            "https://auth.example/oauth/authorize?redirect_uri=https%3A%2F%2Fapp(x)?token=SECRET",
-        ] {
-            let out = scrub_secrets(src, &[]);
-            assert!(!out.contains("SECRET"), "secret leaked from {src}: {out}");
-            assert!(!out.contains("token="), "secret leaked from {src}: {out}");
-            assert!(!out.contains("api_key="), "secret leaked from {src}: {out}");
-            assert!(
-                !out.contains("access_token="),
-                "secret leaked from {src}: {out}"
-            );
-            assert!(out.contains("[r"), "no rewrite for {src}: {out}");
-        }
-    }
-
-    /// Issue 148 review F2: a punctuation run of length n must cost O(n), not O(n^2).
-    /// Tool output reaches `MAX_TOOL_OUTPUT_DEFAULT` (16 MiB) before this scrubber sees
-    /// it, so a multi-hundred-kilobyte run is scrubbed here under a hard wall-clock
-    /// budget with the whole output still covered.
-    #[test]
-    fn long_punctuation_run_scrubs_in_linear_time() {
-        let n = 400_000usize;
-        // One long run with no scheme anywhere in it: nothing to rewrite.
-        let noise = "?".repeat(n);
-        let quiet = format!("quiet {noise} end");
-        let budget = Duration::from_millis(2_000);
-        let scrubbed = time_bounded(&quiet, &[], budget, "scheme-free run");
-        assert_eq!(scrubbed, quiet, "a scheme-free run must round-trip");
-
-        // The same run shape with a scheme earlier in it: one rewrite covers it all.
-        let url = format!("https://h.example/v1?token=SECRET&{noise}");
-        let out = time_bounded(&url, &[], budget, "post-scheme run");
-        assert!(!out.contains("SECRET"), "{out}");
-        assert!(!out.contains("token="), "{out}");
-        assert!(
-            !out.contains("?"),
-            "punctuation survived the rewrite: {out}"
-        );
-        assert!(out.contains("[r"), "no rewrite happened: {out}");
-
-        // Issue 148 follow-up: the run context now survives `)`/`}`/`"`, so this shape —
-        // a scheme-proven run holding n delimiter-separated segments, each with its own
-        // trigger — must stay one linear sweep. `has_scheme` stays memoized and the
-        // scheme-scan cursor stays monotone across each preserved boundary, so no
-        // backward walk and no rescanning can creep back in.
-        let segments = "?a=1)".repeat(n);
-        let chunked = format!("https://h.example/v1?first=SECRET{segments}?end=SECRET");
-        let out = time_bounded(&chunked, &[], budget, "delimited post-scheme run");
-        assert!(!out.contains("SECRET"), "{out}");
-        assert!(!out.contains("first="), "{out}");
-        assert!(!out.contains("end="), "{out}");
-        assert!(out.contains("[r"), "no rewrite happened: {out}");
-    }
-
-    /// Scrub under a wall-clock budget so a super-linear scrubber fails the test instead
-    /// of hanging the suite.
-    fn time_bounded(text: &str, secrets: &[String], budget: Duration, label: &str) -> String {
-        let started = Instant::now();
-        let out = scrub_secrets(text, secrets);
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed <= budget,
-            "{label} took {elapsed:?} (budget {budget:?}) on a {} byte input",
-            text.len()
-        );
-        out
-    }
-
-    #[test]
-    fn scrub_secrets_removes_exact_markers() {
-        let key = "sk-super-fake-marker-777";
-        let out = scrub_secrets(
-            "boom with sk-super-fake-marker-777 again",
-            &[key.to_string()],
-        );
-        assert!(!out.contains(key), "{out}");
-        assert_eq!(out, "boom with [redacted] again");
-        assert_eq!(scrub_secrets("safe text", &[key.to_string()]), "safe text");
-    }
-
-    #[test]
-    fn scrub_secrets_removes_auth_and_url_chunks() {
-        let key = "sk-fake-888";
-        let out = scrub_secrets(
-            "Authorization: Bearer sk-fake-888 and https://u:pw@h/x?tok=sk-fake-888#f",
-            &[key.to_string()],
-        );
-        assert!(!out.contains("sk-fake-888"), "{out}");
-        assert!(!out.contains("u:pw"), "{out}");
-        assert!(!out.contains("tok="), "{out}");
-        // Keyfile path values never survive either.
-        let p = "/var/lib/llxprt/private/provider_key".to_string();
-        let o2 = scrub_secrets("could not open /var/lib/llxprt/private/provider_key", &[p]);
-        assert!(!o2.contains("provider_key"), "{o2}");
-    }
-
-    /// Every authorization-like header occurrence in an evolving string is scrubbed,
-    /// case-insensitively: duplicate headers, mixed-case headers, `api_key` (underscore),
-    /// and headers split across lines never leave a second distinct value behind.
-    #[test]
-    fn scrub_auth_like_scrubs_every_header_occurrence_case_insensitively() {
-        let src = concat!(
-            "Authorization: Bearer first-secret\n",
-            "X-API-Key: second-secret\r\n",
-            "aPi_KeY: third-secret\n",
-            "Api-Key: fourth-secret\n",
-            "AUTHORIZATION : fifth-secret\n",
-            "trailing\n",
-        );
-        let out = scrub_auth_like(src);
-        assert_eq!(out.matches("[redacted]").count(), 5, "{out}");
-        for value in [
-            "first-secret",
-            "second-secret",
-            "third-secret",
-            "fourth-secret",
-            "fifth-secret",
-        ] {
-            assert!(!out.contains(value), "a header value survived: {out}");
-        }
-        assert!(!out.contains("Authorization"), "{out}");
-        assert!(!out.contains("X-API-Key"), "{out}");
-        assert!(out.ends_with("trailing\n"), "{out}");
-    }
-
-    /// A standalone `Bearer <token>` (no header) is redacted too, as are a duplicate
-    /// naive `[redacted]`-already value and a bearer token in a UTF-8 line: the
-    /// marker is never rescanned (no loop) and the multi-byte line stays valid UTF-8.
-    #[test]
-    fn scrub_auth_like_handles_standalone_bearer_utf8_and_redacted_without_loop() {
-        let out = scrub_auth_like("Bearer alone-secret and later Bearer other-secret");
-        assert_eq!(out.matches("[redacted]").count(), 2, "{out}");
-        assert!(!out.contains("alone-secret"), "{out}");
-        assert!(!out.contains("other-secret"), "{out}");
-
-        // An already-redacted value must not re-enter the scan forever, and a value with
-        // a multi-byte codepoint inside a header value is removed whole (still valid UTF-8).
-        let out = scrub_auth_like("please retry: [redacted] with x-api-key: héllo-üütf8-nope");
-        assert!(!out.contains("héllo-üütf8-nope"), "{out}");
-        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-        assert_eq!(
-            out.matches("[redacted]").count(),
-            2,
-            "the header value and the already-redacted occurrence are both covered: {out}"
-        );
-        // A bare "bearer" without any token (end of text) makes no change and never loops.
-        let out = scrub_auth_like("no credentials; just the word bearer");
-        assert_eq!(out, "no credentials; just the word bearer");
-    }
-
-    /// The largest accepted key — exactly [`MAX_SECRET_BYTES`] bytes — is still scrubbed
-    /// by exact substitution even when the provider text also carries it behind a header, so
-    /// a full-size credential never survives.
-    #[test]
-    fn exact_4096_byte_secret_is_still_scrubbed() {
-        let secret = "k".repeat(MAX_SECRET_BYTES);
-        let src = format!("Authorization: Bearer {secret} then x-api-key: {secret}");
-        let out = scrub_secrets(&src, &[secret]);
-        assert!(!out.contains('k'), "the exact-cap secret survives: {out}");
-        assert_eq!(out, "[redacted]");
-    }
-
-    #[test]
-    fn parse_cargo_dependencies_ignores_comments() {
-        let mani = r#"
-[package]
-name = "crypt"
-# aes-gcm in a comment must never count
-version = "0.1.0"
-
-[dependencies]
-aes-gcm = "0.10"
-chacha20poly1305 = { version = "0.10", features = ["std"] }
-
-[dev-dependencies]
-tempfile = "3"
-"#;
-        let names = parse_cargo_dep_names(mani);
-        assert!(names.contains(&"aes-gcm".to_string()), "{names:?}");
-        assert!(names.contains(&"chacha20poly1305".to_string()));
-        assert!(!names.contains(&"comment".to_string()));
-        let only = r#"[package]
-name = "x"
-# aes-gcm = "10"
-"#;
-        assert!(parse_cargo_dep_names(only).is_empty());
-    }
-
-    #[test]
-    fn redacted_url_preserves_path_prefix_for_transport_but_not_display() {
-        let u = crate::profile::RedactedUrl::from_unvalidated("http://127.0.0.1:8000/inference/v1");
-        assert_eq!(u.full(), "http://127.0.0.1:8000/inference/v1");
-        assert!(!u.as_display().contains("inference"), "{}", u.as_display());
-        assert_eq!(u.as_display(), "http://127.0.0.1:8000");
-    }
-
-    /// `truncate_utf8` totals (ASCII): every truncated result is at most `max_bytes`
-    /// **including** the marker, for cap-1 / cap / cap+1 around several cap values,
-    /// and a max smaller than the marker returns only a marker prefix.
-    #[test]
-    fn truncate_utf8_total_includes_marker_ascii() {
-        let marker = TRUNCATION_MARKER;
-        let long = "a".repeat(256);
-        for max in [31, 32, 33, marker.len() - 1, marker.len(), marker.len() + 1] {
-            for len in [max.saturating_sub(1), max, max + 1] {
-                let s = "b".repeat(len);
-                let out = truncate_utf8(s, max);
-                assert!(out.len() <= max, "len {len} cap {max}: {} bytes", out.len());
-                assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-                if len > max && max >= marker.len() {
-                    assert_eq!(
-                        out.len(),
-                        max,
-                        "len {len} cap {max}: truncated ASCII fills the cap"
-                    );
-                    assert!(out.ends_with(marker));
-                }
-            }
-        }
-        // When truncated and ASCII, the content prefix plus marker exactly fill the cap.
-        let out = truncate_utf8(long.clone(), marker.len() + 4);
-        assert_eq!(out.len(), marker.len() + 4);
-        assert!(out.ends_with(marker));
-        assert!(out.starts_with("aaaa"));
-        // max smaller than the marker: only a marker prefix, still a valid string.
-        for max in [0, 1, marker.len() - 1] {
-            let out = truncate_utf8(long.clone(), max);
-            assert!(out.len() <= max, "cap {max}: {}", out.len());
-            assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-        }
-    }
-
-    /// `truncate_utf8` never splits a multi-byte codepoint and never exceeds `max_bytes`
-    /// including the marker, for cap-1 / cap / cap+1 windows on a multi-byte string.
-    #[test]
-    fn truncate_utf8_preserves_multibyte_within_cap() {
-        let marker = TRUNCATION_MARKER;
-        let s = "é".repeat(64); // 2 bytes per codepoint
-        for max in [13, 14, 15, marker.len(), marker.len() + 1] {
-            let out = truncate_utf8(s.clone(), max);
-            assert!(out.len() <= max, "cap {max}: {}", out.len());
-            assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-            // No partial 'é' survives: every 'é' is intact or absent.
-            for (i, b) in out.as_bytes().iter().enumerate() {
-                if *b != b'\xc3' && *b != b'\xa9' {
-                    continue;
-                }
-                if *b == b'\xc3' {
-                    assert_eq!(
-                        out.as_bytes().get(i + 1),
-                        Some(&0xa9),
-                        "split codepoint at {i}"
-                    );
-                }
-            }
-            let out = truncate_utf8(s.clone(), max - 1);
-            let cap = max - 1;
-            assert!(out.len() <= cap);
-            assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-        }
-        // A string that already fits is returned verbatim even at a tiny cap.
-        let short = "ok".to_string();
-        assert_eq!(truncate_utf8(short.clone(), 2), short);
-    }
-}
+mod tests;
