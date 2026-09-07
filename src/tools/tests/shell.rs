@@ -167,16 +167,21 @@ fn shell_omitted_timeout_enforces_default_and_cleans_up_group() {
         },
     };
     let marker = d.path().join("must-not-survive-default");
-    let start = std::time::Instant::now();
     let (ok, output) = execute_tool(
         d.path(),
         "run_shell_command",
-        json!({"command": "(sleep 3; touch must-not-survive-default) & wait"}),
+        json!({"command": "touch default-started; (sleep 3; touch must-not-survive-default) & wait"}),
         &config,
     );
     assert!(!ok, "omitted timeout must enforce the default: {output}");
     assert_eq!(output, "command timed out after 1000 ms; output:\n");
-    assert!(start.elapsed() < Duration::from_secs(3));
+    // The shared runner serializes process groups; exclude time queued behind
+    // other tests by measuring from the command's first side effect.
+    let started = std::fs::metadata(d.path().join("default-started"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert!(started.elapsed().unwrap() < Duration::from_secs(3));
     // Wait past the descendant's side-effect opportunity, not just until timeout.
     std::thread::sleep(Duration::from_secs(3));
     assert!(
