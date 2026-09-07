@@ -797,7 +797,7 @@ impl SessionStore {
     }
 
     /// Compacts one tool result before it is recorded into the round.
-    pub fn compact_tool_result(&self, tool: &str, result: &str) -> String {
+    pub fn compact_tool_result(&self, tool: &str, result: &str) -> Result<String, StoreError> {
         context_persist::compact_tool_result(self, tool, result)
     }
 

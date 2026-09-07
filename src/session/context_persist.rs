@@ -679,14 +679,6 @@ fn digest_record(
     record
 }
 
-/// Lock-poisoned fallback: a pure in-memory record with no shared state touched at all.
-fn memory_quiesce_record(tool: &str, result: &str) -> String {
-    let mut state = new_context_state([0u8; 32].into());
-    state.quiesce = Some("quiesce_unwritable".to_string());
-    state.detail = Some("context store lock poisoned".to_string());
-    memory_digest(&mut state, tool, result.as_bytes())
-}
-
 /// Replaces every bulk tool result with a deterministic digest record after moving the
 /// full bytes through the fail-closed ingress transaction into the spine and the vault.
 ///
@@ -827,80 +819,46 @@ pub(crate) fn context_exchange(
 
 /// Compacts one tool result before it is recorded into the round.
 ///
-/// Bulk results are digested here, ahead of the request list, so the request that
-/// carries the result to the provider stays small and the pre-send wall guard never
-/// sees raw bulk bytes. Results strictly below the bulk threshold are returned
-/// unchanged and touch no store state; a result exactly at the threshold is bulk
-/// evidence and is digested (119).
-///
-/// A store or artifact failure never fails the turn: the record is still compact
-/// (computed in memory), the run is marked quiesce, and the marker is persisted
-/// best-effort where it stays readable when only `context/` is unwritable.
-pub fn compact_tool_result(store: &SessionStore, tool: &str, result: &str) -> String {
-    // Strictly below the threshold skips the seam: a result of exactly
-    // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so the pre-entry seam
-    // digests it like any other bulk result and the request list never carries
-    // raw bulk bytes. The comparison matches the filter verdict's
-    // `total >= rules.size_floor` and the checkpoint seam, so all three agree
-    // on the boundary (119).
+/// Bulk results are digested before entering the request list. In a genuinely
+/// store-free (`Unavailable`) context-store mode, compaction remains in memory;
+/// otherwise ingress, recovery, locking, and artifact-persistence failures are
+/// returned so the caller fails the turn rather than recording an undurable result.
+pub fn compact_tool_result(
+    store: &SessionStore,
+    tool: &str,
+    result: &str,
+) -> Result<String, StoreError> {
     if result.len() < BULK_RESULT_BYTES {
-        return result.to_string();
+        return Ok(result.to_string());
     }
-    let Ok(mut guard) = store.context.lock() else {
-        return memory_quiesce_record(tool, result);
-    };
+    let mut guard = store
+        .context
+        .lock()
+        .map_err(|_| StoreError::Lock("context store lock poisoned".into()))?;
     if guard.is_none() {
-        // Restart recovery as above; an unrecoverable store quiesces instead
-        // of pretending the history is gone, and the compact record is still
-        // computed in memory so no raw bytes ride the request list.
-        match recover_context_state(store) {
-            Ok(state) => *guard = Some(state),
-            Err(reason) => {
-                let key = match ensure_vault_key(store) {
-                    Ok(key) => key,
-                    Err(inner) => {
-                        let mut state = new_context_state([0u8; 32].into());
-                        state.quiesce = Some("quiesce_unwritable".to_string());
-                        state.detail = Some(inner);
-                        return memory_digest(&mut state, tool, result.as_bytes());
-                    }
-                };
-                let mut state = new_context_state(key);
-                state.quiesce = Some("quiesce_unwritable".to_string());
-                state.detail = Some(reason);
-                return memory_digest(&mut state, tool, result.as_bytes());
-            }
-        }
+        *guard = Some(recover_context_state(store).map_err(StoreError::Invalid)?);
     }
-    let Some(state) = guard.as_mut() else {
-        return memory_quiesce_record(tool, result);
-    };
-    let record = match ingest_bulk(state, tool, result.as_bytes()) {
-        Ok(record) => record,
-        Err(reason) => {
-            // The store-write paths below keep the unwritable spelling; this
-            // branch is where a rate quiesce lands, so it carries the rate
-            // spelling when the policy recorded one and the unwritable
-            // spelling otherwise (the ingress transaction failed).
-            state.quiesce = Some(
-                state
-                    .policy
-                    .terminal_outcome()
-                    .unwrap_or("quiesce_unwritable")
-                    .to_string(),
-            );
-            state.detail = Some(reason);
-            memory_digest(state, tool, result.as_bytes())
+    let state = guard
+        .as_mut()
+        .ok_or_else(|| StoreError::Lock("context store missing".into()))?;
+    if !state.store.mode().writable() {
+        // `Unavailable` is the explicit memory-only configuration. `ReadOnly`
+        // is a present durable store and must fail rather than silently fall back.
+        if matches!(
+            state.store.mode(),
+            crate::context_store::store::StoreMode::Unavailable
+        ) {
+            return Ok(memory_digest(state, tool, result.as_bytes()));
         }
-    };
-    if let Err(reason) = persist_context(store, state) {
-        state.quiesce = Some("quiesce_unwritable".to_string());
-        state.detail = Some(reason);
-        record_quiesce_manifest(store, state);
-        record_quiesce_fallback(store, state);
+        return Err(StoreError::Invalid(format!(
+            "context store mode {} refused the turn",
+            state.store.mode().name()
+        )));
     }
+    let record = ingest_bulk(state, tool, result.as_bytes()).map_err(StoreError::Invalid)?;
+    persist_context(store, state).map_err(StoreError::Invalid)?;
     trim_preserved(state);
-    record
+    Ok(record)
 }
 
 impl SessionStore {

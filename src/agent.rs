@@ -469,7 +469,9 @@ impl CodingAgent {
         // Pre-entry compaction (#39): a bulk tool result is digested before it joins the
         // request list and the round, so neither the next provider request nor the
         // checkpointed transcript ever carries raw bulk bytes.
-        let text = store.compact_tool_result(&call.name, &text);
+        let text = store
+            .compact_tool_result(&call.name, &text)
+            .map_err(|error| ToolCallFailure::Invalid(error.to_string()))?;
         attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
         attempt
             .requests
