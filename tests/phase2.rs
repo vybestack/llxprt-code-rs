@@ -154,9 +154,10 @@ fn digest_handle(record: &str) -> &str {
     &header[at..]
 }
 
-/// Reads one published `context/` artifact of a session.
+/// Reads one published `context/` artifact of a session. Post-#137 every
+/// publication lands as a committed generation directory.
 fn context_artifact(st: &SessionStore, name: &str) -> Vec<u8> {
-    std::fs::read(st.session_dir.join("context").join(name))
+    std::fs::read(st.session_dir.join("context/committed").join(name))
         .unwrap_or_else(|error| panic!("read context artifact {name} failed: {error}"))
 }
 

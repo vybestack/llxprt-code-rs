@@ -101,7 +101,7 @@ fn agent(backend: Box<dyn ChatBackend>, cwd: &Path) -> CodingAgent {
 
 /// Reads one published `context/` artifact of a session.
 fn artifact(store: &SessionStore, name: &str) -> Vec<u8> {
-    std::fs::read(store.session_dir.join("context").join(name))
+    std::fs::read(store.session_dir.join("context/committed").join(name))
         .unwrap_or_else(|error| panic!("read context artifact {name} failed: {error}"))
 }
 
@@ -177,7 +177,7 @@ fn reopen(store: &SessionStore) -> SessionStore {
 
 /// Edits the durable context manifest in place, as an operator-issued update would.
 fn rewrite_manifest(store: &SessionStore, edit: impl FnOnce(&mut serde_json::Value)) {
-    let manifest = store.session_dir.join("context/manifest.json");
+    let manifest = store.session_dir.join("context/committed/manifest.json");
     let mut value: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&manifest).expect("read manifest"))
             .expect("parse manifest");
@@ -432,7 +432,10 @@ fn corrupt_spine_fails_the_exchange_instead_of_truncating() {
     run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
 
     // Corrupt one byte inside the first frame's payload.
-    let spine = first.session_dir.join("context").join("sanitized");
+    let spine = first
+        .session_dir
+        .join("context/committed")
+        .join("sanitized");
     let mut bytes = std::fs::read(&spine).unwrap();
     assert!(bytes.len() > 64, "the spine is not empty");
     let payload_start = 8 + 8; // length field + digest field
@@ -834,14 +837,23 @@ fn unreadable_spine_fails_recovery_instead_of_resetting() {
     let cwd = workspace();
     let first = store("unreadable-spine");
     run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
-    let spine_before = std::fs::read(first.session_dir.join("context").join("sanitized")).unwrap();
+    let spine_before = std::fs::read(
+        first
+            .session_dir
+            .join("context/committed")
+            .join("sanitized"),
+    )
+    .unwrap();
     assert!(
         !spine_before.is_empty(),
         "the first run left durable spine evidence"
     );
 
     // chmod 000 the spine: open must fail with a kind other than NotFound.
-    let spine = first.session_dir.join("context").join("sanitized");
+    let spine = first
+        .session_dir
+        .join("context/committed")
+        .join("sanitized");
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&spine, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -877,13 +889,17 @@ fn symlinked_vault_artifact_fails_recovery() {
     let cwd = workspace();
     let first = store("symlink-vault");
     run_bulk_turn(&first, &cwd, "bulk.txt", "c0");
-    let vault_before = std::fs::read(first.session_dir.join("context").join("vault")).unwrap();
+    let vault_before =
+        std::fs::read(first.session_dir.join("context/committed").join("vault")).unwrap();
     assert!(!vault_before.is_empty(), "the vault snapshot is durable");
 
     // Replace the vault artifact with a symlink: O_NOFOLLOW makes open fail
     // with a kind that is not NotFound, so recovery must refuse.
-    let vault = first.session_dir.join("context").join("vault");
-    let target = first.session_dir.join("context").join("vault-real");
+    let vault = first.session_dir.join("context/committed").join("vault");
+    let target = first
+        .session_dir
+        .join("context/committed")
+        .join("vault-real");
     std::fs::rename(&vault, &target).unwrap();
     std::os::unix::fs::symlink("vault-real", &vault).unwrap();
 
@@ -1198,8 +1214,8 @@ fn compact_tool_result_surfaces_persist_failure_when_store_present() {
     assert!(
         error
             .to_string()
-            .contains("publish context artifact sanitized failed"),
-        "the injected failure is persist_context, not ingest: {error}"
+            .contains("open context staging directory failed"),
+        "the injected failure is persist_context's staging step, not ingest: {error}"
     );
 }
 
@@ -1214,7 +1230,7 @@ fn compact_tool_result_falls_back_to_memory_digest_in_store_free_mode() {
 
     // Store mode is recovered from the durable manifest. Reopen so compaction
     // exercises the public recovery seam rather than mutating private state.
-    let manifest = store.session_dir.join("context/manifest.json");
+    let manifest = store.session_dir.join("context/committed/manifest.json");
     let mut value: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&manifest).expect("read manifest"))
             .expect("parse manifest");
@@ -1481,7 +1497,10 @@ fn recovery_either_outcome_is_reachable_on_both_arms() {
     // a typed failure the caller must treat as integrity loss.
     let corrupt = store("either-outcome-corrupt");
     run_bulk_turn(&corrupt, &cwd, "either-outcome-bulk.txt", "c0");
-    let spine_path = corrupt.session_dir.join("context").join("sanitized");
+    let spine_path = corrupt
+        .session_dir
+        .join("context/committed")
+        .join("sanitized");
     let published = std::fs::read(&spine_path).expect("the spine was published");
     assert!(!published.is_empty(), "the published spine carries bytes");
     // Corrupt one byte inside the first frame's payload so the typed loader
@@ -1583,7 +1602,7 @@ fn fit_saturated_wrap_up_refuses_completion() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let manifest_path = dir.join("manifest.json");
+    let manifest_path = dir.join("committed/manifest.json");
     let published = std::fs::read_to_string(&manifest_path).unwrap();
     let recorded = splice_manifest_field(&published, "terminal_outcome", "quiesce_unwritable")
         .and_then(|text| splice_manifest_field(&text, "quiesce", "quiesce_unwritable"))
@@ -1639,7 +1658,10 @@ fn superseded_rate_quiesce_still_completes() {
     // recorded, and over the session-side quiesce flag, so the durable
     // manifest reads the way a previous process that hit the quota ceiling
     // would have left it: every artifact landed, the terminal is rate.
-    let manifest_path = store.session_dir.join("context").join("manifest.json");
+    let manifest_path = store
+        .session_dir
+        .join("context/committed")
+        .join("manifest.json");
     let published = std::fs::read_to_string(&manifest_path).unwrap();
     let wrap_up_pair = json_pair("terminal_outcome", "wrap_up");
     assert!(
@@ -1710,4 +1732,93 @@ fn splice_manifest_field(text: &str, key: &str, value: &str) -> Option<String> {
     spliced.push(q);
     spliced.push_str(&text[end..]);
     Some(spliced)
+}
+
+/// Issue 137 -- a crash between the artifact writes of one publication must
+/// never yield a mixed generation: a NEW `sanitized` beside an OLD `vault` or
+/// `manifest.json` is exactly the state a spine placeholder naming a vault
+/// handle the restored snapshot does not hold.
+#[test]
+fn torn_publication_never_yields_a_mixed_generation() {
+    let cwd = workspace();
+    let first = store("torn-publication");
+    run_bulk_turn(&first, &cwd, "torn-bulk.txt", "c0");
+    let context = first.session_dir.join("context");
+    let committed = context.join("committed");
+    assert!(
+        committed.is_dir(),
+        "a publication lands as one committed generation directory"
+    );
+    let generation = |dir: &Path| {
+        let bytes = std::fs::read(dir.join("manifest.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        value["generation"].as_u64().unwrap()
+    };
+    assert_eq!(
+        generation(&committed),
+        1,
+        "the first turn commits generation 1"
+    );
+    let old_spine = std::fs::read(committed.join("sanitized")).unwrap();
+    assert!(
+        !old_spine.is_empty(),
+        "the first generation holds spine evidence"
+    );
+    assert!(
+        !std::fs::read(committed.join("vault")).unwrap().is_empty(),
+        "the first generation holds the vault snapshot"
+    );
+
+    // A crash between artifact writes: a stage carrying a NEW spine and no
+    // manifest, with the committed generation left intact.
+    let stage = context.join(".stage");
+    std::fs::create_dir_all(&stage).unwrap();
+    std::fs::write(stage.join("sanitized"), b"torn half-published spine").unwrap();
+    let second = reopen(&first);
+    let second_turn = reserved(&second, Some(1), None, "P2", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&second, &second_turn)
+        .expect("a torn stage never poisons recovery");
+    assert!(
+        !stage.exists(),
+        "the next publication sweeps the torn stage away"
+    );
+    assert_eq!(
+        generation(&committed),
+        2,
+        "artifacts reload from the committed slot and the generation increments"
+    );
+    // The recovered generation's evidence is intact: the reloaded store serves
+    // the previous spine, never a stage spine beside an old vault.
+    let spine = std::fs::read(committed.join("sanitized")).unwrap();
+    assert!(
+        spine.len() >= old_spine.len(),
+        "the reloaded generation keeps the recovered spine"
+    );
+
+    // At most two generation directories survive a successful persist.
+    let slots = ["committed", ".prev", ".stage"];
+    let present: Vec<&str> = slots
+        .into_iter()
+        .filter(|slot| context.join(slot).is_dir())
+        .collect();
+    assert!(
+        present.len() <= 2,
+        "generations never accumulate without bound: {present:?}"
+    );
+
+    // The deadly case from the issue is NOT producible by the new code path;
+    // its stand-in is a committed slot whose manifest is missing, which must
+    // fail closed instead of loading a mix.
+    std::fs::remove_file(committed.join("manifest.json")).unwrap();
+    let third = reopen(&first);
+    let third_turn = reserved(&third, Some(2), None, "P3", &cwd).unwrap();
+    let c = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    let error = c
+        .run(&third, &third_turn)
+        .expect_err("a torn committed generation fails closed");
+    assert!(
+        error.to_string().contains("context"),
+        "the refusal names the context generation, got: {error}"
+    );
 }

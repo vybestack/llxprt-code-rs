@@ -225,6 +225,21 @@ fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, Stor
     Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
 }
 
+/// Resolves the directory every reader of a session's context artifacts must
+/// open: the committed generation slot when the store publishes generations
+/// (issue 137), or the session's flat `context/` directory for the layouts
+/// earlier builds wrote. Routing every reader through one helper keeps a
+/// consumer from opening a flat layout a later publication no longer updates.
+pub(crate) fn context_artifact_dir(session_dir: &std::path::Path) -> std::path::PathBuf {
+    let context = session_dir.join("context");
+    let committed = context.join(crate::session::context_persist::CONTEXT_COMMITTED_DIR);
+    if committed.is_dir() {
+        committed
+    } else {
+        context
+    }
+}
+
 pub(crate) fn ensure_private_subdir(
     parent: &openat::Dir,
     name: &str,
