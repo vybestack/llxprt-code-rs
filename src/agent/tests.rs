@@ -758,3 +758,15 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
         "a completed turn leaves no in-flight marker behind"
     );
 }
+#[test]
+fn with_request_timeout_emits_resolved_value() {
+    let cwd = tempfile::tempdir().unwrap();
+    let timeout = std::time::Duration::from_millis(42_000);
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(Vec::new())),
+        cwd.path().to_path_buf(),
+        false,
+    )
+    .with_request_timeout(Some(timeout));
+    assert_eq!(agent.request_timeout, Some(timeout));
+}

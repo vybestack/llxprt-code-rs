@@ -11,6 +11,11 @@ pub use user_file::load_user_file;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// The single provider request-timeout policy default (900s), preserving today's
+/// effective value everywhere a provider previously hardcoded 900s. Providers consume
+/// the resolved value; this constant is the sole timeout default in the codebase.
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
@@ -48,6 +53,8 @@ pub struct ResolvedBudgets {
     pub max_turn_output: Resolved<u64>,
     #[serde(with = "duration_option")]
     pub turn_time: Resolved<Option<Duration>>,
+    #[serde(with = "duration")]
+    pub request_timeout: Resolved<Duration>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedPaths {
@@ -111,6 +118,8 @@ pub struct SettingsBudgets {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_turn_output: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_timeout: Option<String>,
 }
 
 impl SettingsBudgets {
@@ -120,6 +129,7 @@ impl SettingsBudgets {
             && self.max_shell_output.is_none()
             && self.max_tool_output.is_none()
             && self.max_turn_output.is_none()
+            && self.request_timeout.is_none()
     }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -176,6 +186,7 @@ pub fn environment_layer() -> Result<SettingsLayer, String> {
             max_shell_output: env_byte_cap("LLXPRT_MAX_SHELL_OUTPUT", "--max-shell-output")?,
             max_tool_output: env_byte_cap("LLXPRT_MAX_TOOL_OUTPUT", "--max-tool-output")?,
             max_turn_output: env_byte_cap("LLXPRT_MAX_TURN_OUTPUT", "--max-turn-output")?,
+            request_timeout: std::env::var("LLXPRT_REQUEST_TIMEOUT").ok(),
         },
         ..Default::default()
     })
@@ -280,6 +291,62 @@ pub fn parse_turn_time(raw: &str) -> Result<Option<Duration>, String> {
         .checked_mul(seconds_per_unit)
         .ok_or_else(|| format!("--turn-time {raw} overflows"))?;
     Ok((seconds != 0).then(|| Duration::from_secs(seconds)))
+}
+
+/// Parse a request-timeout value using the CLI grammar: seconds as a bare integer, or
+/// a duration string with an `s`, `m`, `h`, or `ms` unit (the `ms` unit is how
+/// the profile layer expresses its provider `timeoutMs` data).
+pub fn parse_request_timeout(raw: &str) -> Result<Duration, String> {
+    let raw = raw.trim();
+    let (digits, unit) = if let Some(stripped) = raw.strip_suffix("ms") {
+        (stripped, "ms")
+    } else if let Some(stripped) = raw.strip_suffix('s') {
+        (stripped, "s")
+    } else if let Some(stripped) = raw.strip_suffix('m') {
+        (stripped, "m")
+    } else if let Some(stripped) = raw.strip_suffix('h') {
+        (stripped, "h")
+    } else {
+        (raw, "")
+    };
+    let milliseconds_per_unit = match unit {
+        "ms" => 1,
+        "s" | "" => 1000,
+        "m" => 60 * 1000,
+        "h" => 3600 * 1000,
+        _ => {
+            return Err(format!(
+                "--request-timeout unit must be s, m, h, or ms (got {raw})"
+            ))
+        }
+    };
+    let count = digits
+        .parse::<u64>()
+        .map_err(|_| format!("--request-timeout needs an integer count (got {raw})"))?;
+    let ms = count
+        .checked_mul(milliseconds_per_unit)
+        .ok_or_else(|| format!("--request-timeout {raw} overflows"))?;
+    Ok(Duration::from_millis(ms))
+}
+
+mod duration {
+    use serde::{Serialize, Serializer};
+    use std::time::Duration;
+    pub fn serialize<S: Serializer>(
+        value: &crate::settings::Resolved<Duration>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            value: u64,
+            source: &'a super::Source,
+        }
+        Wire {
+            value: value.value.as_secs(),
+            source: &value.source,
+        }
+        .serialize(serializer)
+    }
 }
 
 mod duration_option {

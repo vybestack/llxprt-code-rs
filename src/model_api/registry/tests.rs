@@ -434,6 +434,57 @@ fn codex_settings_forward_the_profile_output_bound() {
 }
 
 #[test]
+fn request_timeout_resolved_policy_defaults_to_900s_for_every_provider_path() {
+    // No provider `timeoutMs` on this profile: every provider path consumes the single
+    // 900s policy default through `resolved_timeout`, exactly preserving today's
+    // hardcoded 900s (chat via `from_profile_in` keeps its own path).
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+    assert!(profile.ephemeral.timeout_ms.is_none());
+    assert_eq!(
+        resolved_timeout(&profile),
+        std::time::Duration::from_secs(900)
+    );
+    assert_eq!(
+        codex_model_settings(&profile).timeout,
+        Some(std::time::Duration::from_secs(900))
+    );
+}
+
+#[test]
+fn request_timeout_codex_consumes_provider_timeout_data() {
+    // A provider `timeoutMs` is data at the resolver and flows onto the profile, so
+    // the codex path honors it now (previously it ignored the field).
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    let mut profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
+    profile.ephemeral.timeout_ms = Some(120_000);
+    assert_eq!(
+        resolved_timeout(&profile),
+        std::time::Duration::from_secs(120)
+    );
+    let settings = codex_model_settings(&profile);
+    assert_eq!(settings.timeout, Some(std::time::Duration::from_secs(120)));
+    crate::limits::validate_timeout(settings.timeout)
+        .expect("120s Codex timeout must clear the lease bound");
+}
+
+#[test]
+fn request_timeout_at_lease_margin_still_fails_validation() {
+    // A resolved timeout at/above lease minus the margin is refused by the leaf the
+    // registry enforces for every provider.
+    let high = std::time::Duration::from_secs(3600);
+    let error =
+        crate::limits::validate_timeout(Some(high)).expect_err("3600s must exceed the lease bound");
+    assert!(error.contains("session lease"), "{error}");
+}
+
+#[test]
 fn both_public_responses_targets_construct_without_native_credentials() {
     for value in [
         serde_json::json!({

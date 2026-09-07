@@ -62,6 +62,17 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
             .flatten(),
         source: raw_time.source,
     };
+    let raw_timeout = pick_optional(&layers, |x| &x.budgets.request_timeout);
+    let request_timeout = Resolved {
+        value: raw_timeout
+            .value
+            .as_deref()
+            .map(parse_request_timeout)
+            .transpose()
+            .map_err(SettingsError::Invalid)?
+            .unwrap_or(DEFAULT_REQUEST_TIMEOUT),
+        source: raw_timeout.source,
+    };
     Ok(Settings {
         provider,
         budgets: ResolvedBudgets {
@@ -70,6 +81,7 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
             max_tool_output,
             max_turn_output,
             turn_time,
+            request_timeout,
         },
         paths: ResolvedPaths { config_root },
     })

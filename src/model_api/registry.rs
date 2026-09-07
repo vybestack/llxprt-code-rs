@@ -1,6 +1,7 @@
 use crate::adapter::{make_adapter, ChatBackend};
 use crate::model::ModelConfig;
 use crate::profile::Profile;
+use crate::settings::DEFAULT_REQUEST_TIMEOUT;
 use serdes_ai_responses::client::OpenResponsesModel;
 
 use super::anthropic_backend::AnthropicBackend;
@@ -136,6 +137,20 @@ fn apply_model_params_policy(
     }
 }
 
+/// The single request-timeout policy consumed at backend construction. The settings
+/// resolver writes the resolved value onto the profile as provider data
+/// (`ephemeral.timeout_ms`); this helper is the only timeout read in provider code and
+/// falls back to the resolver's `DEFAULT_REQUEST_TIMEOUT` when no layer set one (kept
+/// for direct construction paths such as tests).
+fn resolved_timeout(profile: &Profile) -> std::time::Duration {
+    std::time::Duration::from_millis(
+        profile
+            .ephemeral
+            .timeout_ms
+            .unwrap_or(DEFAULT_REQUEST_TIMEOUT.as_millis() as u64),
+    )
+}
+
 fn construct_chat(
     profile: &Profile,
     dependencies: &RuntimeDependencies,
@@ -237,7 +252,7 @@ fn construct_openai_responses(
         api_key: api_key.clone(),
         keyfile_path,
         max_output_tokens: profile.ephemeral.max_output_tokens,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         model_params: Some(profile.model_params.clone()),
         context_limit: profile.ephemeral.context_limit,
     };
@@ -245,12 +260,12 @@ fn construct_openai_responses(
     let model = serdes_ai::models::openai::OpenAIResponsesModel::new(&profile.model, api_key)
         .with_base_url(responses_transport_base(&endpoint))
         .with_settings(draft.finalize(session_id))
-        .with_timeout(std::time::Duration::from_secs(900));
+        .with_timeout(resolved_timeout(profile));
     let model_settings = serdes_ai::ModelSettings {
         max_tokens: profile.ephemeral.max_output_tokens,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         ..Default::default()
     };
     crate::limits::validate_timeout(model_settings.timeout)?;
@@ -323,7 +338,7 @@ fn construct_anthropic(
         )
         .map_err(|error| error.to_string())?,
     };
-    let timeout = std::time::Duration::from_millis(profile.ephemeral.timeout_ms.unwrap_or(900_000));
+    let timeout = resolved_timeout(profile);
     let secret_config = ModelConfig {
         model: profile.model.clone(),
         base_url: crate::profile::RedactedUrl::parse(base_url)?,
@@ -447,7 +462,7 @@ fn codex_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
         max_tokens: None,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         ..Default::default()
     }
 }

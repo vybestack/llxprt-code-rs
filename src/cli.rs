@@ -106,6 +106,12 @@ pub struct Args {
     #[arg(long, value_name = "MODE")]
     pub model_params_mode: Option<crate::settings::ModelParamsMode>,
 
+    /// Provider request timeout: seconds as an integer or a duration string like
+    /// `90s`, `30m`, `2h`, `1500ms`. Defaults to 900 seconds for every
+    /// provider. Overrides the settings file and the profile's provider `timeoutMs`.
+    #[arg(long, value_name = "DURATION")]
+    pub request_timeout: Option<String>,
+
     /// Print the resolved layered settings JSON and exit without constructing a backend.
     #[arg(long)]
     pub print_config: bool,
@@ -140,6 +146,7 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
             max_shell_output: args.max_shell_output,
             max_tool_output: args.max_tool_output,
             max_turn_output: args.max_turn_output,
+            request_timeout: args.request_timeout.clone(),
         },
         ..Default::default()
     };
@@ -156,6 +163,7 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
         },
         budgets: SettingsBudgets {
             max_tool_calls: profile_max,
+            request_timeout: profile.ephemeral.timeout_ms.map(|ms| format!("{ms}ms")),
             ..Default::default()
         },
         ..Default::default()
@@ -188,6 +196,9 @@ pub(crate) fn apply_runtime_settings(
         RedactedUrl::parse(&settings.provider.base_url.value)
             .map_err(|e| AppError::new(Code::Config, "settings-resolve", e))?,
     );
+    // The single resolved request-timeout policy is written onto the profile as provider
+    // data; every provider backend consumes `profile.ephemeral.timeout_ms`.
+    profile.ephemeral.timeout_ms = Some(settings.budgets.request_timeout.value.as_millis() as u64);
     Ok(())
 }
 /// Outcome of a successful invocation.

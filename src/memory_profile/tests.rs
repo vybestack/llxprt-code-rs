@@ -70,3 +70,38 @@ fn profile_file_stays_bound_to_original_inode() {
         .unwrap()
         .contains("profile_complete"));
 }
+
+#[test]
+fn resolved_timeout_and_turn_elapsed_serialize_with_keys() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("profile.jsonl");
+    let profiler = Profiler::initialize(&path).unwrap();
+    profiler
+        .event(
+            "session_written",
+            EventData {
+                round_count: Some(3),
+                request_timeout_ms: Some(60_000),
+                turn_elapsed_ms: Some(1_250),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    profiler.finalize("ok").unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let events: Vec<serde_json::Value> = bytes
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(events[0]["phase"], "startup_observed");
+    assert_eq!(events[0]["request_timeout_ms"], serde_json::Value::Null);
+    assert_eq!(events[0]["turn_elapsed_ms"], serde_json::Value::Null);
+    let written = events
+        .iter()
+        .find(|event| event["phase"] == "session_written")
+        .unwrap();
+    assert_eq!(written["round_count"], 3);
+    assert_eq!(written["request_timeout_ms"], 60_000);
+    assert_eq!(written["turn_elapsed_ms"], 1_250);
+}
