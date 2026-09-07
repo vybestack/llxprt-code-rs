@@ -272,7 +272,29 @@ fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
 /// places it inside the supervised cohort's birth window. Other hosts keep the legacy probe.
 #[test]
 fn cancelling_the_worker_kills_the_active_tool_group() {
+    // Born deaf on purpose: block SIGTERM on this thread so the helper inherits the block
+    // across exec — the exact CI condition this test regressed on. The production unblock in
+    // `install_cancellation_signal_handlers` must punch through it, otherwise the TERM sent
+    // below stays pending forever and the supervised group outlives the worker.
+    let mut blocked: libc::sigset_t = unsafe { std::mem::zeroed() };
+    let mut previous: libc::sigset_t = unsafe { std::mem::zeroed() };
+    // Safety: `zeroed` supplies storage; the set init and mask swap touch this thread only.
+    unsafe {
+        libc::sigemptyset(&mut blocked);
+        libc::sigaddset(&mut blocked, libc::SIGTERM);
+        assert_eq!(
+            libc::pthread_sigmask(libc::SIG_SETMASK, &blocked, &mut previous),
+            0
+        );
+    }
     let mut child = spawn_cancellation_child();
+    // Safety: restore this thread's mask so only the spawn carried the block.
+    unsafe {
+        assert_eq!(
+            libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut()),
+            0
+        );
+    }
     let (pgid, cohort) = read_reported_pgid(&mut child);
     // `cohort` anchors the Linux /proc probe; the legacy probe on other hosts never reads it.
     #[cfg(not(target_os = "linux"))]

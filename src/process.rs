@@ -163,8 +163,26 @@ extern "C" fn cancellation_handler(signal: libc::c_int) {
 
 /// Install the `SIGINT`/`SIGTERM` handlers that terminate the active tool's process group before
 /// the worker exits. Idempotent; call it at startup, before the first model request, so no
-/// tool can outlive the worker. Returns `Err` when the platform rejects the `sigaction`.
+/// tool can outlive the worker. Returns `Err` when the platform rejects the unblock or the `sigaction`.
 pub fn install_cancellation_signal_handlers() -> Result<(), String> {
+    // A supervisor that blocks SIGTERM before spawning a worker leaves the block inherited
+    // across exec: pending cancellations never reach the handler registered below, so the
+    // worker (and its supervised tool group) becomes uncancellable. Unblock the two signals
+    // this installer owns so delivery is always possible.
+    // Safety: `zeroed` supplies storage; `sigemptyset`/`sigaddset` initialise it with two
+    // valid signal numbers; `pthread_sigmask` with `SIG_UNBLOCK` affects only this thread.
+    let mut unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::sigemptyset(&mut unblock);
+        libc::sigaddset(&mut unblock, libc::SIGINT);
+        libc::sigaddset(&mut unblock, libc::SIGTERM);
+        if libc::pthread_sigmask(libc::SIG_UNBLOCK, &unblock, std::ptr::null_mut()) != 0 {
+            return Err(format!(
+                "pthread_sigmask(SIG_UNBLOCK) failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
     for signal in [libc::SIGINT, libc::SIGTERM] {
         // Safety: the struct is initialised field-by-field below; `zeroed` supplies an empty
         // signal mask, so the handler runs with no signals blocked.
