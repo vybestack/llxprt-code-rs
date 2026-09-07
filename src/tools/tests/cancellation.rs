@@ -3,6 +3,10 @@
 use std::time::Duration;
 
 const CANCELLATION_CHILD: &str = "LLXPRT_TEST_CANCELLATION_CHILD";
+#[cfg(target_os = "linux")]
+const LAUNCH_READY: &str = "LLXPRT_TEST_LAUNCH_READY";
+#[cfg(target_os = "linux")]
+const LAUNCH_SIDE_EFFECT: &str = "LLXPRT_TEST_LAUNCH_SIDE_EFFECT";
 
 fn spawn_cancellation_child() -> std::process::Child {
     std::process::Command::new(std::env::current_exe().unwrap())
@@ -13,6 +17,25 @@ fn spawn_cancellation_child() -> std::process::Child {
         ])
         .env(CANCELLATION_CHILD, "1")
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_launch_cancellation_child(
+    marker: &std::path::Path,
+    side_effect: &std::path::Path,
+) -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tools::tests::cancellation::cancelling_during_launch_subprocess_helper",
+            "--nocapture",
+        ])
+        .env(LAUNCH_READY, marker)
+        .env(LAUNCH_SIDE_EFFECT, side_effect)
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap()
@@ -129,13 +152,42 @@ fn live_group_snapshot(pgid: libc::pid_t) -> Option<Vec<LiveMember>> {
 /// leader execs). `cohort == None` (leader stat unreadable) keeps the bare pgrp match so the
 /// test still catches true survivors. `None` when `/proc` is unreadable; callers keep polling.
 #[cfg(target_os = "linux")]
+fn cohort_fork_slack_ticks() -> u64 {
+    // Safety: `_SC_CLK_TCK` is a valid `sysconf` selector. Do not assume Linux uses 100 Hz.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    u64::try_from(ticks).unwrap_or(100)
+}
+
+#[cfg(target_os = "linux")]
 fn group_has_live_member(pgid: libc::pid_t, cohort: Option<u64>) -> Option<bool> {
     let members = live_group_snapshot(pgid)?;
+    let slack = cohort_fork_slack_ticks();
     Some(
         members
             .iter()
-            .any(|m| cohort.is_none_or(|born| m.starttime <= born + 100)),
+            .any(|m| cohort.is_none_or(|born| m.starttime <= born.saturating_add(slack))),
     )
+}
+
+/// Deliberately reach the pre-exec barrier before `run_cmd` has a `Child` to register.
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn cancelling_during_launch_subprocess_helper() {
+    if std::env::var_os(LAUNCH_READY).is_none() {
+        return;
+    }
+    crate::process::install_cancellation_signal_handlers().unwrap();
+    let side_effect = std::env::var_os(LAUNCH_SIDE_EFFECT).unwrap();
+    let _ = crate::process::run_sh(
+        "touch \"$LLXPRT_TEST_LAUNCH_SIDE_EFFECT\"",
+        None,
+        Duration::from_secs(60),
+        1024,
+        vec![(
+            LAUNCH_SIDE_EFFECT.to_string(),
+            side_effect.to_string_lossy().into_owned(),
+        )],
+    );
 }
 
 #[test]
@@ -166,6 +218,52 @@ fn cancelling_the_worker_subprocess_helper() {
     let _ = crate::process::run_sh("sleep 30", None, Duration::from_secs(60), 1024, Vec::new());
 }
 
+/// The marker is written after `setsid` and the child-side parent-death guard, but while
+/// `Command::spawn` is blocked before the parent can publish `ACTIVE_GROUP`.
+#[cfg(target_os = "linux")]
+#[test]
+fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("launch-ready");
+    let side_effect = directory.path().join("tool-executed");
+    let mut worker = spawn_launch_cancellation_child(&marker, &side_effect);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !marker.is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "launch barrier did not report readiness: {:?}",
+            worker.try_wait().ok().flatten()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let pgid: libc::pid_t = std::fs::read_to_string(&marker).unwrap().parse().unwrap();
+    assert!(
+        !side_effect.exists(),
+        "tool executed before launch cancellation"
+    );
+    // Safety: cancellation hits the exact post-fork/pre-publication handoff.
+    assert_eq!(
+        unsafe { libc::kill(worker.id() as libc::pid_t, libc::SIGTERM) },
+        0
+    );
+    assert_eq!(worker.wait().unwrap().code(), Some(143));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if matches!(proc_stat(pgid), None | Some((b'Z', _, _, _))) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "unpublished child {pgid} survived worker cancellation"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        !side_effect.exists(),
+        "tool executed after launch cancellation"
+    );
+}
+
 /// `kill(pgid, 0)` — the v1 probe — counts orphan zombies (unreaped by non-reaping subreaper
 /// ancestors on busy CI runners) and pids reused by successor processes as alive; the release
 /// job's second test invocation hits both. v2 moved to a `/proc` pgrp + state scan, but a
@@ -174,22 +272,6 @@ fn cancelling_the_worker_subprocess_helper() {
 /// places it inside the supervised cohort's birth window. Other hosts keep the legacy probe.
 #[test]
 fn cancelling_the_worker_kills_the_active_tool_group() {
-    // On Linux, make this test process a child subreaper so that descendants orphaned by the
-    // terminated helper (the `setsid` group leader, in particular) reparent to *us* instead of
-    // to a CI runner agent. Runner agents are subreapers that do not promptly reap foreign
-    // orphans, so the killed group leader can linger as a zombie — and `kill(pgid, 0)` reports
-    // zombies as alive. Adopting the chain lets us reap it ourselves below.
-    #[cfg(target_os = "linux")]
-    {
-        // Safety: prctl with a valid option and integer argument; see PR_SET_CHILD_SUBREAPER(2).
-        let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
-        assert_eq!(
-            rc,
-            0,
-            "PR_SET_CHILD_SUBREAPER failed: {}",
-            std::io::Error::last_os_error()
-        );
-    }
     let mut child = spawn_cancellation_child();
     let (pgid, cohort) = read_reported_pgid(&mut child);
     // `cohort` anchors the Linux /proc probe; the legacy probe on other hosts never reads it.
@@ -205,10 +287,9 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
-        // Definitive: the kernel handed us the former leader's exit status.
-        if unsafe { libc::waitpid(pgid, std::ptr::null_mut(), libc::WNOHANG) } == pgid {
-            break;
-        }
+        // Reap the leader if this test happens to own it. Its status is cleanup only: reaping
+        // a leader does not prove same-group descendants are gone.
+        let _ = unsafe { libc::waitpid(pgid, std::ptr::null_mut(), libc::WNOHANG) };
         #[cfg(target_os = "linux")]
         {
             // Truthful /proc verdict: scan succeeded and no live (non-zombie) member remains.

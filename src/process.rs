@@ -218,6 +218,9 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
         cmd.current_dir(d);
     }
     scrub_env(&mut cmd, &spec.env_add);
+    // Test-only: deterministic launch/publication interleaving, installed after the guard.
+    #[cfg(test)]
+    cfg_launch_test_barrier(&mut cmd);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -494,14 +497,88 @@ fn allow_key(k: &str) -> bool {
 /// negative-pid kill reaches every descendant.
 fn cfg_setsid(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
+    // Capture this before fork. The Linux child rechecks it after arming PDEATHSIG to close the
+    // race where cancellation exits the worker between fork and guard installation.
+    let parent_pid = std::process::id() as libc::pid_t;
     // Safety: `pre_exec` runs between fork and exec in the child where `setsid` is safe; it
     // creates a new session whose process group id equals the child's pid.
     unsafe {
-        cmd.pre_exec(|| {
+        cmd.pre_exec(move || {
             if libc::setsid() == -1 {
                 return Err(std::io::Error::last_os_error());
             }
-            Ok(())
+            cfg_parent_death_guard(parent_pid)
+        });
+    }
+}
+
+/// Make a Linux child die if its worker dies before the parent publishes its process group.
+/// `PR_SET_PDEATHSIG` covers all later worker exits; the parent identity recheck covers the
+/// `fork`-to-`prctl` setup interval, so the command cannot reach exec unsupervised.
+#[cfg(target_os = "linux")]
+fn cfg_parent_death_guard(parent_pid: libc::pid_t) -> std::io::Result<()> {
+    // Safety: valid Linux `prctl` arguments in the post-fork child. SIGKILL cannot be ignored.
+    unsafe {
+        if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::getppid() != parent_pid {
+            libc::kill(libc::getpid(), libc::SIGKILL);
+            libc::_exit(127);
+        }
+    }
+    Ok(())
+}
+
+/// macOS has no equivalent parent-death signal. Its existing process-group handler continues to
+/// cover published commands; the race-free launch handoff is provided on Linux.
+#[cfg(not(target_os = "linux"))]
+fn cfg_parent_death_guard(_parent_pid: libc::pid_t) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Test-only pre-exec gate. It runs after `setsid` and the Linux guard but before exec; the test
+/// cancels the worker after reading this marker, proving an unpublished child cannot survive.
+#[cfg(test)]
+fn cfg_launch_test_barrier(cmd: &mut Command) {
+    use std::ffi::CString;
+    use std::os::unix::{ffi::OsStrExt, process::CommandExt};
+
+    let Some(marker) = std::env::var_os("LLXPRT_TEST_LAUNCH_READY") else {
+        return;
+    };
+    let marker = CString::new(marker.as_bytes()).expect("launch test marker contains no NUL");
+    // Safety: syscall-only work in the post-fork child. This hook is appended after `cfg_setsid`.
+    unsafe {
+        cmd.pre_exec(move || {
+            let fd = libc::open(
+                marker.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+                0o600,
+            );
+            if fd == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let mut pid = libc::getpid() as u32;
+            let mut digits = [0_u8; 10];
+            let mut start = digits.len();
+            loop {
+                start -= 1;
+                digits[start] = b'0' + (pid % 10) as u8;
+                pid /= 10;
+                if pid == 0 {
+                    break;
+                }
+            }
+            let length = digits.len() - start;
+            let written = libc::write(fd, digits[start..].as_ptr().cast(), length);
+            libc::close(fd);
+            if written != length as isize {
+                return Err(std::io::Error::last_os_error());
+            }
+            loop {
+                libc::pause();
+            }
         });
     }
 }
