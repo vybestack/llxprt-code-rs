@@ -12,7 +12,7 @@ Rust version: 1.88.0
 
 Replace full selected-lineage transcript replay with the transactional context runtime in design v6. The result must preserve enough context to finish long-running coding work without sending an over-budget request, silently losing a final report, or poisoning the next process invocation with the same oversized history.
 
-This is a full-design implementation. It includes all eleven boundaries, the closed operation set, the proposer and authority rules, universal commit preconditions, budget and forward-progress algebra, typed validation verdicts rooted in authenticated ingress leaves, the fact ledger and proposer class L, lane policies, legality checking, cache-aware rewrite scheduling, deterministic replay, restart equivalence, and the security layer. A phase may stage a contract before another phase supplies a consumer, but no design requirement may be omitted or replaced with an undocumented approximation.
+This is a full-design implementation. It includes all eleven boundaries, the closed operation set, the proposer and authority rules, universal commit preconditions, budget and forward-progress algebra, typed validation verdicts rooted in authenticated ingress leaves, the fact ledger and proposer class L, lane policies, legality checking, cache-aware checkpoint-line scheduling, deterministic replay, restart equivalence, and the security layer. A phase may stage a contract before another phase supplies a consumer, but no design requirement may be omitted or replaced with an undocumented approximation.
 
 Each phase below is one ordered sub-issue of #36. Each sub-issue starts with its listed tests and evals red, then implements only enough production behavior to make that phase green. Phase 0 creates the runner and records the initial red baseline. Feature evals remain red until their owning phase lands.
 
@@ -60,7 +60,7 @@ These exclusions match design section 2.
 9. Rust 1.88.0 and offline/locked dependency verification remain supported. New dependencies require a separate admission record and must already be vendorable under release policy.
 10. Production source satisfies the xtask LOC and complexity gates with no baseline, allow-list, or suppression.
 11. Source, vendor, release-fixture, and license gates remain green.
-12. Sensitive values do not enter stdout, stderr, debug output, event logs, eval reports, or rewrite journals.
+12. Sensitive values do not enter stdout, stderr, debug output, event logs, eval reports, or per-epoch cache accounting.
 
 ## Test-first and evals-first rules
 
@@ -105,7 +105,7 @@ All scenarios are runnable in Phase 0. Their owner field says when they may turn
 | `provider-crash-matrix` | Crash at each intent, send, pending-response, admission, tool-intent, and completion interval; compare materialized hash and side-effect count after restart. | No provider-turn event protocol. | 7 |
 | `branch-readset-conflict` | Run read-only exploration, mutate a parent dependency, then return; assert evidential suggestion and revalidation rather than current fact. | Existing branch model has no context read-set contract. | 8 |
 | `security-authority-laundering` | Place obligation-shaped and decisional instructions in tool output and generated summaries; assert no authority elevation. | No authority grammar in context state. | 8 |
-| `cache-amortization` | Alternate append-only work and prefix rewrites under known and unknown cache telemetry; assert rewrite decisions and journal totals. | No rewrite journal or cache report. | 4 |
+| `epoch-cache` | Append-only epochs under known and unknown cache telemetry; drive appending work to the cut threshold, then assert exactly one invalidation per cut, a stable epoch head, and a hit ratio that climbs within the epoch. | No epoch-cut operation or per-epoch cache report. | 4 |
 | `endurance-restart` | Composed multi-stage task with injected restarts, sustained tool output, and final exact grading. | Wall or lacks required evidence. | 9 |
 
 Phase 0 also creates tests that verify the harness itself: scenario schema rejection, deterministic fixture expansion, strict process-result parsing, isolated config/session paths, bounded artifact capture, exact report schema, Rust/TypeScript adapter command construction, and nonzero exit when an expected-red scenario unexpectedly passes without an approved baseline update.
@@ -173,7 +173,7 @@ context/
   vault/
   retrieval.index
   checkpoints/
-  rewrite-journal.log
+
 ```
 
 The exact encoding is selected in Phase 1 after tests establish bounded record framing, checksums, atomic visibility, and recovery. The normative properties are append-only events, one total order, bounded deterministic reads, content hashes, explicit modes, and replay from checkpoint plus tail.
@@ -274,15 +274,15 @@ The operation table in design section 9 becomes one exhaustive Rust registry. Ea
 
 ## Phase 4: Policy plane, governor, ladders, monitor, and cache economics
 
-**Goal.** Add proposal-only policy, enforce ingress rate against measured reclamation, select a terminating degradation path, preserve terminal reserve, and make rewrite economics visible and testable.
+**Goal.** Add proposal-only policy, enforce ingress rate against measured reclamation, select a terminating degradation path, preserve terminal reserve, and make checkpoint-line economics visible and testable.
 
 **Dependencies.** Phase 3.
 
-**Design sections realized.** Section 8.2 (`sec:admission`); section 8.5 (`sec:ladder`); section 15 cache economics; section 20 (`sec:params`); progress, governor, and failure-mode rows of sections 18 and 19.
+**Design sections realized.** Section 8.2 (`sec:admission`); section 8.5 (`sec:ladder`); section 15 cache economics (append-only epochs with checkpoint lines); section 20 (`sec:params`); progress, governor, and failure-mode rows of sections 18 and 19.
 
-**Red tests/evals before implementation.** Queue fairness and reserved shares; semantic dedup and bounded reproposal; deterministic `find_admissible`; per-source/per-window quota and handle path; `admitted_rate <= alpha * measured_reclamation_throughput`; quota floor then quiesce; arm X/disarm Y/target T hysteresis; fixed rung order; capability-adjusted placeholder/drop rung; scorer-outage emergency set; bounded escalation retries; macrostep lexicographic decrease of `(Psi, retries_remaining)`; stability bound; no armed unquiesced no-op reachable states; and exact wrap-up/quiesce outcomes. Monitor tests cover reacquisition, reread clustering, full-output-after-digest, thrash, overprotective classification, sticky caps, frozen counters, and relaxation only after the disarmed window. Cache tests cover threshold boundaries, forced flush, unknown telemetry, safety-arm suspension, and tie-breaking. Start `budget-governor-progress`, `terminal-reserve-wrap-up`, `cache-amortization`, and the minimum-management-floor arm red.
+**Red tests/evals before implementation.** Queue fairness and reserved shares; semantic dedup and bounded reproposal; deterministic `find_admissible`; per-source/per-window quota and handle path; `admitted_rate <= alpha * measured_reclamation_throughput`; quota floor then quiesce; arm X/disarm Y/target T hysteresis; fixed rung order; capability-adjusted placeholder/drop rung; scorer-outage emergency set; bounded escalation retries; macrostep lexicographic decrease of `(Psi, retries_remaining)`; stability bound; no armed unquiesced no-op reachable states; and exact wrap-up/quiesce outcomes. Monitor tests cover reacquisition, reread clustering, full-output-after-digest, thrash, overprotective classification, sticky caps, frozen counters, and relaxation only after the disarmed window. Cache tests cover the cut trigger (governor budget pressure plus the explicit-request path, epoch age excluded), one invalidation per cut, forced flush, unknown telemetry, and tie-breaking. Start `budget-governor-progress`, `terminal-reserve-wrap-up`, `epoch-cache`, and the minimum-management-floor arm red.
 
-**Implementation.** Add classed queues, governor, pressure estimator port, fixed reclamation ladder, bounded escalation ladder, monitor, parameter registry with four classes, and rewrite journal. Implement deterministic emergency operations, quotas, handle admission, range read-back baseline, arm/disarm, queue service, calibration/margin operations, spend/journal accounting, wrap-up, quiesce, note flushing, consolidation, and monitor reproposals. Estimator weights may reorder only inside a rung. Spacing and amortization are suspended while armed.
+**Implementation.** Add classed queues, governor, pressure estimator port, fixed reclamation ladder, bounded escalation ladder, monitor, parameter registry with four classes, and per-epoch cache accounting. Implement deterministic emergency operations, quotas, handle admission, range read-back baseline, arm/disarm, queue service, calibration/margin operations, spend/epoch accounting, wrap-up, quiesce, note flushing, consolidation, and monitor reproposals. Estimator weights may reorder only inside a rung. Spacing is suspended while armed; no rewrite exists to amortize, the epoch cut is the only priced invalidation and it still travels the governor gate.
 
 **Definition of done.** Adversarial reachable-state generation finds zero out-of-branch wall hits and zero unquiesced armed no-op states. Every armed episode reaches disarm, wrap-up, or quiesce in bounded macrosteps under the enforced governor predicate. The minimum-management-floor arm works using quota, handle, store, and deterministic range read-back without lanes, gate, ledger, or branches. Cache reports satisfy the first-class acceptance contract below.
 
@@ -416,13 +416,13 @@ The table is a plan index, not a substitute for design Table 1. The executable r
 
 Cache statistics are first-class acceptance output, not optional debug logging. Every scenario and aggregate report includes:
 
-- cache hit rate;
-- prefix invalidation cost per rewrite event;
-- rewrite-journal accounting with tokens reclaimed versus tokens invalidated;
-- amortization-threshold behavior, including decisions immediately below, at, and above the threshold;
+- cache hit rate, reported per epoch;
+- invalidation count per cut, asserted to be exactly one;
+- tokens reclaimed at each checkpoint line versus tokens invalidated by the cut;
+- cut-trigger provenance: governor budget pressure, explicit request, or forced flush under an armed safety tier;
 - armed-versus-disarmed conditional reporting.
 
-When telemetry exists, reports contain measured values and source. When it does not, the report marks the cost class unknown and excludes the unpriced term from economic claims. It does not write zero. While safety is armed, reports identify suspended amortization, every unamortized note flush, and sustained-armed cost. Acceptance checks reconcile every rewrite event to one journal entry and aggregate totals exactly.
+When telemetry exists, reports contain measured values and source. When it does not, the report marks the cost class unknown and excludes the unpriced term from economic claims. It does not write zero. While safety is armed, reports identify every forced cut and sustained-armed cost. Acceptance checks reconcile every cut to exactly one invalidation and aggregate per-epoch totals exactly; no rewrite journal exists because no priced rewrite exists.
 
 ### Security and continuity
 
