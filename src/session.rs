@@ -281,8 +281,46 @@ fn read_state_with_generation(
     Ok(Some((selected.store_generation, selected.state)))
 }
 
+// compat-allow: the flat session.json layout is a durable on-disk format this reader owns (#74 ledger)
 fn read_flat_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
-    Ok(read_state_with_generation(dir)?.map(|(_, state)| state))
+    let parse = |name: &str| -> Result<Option<SessionState>, StoreError> {
+        let mut bytes = Vec::new();
+        let f = match open_regular_at(dir, name, libc::O_RDONLY, 0) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => {
+                return Err(StoreError::Io(
+                    "session state could not be opened safely".into(),
+                ))
+            }
+        };
+        f.take(MAX_SESSION_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| StoreError::Io("session state could not be read".into()))?;
+        if bytes.len() > MAX_SESSION_BYTES {
+            return Err(StoreError::Corrupt(
+                "session state exceeds the session byte cap".into(),
+            ));
+        }
+        match serde_json::from_slice::<SessionState>(&bytes) {
+            Ok(state) => match state.validate() {
+                Ok(()) => Ok(Some(state)),
+                Err(error) => Err(error),
+            },
+            Err(_) => Err(StoreError::Corrupt(
+                "flat session state is not valid JSON".into(),
+            )),
+        }
+    };
+    if let Ok(Some((_, state))) = read_state_with_generation(dir) {
+        return Ok(Some(state));
+    }
+    let primary = parse("session.json")?;
+    let alternate = parse("session.alt.json")?;
+    match (primary, alternate) {
+        (Some(state), _) | (None, Some(state)) => Ok(Some(state)),
+        (None, None) => Ok(None),
+    }
 }
 
 fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, StoreError> {

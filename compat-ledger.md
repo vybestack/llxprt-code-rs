@@ -33,3 +33,4 @@ the Err arm.
 | src/transport.rs:703 | provider legacy-prose classifier, not a session-format reader |
 | src/transport.rs:704 | provider legacy-prose classifier, not a session-format reader |
 | src/transport.rs:705 | provider legacy-prose classifier, not a session-format reader |
+| src/session.rs:read_flat_state | reads both historical session.json shapes (slot envelope then flat); no writer remains |
