@@ -338,18 +338,26 @@ mod tests {
         let sse = |event: &serdes_ai_responses::types::StreamEvent| {
             format!("data: {}\n\n", serde_json::to_string(event).unwrap())
         };
+        // Codex emits transport keepalives as ordinary SSE JSON events. They
+        // can arrive before, between, or after response events and may carry
+        // an otherwise irrelevant payload.
+        let keepalive =
+            |payload: &str| format!("data: {{\"type\":\"keepalive\",\"payload\":{payload}}}\n\n");
         let done = if round == 0 {
             String::new()
         } else {
             "data: [DONE]\n\n".to_string()
         };
         format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}{}",
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{}{}{}{}{}{}{}{}{}",
+            keepalive("{\"position\":\"before\"}"),
             sse(&created),
             sse(&item_added),
+            keepalive("[1,2,3]"),
             sse(&text_delta),
             sse(&item_done),
             sse(&completed),
+            keepalive("\"after\""),
             done,
         )
     }

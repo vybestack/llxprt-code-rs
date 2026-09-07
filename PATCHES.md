@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `a1a5ebef184ab8ee82e59168ec720705b9999933cfa01b2e77821b9322ef8ea4`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `befb9bd7dcd4eb82079585783970c3f38778d5d34a8dc1925ecd2c2172ba5856`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -196,9 +196,13 @@ string-input shorthand or `previous_response_id` chaining; because nothing is st
 replays the full input list. The turn drains the SSE event stream and folds it through the
 existing assembler, propagating stream errors instead of folding them into an empty response, and
 a stream that closes cleanly after the terminal response event terminates normally because the
-codex backend sends no `[DONE]` marker. A completed response whose folded output contains tool
-calls reports `ToolCall` as the finish reason because the responses wire has no tool-call finish
-reason of its own (mirroring the sibling openai client). The vendored `ModelError` keeps external
+codex backend sends no `[DONE]` marker. The SSE parser classifies the Codex `keepalive` type as
+transport liveness before the closed `StreamEvent` semantic enum, so keepalives with or without a
+payload are ignored before, between, or after Responses events and cannot mutate the folded model
+response or terminal state. Unknown non-keepalive response types remain rejected by the closed
+semantic enum. A completed response whose folded output contains tool calls reports `ToolCall` as
+the finish reason because the responses wire has no tool-call finish reason of its own (mirroring
+the sibling openai client). The vendored `ModelError` keeps external
 text out of its public formatting; the host (`src/model_api/responses_backend.rs`) renders the
 `InvalidResponse` and `Network` details on its own trusted diagnostic path so wire failures still
 name the actual cause. The host (`src/model_api/registry.rs`) enables the mode for the codex

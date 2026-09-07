@@ -25638,7 +25638,7 @@ index 9993fc0..78de8d4 100644
  }
  
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..1fb8ccc 100644
+index f90cc22..86e53d5 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -16,7 +16,6 @@ use async_trait::async_trait;
@@ -25851,17 +25851,31 @@ index f90cc22..1fb8ccc 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -759,7 +820,8 @@ impl OpenResponsesModel {
+@@ -759,7 +820,22 @@ impl OpenResponsesModel {
      }
  }
  
 -/// Streaming HTTP turn (SSE).
++/// Decode one Responses event payload at the SSE transport boundary.
++///
++/// Codex emits `keepalive` transport frames while a response is running.
++/// They are not Responses semantic events, so they neither reach the model
++/// assembler nor affect stream terminal state. All other event types remain
++/// subject to the closed [`StreamEvent`] protocol enum.
++fn parse_sse_response_event(payload: &str) -> Result<Option<StreamEvent>, serde_json::Error> {
++    let value: serde_json::Value = serde_json::from_str(payload)?;
++    if value.get("type").and_then(serde_json::Value::as_str) == Some("keepalive") {
++        return Ok(None);
++    }
++    serde_json::from_value(value).map(Some)
++}
++
 +/// Streaming HTTP turn (SSE). Returns the terminal response id when the
 +/// stream completed.
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,7 +834,7 @@ async fn run_http_stream(
+@@ -772,7 +848,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -25870,7 +25884,7 @@ index f90cc22..1fb8ccc 100644
      use futures::StreamExt;
  
      let mut session = inner.session.lock().await;
-@@ -815,6 +877,7 @@ async fn run_http_stream(
+@@ -815,6 +891,7 @@ async fn run_http_stream(
  
      let mut byte_stream = response.bytes_stream();
      let mut buffer = String::new();
@@ -25878,15 +25892,20 @@ index f90cc22..1fb8ccc 100644
      while let Some(chunk) = byte_stream.next().await {
          let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
          buffer.push_str(&String::from_utf8_lossy(&chunk));
-@@ -825,15 +888,18 @@ async fn run_http_stream(
+@@ -825,15 +902,21 @@ async fn run_http_stream(
                  continue;
              };
              if payload == "[DONE]" {
 -                return Ok(());
 +                return Ok(terminal_id);
              }
-             let event: StreamEvent = serde_json::from_str(payload)
-                 .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
+-            let event: StreamEvent = serde_json::from_str(payload)
+-                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
++            let Some(event) = parse_sse_response_event(payload)
++                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?
++            else {
++                continue;
++            };
              if let StreamEvent::ResponseCompleted { response, .. }
              | StreamEvent::ResponseIncomplete { response, .. } = &event
              {
@@ -25900,7 +25919,7 @@ index f90cc22..1fb8ccc 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,14 +912,20 @@ async fn run_http_stream(
+@@ -846,14 +929,41 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -25923,6 +25942,27 @@ index f90cc22..1fb8ccc 100644
 +        Err(ModelError::InvalidResponse(
 +            "sse stream ended without a terminal event".to_string(),
 +        ))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::parse_sse_response_event;
++
++    #[test]
++    fn sse_keepalives_are_transport_only_and_other_types_remain_closed() {
++        assert!(parse_sse_response_event(r#"{"type":"keepalive"}"#)
++            .expect("keepalive without a payload must parse")
++            .is_none());
++        assert!(
++            parse_sse_response_event(r#"{"type":"keepalive","payload":{"tick":1}}"#)
++                .expect("keepalive payload must remain transport-only")
++                .is_none()
++        );
++
++        let error = parse_sse_response_event(r#"{"type":"response.not_a_real_event"}"#)
++            .expect_err("unknown semantic response events must remain rejected");
++        assert!(error.to_string().contains("unknown variant"));
 +    }
  }
 diff --git a/vendor/serdes-ai-responses/src/engine.rs b/vendor/serdes-ai-responses/src/engine.rs
