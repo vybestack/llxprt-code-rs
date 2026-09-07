@@ -46,8 +46,12 @@ pub(super) fn parse(
     let mut model_params = parse_model_params(&cleaned, name)?;
     model_params.temperature = temperature;
     model_params.top_p = top_p;
-    let mut unsupported = ephemeral.unsupported.clone();
-    unsupported.extend(model_params.unsupported.iter().cloned());
+    if !ephemeral.unsupported.is_empty() {
+        return Err(format!(
+            "profile {name:?}: unsupported OpenAI Responses setting"
+        ));
+    }
+    let mut unsupported = model_params.unsupported.clone();
     if model_params.top_k.is_some() {
         unsupported.push("top_k".to_string());
     }
