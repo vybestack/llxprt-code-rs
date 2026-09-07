@@ -9,8 +9,16 @@ const ALLOW_MARKER: &str = "// compat-allow:";
 
 /// Identifiers that name compatibility machinery rather than behavior.
 const BANNED_MARKERS: [&str; 10] = [
-    "legacy", "migrate_", "back_compat", "backwards_compat", "compat_", "fallback_",
-    "deprecated", "_v1", "_v2", "compatibility",
+    "legacy",
+    "migrate_",
+    "back_compat",
+    "backwards_compat",
+    "compat_",
+    "fallback_",
+    "deprecated",
+    "_v1",
+    "_v2",
+    "compatibility",
 ];
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -79,16 +87,16 @@ fn scan_file(path: &Path, findings: &mut Vec<String>) -> Result<(), String> {
         let code = strip_comments(raw).trim();
         for marker in BANNED_MARKERS {
             if code.contains(marker) {
-                findings.push(format!("{}:{}: banned marker '{}'", path.display(), index + 1, marker));
+                findings.push(format!(
+                    "{}:{}: banned marker '{}'",
+                    path.display(),
+                    index + 1,
+                    marker
+                ));
                 break;
             }
         }
-        let window: Vec<&str> = lines
-            .iter()
-            .skip(index + 1)
-            .take(3)
-            .copied()
-            .collect();
+        let window: Vec<&str> = lines.iter().skip(index + 1).take(3).copied().collect();
         let is_if_guard = code.contains("if") && code.contains("is_err");
         let body_exits = window.iter().any(|l| {
             let w = strip_comments(l);
@@ -119,17 +127,18 @@ mod tests {
     use std::fs;
 
     fn write_temp(name: &str, contents: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "llxprt-compat-gate-{}-{name}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("llxprt-compat-gate-{}-{name}", std::process::id()));
         fs::write(&path, contents).unwrap();
         path
     }
 
     #[test]
     fn flags_banned_legacy_reader() {
-        let path = write_temp("legacy-marker", "fn read_legacy_state(dir: &openat::Dir) {}\n");
+        let path = write_temp(
+            "legacy-marker",
+            "fn read_legacy_state(dir: &openat::Dir) {}\n",
+        );
         let mut findings = Vec::new();
         scan_file(&path, &mut findings).unwrap();
         fs::remove_file(&path).unwrap();
