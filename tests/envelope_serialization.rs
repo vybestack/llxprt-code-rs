@@ -78,11 +78,11 @@ fn clap_usage_envelope_bytes_are_pinned() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        "{\"error\":{\"code\":\"usage\",\"message\":\"unknown argument\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
     assert_eq!(
         output.stdout,
-        b"{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        b"{\"error\":{\"code\":\"usage\",\"message\":\"unknown argument\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
     assert!(output.stderr.is_empty());
 }

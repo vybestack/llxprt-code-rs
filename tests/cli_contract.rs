@@ -628,6 +628,87 @@ fn help_is_a_protocol_exception() {
     assert!(s.contains("--allow-shell"));
 }
 
+/// Issue 183: a separated hyphen-prefixed unlimited budget must be consumed as the
+/// budget's value, just like the equals form.  Every accepted spelling gets as far as
+/// profile loading; the deliberately nonexistent profile proves no network is involved.
+#[test]
+fn max_tool_calls_forms_parse_before_profile_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls", "-1"],
+        vec!["--max-tool-calls=-1"],
+        vec!["--max-tool-calls", "7"],
+        vec!["--max-tool-calls=7"],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--profile", "issue183-no-such-profile", "--prompt", "hi"])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3));
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["error"]["code"], "profile-missing");
+    }
+}
+
+/// Parsing diagnostics use only Clap's structured class and fixed option spellings:
+/// supplied prompts, paths, profile names, and environment values must never be reflected.
+#[test]
+fn clap_usage_diagnostics_are_sanitized_and_identify_budget_or_error_class() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--max-tool-calls",
+            "BUDGET_SECRET_SENTINEL",
+        ],
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--cwd",
+            "/PATH_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--UNKNOWN_SECRET_SENTINEL",
+        ],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .env("LLXPRT_API_KEY", "ENV_SECRET_SENTINEL")
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(parsed["error"]["code"], "usage");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--max-tool-calls")
+                || parsed["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unknown argument")
+        );
+        for secret in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "BUDGET_SECRET_SENTINEL",
+            "PATH_SECRET_SENTINEL",
+            "UNKNOWN_SECRET_SENTINEL",
+            "ENV_SECRET_SENTINEL",
+        ] {
+            assert!(!stdout.contains(secret), "usage diagnostic leaked {secret}");
+        }
+    }
+}
+
 /// CLI flag validation ordering (issue 60): an invalid `--max-tool-calls` or
 /// `--turn-time` is a usage error (exit 2) that must be reported **before** any
 /// profile resolution or credential access. The named profile here does not exist
