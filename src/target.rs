@@ -70,7 +70,7 @@ pub enum ModelApi {
 }
 
 impl ModelApi {
-    /// The documented `apiMode`/`responsesMode` selector spelling.
+    /// The documented `apiMode` selector spelling.
     pub const fn selector_name(self) -> &'static str {
         match self {
             Self::ChatCompletions => "chat",
@@ -100,7 +100,7 @@ pub struct ModelTarget {
     pub transport: TransportKind,
 }
 
-/// The `apiMode`/`responsesMode` selector as written on disk.
+/// The `apiMode` selector as written on disk.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApiSelector {
     Chat,
