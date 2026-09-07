@@ -214,7 +214,7 @@ fn cancelling_the_worker_subprocess_helper() {
     let _ = crate::process::run_sh("sleep 30", None, Duration::from_secs(60), 1024, Vec::new());
 }
 
-/// The marker is written after `setsid`, but while the child cannot reach the launch handoff.
+/// The marker is written after `setsid`, but while the child cannot reach the launch handoff; its file can briefly exist empty, so the poller retries until the pid parses.
 #[test]
 fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
     let directory = tempfile::tempdir().unwrap();
@@ -222,15 +222,22 @@ fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
     let side_effect = directory.path().join("tool-executed");
     let mut worker = spawn_launch_cancellation_child(&marker, &side_effect);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !marker.is_file() {
+    // The marker file is created by open(O_EXCL) and its pid digits are written
+    // by a separate write(2), so existence does not imply content. Poll the
+    // read itself and retry empties and short parses until the deadline.
+    let pgid: libc::pid_t = loop {
+        if let Ok(text) = std::fs::read_to_string(&marker) {
+            if let Ok(pgid) = text.trim().parse::<libc::pid_t>() {
+                break pgid;
+            }
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "launch barrier did not report readiness: {:?}",
             worker.try_wait().ok().flatten()
         );
         std::thread::sleep(Duration::from_millis(1));
-    }
-    let pgid: libc::pid_t = std::fs::read_to_string(&marker).unwrap().parse().unwrap();
+    };
     assert!(
         !side_effect.exists(),
         "tool executed before launch cancellation"
