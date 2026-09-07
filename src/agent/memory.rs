@@ -88,6 +88,7 @@ impl CodingAgent {
         store: &SessionStore,
         phase: &'static str,
         round_count: usize,
+        turn_elapsed: Option<std::time::Duration>,
     ) -> Result<(), AgentError> {
         let metrics = store.take_profile_metrics();
         self.profile(
@@ -96,6 +97,10 @@ impl CodingAgent {
                 session_slot_input_bytes: Some(metrics.input_bytes),
                 session_slot_output_bytes: Some(metrics.output_bytes),
                 round_count: Some(round_count as u64),
+                request_timeout_ms: self
+                    .request_timeout
+                    .map(|timeout| timeout.as_millis() as u64),
+                turn_elapsed_ms: turn_elapsed.map(|elapsed| elapsed.as_millis() as u64),
                 ..Default::default()
             },
         )

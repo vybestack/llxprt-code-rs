@@ -47,6 +47,13 @@ fn precedence_defaults_only() {
     assert_eq!(got.paths.config_root.source, Source::Default);
 }
 #[test]
+fn default_max_tool_calls_is_256() {
+    // No layers: the resolved default is 256 (documented; was 16 before #15).
+    let got = resolve(layers()).unwrap();
+    assert_eq!(got.budgets.max_tool_calls.value, 256);
+    assert_eq!(got.budgets.max_tool_calls.source, Source::Default);
+}
+#[test]
 fn precedence_user_file_overrides_default() {
     let mut l = layers();
     l.user_file = budget(7);
@@ -452,6 +459,104 @@ fn runtime_env_overrides_profile_for_turn_time() {
         Some(std::time::Duration::from_secs(90))
     );
     assert_eq!(settings.budgets.turn_time.source, Source::Env);
+}
+
+#[test]
+fn request_timeout_defaults_to_900_seconds_for_all_providers() {
+    let got = resolve(layers()).unwrap();
+    assert_eq!(
+        got.budgets.request_timeout.value,
+        std::time::Duration::from_secs(900)
+    );
+    assert_eq!(got.budgets.request_timeout.source, Source::Default);
+}
+
+#[test]
+fn request_timeout_settings_file_override_changes_resolution() {
+    let mut l = layers();
+    l.user_file.budgets.request_timeout = Some("120s".into());
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        got.budgets.request_timeout.value,
+        std::time::Duration::from_secs(120)
+    );
+    assert_eq!(got.budgets.request_timeout.source, Source::UserFile);
+}
+
+#[test]
+fn request_timeout_cli_beats_settings_file() {
+    let mut l = layers();
+    l.user_file.budgets.request_timeout = Some("120s".into());
+    l.cli.budgets.request_timeout = Some("30".into());
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        got.budgets.request_timeout.value,
+        std::time::Duration::from_secs(30)
+    );
+    assert_eq!(got.budgets.request_timeout.source, Source::Cli);
+}
+
+#[test]
+fn request_timeout_profile_timeout_ms_wins_for_that_provider() {
+    // The anthropic `timeout_ms` is per-provider data expressed in the profile layer;
+    // it outranks the settings-file value for that provider.
+    let mut l = layers();
+    l.user_file.budgets.request_timeout = Some("120s".into());
+    l.profile.budgets.request_timeout = Some("2500ms".into());
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        got.budgets.request_timeout.value,
+        std::time::Duration::from_millis(2500)
+    );
+    assert_eq!(got.budgets.request_timeout.source, Source::Profile);
+}
+
+#[test]
+fn request_timeout_env_beats_profile() {
+    let mut l = layers();
+    l.profile.budgets.request_timeout = Some("2500ms".into());
+    l.env.budgets.request_timeout = Some("60".into());
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        got.budgets.request_timeout.value,
+        std::time::Duration::from_secs(60)
+    );
+    assert_eq!(got.budgets.request_timeout.source, Source::Env);
+}
+
+#[test]
+fn request_timeout_above_lease_margin_still_fails_validation() {
+    // The resolver resolves the value; the lease-margin bound stays enforced on it.
+    let mut l = layers();
+    l.cli.budgets.request_timeout = Some("3600".into());
+    let settings = resolve(l).unwrap();
+    assert_eq!(
+        settings.budgets.request_timeout.value,
+        std::time::Duration::from_secs(3600)
+    );
+    let error =
+        crate::limits::validate_timeout(Some(settings.budgets.request_timeout.value)).unwrap_err();
+    assert!(error.contains("session lease"), "{error}");
+}
+
+#[test]
+fn request_timeout_parse_errors_match_cli_style() {
+    assert_eq!(
+        parse_request_timeout("90s").unwrap(),
+        std::time::Duration::from_secs(90)
+    );
+    assert_eq!(
+        parse_request_timeout("90").unwrap(),
+        std::time::Duration::from_secs(90)
+    );
+    assert_eq!(
+        parse_request_timeout("2500ms").unwrap(),
+        std::time::Duration::from_millis(2500)
+    );
+    assert_eq!(
+        parse_request_timeout("5x").unwrap_err(),
+        "--request-timeout needs an integer count (got 5x)"
+    );
 }
 
 #[test]

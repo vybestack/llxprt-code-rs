@@ -54,6 +54,7 @@ pub fn run_release_gates(root: &Path) -> Result<(), String> {
     run_release_gate_phase(&mut output, "workspace checks", || {
         run_workspace_checks(root)
     })?;
+    run_release_gate_phase(&mut output, "compat gate", || crate::compat::run(root))?;
     run_release_gate_phase(
         &mut output,
         "direct vendored SerdesAI feature surfaces and OpenAI tests",

@@ -7256,10 +7256,14 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..22d1eb7 100644
+index 0d35170..b370ae9 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
-@@ -21,7 +21,7 @@ use serdes_ai_tools::ToolDefinition;
+@@ -18,10 +18,11 @@ use serdes_ai_core::{
+     RequestUsage,
+ };
+ use serdes_ai_tools::ToolDefinition;
++use std::collections::BTreeMap;
  use std::time::Duration;
  
  /// Anthropic Claude model.
@@ -7268,10 +7272,15 @@ index 0d35170..22d1eb7 100644
  pub struct AnthropicModel {
      model_name: String,
      client: Client,
-@@ -39,6 +39,16 @@ pub struct AnthropicModel {
+@@ -37,6 +38,19 @@ pub struct AnthropicModel {
+     enable_caching: bool,
+     /// Anthropic API version.
      api_version: String,
- }
- 
++    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
++    /// verbatim and flattened into the request body.
++    extra: BTreeMap<String, serde_json::Value>,
++}
++
 +impl std::fmt::Debug for AnthropicModel {
 +    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 +        formatter
@@ -7280,12 +7289,10 @@ index 0d35170..22d1eb7 100644
 +            .field("api_key", &"[redacted]")
 +            .finish_non_exhaustive()
 +    }
-+}
-+
+ }
+ 
  impl AnthropicModel {
-     /// Create a new Anthropic model.
-     pub fn new(model_name: impl Into<String>, api_key: impl Into<String>) -> Self {
-@@ -47,7 +57,7 @@ impl AnthropicModel {
+@@ -47,7 +61,7 @@ impl AnthropicModel {
  
          Self {
              model_name,
@@ -7294,7 +7301,15 @@ index 0d35170..22d1eb7 100644
              api_key: api_key.into(),
              base_url: "https://api.anthropic.com".to_string(),
              profile,
-@@ -73,13 +83,6 @@ impl AnthropicModel {
+@@ -56,6 +70,7 @@ impl AnthropicModel {
+             thinking_budget: None,
+             enable_caching: false,
+             api_version: "2023-06-01".to_string(),
++            extra: BTreeMap::new(),
+         }
+     }
+ 
+@@ -73,13 +88,6 @@ impl AnthropicModel {
          self
      }
  
@@ -7308,7 +7323,29 @@ index 0d35170..22d1eb7 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -512,12 +515,16 @@ impl AnthropicModel {
+@@ -119,6 +127,13 @@ impl AnthropicModel {
+         self
+     }
+ 
++    /// Forward unrecognized `modelParams` keys verbatim on every request.
++    #[must_use]
++    pub fn with_extra(mut self, extra: BTreeMap<String, serde_json::Value>) -> Self {
++        self.extra = extra;
++        self
++    }
++
+     /// Get the appropriate profile for a model name.
+     fn profile_for_model(model: &str) -> ModelProfile {
+         let mut profile = anthropic_claude_profile();
+@@ -475,6 +490,7 @@ impl AnthropicModel {
+             metadata: None,
+             stream: if stream { Some(true) } else { None },
+             thinking,
++            extra: self.extra.clone(),
+         }
+     }
+ 
+@@ -512,12 +528,16 @@ impl AnthropicModel {
              }
          }
  
@@ -7331,7 +7368,7 @@ index 0d35170..22d1eb7 100644
          });
  
          let usage = RequestUsage {
-@@ -550,36 +557,8 @@ impl AnthropicModel {
+@@ -550,36 +570,8 @@ impl AnthropicModel {
      }
  
      /// Handle API error response.
@@ -7370,7 +7407,7 @@ index 0d35170..22d1eb7 100644
      }
  }
  
-@@ -630,14 +609,11 @@ impl Model for AnthropicModel {
+@@ -630,14 +622,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7387,7 +7424,7 @@ index 0d35170..22d1eb7 100644
  
          self.parse_response(resp)
      }
-@@ -673,11 +649,11 @@ impl Model for AnthropicModel {
+@@ -673,11 +662,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7401,6 +7438,36 @@ index 0d35170..22d1eb7 100644
          let parser = AnthropicStreamParser::new(byte_stream);
  
          Ok(Box::pin(parser))
+@@ -767,6 +756,29 @@ mod tests {
+         assert_eq!(request.messages.len(), 1);
+         assert_eq!(request.temperature, Some(0.7));
+         assert!(request.stream.is_none());
++        // A default model forwards nothing; the flattened key stays absent.
++        assert!(request.extra.is_empty());
++        let wire = serde_json::to_value(&request).unwrap();
++        assert!(wire.get("extra").is_none());
++    }
++
++    #[test]
++    fn test_build_request_forwards_extra_flattened() {
++        let model =
++            AnthropicModel::new("claude-3-5-sonnet-20241022", "key").with_extra(BTreeMap::from([
++                ("custom_param".to_string(), serde_json::json!({"x": 1})),
++            ]));
++        let mut req = ModelRequest::new();
++        req.add_user_prompt("Hello!");
++        let request = model.build_request(
++            &[req],
++            &ModelSettings::default(),
++            &Default::default(),
++            false,
++        );
++        let wire = serde_json::to_value(&request).unwrap();
++        assert_eq!(wire["custom_param"], serde_json::json!({"x": 1}));
++        assert!(wire.get("extra").is_none());
+     }
+ 
+     #[test]
 diff --git a/vendor/serdes-ai-models/src/anthropic/stream.rs b/vendor/serdes-ai-models/src/anthropic/stream.rs
 index 8623d2c..0ced5fe 100644
 --- a/vendor/serdes-ai-models/src/anthropic/stream.rs
@@ -7566,6 +7633,37 @@ index 8623d2c..0ced5fe 100644
          let stream = stream::iter(bytes);
          let mut parser = AnthropicStreamParser::new(stream);
  
+diff --git a/vendor/serdes-ai-models/src/anthropic/types.rs b/vendor/serdes-ai-models/src/anthropic/types.rs
+index 90bb06a..f6534bd 100644
+--- a/vendor/serdes-ai-models/src/anthropic/types.rs
++++ b/vendor/serdes-ai-models/src/anthropic/types.rs
+@@ -4,6 +4,7 @@
+ 
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value as JsonValue;
++use std::collections::BTreeMap;
+ 
+ // ============================================================================
+ // Request Types
+@@ -48,6 +49,10 @@ pub struct MessagesRequest {
+     /// Extended thinking configuration.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub thinking: Option<ThinkingConfig>,
++    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
++    /// verbatim. Flattened into the request object; absent when empty.
++    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
++    pub extra: BTreeMap<String, serde_json::Value>,
+ }
+ 
+ impl MessagesRequest {
+@@ -67,6 +72,7 @@ impl MessagesRequest {
+             metadata: None,
+             stream: None,
+             thinking: None,
++            extra: BTreeMap::new(),
+         }
+     }
+ }
 diff --git a/vendor/serdes-ai-models/src/antigravity/model.rs b/vendor/serdes-ai-models/src/antigravity/model.rs
 index c98b56f..9ef7c6d 100644
 --- a/vendor/serdes-ai-models/src/antigravity/model.rs
@@ -14651,7 +14749,7 @@ index 97d1a2d..1e6fe0e 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..c07cbf5 100644
+index 9471b5b..d04c7e2 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -14668,8 +14766,11 @@ index 9471b5b..c07cbf5 100644
  use reqwest::Client;
  use serdes_ai_core::messages::{
      ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs,
-@@ -20,8 +19,35 @@ use serdes_ai_core::{
+@@ -18,10 +17,38 @@ use serdes_ai_core::{
+     RequestUsage,
+ };
  use serdes_ai_tools::ToolDefinition;
++use std::collections::BTreeMap;
  use std::time::Duration;
  
 +/// Build the chat-completions URL from a base URL. Only `chat/completions` is
@@ -14705,7 +14806,7 @@ index 9471b5b..c07cbf5 100644
  pub struct OpenAIChatModel {
      model_name: String,
      client: Client,
-@@ -31,6 +57,26 @@ pub struct OpenAIChatModel {
+@@ -31,6 +58,29 @@ pub struct OpenAIChatModel {
      project: Option<String>,
      profile: ModelProfile,
      default_timeout: Duration,
@@ -14719,6 +14820,9 @@ index 9471b5b..c07cbf5 100644
 +pub struct OpenAIChatModelRequestSettings {
 +    /// The dsflash request extension; `None` keeps the wire key absent.
 +    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
++    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
++    /// verbatim and flattened into the request body.
++    pub extra: BTreeMap<String, serde_json::Value>,
 +}
 +
 +impl std::fmt::Debug for OpenAIChatModel {
@@ -14732,7 +14836,7 @@ index 9471b5b..c07cbf5 100644
  }
  
  impl OpenAIChatModel {
-@@ -41,13 +87,18 @@ impl OpenAIChatModel {
+@@ -41,13 +91,18 @@ impl OpenAIChatModel {
  
          Self {
              model_name,
@@ -14752,7 +14856,7 @@ index 9471b5b..c07cbf5 100644
          }
      }
  
-@@ -80,17 +131,17 @@ impl OpenAIChatModel {
+@@ -80,17 +135,17 @@ impl OpenAIChatModel {
          self
      }
  
@@ -14776,11 +14880,20 @@ index 9471b5b..c07cbf5 100644
          self
      }
  
-@@ -364,10 +415,16 @@ impl OpenAIChatModel {
+@@ -338,6 +393,7 @@ impl OpenAIChatModel {
+             ResponseFormat::json_schema("output", schema_value, true)
+         });
+ 
++        let mut request_extra = self.request_settings.extra.clone();
+         ChatCompletionRequest {
+             model: self.model_name.clone(),
+             messages,
+@@ -364,10 +420,17 @@ impl OpenAIChatModel {
              },
              logprobs: None,
              top_logprobs: None,
 +            chat_template_kwargs: self.request_settings.chat_template_kwargs.clone(),
++            extra: std::mem::take(&mut request_extra),
          }
      }
  
@@ -14793,7 +14906,7 @@ index 9471b5b..c07cbf5 100644
      fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
          let choice = resp
              .choices
-@@ -375,6 +432,12 @@ impl OpenAIChatModel {
+@@ -375,6 +438,12 @@ impl OpenAIChatModel {
              .next()
              .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
  
@@ -14806,7 +14919,7 @@ index 9471b5b..c07cbf5 100644
          let mut parts = Vec::new();
  
          // Check for refusal
-@@ -397,22 +460,29 @@ impl OpenAIChatModel {
+@@ -397,22 +466,29 @@ impl OpenAIChatModel {
  
          if let Some(tool_calls) = choice.message.tool_calls {
              for tc in tool_calls {
@@ -14841,7 +14954,7 @@ index 9471b5b..c07cbf5 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -436,42 +506,18 @@ impl OpenAIChatModel {
+@@ -436,42 +512,18 @@ impl OpenAIChatModel {
          })
      }
  
@@ -14894,7 +15007,7 @@ index 9471b5b..c07cbf5 100644
      }
  }
  
-@@ -499,12 +545,16 @@ impl Model for OpenAIChatModel {
+@@ -499,12 +551,16 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -14913,7 +15026,7 @@ index 9471b5b..c07cbf5 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -517,17 +567,14 @@ impl Model for OpenAIChatModel {
+@@ -517,17 +573,14 @@ impl Model for OpenAIChatModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -14937,7 +15050,7 @@ index 9471b5b..c07cbf5 100644
      }
  
      async fn request_stream(
-@@ -540,12 +587,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +593,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -14955,7 +15068,7 @@ index 9471b5b..c07cbf5 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -558,14 +608,14 @@ impl Model for OpenAIChatModel {
+@@ -558,14 +614,14 @@ impl Model for OpenAIChatModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -14976,7 +15089,7 @@ index 9471b5b..c07cbf5 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +632,59 @@ mod tests {
+@@ -582,6 +638,61 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -14989,6 +15102,7 @@ index 9471b5b..c07cbf5 100644
 +                    enable_thinking: true,
 +                    reasoning_effort: Some(ChatTemplateReasoningEffort::High),
 +                }),
++                extra: BTreeMap::new(),
 +            },
 +        );
 +        let request =
@@ -15006,6 +15120,7 @@ index 9471b5b..c07cbf5 100644
 +                    enable_thinking: false,
 +                    reasoning_effort: None,
 +                }),
++                extra: BTreeMap::new(),
 +            },
 +        );
 +        let request = without_effort.build_request(
@@ -15036,7 +15151,7 @@ index 9471b5b..c07cbf5 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +764,94 @@ mod tests {
+@@ -661,4 +772,125 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15129,6 +15244,37 @@ index 9471b5b..c07cbf5 100644
 +        let requests = server.received_requests().await.unwrap();
 +        assert_eq!(requests.len(), 1);
 +        assert!(requests[0].headers.get("authorization").is_none());
++    }
++
++    #[test]
++    fn test_forwarded_extra_flattens_into_request_body() {
++        // A model constructed with forwarded modelParams carries them flattened at the
++        // top level of the serialized body; an empty map keeps them absent.
++        let mut extra = BTreeMap::new();
++        extra.insert("top_k".to_string(), serde_json::json!(42));
++        extra.insert("nested".to_string(), serde_json::json!({"a": 1}));
++        let model = OpenAIChatModel::new("gpt-4o", "key").with_request_settings(
++            OpenAIChatModelRequestSettings {
++                chat_template_kwargs: None,
++                extra,
++            },
++        );
++        let request =
++            model.build_request(&[], &ModelSettings::default(), &Default::default(), false);
++        let wire = serde_json::to_value(&request).unwrap();
++        assert_eq!(wire["top_k"], 42);
++        assert_eq!(wire["nested"], serde_json::json!({"a": 1}));
++
++        let plain = OpenAIChatModel::new("gpt-4o", "key");
++        let wire = serde_json::to_value(plain.build_request(
++            &[],
++            &ModelSettings::default(),
++            &Default::default(),
++            false,
++        ))
++        .unwrap();
++        assert!(wire.get("extra").is_none());
++        assert!(wire.get("top_k").is_none());
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/mod.rs b/vendor/serdes-ai-models/src/openai/mod.rs
@@ -16154,10 +16300,18 @@ index 69518dd..f21e77b 100644
          let stream = stream::iter(bytes);
          let mut parser = OpenAIStreamParser::new(stream);
 diff --git a/vendor/serdes-ai-models/src/openai/types.rs b/vendor/serdes-ai-models/src/openai/types.rs
-index 51c81fd..f2d729c 100644
+index 51c81fd..3be48d2 100644
 --- a/vendor/serdes-ai-models/src/openai/types.rs
 +++ b/vendor/serdes-ai-models/src/openai/types.rs
-@@ -67,6 +67,39 @@ pub struct ChatCompletionRequest {
+@@ -4,6 +4,7 @@
+ 
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value as JsonValue;
++use std::collections::BTreeMap;
+ 
+ // ============================================================================
+ // Request Types
+@@ -67,6 +68,43 @@ pub struct ChatCompletionRequest {
      /// Top log probabilities.
      #[serde(skip_serializing_if = "Option::is_none")]
      pub top_logprobs: Option<u32>,
@@ -16165,6 +16319,10 @@ index 51c81fd..f2d729c 100644
 +    /// supplied it. Every non-dsflash Chat target constructs `None`.
 +    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
++    /// llxprt-code-rs local patch: unrecognized `modelParams` keys forwarded
++    /// verbatim. Flattened into the request object; absent when empty.
++    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
++    pub extra: BTreeMap<String, serde_json::Value>,
 +}
 +
 +/// Bounded reasoning effort accepted inside `chat_template_kwargs`.
@@ -16197,11 +16355,12 @@ index 51c81fd..f2d729c 100644
  }
  
  impl ChatCompletionRequest {
-@@ -92,6 +125,7 @@ impl ChatCompletionRequest {
+@@ -92,6 +130,8 @@ impl ChatCompletionRequest {
              stream_options: None,
              logprobs: None,
              top_logprobs: None,
 +            chat_template_kwargs: None,
++            extra: BTreeMap::new(),
          }
      }
  }

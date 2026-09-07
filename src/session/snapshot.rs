@@ -70,10 +70,10 @@ pub(super) fn load_or_migrate(
                     }
                 }
             };
-            cleanup_legacy(dir)?;
+            cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
             Ok(loaded)
         }
-        None => migrate_legacy(dir, session_id),
+        None => migrate_legacy(dir, session_id), // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     }
 }
 
@@ -191,11 +191,12 @@ pub(super) fn append(
 }
 
 fn migrate_legacy(dir: &openat::Dir, session_id: &str) -> Result<LoadedStore, StoreError> {
-    let state = super::read_legacy_state(dir)?.unwrap_or_else(|| SessionState::empty(session_id));
+    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
+    let state = super::read_flat_state(dir)?.unwrap_or_else(|| SessionState::empty(session_id));
     check_logical_read(&state)?;
     let manifest = initial_manifest(dir, &state, 0, [0; 16], None)?;
     let loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?;
+    cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     Ok(loaded)
 }
 
@@ -212,7 +213,7 @@ fn recover_previous(
         Some(previous),
     )?;
     loaded = load_set(dir, &manifest, &manifest.current, true)?;
-    cleanup_legacy(dir)?;
+    cleanup_legacy(dir)?; // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     Ok(loaded)
 }
 
@@ -566,6 +567,7 @@ fn check_logical_write(state: &SessionState) -> Result<(), StoreError> {
 }
 
 fn cleanup_legacy(dir: &openat::Dir) -> Result<(), StoreError> {
+    // compat-allow: durable snapshot migration, intentional per #135/#179 spelling policy
     let mut changed = false;
     for name in ["session.json", "session.alt.json"] {
         match dir.remove_file(name) {

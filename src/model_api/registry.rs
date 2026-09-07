@@ -1,6 +1,7 @@
 use crate::adapter::{make_adapter, ChatBackend};
 use crate::model::ModelConfig;
 use crate::profile::Profile;
+use crate::settings::DEFAULT_REQUEST_TIMEOUT;
 use serdes_ai_responses::client::OpenResponsesModel;
 
 use super::anthropic_backend::AnthropicBackend;
@@ -23,10 +24,15 @@ pub(crate) fn construct_backend(
     dependencies: &RuntimeDependencies,
     profile_from_file: bool,
     allow_insecure_http: bool,
+    model_params_mode: crate::settings::ModelParamsMode,
 ) -> Result<ConstructedBackend, String> {
     // The provider-layer seam: interpret the neutral parsed profile once, then
     // select the registration row for the resolved target.
     let resolved = crate::model_api::interpret::ResolvedProfile::interpret(profile)?;
+    // The acceptance policy runs after the target resolves: `strict` and
+    // `known-model` refuse unowned keys at load, before credentials are read;
+    // `loose` (default) warns and the provider wire carries them verbatim.
+    apply_model_params_policy(profile, &resolved, model_params_mode)?;
     let registration = dependencies
         .registrations()
         .iter()
@@ -56,6 +62,93 @@ pub(crate) fn construct_backend(
         ),
         ConstructorKind::CodexResponses => construct_codex(profile, &resolved, dependencies),
     }
+}
+
+/// The `modelParams` acceptance policy (issue 64).
+///
+/// `Loose` (default) forwards unrecognized keys on the provider wire and warns for
+/// the keys this build knows but cannot serialize. `KnownModel` compares the
+/// unrecognized keys against the checked-in model registry for the effective provider and
+/// refuses a key the registry does not know. `Strict` refuses every unrecognized or
+/// non-wire key at load.
+fn apply_model_params_policy(
+    profile: &Profile,
+    resolved: &crate::model_api::interpret::ResolvedProfile,
+    mode: crate::settings::ModelParamsMode,
+) -> Result<(), String> {
+    let forwarded: Vec<(String, &serde_json::Value)> = profile
+        .model_params
+        .forwarded
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect();
+    let unsupported: Vec<&String> = profile.model_params.unsupported.iter().collect();
+
+    let refuse = |names: &[String], reason: &str| -> Result<(), String> {
+        if names.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "{reason} unknown or unsupported modelParams key(s): {}",
+            names.join(", ")
+        ))
+    };
+
+    match mode {
+        crate::settings::ModelParamsMode::Loose => {
+            let names: Vec<String> = unsupported.iter().map(|n| n.to_string()).collect();
+            for name in &names {
+                // Unsupported keys cannot reach the wire; name them so the operator
+                // knows they were not forwarded.
+                crate::harness::eprint_status(&format!(
+                    "warning: modelParams key `{name}` cannot be sent to the provider and was not forwarded"
+                ));
+            }
+            let _ = forwarded;
+            Ok(())
+        }
+        crate::settings::ModelParamsMode::KnownModel => {
+            let unknown: Vec<String> = forwarded
+                .iter()
+                .filter(|(name, _)| {
+                    !crate::model_api::model_registry::known_for(resolved.target.provider, name)
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            refuse(&unknown, "known-model mode:")?;
+            let names: Vec<String> = unsupported.iter().map(|n| n.to_string()).collect();
+            for name in &names {
+                crate::harness::eprint_status(&format!(
+                    "warning: modelParams key `{name}` cannot be sent to the provider and was not forwarded"
+                ));
+            }
+            Ok(())
+        }
+        crate::settings::ModelParamsMode::Strict => {
+            let mut names: Vec<String> = forwarded
+                .iter()
+                .map(|(name, _)| name.clone())
+                .chain(unsupported.iter().map(|n| n.to_string()))
+                .collect();
+            names.sort();
+            refuse(&names, "strict mode:")?;
+            Ok(())
+        }
+    }
+}
+
+/// The single request-timeout policy consumed at backend construction. The settings
+/// resolver writes the resolved value onto the profile as provider data
+/// (`ephemeral.timeout_ms`); this helper is the only timeout read in provider code and
+/// falls back to the resolver's `DEFAULT_REQUEST_TIMEOUT` when no layer set one (kept
+/// for direct construction paths such as tests).
+fn resolved_timeout(profile: &Profile) -> std::time::Duration {
+    std::time::Duration::from_millis(
+        profile
+            .ephemeral
+            .timeout_ms
+            .unwrap_or(DEFAULT_REQUEST_TIMEOUT.as_millis() as u64),
+    )
 }
 
 fn construct_chat(
@@ -159,7 +252,7 @@ fn construct_openai_responses(
         api_key: api_key.clone(),
         keyfile_path,
         max_output_tokens: profile.ephemeral.max_output_tokens,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         model_params: Some(profile.model_params.clone()),
         context_limit: profile.ephemeral.context_limit,
     };
@@ -167,12 +260,12 @@ fn construct_openai_responses(
     let model = serdes_ai::models::openai::OpenAIResponsesModel::new(&profile.model, api_key)
         .with_base_url(responses_transport_base(&endpoint))
         .with_settings(draft.finalize(session_id))
-        .with_timeout(std::time::Duration::from_secs(900));
+        .with_timeout(resolved_timeout(profile));
     let model_settings = serdes_ai::ModelSettings {
         max_tokens: profile.ephemeral.max_output_tokens,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         ..Default::default()
     };
     crate::limits::validate_timeout(model_settings.timeout)?;
@@ -245,7 +338,7 @@ fn construct_anthropic(
         )
         .map_err(|error| error.to_string())?,
     };
-    let timeout = std::time::Duration::from_millis(profile.ephemeral.timeout_ms.unwrap_or(900_000));
+    let timeout = resolved_timeout(profile);
     let secret_config = ModelConfig {
         model: profile.model.clone(),
         base_url: crate::profile::RedactedUrl::parse(base_url)?,
@@ -259,9 +352,12 @@ fn construct_anthropic(
     let secret_values = secret_config.secret_values();
     let model_settings = anthropic_model_settings(profile, timeout);
     crate::limits::validate_timeout(model_settings.timeout)?;
-    let model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
+    let mut model = serdes_ai::models::anthropic::AnthropicModel::new(&profile.model, api_key)
         .with_base_url(base_url.trim_end_matches('/'))
         .with_timeout(timeout);
+    // Unrecognized `modelParams` keys travel as a flattened extra map on each
+    // Messages request body (issue 64).
+    model = model.with_extra(profile.model_params.forwarded.clone());
     let prompt_caching = resolved
         .anthropic
         .as_ref()
@@ -366,7 +462,7 @@ fn codex_model_settings(profile: &Profile) -> serdes_ai::ModelSettings {
         max_tokens: None,
         temperature: profile.model_params.temperature,
         top_p: profile.model_params.top_p,
-        timeout: Some(std::time::Duration::from_secs(900)),
+        timeout: Some(resolved_timeout(profile)),
         ..Default::default()
     }
 }

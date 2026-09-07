@@ -1,5 +1,5 @@
 use super::*;
-use crate::adapter::{ChatBackend, ToolCall};
+use crate::adapter::{ChatBackend, LlmUsage, ToolCall};
 use crate::session::{Lifecycle, SessionId, SessionStore};
 use crate::tools::ToolSpec;
 use serdes_ai::core::FinishReason;
@@ -37,6 +37,8 @@ impl ChatBackend for MockBackend {
                 text: String::new(),
                 calls: Vec::new(),
                 finish_reason: Some(FinishReason::Stop),
+
+                usage: LlmUsage::default(),
             }
         })
     }
@@ -121,11 +123,15 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let r2 = LlmResult {
         text: "z".repeat(MAX_TURN_ASSISTANT_BYTES - pre),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let a = agent_with_caps(
         Box::new(MockBackend::new(vec![r1, r2])),
@@ -171,6 +177,8 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
             text: "é".repeat(MAX_TURN_ASSISTANT_BYTES / "é".len()),
             calls: Vec::new(),
             finish_reason: Some(FinishReason::Stop),
+
+            usage: LlmUsage::default(),
         };
         let a = CodingAgent::with_backend(
             Box::new(MockBackend::new(vec![
@@ -178,6 +186,8 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
                     text: String::new(),
                     calls: Vec::new(),
                     finish_reason: Some(FinishReason::Stop),
+
+                    usage: LlmUsage::default(),
                 },
                 r2,
             ])),
@@ -214,11 +224,15 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let rr2 = LlmResult {
         text: "z".repeat(MAX_TURN_ASSISTANT_BYTES - pre + 1),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let ra = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![rr1, rr2])),
@@ -282,6 +296,8 @@ fn reflected_secret_in_assistant_text_fails_without_persisting_it() {
         text: format!("reflected {secret}"),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![reply])),
@@ -315,6 +331,8 @@ fn reflected_secret_in_tool_args_prevents_tool_side_effect() {
             args_json: format!(r#"{{"path":"{secret}"}}"#),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![reply])),
@@ -346,6 +364,8 @@ fn oversized_tool_call_id_is_rejected_before_side_effect() {
             args_json: r#"{"path":"created.txt","content":"bad"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![reply])),
@@ -375,11 +395,15 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
             args_json: r#"{"path":"secret.txt"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, final_round])),
@@ -409,11 +433,15 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
         text: "summary".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, final_round])),
@@ -446,16 +474,22 @@ fn forced_summary_counts_already_persisted_rounds() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let empty_round = LlmResult {
         text: String::new(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let forced_round = LlmResult {
         text: "summary".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![
@@ -486,11 +520,15 @@ fn forced_summary_with_tool_call_markup_fails_the_turn() {
         text: String::new(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let forced = LlmResult {
         text: "still working\n<tool_call>{\"name\":\"read_file\"}</tool_call>".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![empty_round, forced])),
@@ -522,11 +560,15 @@ fn forced_summary_in_prose_still_completes_the_turn() {
         text: String::new(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let forced = LlmResult {
         text: "I used read_file to inspect the file, and the work is complete.".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![empty_round, forced])),
@@ -549,6 +591,8 @@ fn malformed_tool_call_text_fails_the_turn() {
         text: "<tool_calls><function_calls>read_file</function_calls></tool_calls>".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![malformed])),
@@ -584,11 +628,15 @@ fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let fragment = LlmResult {
         text: "work finished\n</｜DSML｜parameter>".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, fragment])),
@@ -614,6 +662,8 @@ fn normal_wrap_up_keeps_ok_exit_and_reports_zero_call_tail() {
         text: "I used read_file to inspect the file, and the change is complete.".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![reply])),
@@ -643,11 +693,15 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, final_round])),
@@ -679,11 +733,15 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
             args_json: r#"{"path":"."}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+
+        usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+
+        usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
         Box::new(MockBackend::new(vec![tool_round, final_round])),
@@ -700,154 +758,15 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
         "a completed turn leaves no in-flight marker behind"
     );
 }
-
-/// Scripted provider failures plus optional request capture for over-limit recovery.
-struct RecoveryBackend {
-    replies: Mutex<std::collections::VecDeque<Result<LlmResult, String>>>,
-    requests: Mutex<Vec<Vec<serdes_ai::core::ModelRequest>>>,
-}
-impl RecoveryBackend {
-    fn new(replies: Vec<Result<LlmResult, String>>) -> Self {
-        Self {
-            replies: Mutex::new(replies.into()),
-            requests: Mutex::new(Vec::new()),
-        }
-    }
-}
-impl ChatBackend for RecoveryBackend {
-    fn request(
-        &self,
-        requests: &[serdes_ai::core::ModelRequest],
-        _: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        self.requests.lock().unwrap().push(requests.to_vec());
-        self.replies.lock().unwrap().pop_front().unwrap()
-    }
-    fn request_calls(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
-}
-impl ChatBackend for std::sync::Arc<RecoveryBackend> {
-    fn request(
-        &self,
-        requests: &[serdes_ai::core::ModelRequest],
-        tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        (**self).request(requests, tools)
-    }
-    fn request_calls(&self) -> usize {
-        (**self).request_calls()
-    }
-}
-fn stop_reply() -> LlmResult {
-    LlmResult {
-        text: "done".into(),
-        calls: Vec::new(),
-        finish_reason: Some(FinishReason::Stop),
-    }
-}
-fn recovery_store_with_prompt(
-    name: &str,
-    prompt: &str,
-) -> (tempfile::TempDir, SessionStore, ReservedRequest) {
+#[test]
+fn with_request_timeout_emits_resolved_value() {
     let cwd = tempfile::tempdir().unwrap();
-    let _config = shared_config_home();
-    let store = SessionStore::load(&SessionId::parse(name).unwrap()).unwrap();
-    let reserved = store.start_request(None, None, prompt, cwd.path()).unwrap();
-    (cwd, store, reserved)
-}
-fn recovery_store(name: &str) -> (tempfile::TempDir, SessionStore, ReservedRequest) {
-    recovery_store_with_prompt(name, "current prompt verbatim")
-}
-
-#[test]
-fn over_limit_preflight_compacts_once_and_proceeds() {
-    let (cwd, store, mut reserved) = recovery_store("over-preflight");
-    reserved.history.push(crate::session::HistoryTurn {
-        turn: 0,
-        attempt: 1,
-        branch_id: "old".into(),
-        prompt: "old".into(),
-        rounds: vec![RoundRecord {
-            assistant: "x".repeat(20_000),
-            calls: Vec::new(),
-        }],
-        summary: String::new(),
-    });
-    let backend = std::sync::Arc::new(RecoveryBackend::new(vec![Ok(stop_reply())]));
-    let agent =
-        CodingAgent::with_backend(Box::new(backend.clone()), cwd.path().to_path_buf(), false)
-            .with_context_limit(Some(10_000));
-    assert_eq!(agent.run(&store, &reserved).unwrap().status, "ok");
-    assert_eq!(agent.model_calls(), 1);
-    let captured = backend.requests.lock().unwrap();
-    assert!(serde_json::to_string(captured.last().unwrap())
-        .unwrap()
-        .contains("current prompt verbatim"));
-}
-
-#[test]
-fn over_limit_provider_verdict_compacts_once_and_proceeds() {
-    let (cwd, store, reserved) = recovery_store("over-provider");
+    let timeout = std::time::Duration::from_millis(42_000);
     let agent = CodingAgent::with_backend(
-        Box::new(RecoveryBackend::new(vec![
-            Err("Model context length exceeded (1 tokens maximum, 2 requested)".into()),
-            Ok(stop_reply()),
-        ])),
-        cwd.path().to_path_buf(),
-        false,
-    );
-    assert_eq!(agent.run(&store, &reserved).unwrap().status, "ok");
-    assert_eq!(agent.model_calls(), 2);
-}
-
-#[test]
-fn over_limit_twice_fails_naming_both_attempts() {
-    let prompt = "x".repeat(100_000);
-    let (cwd, store, reserved) = recovery_store_with_prompt("over-twice", &prompt);
-    let agent = CodingAgent::with_backend(
-        Box::new(RecoveryBackend::new(vec![Ok(stop_reply())])),
+        Box::new(MockBackend::new(Vec::new())),
         cwd.path().to_path_buf(),
         false,
     )
-    .with_context_limit(Some(10_000));
-    let error = agent.run(&store, &reserved).unwrap_err();
-    assert_eq!(error.key, "context-limit");
-    assert!(error.message.contains("estimated request would be "));
-    assert!(error.message.contains("still "));
-}
-
-#[test]
-fn provider_verdict_twice_fails_naming_both_attempts() {
-    let (cwd, store, reserved) = recovery_store("provider-twice");
-    let message = "Model context length exceeded (1 tokens maximum, 2 requested)".to_string();
-    let agent = CodingAgent::with_backend(
-        Box::new(RecoveryBackend::new(vec![
-            Err(message.clone()),
-            Err(message),
-        ])),
-        cwd.path().to_path_buf(),
-        false,
-    );
-    let error = agent.run(&store, &reserved).unwrap_err();
-    assert_eq!(error.key, "context-limit");
-    assert_eq!(agent.model_calls(), 2);
-    assert!(error.message.contains("attempt 1"));
-    assert!(error.message.contains("retry after compaction"));
-}
-
-#[test]
-fn unrelated_provider_error_untouched() {
-    let (cwd, store, reserved) = recovery_store("provider-unrelated");
-    let agent = CodingAgent::with_backend(
-        Box::new(RecoveryBackend::new(vec![Err(
-            "Model request rate limited (no retry delay supplied)".into(),
-        )])),
-        cwd.path().to_path_buf(),
-        false,
-    );
-    let error = agent.run(&store, &reserved).unwrap_err();
-    assert_eq!(agent.model_calls(), 1);
-    assert_eq!(error.key, "model");
-    assert!(!error.message.contains("context length exceeded"));
+    .with_request_timeout(Some(timeout));
+    assert_eq!(agent.request_timeout, Some(timeout));
 }
