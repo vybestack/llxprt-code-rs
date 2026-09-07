@@ -654,7 +654,7 @@ fn shared_settings_root_no_longer_blocks_startup() {
         "http://127.0.0.1:1/v1"
     );
     assert_eq!(resolved["provider"]["base_url"]["source"], "profile");
-    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 16);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 256);
 
     // A real run must read the shared settings before the valid profile reaches the
     // refused loopback endpoint.
