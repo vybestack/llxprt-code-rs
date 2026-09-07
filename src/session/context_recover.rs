@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::session::context_persist::{
     context_dir, ensure_vault_key, new_context_state, ContextState, PersistedManifest,
-    CHECKPOINT_RELOAD_MAX, EVENTS_RELOAD_MAX, JOURNAL_RELOAD_MAX, MANIFEST_RELOAD_MAX,
-    SPINE_RELOAD_MAX, VAULT_RELOAD_MAX,
+    CHECKPOINT_RELOAD_MAX, CONTEXT_COMMITTED_DIR, CONTEXT_PREV_DIR, CONTEXT_STAGE_DIR,
+    EVENTS_RELOAD_MAX, JOURNAL_RELOAD_MAX, MANIFEST_RELOAD_MAX, SPINE_RELOAD_MAX, VAULT_RELOAD_MAX,
 };
 use crate::session::{open_regular_at, SessionStore};
 
@@ -21,9 +21,15 @@ use crate::session::{open_regular_at, SessionStore};
 /// surfaced to the caller instead of a degraded restart (issue #102).
 pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState, String> {
     let key = ensure_vault_key(store)?;
-    let dir = match context_dir(store) {
-        Ok(dir) => dir,
-        Err(_) => return Ok(new_context_state(key)),
+    let (dir, generation) = match open_committed_generation(store) {
+        Ok(Some(found)) => found,
+        // No committed slot: the flat pre-generation layout earlier builds
+        // wrote, which still loads exactly as it did before (issue 137).
+        Ok(None) => match context_dir(store) {
+            Ok(dir) => (dir, 0),
+            Err(_) => return Ok(new_context_state(key)),
+        },
+        Err(reason) => return Err(reason),
     };
     let spine_bytes = match crate::safe_file::read_artifact(&dir, "sanitized", SPINE_RELOAD_MAX) {
         Ok(bytes) => bytes,
@@ -40,6 +46,7 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
         Err(error) => return Err(format!("context spine unreadable: {error}")),
     };
     let mut state = new_context_state(key);
+    state.generation = generation;
     state
         .store
         .load_spine_typed(&spine_bytes)
@@ -70,6 +77,59 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
         state.policy.restore_terminal_outcome(outcome, saturated);
     }
     Ok(state)
+}
+
+/// Opens the generation a recovering process must read (issue 137): the
+/// committed slot when it exists and its manifest validates, the previous slot
+/// when the committed one is torn, and nothing when the session still uses the
+/// flat pre-generation layout.
+///
+/// `.stage/` is never read: it is the half-written NEXT generation, and a crash
+/// between its artifact writes is exactly the mixed generation the slot
+/// rotation exists to make impossible.
+fn open_committed_generation(store: &SessionStore) -> Result<Option<(openat::Dir, u64)>, String> {
+    let context = store.session_dir.join("context");
+    let committed = context.join(CONTEXT_COMMITTED_DIR);
+    if !committed.is_dir() {
+        return Ok(None);
+    }
+    match validate_generation(&committed) {
+        Ok(generation) => {
+            // A stage that survived a crash is garbage now that the committed
+            // generation exists; the next publication removes it anyway.
+            let _ = std::fs::remove_dir_all(context.join(CONTEXT_STAGE_DIR));
+            let dir = openat::Dir::open(&committed)
+                .map_err(|error| format!("open committed context generation failed: {error}"))?;
+            Ok(Some((dir, generation)))
+        }
+        // A torn committed slot never loads as a mix: recovery falls back to
+        // the last known-good generation, and fails closed when there is none.
+        Err(reason) => {
+            let previous = context.join(CONTEXT_PREV_DIR);
+            if previous.is_dir() {
+                if let Ok(generation) = validate_generation(&previous) {
+                    let dir = openat::Dir::open(&previous).map_err(|error| {
+                        format!("open previous context generation failed: {error}")
+                    })?;
+                    return Ok(Some((dir, generation)));
+                }
+            }
+            Err(format!("context committed generation is torn: {reason}"))
+        }
+    }
+}
+
+/// Reads one generation slot's manifest and returns the generation it names:
+/// a missing or unparsable manifest is a torn publication, never a fresh
+/// store (issue 137).
+fn validate_generation(dir: &Path) -> Result<u64, String> {
+    let handle = openat::Dir::open(dir)
+        .map_err(|error| format!("open context generation failed: {error}"))?;
+    let bytes = crate::safe_file::read_artifact(&handle, "manifest.json", MANIFEST_RELOAD_MAX)
+        .map_err(|error| format!("context manifest unreadable: {error}"))?;
+    let manifest: PersistedManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("context manifest corrupt: {error}"))?;
+    Ok(manifest.generation)
 }
 
 /// Recovers the durable quiesce marker written beside the session when the
