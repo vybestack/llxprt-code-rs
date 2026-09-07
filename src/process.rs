@@ -30,6 +30,11 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+mod process_launch;
+#[cfg(test)]
+use process_launch::cfg_launch_test_barrier;
+use process_launch::{cfg_launch_close_parent_ends, cfg_launch_handoff, LaunchHandoff};
+
 /// Everything the runner needs to spawn and bound one command.
 pub struct CmdSpec {
     pub program: String,
@@ -236,18 +241,35 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
         cmd.current_dir(d);
     }
     scrub_env(&mut cmd, &spec.env_add);
+    let launch_handoff = LaunchHandoff::new()?;
     // Test-only: deterministic launch/publication interleaving, installed after the guard.
+    cfg_launch_close_parent_ends(
+        &mut cmd,
+        launch_handoff.parent_ends_in_child(),
+        #[cfg(test)]
+        launch_handoff.test_gate_parent_write(),
+    );
     #[cfg(test)]
-    cfg_launch_test_barrier(&mut cmd);
+    cfg_launch_test_barrier(&mut cmd, launch_handoff.test_gate_read());
+    cfg_launch_handoff(&mut cmd, &launch_handoff);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let (deadline, escalation_deadline) = command_deadlines(Instant::now(), spec.timeout)?;
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn {} failed: {e}", spec.program))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            launch_handoff.finish();
+            // The coordinator can have published before a later pre-exec/exec failure reaches
+            // `Command::spawn`; no guard exists on this error path to clear its slot.
+            ACTIVE_GROUP.store(0, Ordering::SeqCst);
+            return Err(format!("spawn {} failed: {error}", spec.program));
+        }
+    };
+    launch_handoff.finish();
 
-    // Publish the child's process group so a cancellation signal can kill the whole tool tree.
+    // The launch handoff published the child's process group before allowing exec. Retain the
+    // registration through supervision so a cancellation can kill the whole tool tree.
     // The guard clears the registration on every exit path, so a stale group is never signalled
     // after the run that owned it has finished.
     let _active = ActiveGroupGuard::register(child.id() as i32, run_lock);
@@ -548,57 +570,9 @@ fn cfg_parent_death_guard(parent_pid: libc::pid_t) -> std::io::Result<()> {
     Ok(())
 }
 
-/// macOS has no equivalent parent-death signal. Its existing process-group handler continues to
-/// cover published commands; the race-free launch handoff is provided on Linux.
 #[cfg(not(target_os = "linux"))]
 fn cfg_parent_death_guard(_parent_pid: libc::pid_t) -> std::io::Result<()> {
     Ok(())
-}
-
-/// Test-only pre-exec gate. It runs after `setsid` and the Linux guard but before exec; the test
-/// cancels the worker after reading this marker, proving an unpublished child cannot survive.
-#[cfg(test)]
-fn cfg_launch_test_barrier(cmd: &mut Command) {
-    use std::ffi::CString;
-    use std::os::unix::{ffi::OsStrExt, process::CommandExt};
-
-    let Some(marker) = std::env::var_os("LLXPRT_TEST_LAUNCH_READY") else {
-        return;
-    };
-    let marker = CString::new(marker.as_bytes()).expect("launch test marker contains no NUL");
-    // Safety: syscall-only work in the post-fork child. This hook is appended after `cfg_setsid`.
-    unsafe {
-        cmd.pre_exec(move || {
-            let fd = libc::open(
-                marker.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
-                0o600,
-            );
-            if fd == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            let mut pid = libc::getpid() as u32;
-            let mut digits = [0_u8; 10];
-            let mut start = digits.len();
-            loop {
-                start -= 1;
-                digits[start] = b'0' + (pid % 10) as u8;
-                pid /= 10;
-                if pid == 0 {
-                    break;
-                }
-            }
-            let length = digits.len() - start;
-            let written = libc::write(fd, digits[start..].as_ptr().cast(), length);
-            libc::close(fd);
-            if written != length as isize {
-                return Err(std::io::Error::last_os_error());
-            }
-            loop {
-                libc::pause();
-            }
-        });
-    }
 }
 
 /// Bind the child's working directory to the retained workspace descriptor between fork and

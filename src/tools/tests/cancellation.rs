@@ -3,9 +3,7 @@
 use std::time::Duration;
 
 const CANCELLATION_CHILD: &str = "LLXPRT_TEST_CANCELLATION_CHILD";
-#[cfg(target_os = "linux")]
 const LAUNCH_READY: &str = "LLXPRT_TEST_LAUNCH_READY";
-#[cfg(target_os = "linux")]
 const LAUNCH_SIDE_EFFECT: &str = "LLXPRT_TEST_LAUNCH_SIDE_EFFECT";
 
 fn spawn_cancellation_child() -> std::process::Child {
@@ -22,7 +20,6 @@ fn spawn_cancellation_child() -> std::process::Child {
         .unwrap()
 }
 
-#[cfg(target_os = "linux")]
 fn spawn_launch_cancellation_child(
     marker: &std::path::Path,
     side_effect: &std::path::Path,
@@ -170,7 +167,6 @@ fn group_has_live_member(pgid: libc::pid_t, cohort: Option<u64>) -> Option<bool>
 }
 
 /// Deliberately reach the pre-exec barrier before `run_cmd` has a `Child` to register.
-#[cfg(all(test, target_os = "linux"))]
 #[test]
 fn cancelling_during_launch_subprocess_helper() {
     if std::env::var_os(LAUNCH_READY).is_none() {
@@ -218,9 +214,7 @@ fn cancelling_the_worker_subprocess_helper() {
     let _ = crate::process::run_sh("sleep 30", None, Duration::from_secs(60), 1024, Vec::new());
 }
 
-/// The marker is written after `setsid` and the child-side parent-death guard, but while
-/// `Command::spawn` is blocked before the parent can publish `ACTIVE_GROUP`.
-#[cfg(target_os = "linux")]
+/// The marker is written after `setsid`, but while the child cannot reach the launch handoff.
 #[test]
 fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
     let directory = tempfile::tempdir().unwrap();
@@ -247,16 +241,35 @@ fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
         0
     );
     assert_eq!(worker.wait().unwrap().code(), Some(143));
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if matches!(proc_stat(pgid), None | Some((b'Z', _, _, _))) {
-            break;
+    #[cfg(target_os = "linux")]
+    {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if matches!(proc_stat(pgid), None | Some((b'Z', _, _, _))) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unpublished child {pgid} survived worker cancellation"
+            );
+            std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "unpublished child {pgid} survived worker cancellation"
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while unsafe { libc::kill(pgid, 0) } == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "unpublished child {pgid} survived worker cancellation"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH),
+            "launch child {pgid} probe failed unexpectedly"
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(
         !side_effect.exists(),
