@@ -109,9 +109,25 @@ fn unresolved_layer_defers_downward() {
     assert_eq!(got.paths.config_root.source, Source::UserFile);
 }
 #[test]
-fn unknown_settings_json_key_is_error() {
+fn foreign_top_level_settings_keys_are_ignored() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join("settings.json"), r#"{"unknown": true}"#).unwrap();
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"ui": {"theme": "Green Screen"}, "oauthEnabledProviders": {"codex": true}, "provider": {"model": "test-model"}}"#,
+    )
+    .unwrap();
+    let layer = load_user_file(temp.path()).unwrap();
+    assert_eq!(layer.provider.model, Some("test-model".into()));
+}
+
+#[test]
+fn unknown_key_inside_owned_namespace_is_error() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"provider": {"base-url": "http://x", "bogus": 1}}"#,
+    )
+    .unwrap();
     assert!(load_user_file(temp.path())
         .unwrap_err()
         .contains("unknown field"));

@@ -6,7 +6,12 @@ use std::path::Path;
 const MAX_SETTINGS_FILE_BYTES: usize = 4096;
 
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+// Shared multi-tool root: the rs resolver owns exactly `provider`, `budgets`,
+// and `paths`. Foreign top-level keys (e.g. the TS app's `ui`,
+// `oauthEnabledProviders`) are deliberately ignored here, so there is no
+// `deny_unknown_fields` on this struct; the owned sub-objects below keep their
+// own `deny_unknown_fields`, so an unknown key inside a namespace stays a hard
+// error.
 struct File {
     #[serde(default)]
     provider: SettingsProvider,
