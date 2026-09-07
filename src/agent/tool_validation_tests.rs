@@ -49,6 +49,50 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
 }
 
 #[test]
+fn unknown_tool_refusal_counts_toward_the_tool_budget() {
+    let cwd = tempfile::tempdir().unwrap();
+    let _config = shared_config_home();
+    let store = SessionStore::load(&SessionId::parse("unknown-tool-budget").unwrap()).unwrap();
+    let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+    let unknown = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "unknown-1".into(),
+            name: "search_file_command".into(),
+            args_json: r#"{"path":".","pattern":"x"}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let read = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "read-1".into(),
+            name: "read_file".into(),
+            args_json: r#"{"path":"missing"}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let done = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(vec![unknown, read, done])),
+        cwd.path().to_path_buf(),
+        false,
+    )
+    .with_max_tool_calls(Some(2));
+    let run = agent.run(&store, &reserved).unwrap();
+    assert_eq!(run.status, "ok");
+    // The hallucinated name and the valid call both consume budget.
+    assert_eq!(run.tool_count, 2);
+    let round = &store.snapshot().unwrap().branches[0].rounds[0];
+    assert_eq!(round.calls.len(), 1);
+    assert_eq!((round.calls[0].ok, round.calls[0].refused), (false, true));
+}
+
+#[test]
 fn disabled_shell_tool_gets_corrective_result() {
     let cwd = tempfile::tempdir().unwrap();
     let _config = shared_config_home();
