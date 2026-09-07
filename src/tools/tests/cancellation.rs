@@ -57,6 +57,22 @@ fn cancelling_the_worker_subprocess_helper() {
 
 #[test]
 fn cancelling_the_worker_kills_the_active_tool_group() {
+    // On Linux, make this test process a child subreaper so that descendants orphaned by the
+    // terminated helper (the `setsid` group leader, in particular) reparent to *us* instead of
+    // to a CI runner agent. Runner agents are subreapers that do not promptly reap foreign
+    // orphans, so the killed group leader can linger as a zombie — and `kill(pgid, 0)` reports
+    // zombies as alive. Adopting the chain lets us reap it ourselves below.
+    #[cfg(target_os = "linux")]
+    {
+        // Safety: prctl with a valid option and integer argument; see PR_SET_CHILD_SUBREAPER(2).
+        let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
+        assert_eq!(
+            rc,
+            0,
+            "PR_SET_CHILD_SUBREAPER failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
     let mut child = spawn_cancellation_child();
     let pgid = read_reported_pgid(&mut child);
     // Let the helper settle into its supervised wait before cancelling it.
@@ -68,6 +84,9 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
+        // Non-blocking reap of the (possibly adopted) former group leader. ECHILD before
+        // adoption completes, or on non-Linux, is harmless and ignored.
+        let _ = unsafe { libc::waitpid(pgid, std::ptr::null_mut(), libc::WNOHANG) };
         // Safety: signal zero only probes whether the tool's process group still exists.
         if unsafe { libc::kill(pgid, 0) } == -1
             && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
