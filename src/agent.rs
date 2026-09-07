@@ -132,8 +132,8 @@ mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
-    final_summary_request, refuse_over_budget, refuse_unknown_tools, split_over_budget,
-    tool_call_record, validate_provider_result,
+    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
+    validate_provider_result,
 };
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
@@ -453,71 +453,6 @@ impl CodingAgent {
         Ok(())
     }
 
-    /// Execute one tool call of a round and record it. `index`/`total` decide
-    /// whether the budget notice rides on this result (last call of the round).
-    /// Failures carry their kind so the caller keeps the right error code.
-    fn execute_one_call(
-        &self,
-        config: &crate::tools::ToolConfig,
-        store: &SessionStore,
-        attempt: &mut AttemptState,
-        round: &mut RoundRecord,
-        call: &ToolCall,
-        position: (usize, usize),
-    ) -> Result<(), ToolCallFailure> {
-        // `position` is `(index, total)` packed into one argument so the call site and
-        // the signature stay inside clippy's argument budget now that the session store
-        // handle is threaded in for pre-entry compaction.
-        let (index, total) = position;
-        let remaining_output = self
-            .output_caps
-            .turn
-            .saturating_sub(attempt.usage.output_bytes);
-        if remaining_output == 0 {
-            return Err(ToolCallFailure::OutputCap);
-        }
-        let parsed = parse_object_args(call).map_err(ToolCallFailure::Invalid)?;
-        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-            &self.cwd,
-            &call.name,
-            parsed,
-            config,
-            remaining_output,
-        );
-        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
-        attempt.usage.total_calls += 1;
-        let notice = if index + 1 == total {
-            budget_notice(self.max_tool_calls, attempt.usage.total_calls)
-        } else {
-            String::new()
-        };
-        // The notice must survive truncation, so reserve its bytes (plus the blank
-        // line that carries it) first; with no notice there is nothing to reserve.
-        let body_budget = if notice.is_empty() {
-            remaining_output
-        } else {
-            remaining_output.saturating_sub(notice.len().saturating_add(2))
-        };
-        let text = crate::redact::truncate_utf8(scrubbed, body_budget);
-        let text = if notice.is_empty() {
-            text
-        } else {
-            format!("{text}\n\n{notice}")
-        };
-        // Pre-entry compaction (#39): a bulk tool result is digested before it joins the
-        // request list and the round, so neither the next provider request nor the
-        // checkpointed transcript ever carries raw bulk bytes.
-        let text = store
-            .compact_tool_result(&call.name, &text)
-            .map_err(|error| ToolCallFailure::Invalid(error.to_string()))?;
-        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-        attempt
-            .requests
-            .push(tool_return_request(&call.name, &call.id, ok, &text));
-        round.calls.push(tool_call_record(call, ok, text));
-        Ok(())
-    }
-
     fn request_next_round(
         &self,
         store: &SessionStore,
@@ -692,9 +627,9 @@ impl CodingAgent {
         rounds: &[RoundRecord],
         forced: &LlmResult,
     ) -> Result<(), AgentError> {
-        let (calls, refused) = validate_calls(ids, forced, self.allow_shell)
+        let calls = validate_calls(ids, forced)
             .map_err(|error| self.dead(store, reserved, "invalid-tool-call", &error, rounds))?;
-        if !calls.is_empty() || !refused.is_empty() {
+        if !calls.is_empty() {
             return Err(self.dead(
                 store,
                 reserved,
@@ -977,3 +912,6 @@ mod tool_validation_tests;
 
 #[cfg(test)]
 mod over_limit_tests;
+
+#[cfg(test)]
+mod naming_recovery_tests;

@@ -220,11 +220,11 @@ fn validator_accepts_refused_unknown_tool_record() {
 }
 
 #[test]
-fn validator_rejects_unknown_tool_record_without_refusal_flag() {
+fn validator_accepts_charged_unknown_tool_failure() {
     let mut state = valid_state();
     let call = &mut state.branches[0].rounds[0].calls[0];
     call.name = "search_file_command".into();
     call.ok = false;
     call.refused = false;
-    assert!(corruption_message(&state).contains("unknown tool name"));
+    state.validate().unwrap();
 }
