@@ -5,6 +5,10 @@ pub fn run_profiled(
     args: Args,
     profiler: Option<crate::memory_profile::Profiler>,
 ) -> Result<RunOutcome, AppError> {
+    // Issue 88: install the cancellation handlers before anything else so a `kill -TERM` on this
+    // worker takes the active tool's process group with it. Best-effort; a platform that rejects
+    // the registration still runs the turn.
+    let _ = crate::process::install_cancellation_signal_handlers();
     let session_id =
         SessionId::parse(&args.session).map_err(|m| AppError::new(Code::Usage, "session", m))?;
     // Validate raw CLI limits before reading a prompt or resolving settings.  In
