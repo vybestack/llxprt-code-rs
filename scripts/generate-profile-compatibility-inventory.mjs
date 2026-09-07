@@ -992,15 +992,13 @@ function renderMarkdown(artifact) {
   for (const e of artifact.inventory.entries) {
     const sources = (e.applicationPaths ?? []).map((a) => a.split('/').pop()).join(', ');
     push(`| \`${e.key}\` | ${e.type ?? 'declared'} | ${(e.aliases ?? []).map((a) => '`' + a + '`').join(', ')} | ${sources} |`);
-    if (e.key === 'shell-max-timeout-seconds') {
-      push();
-      push('Shell timeout compatibility: `shell-default-timeout-seconds` and');
-      push('`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to');
-      push('120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy');
-      push('ceiling), and the default may not exceed the maximum. A requested per-call timeout');
-      push('above the configured maximum is clamped and reports its requested and effective values.');
-    }
   }
+  push();
+  push('Shell timeout compatibility: `shell-default-timeout-seconds` and');
+  push('`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to');
+  push('120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy');
+  push('ceiling), and the default may not exceed the maximum. A requested per-call timeout');
+  push('above the configured maximum is clamped and reports its requested and effective values.');
   push();
   push(`## In-scope installed profile disposition (${c.installedInScope} fixtures)`);
   push();

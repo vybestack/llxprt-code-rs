@@ -2,8 +2,7 @@ use super::*;
 use serde_json::json;
 use std::time::Duration;
 
-/// An exact read limit of 0 bytes returns no content and is never a panic, and a
-/// limit larger than the file returns the whole file with no truncation marker.
+/// Default and explicit timeouts keep ordinary, unclamped success output unchanged.
 #[test]
 fn shell_timeout_defaults_clamps_and_reports_effective_value() {
     let d = tempfile::tempdir().unwrap();
@@ -17,7 +16,7 @@ fn shell_timeout_defaults_clamps_and_reports_effective_value() {
             allow_shell: true,
         },
     };
-    // Omitted timeout uses the configured default and ordinary success text stays unchanged.
+    // Immediate success checks output compatibility, not default-timeout enforcement.
     let (ok, output) = execute_tool(
         d.path(),
         "run_shell_command",
@@ -150,5 +149,79 @@ fn shell_unlimited_timeout_uses_the_maximum_and_rejects_other_nonpositive_values
             "{output}"
         );
         assert!(!marker.exists(), "invalid timeout must reject before spawn");
+    }
+}
+
+/// Unlike immediate printf, this fails if omitted timeout resolves to the maximum.
+#[test]
+fn shell_omitted_timeout_enforces_default_and_cleans_up_group() {
+    let d = tempfile::tempdir().unwrap();
+    let config = ToolConfig {
+        ws: WorkspaceCap::open(d.path()).unwrap(),
+        max_output_bytes: 1024,
+        shell: ShellConfig {
+            default_shell_timeout: Duration::from_secs(1),
+            max_shell_timeout: Duration::from_secs(4),
+            max_shell_output: 1024,
+            allow_shell: true,
+        },
+    };
+    let marker = d.path().join("must-not-survive-default");
+    let start = std::time::Instant::now();
+    let (ok, output) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command": "(sleep 3; touch must-not-survive-default) & wait"}),
+        &config,
+    );
+    assert!(!ok, "omitted timeout must enforce the default: {output}");
+    assert_eq!(output, "command timed out after 1000 ms; output:\n");
+    assert!(start.elapsed() < Duration::from_secs(3));
+    // Wait past the descendant's side-effect opportunity, not just until timeout.
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        !marker.exists(),
+        "default timeout must clean up descendants"
+    );
+}
+
+#[test]
+fn shell_clamp_disclosure_survives_capped_large_output() {
+    let d = tempfile::tempdir().unwrap();
+    let config = ToolConfig {
+        ws: WorkspaceCap::open(d.path()).unwrap(),
+        max_output_bytes: 1024,
+        shell: ShellConfig {
+            default_shell_timeout: Duration::from_secs(2),
+            max_shell_timeout: Duration::from_secs(3),
+            max_shell_output: 1024,
+            allow_shell: true,
+        },
+    };
+    for (requested, label) in [(99, "99s"), (-1, "unlimited")] {
+        for (ending, expected_ok, diagnostic) in [
+            ("exit 0", true, ""),
+            ("exit 7", false, "command exited with 7"),
+            ("kill -TERM $$", false, "command was killed by a signal"),
+        ] {
+            let command = format!(
+                "printf 'secret-fixture '; i=0; while [ $i -lt 2048 ]; do printf 'é'; i=$((i+1)); done; {ending}"
+            );
+            let (ok, output) = execute_tool(
+                d.path(),
+                "run_shell_command",
+                json!({"command": command, "timeout_seconds": requested}),
+                &config,
+            );
+            assert_eq!(ok, expected_ok, "{output}");
+            assert!(output.len() <= 1024, "{} bytes", output.len());
+            assert!(output.contains("[truncated"), "{output}");
+            assert!(output.contains(diagnostic), "{output}");
+            let disclosure = format!("requested timeout {label}; effective timeout 3s");
+            assert!(output.contains(&disclosure), "{output}");
+            let scrubbed = crate::redact::scrub_secrets(&output, &["secret-fixture".into()]);
+            assert!(!scrubbed.contains("secret-fixture"), "{scrubbed}");
+            assert!(scrubbed.contains(&disclosure), "{scrubbed}");
+        }
     }
 }

@@ -64,40 +64,37 @@ pub(super) fn shell_tool(
     );
     // Every model-visible shell string (success or failure diagnostic) is bounded as one
     // value, framing and combined output included, to `max_output`.
-    // Inline clamp note for the timeout diagnostic only; the success path appends
-    // the bracketed note below. Built as a plain binding so `format!` input stays
-    // free of control flow (xtask counts macro control flow as unmeasured code).
     let clamp_note = if clamped {
         format!(" (requested timeout {requested_label}; effective timeout {effective}s)")
     } else {
         String::new()
     };
-    let s = if o.timed_out {
+    let framing = if o.timed_out {
         format!(
-            "command timed out after {} ms{}; output:\n{}",
+            "command timed out after {} ms{}; output:\n",
             timeout.as_millis(),
             clamp_note,
-            combined.trim_end()
         )
     } else {
         match o.status {
-            Some(0) => combined.trim_end().to_string(),
-            Some(code) => format!(
-                "command exited with {code}; output:\n{}",
-                combined.trim_end()
-            ),
-            None => format!(
-                "command was killed by a signal; output:\n{}",
-                combined.trim_end()
-            ),
+            Some(0) if clamped => {
+                format!("[requested timeout {requested_label}; effective timeout {effective}s]\n")
+            }
+            Some(0) => String::new(),
+            Some(code) => format!("command exited with {code}{clamp_note}; output:\n"),
+            None => format!("command was killed by a signal{clamp_note}; output:\n"),
         }
     };
-    let s = if clamped && !o.timed_out {
-        format!("{s}\n[requested timeout {requested_label}; effective timeout {effective}s]")
+    let bounded = if clamped {
+        // Reserve the diagnostic before truncating payload; large output must not
+        // displace the requested/effective timeout disclosure. Tiny budgets still
+        // bound the framing itself, just like every other tool diagnostic.
+        let framing = truncate(&framing, max_output);
+        let payload = truncate(combined.trim_end(), max_output - framing.len());
+        format!("{framing}{payload}")
     } else {
-        s
+        truncate(&format!("{framing}{}", combined.trim_end()), max_output)
     };
-    let bounded = truncate(&s, max_output);
     if o.timed_out {
         Err(bounded)
     } else {
