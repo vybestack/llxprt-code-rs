@@ -77,7 +77,8 @@ pub struct Args {
     pub allow_shell: bool,
 
     /// Per-prompt tool-call budget: `1..=512`, or `-1` for unlimited. Overrides the
-    /// profile's `maxToolCallsPerPrompt`; when omitted, the profile field (then 16) applies.
+    /// profile's `maxToolCallsPerPrompt`; when omitted, the profile field applies.
+    /// The built-in default is 256 (half the ceiling).
     #[arg(long, value_name = "N")]
     pub max_tool_calls: Option<i64>,
 

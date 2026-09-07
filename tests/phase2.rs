@@ -724,6 +724,71 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
 }
 
 #[test]
+fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
+    // Two fitting calls against a 2-call cap, then the model stops on its own:
+    // total == declared, so the envelope must still report exhaustion — the
+    // next call would have been refused (#15).
+    let cwd = new_cwd();
+    let st = store("s15b");
+    let r = reserved(&st, None, None, "P", &cwd).unwrap();
+    let calls: Vec<LlmResult> = (0..2)
+        .map(|i| LlmResult {
+            text: String::new(),
+            calls: vec![ToolCall {
+                id: format!("c{i}"),
+                name: "write_file".into(),
+                args_json: format!(r#"{{"path":"n{i}.txt","content":"x"}}"#),
+            }],
+            finish_reason: Some(FinishReason::ToolCall),
+        })
+        .collect();
+    let mut replies = calls;
+    replies.push(LlmResult {
+        text: "all done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    });
+    let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(2));
+    let run = a.run(&st, &r).expect("capped run completes");
+    assert_eq!(run.tool_count, 2);
+    assert_eq!(run.declared_tool_calls, Some(2));
+    assert!(
+        run.budget_exhausted,
+        "ending exactly at the cap is cap termination"
+    );
+    assert_eq!(run.status, "ok");
+}
+
+#[test]
+fn natural_wrapup_below_cap_reports_budget_available() {
+    let cwd = new_cwd();
+    let st = store("s15c");
+    let r = reserved(&st, None, None, "P", &cwd).unwrap();
+    let call = LlmResult {
+        text: String::new(),
+        calls: vec![ToolCall {
+            id: "c0".into(),
+            name: "write_file".into(),
+            args_json: r#"{"path":"one.txt","content":"x"}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let done = LlmResult {
+        text: "done".into(),
+        calls: Vec::new(),
+        finish_reason: Some(FinishReason::Stop),
+    };
+    let a =
+        agent(Box::new(MockBackend::new(vec![call, done])), &cwd).with_max_tool_calls(Some(256));
+    let run = a.run(&st, &r).unwrap();
+    assert_eq!(run.tool_count, 1);
+    assert!(
+        !run.budget_exhausted,
+        "a run that stops well under the cap is natural wrap-up"
+    );
+}
+
+#[test]
 fn failed_state_persists_error() {
     let cwd = new_cwd();
     let st = store("s15");

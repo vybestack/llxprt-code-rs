@@ -27,7 +27,7 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
             |x| &x.provider.profile_path,
         ),
     };
-    let max = pick(16, &layers, |x| &x.budgets.max_tool_calls);
+    let max = pick(256, &layers, |x| &x.budgets.max_tool_calls);
     validate_max_tool_calls(max.value).map_err(SettingsError::Invalid)?;
     let raw_time = pick_optional(&layers, |x| &x.budgets.turn_time);
     let turn_time = Resolved {

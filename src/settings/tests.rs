@@ -27,6 +27,13 @@ fn precedence_defaults_only() {
     assert_eq!(got.paths.config_root.source, Source::Default);
 }
 #[test]
+fn default_max_tool_calls_is_256() {
+    // No layers: the resolved default is 256 (documented; was 16 before #15).
+    let got = resolve(layers()).unwrap();
+    assert_eq!(got.budgets.max_tool_calls.value, 256);
+    assert_eq!(got.budgets.max_tool_calls.source, Source::Default);
+}
+#[test]
 fn precedence_user_file_overrides_default() {
     let mut l = layers();
     l.user_file = budget(7);

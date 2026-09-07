@@ -708,7 +708,10 @@ impl CodingAgent {
             summary,
             tool_count: attempt.usage.total_calls,
             declared_tool_calls: self.max_tool_calls,
-            budget_exhausted: attempt.budget_exhausted,
+            budget_exhausted: attempt.budget_exhausted
+                || self
+                    .max_tool_calls
+                    .is_some_and(|cap| attempt.usage.total_calls >= cap),
             zero_call_tail: malformed_tool_call::zero_call_tail(&attempt.rounds),
             prompt_digest: prompt_digest(&reserved.prompt),
             status: "ok".into(),
