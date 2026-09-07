@@ -135,10 +135,8 @@ fn chat_registry_construction_does_not_load_native_credentials() {
 
 #[test]
 fn zai_anthropic_backend_constructs_offline_without_native_credentials() {
-    let mut value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/profiles/zai.anthropic.synthetic.json"
-    ))
-    .unwrap();
+    let mut value: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/profiles/zai.json")).unwrap();
     value["ephemeralSettings"]
         .as_object_mut()
         .unwrap()

@@ -227,6 +227,28 @@ fn streaming_is_a_bounded_enum() {
     );
 }
 
+/// `clear_thinking` is a typed legacy compatibility key: both boolean values
+/// are accepted as inert metadata and therefore cannot affect the wire model params.
+#[test]
+fn clear_thinking_is_typed_inert_model_param() {
+    let base = json!({"provider": "openai", "model": "m", "modelParams": {}});
+    for value in [json!(false), json!(true)] {
+        let mut profile = base.clone();
+        profile["modelParams"]["clear_thinking"] = value;
+        let parsed = parse_profile_value(&profile, "clear-thinking").unwrap();
+        assert!(parsed.model_params.unsupported.is_empty());
+        assert!(parsed.model_params.chat_template_kwargs.is_none());
+    }
+    for value in [json!("false"), json!(0), json!(null)] {
+        let mut profile = base.clone();
+        profile["modelParams"]["clear_thinking"] = value;
+        assert_eq!(
+            parse_profile_value(&profile, "clear-thinking").unwrap_err(),
+            "profile \"clear-thinking\": 'clear_thinking' must be a boolean"
+        );
+    }
+}
+
 /// objects when present, and each known scalar field must have the right type. Every
 /// bound field stays error-on-wrong-type, never a silent ignore.
 #[test]

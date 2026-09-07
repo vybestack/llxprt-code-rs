@@ -633,7 +633,7 @@ function buildClassificationTable() {
   add('tpm_threshold', rej, common, 'rejected');
   add('modelParams.provider', rej, common, 'nested modelParams.provider rejects');
   add('modelParams.parse_reasoning', rej, ds, 'parse_reasoning rejects');
-  add('modelParams.clear_thinking', rej, ds, 'clear_thinking rejects');
+  add('modelParams.clear_thinking', meta, common, 'boolean inert compatibility metadata; never forwarded');
   add('modelParams.chat_template_kwargs', wire, ds, 'required discriminator object enable_thinking bool');
   add('text.verbosity', wire, codex, 'codex requires medium; responses optional');
   add('type', rej, common, 'exact standard accepted; loadbalancer rejects');
