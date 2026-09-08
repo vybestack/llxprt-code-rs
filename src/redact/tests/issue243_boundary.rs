@@ -145,6 +145,7 @@ fn registered_tool_cut_inside_the_digest_omits_it_whole_every_time() {
     let cfg = crate::tools::ToolConfig {
         ws: crate::tools::WorkspaceCap::open(dir.path()).unwrap(),
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: crate::tools::ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: std::time::Duration::from_secs(60),

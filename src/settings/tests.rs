@@ -598,3 +598,146 @@ fn settings_serialize_round_trips_through_strict_loader() {
     .unwrap();
     assert_eq!(load_user_file(temp.path()).unwrap(), expected);
 }
+
+/// The digest admission floor defaults to the version-1 rule table's baseline (issue 125).
+#[test]
+fn digest_size_floor_defaults_to_the_filter_baseline() {
+    let got = resolve(layers()).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (
+            u64::try_from(crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR).unwrap(),
+            Source::Default
+        )
+    );
+}
+
+/// At least two layers of the precedence chain move the floor, and `--print-config`
+/// reports the resolved value with the layer that supplied it (issue 125).
+#[test]
+fn digest_size_floor_layers_precedence_and_print_config_visibility() {
+    let floor_layer = |value: u64| SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(value),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    l.env = floor_layer(4096);
+    l.cli = floor_layer(8192);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (8192, Source::Cli)
+    );
+    let wire = serde_json::to_value(&got).unwrap();
+    assert_eq!(
+        wire["budgets"]["digest_size_floor"],
+        serde_json::json!({"value": 8192, "source": "cli"})
+    );
+
+    // Without the CLI layer the environment wins, and without it the user file does.
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    l.env = floor_layer(4096);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (4096, Source::Env)
+    );
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (2048, Source::UserFile)
+    );
+}
+
+/// A floor below the baseline is a typed error: the floor rides into the versioned
+/// registry as a relaxation, and a tightening is refused (issue 125).
+#[test]
+fn digest_size_floor_below_the_baseline_is_a_typed_error() {
+    let mut l = layers();
+    l.cli = SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(64),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(l).unwrap_err().to_string(),
+        "--digest-size-floor (64) must be at least the baseline floor (1024)"
+    );
+}
+
+/// A floor above the per-result output cap makes digesting unreachable, so the
+/// combination is refused naming both values — from the CLI flag and from a settings
+/// file layer alike (issue 125).
+#[test]
+fn digest_size_floor_above_the_per_result_output_cap_is_refused() {
+    let cap = crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT as u64;
+    let floor_layer = SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(cap + 1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let expected = format!(
+        "digest-size-floor ({}) is above the per-result output cap --max-tool-output ({cap}): nothing could ever be admitted as a digest",
+        cap + 1
+    );
+    let mut cli = layers();
+    cli.cli = floor_layer.clone();
+    assert_eq!(resolve(cli).unwrap_err().to_string(), expected);
+    let mut file = layers();
+    file.user_file = floor_layer;
+    assert_eq!(resolve(file).unwrap_err().to_string(), expected);
+}
+
+/// A raised floor changes the digest verdict for a fixed-size payload, and the override
+/// stays a rule-table relaxation (never a `rule_version` redefinition of version 1).
+#[test]
+fn digest_floor_override_changes_the_digest_verdict_for_a_fixed_payload() {
+    use crate::context_ingress::filter::{FilterRegistry, FilterRules, RuleVerdict};
+    use crate::context_ingress::segment::segment;
+
+    let payload = vec![b'x'; 2048];
+    let segments = segment(&payload);
+    let mut registry = FilterRegistry::new();
+    assert_eq!(
+        registry.verdict("read_file", &segments, payload.len()),
+        RuleVerdict::Digest,
+        "at the baseline floor a 2048-byte payload is bulk evidence"
+    );
+    let mut relaxed = FilterRules::v1();
+    relaxed.version = 2;
+    relaxed.size_floor = 4096;
+    assert_eq!(registry.update_rules(relaxed).unwrap(), 2);
+    assert_eq!(
+        registry.rules_at(1).unwrap().size_floor,
+        FilterRules::v1().size_floor,
+        "version 1 keeps its baseline rules"
+    );
+    assert_ne!(
+        registry.verdict("read_file", &segments, payload.len()),
+        RuleVerdict::Digest,
+        "raising the floor stops the fixed payload being digested"
+    );
+}

@@ -43,6 +43,22 @@ pub fn run_profiled(
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|error| AppError::new(Code::Session, "session-store", error))?;
     profile_event(&profiler, "session_store_opened", Default::default())?;
+    // Issue 125: the resolved digest admission floor rides onto the session store so
+    // the filter registry and every CTXDIGEST record agree on what a re-fetch window
+    // must stay under.
+    store
+        .set_digest_size_floor(resolved_digest_size_floor(&settings)?)
+        .map_err(|error| match error {
+            // A tightening refusal is a digest-size-floor configuration error carrying
+            // the actionable message; a recovery failure keeps the context-recovery
+            // code/path every other recovery failure at this boundary uses.
+            crate::session::context_persist::DigestFloorError::Refused { .. } => {
+                AppError::new(Code::Config, "digest-size-floor", error.refusal_message())
+            }
+            crate::session::context_persist::DigestFloorError::Recovery(message) => {
+                AppError::new(Code::Session, "context-recovery", message)
+            }
+        })?;
     let _ = store.take_profile_metrics();
     let reserved = store
         .start_request_with_workspace(
@@ -112,7 +128,8 @@ fn build_agent(
     };
     let turn_time = settings.budgets.turn_time.value;
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
-        .map_err(|error| AppError::new(error.code, error.key, error.message))?
+        .map_err(|error| AppError::new(error.code, error.key, error.message))?;
+    agent = agent
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
         .with_max_rounds(constructed.max_rounds)
@@ -121,6 +138,9 @@ fn build_agent(
         .with_output_caps(resolved_output_caps(settings))
         .with_request_timeout(Some(settings.budgets.request_timeout.value))
         .with_profiler(profiler);
+    agent = agent
+        .with_digest_size_floor(resolved_digest_size_floor(settings)?)
+        .map_err(agent_error)?;
     agent.prompt_notes = CodingAgent::prompt_reason_note(profile);
     Ok(agent)
 }
@@ -135,6 +155,32 @@ fn resolved_output_caps(settings: &Settings) -> crate::agent::OutputCaps {
         tool: cap(settings.budgets.max_tool_output.value),
         turn: cap(settings.budgets.max_turn_output.value),
     }
+}
+
+/// The resolved digest admission floor (issue 125): the agent hands it to every read
+/// so a re-fetch recipe can name a window that stays under the floor, and the session
+/// store applies it to the filter registry as an in-session relaxation. The conversion
+/// is typed like the sibling conversions above it: a value no `usize` can hold is a
+/// configuration error, never a silent rewrite into "never digest".
+fn resolved_digest_size_floor(settings: &Settings) -> Result<usize, AppError> {
+    let value = settings.budgets.digest_size_floor.value;
+    if value < crate::settings::baseline_floor_u64() {
+        return Err(AppError::new(
+            Code::Config,
+            "digest-size-floor",
+            format!(
+                "digest-size-floor ({value}) must be at least the baseline floor ({})",
+                crate::settings::baseline_floor_u64()
+            ),
+        ));
+    }
+    usize::try_from(value).map_err(|_| {
+        AppError::new(
+            Code::Config,
+            "digest-size-floor",
+            "resolved digest-size-floor is invalid",
+        )
+    })
 }
 
 fn agent_error(error: crate::agent::AgentError) -> AppError {

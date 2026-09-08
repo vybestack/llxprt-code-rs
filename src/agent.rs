@@ -112,6 +112,9 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+    /// Digest admission floor handed to every read so a re-fetch recipe can name a
+    /// window that stays under it (issue 125).
+    digest_size_floor: usize,
 
     /// Outbound model-request timeout. `None` (the default) means the backend's
     /// own default applies.
@@ -185,6 +188,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -214,6 +218,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -239,6 +244,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -940,17 +946,8 @@ impl CodingAgent {
         validate_provider_result(&result, &self.secrets).map_err(RoundFailure::Model)?;
         Ok(result)
     }
-
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
-        Ok(crate::tools::ToolConfig {
-            ws: self.workspace.try_clone()?,
-            max_output_bytes: self.output_caps.tool,
-            shell: crate::tools::ShellConfig {
-                max_shell_output: self.output_caps.shell,
-                max_shell_timeout: std::time::Duration::from_secs(120),
-                allow_shell: shell_on,
-            },
-        })
+        helpers::tool_config_with_floor(self, shell_on)
     }
 }
 

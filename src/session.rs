@@ -723,6 +723,17 @@ impl SessionStore {
     }
 
     /// Compacts one tool result before it is recorded into the round.
+    /// Applies the resolved digest admission floor (issue 125) as an in-session
+    /// relaxation of the session's filter registry, so every CTXDIGEST record this
+    /// process renders names the floor its re-fetch recipe must stay under. A refusal is
+    /// a typed configuration error; a context-recovery failure stays a recovery error.
+    pub fn set_digest_size_floor(
+        &self,
+        floor: usize,
+    ) -> Result<(), crate::session::context_persist::DigestFloorError> {
+        context_persist::set_digest_size_floor(self, floor)
+    }
+
     pub fn compact_tool_result(&self, tool: &str, result: &str) -> Result<String, StoreError> {
         context_persist::compact_tool_result(self, tool, result)
     }

@@ -8,6 +8,7 @@ mod catalogue;
 mod hash_gate;
 mod hash_gate_caps;
 mod output_caps;
+mod read_recovery;
 mod redaction;
 
 fn cfg(root: &std::path::Path) -> ToolConfig {
@@ -15,6 +16,7 @@ fn cfg(root: &std::path::Path) -> ToolConfig {
     ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(60),
@@ -100,6 +102,47 @@ fn symlink_final_target_is_rejected_and_no_recursion() {
     std::os::unix::fs::symlink(&real, d.path().join("alias")).unwrap();
     let (ok, msg) = run(d.path(), "read_file", json!({"path": "alias"}));
     assert!(!ok, "final symlink target must be rejected: {msg}");
+}
+
+#[test]
+fn shell_nonzero_and_signal_return_ok_false() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = WorkspaceCap::open(d.path()).unwrap();
+    let c = ToolConfig {
+        ws,
+        max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
+        shell: ShellConfig {
+            max_shell_output: 64 * 1024,
+            max_shell_timeout: Duration::from_secs(30),
+            allow_shell: true,
+        },
+    };
+    let args = json!({"command": "exit 3"});
+    let (ok, msg) = execute_tool(d.path(), "run_shell_command", args, &c);
+    assert!(!ok, "nonzero exit must be ok=false: {msg}");
+    let (ok, _) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command": "true"}),
+        &c,
+    );
+    assert!(ok);
+    // Without --allow-shell the tool refuses even a valid command.
+    let c2 = ToolConfig {
+        shell: ShellConfig {
+            allow_shell: false,
+            ..c.shell
+        },
+        ..c
+    };
+    let (ok, _) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command": "true"}),
+        &c2,
+    );
+    assert!(!ok);
 }
 
 mod publication;
@@ -236,32 +279,6 @@ fn drain_bytes_never_reads_or_retains_beyond_cap() {
     }
 }
 
-/// The model-visible `read_file` string (window header plus body) is at most
-/// `max_output` bytes total.
-#[test]
-fn read_file_total_is_bounded_including_frame() {
-    let d = tempfile::tempdir().unwrap();
-    let big = "y".repeat(MAX_FILE_BYTES);
-    std::fs::write(d.path().join("big.txt"), &big).unwrap();
-    let ws = WorkspaceCap::open(d.path()).unwrap();
-    let c = ToolConfig {
-        ws,
-        max_output_bytes: 8192,
-        shell: ShellConfig {
-            max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(30),
-            allow_shell: false,
-        },
-    };
-    let (ok, body) = execute_tool(d.path(), "read_file", json!({"path": "big.txt"}), &c);
-    assert!(ok, "{body}");
-    assert!(
-        body.len() <= 8192,
-        "read_file total must be <= max_output: {}",
-        body.len()
-    );
-}
-
 #[test]
 fn repeated_root_listings_use_independent_directory_offsets() {
     let d = tempfile::tempdir().unwrap();
@@ -314,6 +331,7 @@ fn shell_output_total_is_bounded_for_success_and_error() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 64 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 4096,
             max_shell_timeout: Duration::from_secs(30),
@@ -847,46 +865,4 @@ fn deterministic_swap_write_then_read_is_consistent() {
             .any(|e| e.file_name().to_string_lossy().contains(".llxprt-tmp"));
         assert!(!residue);
     }
-}
-
-/// An exact read limit of 0 bytes returns no content and is never a panic, and a
-/// limit larger than the file returns the whole file with no truncation marker.
-#[test]
-fn shell_nonzero_and_signal_return_ok_false() {
-    let d = tempfile::tempdir().unwrap();
-    let ws = WorkspaceCap::open(d.path()).unwrap();
-    let c = ToolConfig {
-        ws,
-        max_output_bytes: 16 * 1024,
-        shell: ShellConfig {
-            max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(30),
-            allow_shell: true,
-        },
-    };
-    let args = json!({"command": "exit 3"});
-    let (ok, msg) = execute_tool(d.path(), "run_shell_command", args, &c);
-    assert!(!ok, "nonzero exit must be ok=false: {msg}");
-    let (ok, _) = execute_tool(
-        d.path(),
-        "run_shell_command",
-        json!({"command": "true"}),
-        &c,
-    );
-    assert!(ok);
-    // Without --allow-shell the tool refuses even a valid command.
-    let c2 = ToolConfig {
-        shell: ShellConfig {
-            allow_shell: false,
-            ..c.shell
-        },
-        ..c
-    };
-    let (ok, _) = execute_tool(
-        d.path(),
-        "run_shell_command",
-        json!({"command": "true"}),
-        &c2,
-    );
-    assert!(!ok);
 }
