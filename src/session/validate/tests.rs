@@ -228,3 +228,55 @@ fn validator_accepts_charged_unknown_tool_failure() {
     call.refused = false;
     state.validate().unwrap();
 }
+
+fn reject_charged_tool_name(name: &str) {
+    let mut state = valid_state();
+    let call = &mut state.branches[0].rounds[0].calls[0];
+    call.name = name.into();
+    call.ok = false;
+    call.refused = false;
+    assert!(corruption_message(&state).contains("invalid tool name identifier"));
+}
+
+#[test]
+fn persisted_charged_empty_tool_name_is_rejected() {
+    reject_charged_tool_name("");
+}
+
+#[test]
+fn persisted_charged_invocation_tool_name_is_rejected() {
+    reject_charged_tool_name("<invoke name=run_shell_command>");
+}
+
+#[test]
+fn persisted_charged_command_tool_name_is_rejected() {
+    reject_charged_tool_name("run_shell_command;touch bypass");
+}
+
+#[test]
+fn persisted_tool_name_grammar_applies_to_charged_and_refused_failures() {
+    for refused in [false, true] {
+        for name in ["", "tool name", "tool/name", "töol", "tool\n", "tool\0"] {
+            let mut state = valid_state();
+            let call = &mut state.branches[0].rounds[0].calls[0];
+            call.name = name.into();
+            call.ok = false;
+            call.refused = refused;
+            assert!(corruption_message(&state).contains("invalid tool name identifier"));
+        }
+        for name in [
+            "Unknown-tool_09".into(),
+            "n".repeat(crate::limits::MAX_TOOL_NAME_BYTES),
+        ] {
+            let mut state = valid_state();
+            let call = &mut state.branches[0].rounds[0].calls[0];
+            call.name = name;
+            call.ok = false;
+            call.refused = refused;
+            state.validate().unwrap();
+            state.branches[0].rounds[0].calls[0].name =
+                "n".repeat(crate::limits::MAX_TOOL_NAME_BYTES + 1);
+            assert!(corruption_message(&state).contains("tool name exceeds its byte cap"));
+        }
+    }
+}

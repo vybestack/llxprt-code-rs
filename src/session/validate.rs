@@ -346,6 +346,9 @@ impl SessionState {
         if call.name.len() > crate::limits::MAX_TOOL_NAME_BYTES {
             return Err(branch_corrupt(branch, "tool name exceeds its byte cap"));
         }
+        if !crate::tools::is_safe_tool_name(&call.name) {
+            return Err(branch_corrupt(branch, "invalid tool name identifier"));
+        }
         if !crate::tools::is_known_tool_name(&call.name) && call.ok {
             return Err(branch_corrupt(branch, "unknown tool name"));
         }

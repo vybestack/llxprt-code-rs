@@ -64,13 +64,7 @@ pub(super) fn validate_provider_result(
 }
 
 fn validate_provider_call(call: &ToolCall, secrets: &[String]) -> Result<(), String> {
-    // Names are protocol identifiers, not command strings, paths, or invocation frames.
-    if call.name.is_empty()
-        || !call
-            .name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
+    if !crate::tools::is_safe_tool_name(&call.name) {
         return Err("model returned an invalid tool name identifier".into());
     }
     if call.id.len() > super::MAX_TOOL_CALL_ID_BYTES {
