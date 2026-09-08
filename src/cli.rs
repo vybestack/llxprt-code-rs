@@ -315,6 +315,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 format!("{} | preserved: {spans}", o.run.summary)
             };
             Envelope::Ok(OkEnvelope {
+                request_attempts: o.run.request_attempts,
                 session_id: o.session.id.clone(),
                 session_dir: o.session_dir.display().to_string(),
                 turn: u64::from(o.run.turn),
@@ -336,12 +337,18 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 terminal_outcome: declared.terminal_outcome,
             })
         }
-        Err(error) if error.code == Code::Profiling => Envelope::profiling_error(
-            error_session_id,
-            error.message.clone(),
-            error.profiling_stage.unwrap_or("sample"),
-            error.session_status.as_deref().unwrap_or("ok"),
-        ),
+        Err(error) if error.code == Code::Profiling => {
+            let mut envelope = Envelope::profiling_error(
+                error_session_id,
+                error.message.clone(),
+                error.profiling_stage.unwrap_or("sample"),
+                error.session_status.as_deref().unwrap_or("ok"),
+            );
+            if let Envelope::Error(detail) = &mut envelope {
+                detail.request_attempts = *error.request_attempts;
+            }
+            envelope
+        }
         Err(error) => {
             let mut envelope = Envelope::error(
                 error_session_id,
@@ -349,6 +356,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 error.message.clone(),
             );
             if let Envelope::Error(detail) = &mut envelope {
+                detail.request_attempts = *error.request_attempts;
                 if let Some(outcome) = error.terminal_outcome {
                     detail.error.terminal_outcome = Some(outcome.to_string());
                 }
@@ -443,11 +451,12 @@ pub fn parse_args_fallback(session_hint: &str) -> Args {
 
 /// Error payload used by `main`.
 pub struct AppError {
+    pub request_attempts: Box<crate::envelope::RequestAttempts>,
     pub code: Code,
     pub key: &'static str,
     pub message: String,
     pub profiling_stage: Option<&'static str>,
-    pub session_status: Option<String>,
+    pub session_status: Option<Box<str>>,
     /// The stable envelope `error.code` token. `None` means [`Self::key`] is already the
     /// envelope token. A model transport failure carries its finer `model-<class>`
     /// transport key here (for example `model-quota-exhausted`) while [`Self::key`] stays
@@ -466,6 +475,7 @@ impl AppError {
     /// output field.
     pub fn new(code: Code, key: &'static str, message: impl Into<String>) -> Self {
         AppError {
+            request_attempts: Default::default(),
             code,
             key,
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),
@@ -489,6 +499,7 @@ impl AppError {
 
     pub fn profiling_at(stage: &'static str, message: impl Into<String>) -> Self {
         AppError {
+            request_attempts: Default::default(),
             code: Code::Profiling,
             key: "mem-profile",
             message: crate::redact::scrub_and_bound_diagnostic(&message.into()),

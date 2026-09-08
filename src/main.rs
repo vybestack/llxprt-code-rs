@@ -41,7 +41,13 @@ fn main() {
                 Ok(done) => summary = Some(done),
                 Err(error) => {
                     let status = session_status(&outcome);
-                    outcome = Err(profile_error(error, status));
+                    let counts = match &outcome {
+                        Ok(run) => run.run.request_attempts,
+                        Err(error) => *error.request_attempts,
+                    };
+                    let mut error = profile_error(error, status);
+                    error.request_attempts = Box::new(counts);
+                    outcome = Err(error);
                 }
             }
         }
@@ -80,7 +86,7 @@ fn profile_error(
     status: String,
 ) -> cli::AppError {
     let mut app = cli::AppError::profiling(error);
-    app.session_status = Some(status);
+    app.session_status = Some(status.into());
     app
 }
 

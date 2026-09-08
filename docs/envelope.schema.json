@@ -69,6 +69,27 @@
         "turn"
       ],
       "type": "object"
+    },
+    "RequestAttempts": {
+      "additionalProperties": false,
+      "description": "Provider request attempts actually started in this invocation (zero for replay\nor setup failure). Retries are the subset re-issued after typed transient\nfailures; context/truncation re-issues start a new logical request, not a retry.",
+      "properties": {
+        "attempts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retries": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts",
+        "retries"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/vybestack/llxprt-code-rs/schemas/stdout-envelope-v1",
@@ -114,6 +135,9 @@
         "replayed": {
           "type": "boolean"
         },
+        "request_attempts": {
+          "$ref": "#/$defs/RequestAttempts"
+        },
         "session_dir": {
           "type": "string"
         },
@@ -155,6 +179,7 @@
       },
       "required": [
         "status",
+        "request_attempts",
         "session_id",
         "session_dir",
         "turn",
@@ -179,6 +204,9 @@
         "error": {
           "$ref": "#/$defs/EnvelopeError"
         },
+        "request_attempts": {
+          "$ref": "#/$defs/RequestAttempts"
+        },
         "session_id": {
           "description": "Safe session component: ASCII letters, digits, underscore, or hyphen.",
           "pattern": "^[A-Za-z0-9_-]{1,64}$",
@@ -191,6 +219,7 @@
       },
       "required": [
         "status",
+        "request_attempts",
         "session_id",
         "error"
       ],

@@ -2,6 +2,7 @@ use crate::session::StoreError;
 
 /// An error surfaced to the CLI.
 pub struct AgentError {
+    pub request_attempts: crate::envelope::RequestAttempts,
     pub key: &'static str,
     pub message: String,
     pub code: crate::envelope::Code,
@@ -19,6 +20,7 @@ pub struct AgentError {
 impl AgentError {
     pub fn new(code: crate::envelope::Code, key: &'static str, msg: impl Into<String>) -> Self {
         AgentError {
+            request_attempts: Default::default(),
             code,
             key,
             message: msg.into(),
@@ -36,6 +38,7 @@ impl AgentError {
 
     pub fn from_store(error: StoreError) -> Self {
         AgentError {
+            request_attempts: Default::default(),
             code: crate::envelope::Code::Session,
             key: "session",
             message: error.to_string(),

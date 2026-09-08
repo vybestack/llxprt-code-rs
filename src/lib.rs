@@ -31,3 +31,5 @@ pub mod context_ingress;
 pub mod context_policy;
 pub mod context_store;
 pub mod context_txn;
+
+mod model_failure;

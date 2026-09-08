@@ -5,7 +5,7 @@ use serdes_ai::models::Model as _;
 use serdes_ai::ModelSettings;
 use serdes_ai_responses::client::OpenResponsesModel;
 
-use crate::adapter::{schema_for, ChatBackend, LlmResult};
+use crate::adapter::{schema_for, ChatBackend, LlmResult, ModelFailure};
 use crate::model::SerdeAiParams;
 
 enum ResponsesModel {
@@ -43,35 +43,33 @@ impl ResponsesBackend {
         &self,
         requests: &[ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, ModelFailure> {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
         let request_parameters = params.to_model_request_parameters();
         let response = match &self.model {
-            ResponsesModel::Codex(model) => {
-                model
-                    .request(requests, &self.model_settings, &request_parameters)
-                    .await
-            }
-            ResponsesModel::OpenAi(model) => {
-                model
-                    .request(requests, &self.model_settings, &request_parameters)
-                    .await
-            }
-        }
-        .map_err(|error| {
-            let error = crate::transport::context_length_400(&error).unwrap_or(error);
-            match &error {
-                serdes_ai::models::ModelError::InvalidResponse(detail)
-                | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
-                _ => match crate::transport::TransportFailure::from_model_error(&error) {
-                    Some(failure) => failure.diagnostic(),
-                    None => error.to_string(),
-                },
-            }
-        })?;
+            ResponsesModel::Codex(model) => model
+                .request(requests, &self.model_settings, &request_parameters)
+                .await
+                .map_err(stream_failure),
+            ResponsesModel::OpenAi(model) => model
+                .request(requests, &self.model_settings, &request_parameters)
+                .await
+                .map_err(ModelFailure::from_model_error),
+        }?;
         Ok(LlmResult::from(&response))
+    }
+}
+
+// Responses may have consumed stream frames and, for WebSocket, mutated session
+// continuation state. No typed progress marker crosses this transport boundary, so
+// only retry typed HTTP refusals, never ambiguous stream failures.
+fn stream_failure(error: serdes_ai::models::ModelError) -> ModelFailure {
+    let http_refusal = matches!(error, serdes_ai::models::ModelError::Http { .. });
+    match ModelFailure::from_model_error(error) {
+        ModelFailure::Transport(failure) if !http_refusal => ModelFailure::Incomplete(failure),
+        other => other,
     }
 }
 
@@ -88,7 +86,7 @@ impl ChatBackend for ResponsesBackend {
             match self.model_settings.timeout {
                 Some(limit) => tokio::time::timeout(limit, self.request_async(requests, tools))
                     .await
-                    .map_err(|_| "responses request exceeded the configured timeout".to_string())
+                    .map_err(|_| stream_failure(serdes_ai::models::ModelError::Timeout))
                     .and_then(|result| result),
                 None => self.request_async(requests, tools).await,
             }
@@ -118,8 +116,8 @@ mod tests {
             .expect_err("invalid test endpoint must fail");
 
         assert_eq!(backend.request_calls(), 1);
-        assert!(!error.contains("Bearer"));
-        assert!(!error.contains("chatgpt-account-id"));
+        assert!(!error.diagnostic().contains("Bearer"));
+        assert!(!error.diagnostic().contains("chatgpt-account-id"));
     }
 
     #[test]
@@ -158,7 +156,7 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(4),
             "turn must end via the bound, not the socket"
         );
-        assert_eq!(error, "responses request exceeded the configured timeout");
+        assert!(matches!(error, ModelFailure::Incomplete(_)));
         assert_eq!(backend.request_calls(), 1);
     }
 
@@ -440,7 +438,34 @@ Connection: close
             .unwrap()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("JSON body cannot fold into a codex turn");
-        assert!(error.contains("sse stream"), "unexpected error: {error}");
+        assert!(
+            error.diagnostic().contains("sse stream"),
+            "unexpected error: {error}"
+        );
         server.join().expect("server");
+    }
+}
+
+#[cfg(test)]
+mod retry_mapping_tests {
+    use super::*;
+    use serdes_ai::models::ModelError;
+
+    #[test]
+    fn ambiguous_stream_disconnect_and_timeout_are_not_replayed() {
+        for error in [
+            ModelError::Connection("mid-stream".into()),
+            ModelError::Timeout,
+        ] {
+            assert!(matches!(stream_failure(error), ModelFailure::Incomplete(_)));
+        }
+        assert!(matches!(
+            stream_failure(ModelError::http(503, "unavailable")),
+            ModelFailure::Transport(_)
+        ));
+        assert!(matches!(
+            stream_failure(ModelError::InvalidResponse("incomplete frame".into())),
+            ModelFailure::Terminal(_)
+        ));
     }
 }

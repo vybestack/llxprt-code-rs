@@ -105,6 +105,7 @@ fn request_one(cfg: &ModelConfig) -> Result<LlmResult, String> {
         .build()
         .unwrap()
         .block_on(adapter.request(&reqs, &tools))
+        .map_err(|error| error.diagnostic())
 }
 
 /// Unknown finish reasons remain typed as unknown even when their raw spelling is accepted for a

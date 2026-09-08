@@ -152,6 +152,7 @@ print(json.dumps({
     "branch": False,
     "replayed": False,
     "status": "ok",
+    "request_attempts": {"attempts": 1, "retries": 0},
     "summary": "done",
     "tool_calls": 3,
     "declared_tool_calls": 16,

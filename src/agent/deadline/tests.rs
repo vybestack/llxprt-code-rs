@@ -9,7 +9,7 @@ use std::time::Duration;
 
 struct Reply {
     delay: Duration,
-    result: Result<LlmResult, String>,
+    result: Result<LlmResult, crate::adapter::ModelFailure>,
 }
 
 struct Script {
@@ -110,11 +110,12 @@ impl Fixture {
     }
 
     fn run(&mut self) -> Result<CompletedRun, AgentError> {
-        let turn = Turn::new(&self.agent).unwrap();
+        let lease_reservation = self.reserved.clone();
+        let turn = Turn::new(&self.agent, &self.store, &lease_reservation).unwrap();
         // Auto-advance a single turn's executor, not a fresh clock per request.
         turn.runtime.block_on(async { tokio::time::pause() });
         let _entered = turn.runtime.enter();
-        let result = turn.run_reserved(&self.store, &mut self.reserved);
+        let result = turn.run_counted(&self.store, &mut self.reserved);
         if let Some(budget) = self.agent.turn_time_budget {
             assert!(
                 turn.started.elapsed() < budget + Duration::from_secs(1),
@@ -195,7 +196,12 @@ fn truncation_retry_does_not_restart_the_clock() {
 fn provider_context_retry_does_not_restart_the_clock() {
     let first = Reply {
         delay: Duration::from_secs(6),
-        result: Err("context length exceeded".into()),
+        result: Err(crate::adapter::ModelFailure::from_model_error(
+            serdes_ai::models::ModelError::ContextLengthExceeded {
+                max_tokens: 1,
+                requested_tokens: 2,
+            },
+        )),
     };
     let mut f = Fixture::new(vec![first, reply(6, "OK", vec![])], Some(10));
     f.assert_timeout(2, 0);
@@ -226,7 +232,9 @@ fn provider_timeout_keeps_its_own_failure_instead_of_turn_budget() {
     let mut f = Fixture::new(
         vec![Reply {
             delay: Duration::from_secs(1),
-            result: Err("responses request exceeded the configured timeout".into()),
+            result: Err(crate::adapter::ModelFailure::Terminal(
+                "responses request exceeded the configured timeout".into(),
+            )),
         }],
         Some(10),
     );
@@ -234,3 +242,5 @@ fn provider_timeout_keeps_its_own_failure_instead_of_turn_budget() {
     assert_eq!(error.key, "model");
     assert_eq!(f.active.get(), 0);
 }
+
+mod retries;

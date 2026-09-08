@@ -70,6 +70,7 @@ pub use truncation::is_output_truncation;
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
 pub struct CompletedRun {
+    pub request_attempts: crate::envelope::RequestAttempts,
     pub turn: u32,
     pub attempt: u32,
     pub branch_id: String,
@@ -339,6 +340,7 @@ impl CodingAgent {
 
     fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
         CompletedRun {
+            request_attempts: Default::default(),
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
@@ -368,6 +370,7 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        let lease_reservation = reserved;
         let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
@@ -384,7 +387,7 @@ impl CodingAgent {
             )?;
             return Ok(self.replayed_run(&reserved));
         }
-        Turn::new(self)?.run_reserved(store, &mut reserved)
+        Turn::new(self, store, lease_reservation)?.run_counted(store, &mut reserved)
     }
 }
 
@@ -749,6 +752,7 @@ impl Turn<'_> {
             Some(self.started.elapsed()),
         )?;
         Ok(CompletedRun {
+            request_attempts: Default::default(),
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
@@ -932,13 +936,6 @@ impl Turn<'_> {
     }
 }
 
-/// The budget notice appended to the last tool result of a round so the model
-/// always knows what remains. `None` budget stays silent.
-/// The vendored model error's Display wording is the stable provider verdict.
-fn is_context_limit_error(message: &str) -> bool {
-    message.contains("context length exceeded")
-}
-
 /// Per-call failure kinds that keep the caller's error codes intact.
 enum ToolCallFailure {
     Invalid(String),
@@ -948,8 +945,10 @@ enum ToolCallFailure {
 enum RoundFailure {
     TurnTime,
     Model(String),
+    ContextLimit(String),
     ModelTransport(TransportFailure),
     Profiling(AgentError),
+    Persistence(AgentError),
 }
 
 #[cfg(test)]

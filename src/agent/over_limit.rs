@@ -107,7 +107,7 @@ impl super::Turn<'_> {
             &attempt.usage,
         ) {
             Ok(reply) => Ok(reply),
-            Err(RoundFailure::Model(first)) if super::is_context_limit_error(&first) => {
+            Err(RoundFailure::ContextLimit(first)) => {
                 self.compact_provider_context(reserved, &mut attempt.requests);
                 match self.profiled_round(
                     &attempt.requests,
@@ -118,15 +118,14 @@ impl super::Turn<'_> {
                     &attempt.usage,
                 ) {
                     Ok(reply) => Ok(reply),
-                    Err(RoundFailure::Model(second)) if super::is_context_limit_error(&second) => {
-                        Err(self.provider_context_limit_dead(
+                    Err(RoundFailure::ContextLimit(second)) => Err(self
+                        .provider_context_limit_dead(
                             store,
                             reserved,
                             &first,
                             &second,
                             &attempt.rounds,
-                        ))
-                    }
+                        )),
                     Err(failure) => {
                         Err(self.round_failure(store, reserved, failure, &attempt.rounds))
                     }
