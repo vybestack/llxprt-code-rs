@@ -55,16 +55,22 @@ impl MockBackend {
     }
 }
 
-static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+#[path = "context_recovery/isolation.rs"]
+mod isolation;
 
-/// Per-test-binary configuration root; every test opens its store inside it.
+thread_local! {
+    // Keep every authenticated reopen in this test's root. A PID is not a
+    // run identity: old sessions can survive until that PID is recycled.
+    // The harness owns one thread per test, so TempDir also cleans up on exit.
+    static ROOT: tempfile::TempDir = tempfile::Builder::new()
+        .prefix("llxprt-rs-ctxrec-")
+        .tempdir()
+        .expect("create isolated context-recovery root");
+}
+
+/// Per-test configuration root, retained across authenticated reopens.
 fn root() -> PathBuf {
-    ROOT.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("llxprt-rs-ctxrec-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        root
-    })
-    .clone()
+    ROOT.with(|root| root.path().to_path_buf())
 }
 
 /// A fresh workspace directory for one test.
@@ -76,11 +82,11 @@ fn workspace() -> PathBuf {
     dir
 }
 
-/// Opens a unique session store inside the shared root.
+/// Opens a unique session store inside this test's root.
 fn store(id: &str) -> SessionStore {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    // Session ids must be unique per store: a shared root means two live
-    // stores with the same id contend for the same session lock.
+    // A test can open several stores with the same label. Reopens preserve the
+    // allocated id rather than allocating another one.
     let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let sid = SessionId::parse(&format!("{id}-{n}")).unwrap();
     SessionStore::load_at(&sid, &root()).expect("open store")
