@@ -1337,22 +1337,46 @@ rm -rf "$source_scratch_dir"
 # Ignored scratch outside every tracked top-level source root is not a source input. In
 # particular, keeping local evidence under the ignored tmp/ root must neither poison a
 # release nor add an archive member. The rejection above remains the guard for scratch
-# found inside an actual source root.
+# found inside an actual source root. None of that carries weight unless tmp/ itself is
+# untracked at HEAD: a single tracked pathname there would turn tmp/ into a member root
+# and widen the builder's live-tree scans to it (the force-added tmp/ incident class), so
+# guard that invariant outright instead of assuming it.
 mkdir -p "$ignored_scratch_dir"
 touch "$ignored_scratch"
 if ! git -C "$root" check-ignore -q -- "$ignored_scratch"; then
   echo "source-bundle ignored-scratch fixture is not ignored" >&2
   exit 1
 fi
-ignored_scratch_manifest="$tmp/ignored-scratch-members.txt"
-if ! bash "$build" --list >"$ignored_scratch_manifest" 2>"$tmp/stderr"; then
-  cat "$tmp/stderr" >&2
-  echo "source-bundle builder rejected ignored scratch outside source roots" >&2
+if [[ -n "$(git -C "$root" ls-tree -r --name-only HEAD -- tmp 2>/dev/null)" ]]; then
+  echo "tracked content under tmp/ at HEAD turns the ignored scratch root into a member root;" >&2
+  echo "the ignored-scratch assertions below would not describe a real release tree:" >&2
+  git -C "$root" ls-tree -r --name-only HEAD -- tmp >&2
   exit 1
 fi
-if grep -Fq "tmp/.bundle-verifier-ignored-scratch-$$/" "$ignored_scratch_manifest"; then
-  echo "source-bundle builder listed ignored scratch as an archive member" >&2
-  exit 1
+# Exercise the gates that actually decide the release while the fixture exists: run the
+# full builder, which must tolerate ignored scratch outside every member root and must
+# keep it out of the archive. The former --list assertions here were tautological --
+# --list exits before the live-tree walks and the Git input check, and its manifest is
+# commit-derived, so an untracked scratch path could never appear there.
+if git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1 &&
+    [[ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ]]; then
+  ignored_scratch_bundle="$tmp/ignored-scratch.tar.gz"
+  if ! PATH="$tmp/pass-bin:$PATH" bash "$build" "$ignored_scratch_bundle" \
+      >"$tmp/stdout" 2>"$tmp/stderr"; then
+    echo "source-bundle builder rejected ignored scratch outside source roots; captured builder output follows" >&2
+    cat "$tmp/stdout" "$tmp/stderr" >&2
+    exit 1
+  fi
+  if [[ ! -f "$ignored_scratch_bundle" ]]; then
+    echo "successful source-bundle build did not create its archive" >&2
+    exit 1
+  fi
+  if tar -tzf "$ignored_scratch_bundle" | grep -Fq "tmp/.bundle-verifier-ignored-scratch-$$/"; then
+    echo "source bundle shipped ignored scratch as an archive member" >&2
+    exit 1
+  fi
+else
+  echo "skipping ignored-scratch full-builder checks for a dirty worktree" >&2
 fi
 rm -rf "$ignored_scratch_dir"
 
