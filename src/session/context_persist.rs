@@ -50,9 +50,12 @@ pub(crate) const CHECKPOINT_RELOAD_MAX: usize = 8 << 20;
 /// transcript, the checkpoint and the context store keep. Below the bulk
 /// threshold the two are identical, so that behavior is unchanged.
 ///
-/// `live` is only released by `compact_tool_result` once the ingress record was
-/// both admitted and published: a failure or refusal yields the bounded
-/// persisted representation in both fields instead of raw live bytes.
+/// `live` is released only by a successful `compact_tool_result` call, after the
+/// ingress record was both admitted and published. A failure on that path
+/// returns `Err` and constructs no projection at all, so this type never
+/// substitutes a bounded placeholder for the live bytes. `DropBulk` is a
+/// distinct filter verdict rather than a failure: it succeeds and yields the
+/// same `CTXDROP v1` stub in both fields.
 pub struct ToolResultProjection {
     /// Sanitized admitted content sent to the provider (the drop stub when the
     /// filter verdict is DropBulk, which stays a stub on both projections).
@@ -971,10 +974,12 @@ pub fn compact_tool_result(
 ) -> Result<ToolResultProjection, StoreError> {
     // Strictly below the threshold skips the seam: a result of exactly
     // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so the pre-entry seam
-    // digests it like any other bulk result and the request list never carries
-    // raw bulk bytes. This is the same at-or-above comparison the filter verdict
-    // uses (`total >= rules.size_floor`) and the checkpoint seam, so all three agree
-    // on the boundary (119).
+    // digests it like any other bulk result. What the request list then carries
+    // is the admitted sanitized live projection of that record, not unsanitized
+    // bulk bytes; the bounded digest record is the durable representation the
+    // transcript retains. This is the same at-or-above comparison the filter
+    // verdict uses (`total >= rules.size_floor`) and the checkpoint seam, so all
+    // three agree on the boundary (119).
     if result.len() < BULK_RESULT_BYTES {
         return Ok(ToolResultProjection::verbatim(result.to_string()));
     }

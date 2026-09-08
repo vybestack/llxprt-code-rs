@@ -419,9 +419,7 @@ fn syntactic_and_semantic_corruption_is_an_error() {
 #[test]
 fn u32_max_turn_state_cannot_panic() {
     let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/s9max");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _root = shared_root();
     let state = SessionState {
         version: 2,
         session_id: "s9max".into(),
@@ -431,13 +429,13 @@ fn u32_max_turn_state_cannot_panic() {
         branches: vec![branch(u32::MAX, 1, "b1", "P1", Lifecycle::Completed)],
         next_branch_seq: 1,
     };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
     let st2 = SessionStore::load(&SessionId::parse("s9max").unwrap()).unwrap();
-    match st2.start_request(None, None, "P2", &cwd) {
+    // The turn-max state is rejected by validation when the snapshot is installed;
+    // the typed error is the guarantee under test, at whichever seam fires.
+    match st2
+        .replace_snapshot(&state)
+        .and_then(|()| st2.start_request(None, None, "P2", &cwd))
+    {
         Err(StoreError::Corrupt(_)) | Err(StoreError::Invalid(_)) => {}
         other => panic!("a turn-max root must be rejected, got {other:?}"),
     }
@@ -448,12 +446,13 @@ fn u32_max_turn_state_cannot_panic() {
 #[test]
 fn child_of_failed_parent_is_corrupt() {
     let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/failedparent");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _root = shared_root();
     // b1 completed at turn 1, b2 failed at turn 2, b3 child of b2 at turn 3.
     let p1 = branch(1, 1, "b1", "P1", Lifecycle::Completed);
-    let p2 = branch(2, 1, "b2", "P2", Lifecycle::Failed);
+    let mut p2 = branch(2, 1, "b2", "P2", Lifecycle::Failed);
+    p2.parent_branch = Some("b1".into());
+    p2.parent_turn = 1;
+    p2.parent_attempt = 1;
     let ch = {
         let mut b = branch(3, 1, "b3", "P3", Lifecycle::Completed);
         b.parent_branch = Some("b2".into());
@@ -470,13 +469,12 @@ fn child_of_failed_parent_is_corrupt() {
         branches: vec![p1, p2, ch],
         next_branch_seq: 3,
     };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
     let store = SessionStore::load(&SessionId::parse("failedparent").unwrap()).unwrap();
-    match store.start_request(None, None, "X", &cwd) {
+    // Parentage is validated when the snapshot is installed.
+    match store
+        .replace_snapshot(&state)
+        .and_then(|()| store.start_request(None, None, "X", &cwd))
+    {
         Err(StoreError::Corrupt(_)) => {}
         other => panic!("a child of a failed parent must be corrupt, got {other:?}"),
     }
@@ -488,24 +486,7 @@ fn child_of_failed_parent_is_corrupt() {
 fn turn1_child_of_turn2_parent_is_corrupt() {
     let cwd = new_cwd();
     let _ = shared_root();
-    let root = shared_root();
-    {
-        let dir = root.join("code-rs-sessions/turn1child");
-        let t2: SessionState = SessionState {
-            version: 2,
-            session_id: "turn1child".into(),
-            cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
-            cwd_dev: workspace_identity(&cwd).0,
-            cwd_ino: workspace_identity(&cwd).1,
-            branches: vec![branch(2, 1, "b1", "P1", Lifecycle::Completed)],
-            next_branch_seq: 1,
-        };
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("session.json"), serde_json::to_vec(&t2).unwrap()).unwrap();
-    }
     // A separate session: b1 parent turn 2 with a b1 child at turn 1 referencing it.
-    let dir = root.join("code-rs-sessions/turn1child2");
-    std::fs::create_dir_all(&dir).unwrap();
     let ch = {
         let mut b = branch(2, 1, "b1", "P1", Lifecycle::Completed);
         b.parent_branch = Some("b2".into());
@@ -522,9 +503,12 @@ fn turn1_child_of_turn2_parent_is_corrupt() {
         branches: vec![ch],
         next_branch_seq: 2,
     };
-    std::fs::write(dir.join("session.json"), serde_json::to_vec(&st).unwrap()).unwrap();
     let store = SessionStore::load(&SessionId::parse("turn1child2").unwrap()).unwrap();
-    match store.start_request(None, None, "X", &cwd) {
+    // The dangling-parent state is rejected when the snapshot is installed.
+    match store
+        .replace_snapshot(&st)
+        .and_then(|()| store.start_request(None, None, "X", &cwd))
+    {
         Err(StoreError::Corrupt(_)) => {}
         other => panic!("expected Corrupt for the invalid turn-1 child, got {other:?}"),
     }
@@ -893,7 +877,9 @@ fn first_turn_tiny_context_makes_zero_model_calls() {
 /// provider request, so the replayed request carries the ~1 MiB framed read and the
 /// conservative pre-send guard refuses it (context-limit) instead of sending it. The
 /// persisted side still behaves: the round's retained record is one bounded CTXDIGEST v1
-/// record, and the payload lives in the sanitized spine and the vault.
+/// record whose handle is a content digest, and the payload lives in the sanitized spine.
+/// Ingress quarantine is optional, so this test asserts the sanitized spine and never
+/// requires a vault copy.
 #[test]
 fn later_round_context_overflow_stops_before_next_call() {
     let cwd = new_cwd();
@@ -2076,9 +2062,7 @@ fn second_model_call_observes_renewed_lease_after_elapsed_interval() {
 #[test]
 fn attempt_overflow_is_a_typed_error() {
     let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/attemptmax");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _root = shared_root();
     let state = SessionState {
         version: 2,
         session_id: "attemptmax".into(),
@@ -2091,18 +2075,20 @@ fn attempt_overflow_is_a_typed_error() {
         ],
         next_branch_seq: 2,
     };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
     let store = SessionStore::load(&SessionId::parse("attemptmax").unwrap()).unwrap();
-    match store.start_request(Some(1), None, "fork-attempt", &cwd) {
+    let install = store.replace_snapshot(&state);
+    let installed = install.is_ok();
+    let outcome = install.and_then(|()| store.start_request(Some(1), None, "fork-attempt", &cwd));
+    match outcome {
         Err(StoreError::Invalid(m)) if m.contains("attempt overflow") => {}
         other => panic!("attempt overflow must be a typed Invalid error, got {other:?}"),
     }
     let snap = store.snapshot().unwrap();
-    assert_eq!(snap.branches.len(), 2, "no branch may be added on overflow");
+    assert_eq!(
+        snap.branches.len(),
+        usize::from(installed) * 2,
+        "no branch may be added on overflow"
+    );
 }
 
 /// Checked arithmetic: next_branch_seq at u64::MAX with a live completed branch makes a
@@ -2110,9 +2096,7 @@ fn attempt_overflow_is_a_typed_error() {
 #[test]
 fn branch_seq_overflow_is_a_typed_error() {
     let cwd = new_cwd();
-    let root = shared_root();
-    let dir = root.join("code-rs-sessions/seqmax");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _root = shared_root();
     let state = SessionState {
         version: 2,
         session_id: "seqmax".into(),
@@ -2122,18 +2106,20 @@ fn branch_seq_overflow_is_a_typed_error() {
         branches: vec![branch(1, 1, "b1", "P1", Lifecycle::Completed)],
         next_branch_seq: u64::MAX,
     };
-    std::fs::write(
-        dir.join("session.json"),
-        serde_json::to_vec(&state).unwrap(),
-    )
-    .unwrap();
     let store = SessionStore::load(&SessionId::parse("seqmax").unwrap()).unwrap();
-    match store.start_request(Some(1), None, "fork-seq", &cwd) {
+    let install = store.replace_snapshot(&state);
+    let installed = install.is_ok();
+    let outcome = install.and_then(|()| store.start_request(Some(1), None, "fork-seq", &cwd));
+    match outcome {
         Err(StoreError::Invalid(m)) if m.contains("overflow") => {}
         other => panic!("branch sequence overflow must be typed, got {other:?}"),
     }
     let snap = store.snapshot().unwrap();
-    assert_eq!(snap.branches.len(), 1, "no branch may be added on overflow");
+    assert_eq!(
+        snap.branches.len(),
+        usize::from(installed),
+        "no branch may be added on overflow"
+    );
 }
 
 fn read_current_state(session_dir: &std::path::Path) -> SessionState {

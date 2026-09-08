@@ -107,6 +107,14 @@ Key precedence (matches llxprt-code):
 3. `settings.json` → `providerKeyfiles[provider]` (OpenAI and Anthropic; `openaivercel`
    also falls back to `openai`).
 
+`settings.json` is a **shared, multi-tool file**: the TypeScript llxprt-code app writes its
+own top-level keys into it (`ui`, `oauthEnabledProviders`, `providerKeyfiles`, ...), so the
+Rust resolver reads only the sections it owns (`provider`, `budgets`, `paths`) and ignores
+unknown top-level siblings — a shared root never blocks startup. Strictness is unchanged
+*inside* each owned section: a misspelled owned key, a wrong type, a duplicate key, or an
+invalid value is still a `settings-load`/`settings-resolve` config error. The CLI never
+rewrites, migrates, or preserves sibling keys on write.
+
 `ephemeralSettings.auth-key-name` names a provider key, never a keyfile path. It resolves
 through the credential env selector `LLXPRT_PROVIDER_KEY_<NAME>` (the uppercased name with
 `-` and `.` folded to `_`) and then the secure store (service `llxprt-code-provider-keys`,

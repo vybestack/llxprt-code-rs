@@ -54,35 +54,31 @@ fn provider_spellings_are_exact() {
 }
 
 #[test]
-fn selectors_follow_precedence_without_lower_priority_disagreement() {
-    let target = resolve(
-        "openai",
-        json!({
-            "apiMode": "responses",
-            "responsesMode": "chat",
-            "responses-mode": "chat"
-        }),
-    )
-    .unwrap();
-    assert_eq!(target.api, ModelApi::Responses);
+fn api_selector_selects_the_api_surface() {
+    let responses = resolve("openai", json!({"apiMode": "responses"})).unwrap();
+    assert_eq!(responses.api, ModelApi::Responses);
 
-    let target = resolve(
-        "openai",
-        json!({"responsesMode": "responses", "responses-mode": "chat"}),
-    )
-    .unwrap();
-    assert_eq!(target.api, ModelApi::Responses);
-
-    let target = resolve("openai", json!({"responses-mode": "responses"})).unwrap();
-    assert_eq!(target.api, ModelApi::Responses);
+    let chat = resolve("openai", json!({"apiMode": "chat"})).unwrap();
+    assert_eq!(chat.api, ModelApi::ChatCompletions);
 }
 
 #[test]
-fn every_explicit_selector_is_validated_before_precedence() {
+fn removed_api_selector_spellings_are_inert() {
+    // responsesMode and responses-mode were removed with the dual-spelling
+    // compatibility surface; as unrecognized keys they no longer select.
+    let target = resolve("openai", json!({"responsesMode": "responses"})).unwrap();
+    assert_eq!(target.api, ModelApi::ChatCompletions);
+
+    let target = resolve("openai", json!({"responses-mode": "responses"})).unwrap();
+    assert_eq!(target.api, ModelApi::ChatCompletions);
+}
+
+#[test]
+fn explicit_api_selector_values_are_validated() {
     for settings in [
-        json!({"apiMode": "responses", "responsesMode": ""}),
-        json!({"apiMode": "responses", "responses-mode": "Responses"}),
-        json!({"apiMode": "responses", "responsesMode": false}),
+        json!({"apiMode": ""}),
+        json!({"apiMode": "Responses"}),
+        json!({"apiMode": false}),
         json!({"apiMode": " responses"}),
     ] {
         assert!(resolve("openai", settings).is_err());
@@ -105,8 +101,7 @@ fn response_metadata_does_not_select_an_api() {
 }
 
 #[test]
-fn provider_defaults_and_api_compatibility_are_typed() {
-    // compat-allow: provider API surface test name
+fn provider_defaults_and_api_surfaces_are_typed() {
     for provider in ["openai", "openaivercel", "openai-compatible"] {
         let target = resolve(provider, json!({})).unwrap();
         assert_eq!(target.api, ModelApi::ChatCompletions, "{provider}");

@@ -15,7 +15,7 @@ pub enum CaptureSource {
     ToolCall,
     Assistant,
     GeneratedArtifact,
-    LegacyImport,
+    Imported,
 }
 
 impl CaptureSource {
@@ -27,7 +27,7 @@ impl CaptureSource {
             CaptureSource::ToolCall => "tool-call",
             CaptureSource::Assistant => "assistant",
             CaptureSource::GeneratedArtifact => "generated-artifact",
-            CaptureSource::LegacyImport => "legacy-import", // compat-allow: provenance label for imports predating segmented capture
+            CaptureSource::Imported => "imported",
         }
     }
 }

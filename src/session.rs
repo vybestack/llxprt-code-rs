@@ -1,7 +1,6 @@
 //! Versioned session storage for the headless agent: a framed append-only
 //! transaction log plus validated snapshots providing crash recovery and
-//! bounded replay. Legacy generation-numbered state slots are migrated
-//! atomically on first open. The materialized state holds `session_id`, the
+//! bounded replay. The materialized state holds `session_id`, the
 //! canonical pinned `cwd`, and an explicit list of `branches`. Each branch
 //! carries its own `branch_id`, parent lineage (parent `branch_id` + turn +
 //! attempt), a 1-based `turn`, an `attempt` id, the exact prompt and its
@@ -216,114 +215,6 @@ pub(crate) fn open_regular_at(
     }
     Ok(file)
 }
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct StateSlot {
-    store_generation: u64,
-    state: SessionState,
-}
-
-enum SlotRead {
-    Missing,
-    Valid(StateSlot),
-    Corrupt(StoreError),
-}
-
-fn read_state_slot(dir: &openat::Dir, name: &str) -> Result<SlotRead, StoreError> {
-    let mut bytes = Vec::new();
-    let f = match open_regular_at(dir, name, libc::O_RDONLY, 0) {
-        Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(SlotRead::Missing),
-        Err(_) => {
-            return Err(StoreError::Io(
-                "session state could not be opened safely".into(),
-            ));
-        }
-    };
-    f.take(MAX_SESSION_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| StoreError::Io("session state could not be read".into()))?;
-    if bytes.len() > MAX_SESSION_BYTES {
-        return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-            "session state exceeds the session byte cap".into(),
-        )));
-    }
-    let slot = match serde_json::from_slice::<StateSlot>(&bytes) {
-        Ok(slot) => slot,
-        Err(_) => {
-            return Ok(SlotRead::Corrupt(StoreError::Corrupt(
-                "session state slot is not valid JSON".into(),
-            )))
-        }
-    };
-    if let Err(error) = slot.state.validate() {
-        return Ok(SlotRead::Corrupt(error));
-    }
-    Ok(SlotRead::Valid(slot))
-}
-
-fn read_state_with_generation(
-    dir: &openat::Dir,
-) -> Result<Option<(u64, SessionState)>, StoreError> {
-    let primary = read_state_slot(dir, "session.json")?;
-    let alternate = read_state_slot(dir, "session.alt.json")?;
-    let selected = match (primary, alternate) {
-        (SlotRead::Valid(a), SlotRead::Valid(b)) => {
-            if a.store_generation >= b.store_generation {
-                a
-            } else {
-                b
-            }
-        }
-        (SlotRead::Valid(slot), _) | (_, SlotRead::Valid(slot)) => slot,
-        (SlotRead::Missing, SlotRead::Missing) => return Ok(None),
-        (SlotRead::Corrupt(error), _) | (_, SlotRead::Corrupt(error)) => return Err(error),
-    };
-    Ok(Some((selected.store_generation, selected.state)))
-}
-
-// compat-allow: the flat session.json layout is a durable on-disk format this reader owns (#74 ledger)
-fn read_flat_state(dir: &openat::Dir) -> Result<Option<SessionState>, StoreError> {
-    let parse = |name: &str| -> Result<Option<SessionState>, StoreError> {
-        let mut bytes = Vec::new();
-        let f = match open_regular_at(dir, name, libc::O_RDONLY, 0) {
-            Ok(file) => file,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(_) => {
-                return Err(StoreError::Io(
-                    "session state could not be opened safely".into(),
-                ))
-            }
-        };
-        f.take(MAX_SESSION_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| StoreError::Io("session state could not be read".into()))?;
-        if bytes.len() > MAX_SESSION_BYTES {
-            return Err(StoreError::Corrupt(
-                "session state exceeds the session byte cap".into(),
-            ));
-        }
-        match serde_json::from_slice::<SessionState>(&bytes) {
-            Ok(state) => match state.validate() {
-                Ok(()) => Ok(Some(state)),
-                Err(error) => Err(error),
-            },
-            Err(_) => Err(StoreError::Corrupt(
-                "flat session state is not valid JSON".into(),
-            )),
-        }
-    };
-    if let Ok(Some((_, state))) = read_state_with_generation(dir) {
-        return Ok(Some(state));
-    }
-    let primary = parse("session.json")?;
-    let alternate = parse("session.alt.json")?;
-    match (primary, alternate) {
-        (Some(state), _) | (None, Some(state)) => Ok(Some(state)),
-        (None, None) => Ok(None),
-    }
-}
-
 fn same_file_identity(a: &std::fs::File, b: &std::fs::File) -> Result<bool, StoreError> {
     use std::os::unix::fs::MetadataExt as _;
     let a = a
@@ -533,7 +424,7 @@ impl SessionStore {
         let before = cache.as_ref().map_or(0, |loaded| loaded.cursor.offset);
         match cache.as_mut() {
             Some(loaded) => snapshot::catch_up(&self.dir, loaded)?,
-            None => *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?),
+            None => *cache = Some(snapshot::load_state(&self.dir, &self.session_id)?),
         }
         let loaded = cache.as_ref().expect("session cache initialized");
         let input = loaded.cursor.offset.saturating_sub(before);
@@ -547,7 +438,7 @@ impl SessionStore {
             .lock()
             .map_err(|_| StoreError::Lock("session cache lock poisoned".into()))?;
         if cache.is_none() {
-            *cache = Some(snapshot::load_or_migrate(&self.dir, &self.session_id)?);
+            *cache = Some(snapshot::load_state(&self.dir, &self.session_id)?);
         }
         let loaded = cache.as_mut().expect("session cache initialized");
         let before = loaded.cursor.offset;
