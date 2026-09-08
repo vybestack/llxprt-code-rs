@@ -86,8 +86,8 @@ impl Inherited {
         Self {
             pid,
             fd,
-            dev: stat.st_dev as u64,
-            ino: stat.st_ino as u64,
+            dev: stat.st_dev,
+            ino: stat.st_ino,
             fd_flags: unsafe { libc::fcntl(fd, libc::F_GETFD) } as i64,
             acc_mode: (unsafe { libc::fcntl(fd, libc::F_GETFL) } & libc::O_ACCMODE) as i64,
         }
@@ -142,8 +142,7 @@ fn cloexec_pipe() -> (OwnedFd, OwnedFd) {
         );
     }
     // Safety: each endpoint is owned exactly once, by one half of the pair.
-    let pair = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-    pair
+    unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) }
 }
 
 /// Read exactly `out.len()` bytes, deadline-bounded by `poll(2)`: a peer that never writes
@@ -212,8 +211,8 @@ unsafe fn held_sibling_body(witness: RawFd, report: RawFd, release: RawFd) -> ! 
         bytes[0] = 1;
         bytes[1..5].copy_from_slice(&(unsafe { libc::getpid() } as u32).to_be_bytes());
         bytes[5..9].copy_from_slice(&(witness as u32).to_be_bytes());
-        bytes[9..17].copy_from_slice(&(stat.st_dev as u64).to_be_bytes());
-        bytes[17..25].copy_from_slice(&(stat.st_ino as u64).to_be_bytes());
+        bytes[9..17].copy_from_slice(&stat.st_dev.to_be_bytes());
+        bytes[17..25].copy_from_slice(&stat.st_ino.to_be_bytes());
         let fd_flags = unsafe { libc::fcntl(witness, libc::F_GETFD) } as u64;
         let acc_mode = (unsafe { libc::fcntl(witness, libc::F_GETFL) } & libc::O_ACCMODE) as u64;
         bytes[25..33].copy_from_slice(&fd_flags.to_be_bytes());
@@ -479,9 +478,8 @@ fn red_writer_inherited_and_exec_refused(dir: &Path) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    let error = refused
-        .err()
-        .expect("the direct wrapper exec succeeded while a sibling held its writer");
+    let error =
+        refused.expect_err("the direct wrapper exec succeeded while a sibling held its writer");
     assert_eq!(
         error.raw_os_error(),
         Some(libc::ETXTBSY),
@@ -572,7 +570,7 @@ fn assert_repaired_helper_verdict(run: &HelperRun) {
     assert!(
         run.failure.is_none(),
         "supervising the repaired helper failed: {}\n{}",
-        run.failure.unwrap_or_default(),
+        run.failure.as_deref().unwrap_or_default(),
         run.output
     );
     assert!(
