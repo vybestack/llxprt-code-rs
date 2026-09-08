@@ -254,8 +254,9 @@ fn fd_identity(d: &openat::Dir) -> Result<(u64, u64), String> {
     use std::os::unix::fs::MetadataExt;
     Ok((m.dev(), m.ino()))
 }
-/// blocking on a (possible) FIFO: `openat` with `O_DIRECTORY|O_NOFOLLOW`. This is
-/// used for **traversal** components, including a `search`/`list` start directory.
+/// Reopen a retained directory descriptor-relative with an independent stream offset.
+/// Unlike `try_clone`/`dup`, repeated root listings and searches do not share an offset.
+/// `O_DIRECTORY|O_NOFOLLOW` keeps this a directory-only, no-follow operation.
 fn reopen_directory(dir: &openat::Dir) -> Result<openat::Dir, String> {
     use std::os::unix::io::{AsRawFd as _, FromRawFd as _};
 
@@ -539,7 +540,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
         ToolSpec {
             name: "list_directory".into(),
             description: "List files and subdirectories of a directory inside the project.".into(),
-            properties: vec![("path".into(), json!({"type": "string"}), true)],
+            properties: vec![("path".into(), directory_path_schema(), true)],
         },
         ToolSpec {
             name: "search_file_content".into(),
@@ -547,7 +548,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
             properties: vec![
                 ("pattern".into(), json!({"type": "string"}), true),
                 ("max_results".into(), json!({"type": "integer"}), false),
-                ("path".into(), json!({"type": "string"}), false),
+                ("path".into(), directory_path_schema(), false),
                 (
                     "max_output_bytes".into(),
                     json!({"type": "integer"}),
@@ -566,6 +567,24 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
     ];
     specs.retain(|s| s.name != "run_shell_command" || allow_shell);
     specs
+}
+
+/// Directory tools accept the root itself as well as named descendants. Keep this
+/// separate from file-path validation: `.` must never become a writable leaf or a
+/// reason to discard components from an otherwise rejected path.
+fn open_directory_path(cap: &WorkspaceCap, rel: &str) -> Result<openat::Dir, String> {
+    let root = ws_root(cap)?;
+    match rel {
+        "" | "." => reopen_directory(root),
+        _ => ensure_parent_dir_read(root, &resolve_comps(rel)?),
+    }
+}
+
+fn directory_path_schema() -> JsonValue {
+    json!({
+        "type": "string",
+        "description": "Directory relative to --cwd: use \".\" or \"\" for the project root, or a named path such as src/tools. Absolute paths, '..' components, and symlink traversal (even inside the root) are rejected."
+    })
 }
 
 fn ws_root(ws: &WorkspaceCap) -> Result<&openat::Dir, String> {
@@ -855,26 +874,7 @@ fn list_directory_tool(
 ) -> Result<String, String> {
     reject_unknown(args, &["path"])?;
     let rel = arg_str(args, "path", true)?.unwrap();
-    let dir = {
-        let root = ws_root(cap)?;
-        match rel {
-            "" => reopen_directory(root)?,
-            r => {
-                let comps = resolve_comps(r)?;
-                if comps.is_empty() {
-                    reopen_directory(root)?
-                } else {
-                    let (leaf_last, parent_comps) = comps.split_last().unwrap();
-                    if parent_comps.is_empty() {
-                        open_named_dir(root, leaf_last)?
-                    } else {
-                        let parent = ensure_parent_dir_read(root, parent_comps)?;
-                        open_named_dir(&parent, leaf_last)?
-                    }
-                }
-            }
-        }
-    };
+    let dir = open_directory_path(cap, rel)?;
     let mut names = Vec::new();
     for e in dir
         .list_self()

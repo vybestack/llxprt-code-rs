@@ -204,7 +204,13 @@ Example success object:
 `read_file`, `write_file`, `replace`, `list_directory`, `search_file_content`, and
 (only with `--allow-shell`) `run_shell_command`. File paths are resolved relative to
 `--cwd`; writes create parents inside the root and paths (including symlinks) that escape
-are rejected. Tool arguments are strictly typed (missing required, wrong type, unknown extra
+are rejected. For `list_directory` and `search_file_content`, use `"."` or `""` to
+select the project root, or a named relative directory such as `src/tools` for a
+nested directory. Omitting the optional search `path` selects the root; listing
+requires `path`. Absolute paths and every `..` component are rejected, and neither
+directory tool traverses symlinks, even when their targets are inside the root.
+Root directory representations are not file paths for `read_file`, `write_file`, or
+`replace`. Tool arguments are strictly typed (missing required, wrong type, unknown extra
 fields all fail). `read_file` honors an exact bounded `limit` (at most the requested
 bytes, with an explicit truncation marker) and an exact `offset`. `read_file` and
 `search_file_content` accept `max_output_bytes` to clamp both successful and error results
