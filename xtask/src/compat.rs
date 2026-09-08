@@ -26,10 +26,7 @@ const BANNED_MARKERS: [&str; 10] = [
 pub fn run(root: &Path) -> Result<(), String> {
     let (count, findings) = scan_findings(root)?;
     if findings.is_empty() {
-        println!(
-            "compat gate passed: {} production files scanned, 0 exceptions",
-            count
-        );
+        println!("compat gate passed: {count} production files scanned, 0 exceptions");
         Ok(())
     } else {
         for finding in &findings {
