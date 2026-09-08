@@ -227,6 +227,9 @@ if not moved.exists():
     assert not list(moved.glob('.llxprt-source.*')) and not list(moved.glob('.llxprt-publish.*'))
     headless = tmp / 'headless'
     headless.mkdir()
+    # An empty directory nested in the checkout inherits its parent's Git HEAD.
+    # Initialize an unborn repository to exercise the actual missing-commit boundary.
+    git(headless, 'init', '-q')
     task(headless, 'build', tmp / 'headless.tar.gz', env=pass_env, accepted=False, contains='committed Git HEAD')
     assert not (tmp / 'headless.tar.gz').exists()
 
