@@ -278,29 +278,108 @@ fn print_config_wire_carries_resolved_output_caps() {
 }
 
 #[test]
-fn foreign_top_level_settings_keys_are_ignored() {
+/// An unknown key **inside** a section the resolver owns is still a settings-load error
+/// (issue 202 moved tolerance to the shared top level only, never inside owned data).
+fn unknown_owned_section_key_is_error() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("settings.json"),
-        r#"{"ui": {"theme": "Green Screen"}, "oauthEnabledProviders": {"codex": true}, "provider": {"model": "test-model"}}"#,
+        r#"{"ui": {"theme": "Green Screen"}, "provider": {"unknown": true}}"#,
+    )
+    .unwrap();
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(error.contains("unknown field `unknown`"), "{error}");
+    assert!(
+        error.contains("expected one of `base_url`, `model`, `profile_path`"),
+        "{error}"
+    );
+}
+
+/// Regression (issue 202): `settings.json` is a shared multi-tool surface. The
+/// TypeScript llxprt-code app legitimately writes its own top-level keys (`ui`,
+/// `oauthEnabledProviders`, `providerKeyfiles`, ...), so an unknown top-level sibling
+/// must be ignored, not fail the load. The same read still applies every owned section
+/// beside the sibling key.
+#[test]
+fn shared_user_file_sibling_keys_are_ignored_but_owned_sections_apply() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"ui": {"theme": "Green Screen"},
+            "oauthEnabledProviders": {"codex": true},
+            "providerKeyfiles": {"openai": "/no/such/keyfile"},
+            "budgets": {"max_tool_calls": 9}}"#,
     )
     .unwrap();
     let layer = load_user_file(temp.path()).unwrap();
-    assert_eq!(layer.provider.model, Some("test-model".into()));
+    assert_eq!(layer.budgets.max_tool_calls, Some(9));
+    assert_eq!(layer.provider.base_url, None, "sibling keys add nothing");
 }
 
+/// Strictness stays inside every section the resolver owns: a misspelled owned key is
+/// still a settings-load failure with the section's field list, so a typo cannot be
+/// silently swallowed by the tolerant root.
 #[test]
-fn unknown_key_inside_owned_namespace_is_error() {
+fn owned_sections_stay_strict_on_misspelled_keys() {
     let temp = tempfile::tempdir().unwrap();
+    for (body, expected_field) in [
+        (r#"{"budgets": {"maxToolCalls": 4}}"#, "maxToolCalls"),
+        (r#"{"paths": {"configRoot": "/tmp"}}"#, "configRoot"),
+    ] {
+        std::fs::write(temp.path().join("settings.json"), body).unwrap();
+        let error = load_user_file(temp.path()).unwrap_err();
+        assert!(
+            error.contains(&format!("unknown field `{expected_field}`")),
+            "expected an unknown-field failure for {body}, got: {error}"
+        );
+    }
+}
+
+/// Strictness stays inside every owned section for wrong types, duplicate keys, and
+/// invalid values: the settings-load (or settings-resolve) classification is unchanged.
+#[test]
+fn owned_sections_stay_strict_on_types_duplicates_and_values() {
+    let temp = tempfile::tempdir().unwrap();
+    // Wrong type inside an owned section.
     std::fs::write(
         temp.path().join("settings.json"),
-        r#"{"provider": {"base-url": "http://x", "bogus": 1}}"#,
+        r#"{"ui": {"theme": "Green Screen"}, "provider": {"model": 7}}"#,
     )
     .unwrap();
-    assert!(load_user_file(temp.path())
-        .unwrap_err()
-        .contains("unknown field"));
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(
+        error.contains("invalid type: integer `7`, expected a string"),
+        "wrong type inside an owned section must fail: {error}"
+    );
+
+    // A duplicate owned key is still rejected, beside an ignored sibling key.
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"oauthEnabledProviders": {"codex": true},
+            "budgets": {"max_tool_calls": 7, "max_tool_calls": 8}}"#,
+    )
+    .unwrap();
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(
+        error.contains("duplicate field `max_tool_calls`"),
+        "a duplicate owned key must fail: {error}"
+    );
+
+    // An invalid owned value fails in the resolver, after the load succeeds.
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"ui": {"theme": "Green Screen"}, "budgets": {"max_tool_calls": 0}}"#,
+    )
+    .unwrap();
+    let mut l = layers();
+    l.user_file = load_user_file(temp.path()).unwrap();
+    let error = resolve(l).unwrap_err().to_string();
+    assert!(
+        error.starts_with("--max-tool-calls must be -1 or an integer from 1 through 512 (got "),
+        "an invalid owned value must fail in the resolver: {error}"
+    );
 }
+
 #[test]
 fn env_max_tool_calls_validated_like_cli() {
     for value in [0, 513] {
