@@ -442,6 +442,100 @@ fn a_refused_append_leaves_the_state_untouched() {
     );
 }
 
+#[test]
+/// GREEN: a fold_from that refuses one claim of an append leaves the live state
+/// byte-identical to the state it resumed from — including the append watermark and
+/// the item count, which a premature commit would already have spent. The refused
+/// append's first identifier is derived from the current watermark and stages cleanly,
+/// but the append is refused by the late scope validation, so nothing staged may
+/// reach the live state.
+fn fold_from_refuses_after_a_staged_claim_leaves_live_state_byte_identical() {
+    let payload = b"0123456789abcdefghij"; // 20 bytes
+    let mut sequencer = Sequencer::new(FIRST_SEQUENCE, 1, 1_000);
+    let mut log = EventLog::new(V2);
+    append(
+        op(OperationClass::ScopeOpen, 1, 0),
+        &mut sequencer,
+        &mut log,
+    );
+    append(user("landed", 1), &mut sequencer, &mut log);
+    append(user("resumed", 1), &mut sequencer, &mut log);
+    let reducer = Reducer::new(IDLENESS_WINDOW);
+
+    // Resume a genuine suffix through fold_from rather than rebuilding the full
+    // state with fold, so the refusal is exercised against live resumed state.
+    let mut live = reducer.fold(&log.prefix(2)).unwrap();
+    reducer.fold_from(&mut live, &log).unwrap();
+    assert_eq!(live.state_hash, reducer.fold(&log).unwrap().state_hash);
+    let before = live.clone();
+    let before_bytes = encode_state(&live);
+    let before_item_count = live.conversation_ir.len();
+    let expected_next_identity = ItemId::append(
+        live.conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+    );
+
+    // An append whose first 11-byte claim would mint from the live watermark and
+    // whose claim cover is valid, but which is attributed to scope 2 — a scope
+    // no event opened. The scope validation runs only after every claim staged, so a
+    // reducer that commits staged identifiers early would spend the watermark here.
+    let refused_event = sequencer.append(
+        EventKind::Append {
+            source: AppendSource::User,
+            sanitized: payload.to_vec(),
+            scope: 2,
+            claims: contiguous(payload, &[11, 9]),
+        },
+        log.store_version(),
+    );
+    log.append(refused_event).unwrap();
+
+    assert!(
+        matches!(
+            reducer.fold_from(&mut live, &log).unwrap_err(),
+            ReducerError::UnknownScope { id: 2 }
+        ),
+        "the refusal is the late scope validation, not the claim cover"
+    );
+
+    assert_eq!(
+        encode_state(&live),
+        before_bytes,
+        "a fold_from refusal leaves the live state byte-identical"
+    );
+    assert_eq!(
+        live.conversation_ir.len(),
+        before_item_count,
+        "no claim of the refused append landed"
+    );
+    assert_eq!(
+        live.conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+        before
+            .conversation_ir
+            .namespace_watermark(ItemNamespace::Append),
+        "the append watermark is not spent by a refused fold_from append"
+    );
+    assert_eq!(live.state_hash, before.state_hash);
+
+    // Continue an equivalent clean log after the refusal. The next accepted
+    // append must mint exactly the identity the refused append would have
+    // started with; a premature commit would have advanced it instead.
+    let mut clean_log = log.prefix(3);
+    let mut clean_sequencer = Sequencer::continuing(&clean_log, 1, 2_000);
+    append(
+        user("next accepted", 1),
+        &mut clean_sequencer,
+        &mut clean_log,
+    );
+    reducer.fold_from(&mut live, &clean_log).unwrap();
+    assert_eq!(
+        live.conversation_ir.items().last().unwrap().id(),
+        expected_next_identity,
+        "the next accepted append reuses the identity unspent by the refusal"
+    );
+}
+
 /// GREEN: a logged resegment that would cut a recorded claim in two is refused,
 /// children, and the children's provenance is disjoint and total.
 #[test]
