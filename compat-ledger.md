@@ -9,3 +9,14 @@ the fallback shape nests its second deserialization immediately inside the Err a
 | Site | Reason |
 | --- | --- |
 | src/grade/flow/methods.rs:41 | #234: rustc's own deprecated-attribute name; is_ident requires the literal. Detection of rustc metadata, not a shim |
+
+## Issue #27 shell entrypoint allowance
+
+Issue #27 explicitly permits the ten named release/test scripts to retain their current
+interfaces as thin `exec cargo +1.88.0 xtask` entrypoints. These wrappers contain no old
+implementation or alternate reader. Publication preserves the caller's working directory
+using the same offline locked xtask manifest command. The adjacent vendor-provenance fixture
+entrypoint uses the same dispatch because its copied-tree test must call the Rust verifier.
+This allowance does not exempt any production source from `cargo xtask compat` and does not
+permit session, config, or state translation.
+

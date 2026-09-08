@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub type Result<T = ()> = std::result::Result<T, String>;
 
 pub fn checked(command: &mut Command) -> Result {
+    crate::release_cancellation::check()?;
     let status = command.status().map_err(|e| format!("{command:?}: {e}"))?;
+    crate::release_cancellation::check()?;
     if status.success() {
         Ok(())
     } else {
@@ -72,13 +74,9 @@ impl Temp {
                 std::process::id(),
                 SEQUENCE.fetch_add(1, Ordering::Relaxed)
             ));
-            match fs::create_dir(&path) {
-                Ok(()) => {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
-                        .map_err(|e| e.to_string())?;
-                    return Ok(Self(path));
-                }
+            use std::os::unix::fs::DirBuilderExt;
+            match fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => return Ok(Self(path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
                 Err(e) => return Err(e.to_string()),
             }
