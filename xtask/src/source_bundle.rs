@@ -92,6 +92,7 @@ fn build(root: &Path, args: &[String]) -> Result {
     if args == ["--list"] {
         return run(root, &["list".into()]);
     }
+    let _cancellation = crate::release_cancellation::Cancellation::install()?;
     let commit = policy::commit(root)?;
     let out = archive_argument(root, args)?;
     let destination = text(python(root, "source-bundle-output.py").arg(root).arg(&out))?;
@@ -140,9 +141,27 @@ fn build(root: &Path, args: &[String]) -> Result {
     // to offline builds, which are bounded by the existing publisher-owned deadline.
     reader
         .get_ref()
-        .set_read_timeout(None)
+        .set_read_timeout(Some(Duration::from_millis(100)))
         .map_err(|e| e.to_string())?;
-    std::io::copy(&mut reader, &mut std::io::stdout()).map_err(|e| e.to_string())?;
+    use std::io::Read;
+    let mut buffer = [0; 8192];
+    loop {
+        crate::release_cancellation::check()?;
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => std::io::stdout()
+                .write_all(&buffer[..count])
+                .map_err(|e| e.to_string())?,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     let status = publisher.0.wait().map_err(|e| e.to_string())?;
     if !status.success() {
         return Err(format!("source-bundle publisher: {status}"));

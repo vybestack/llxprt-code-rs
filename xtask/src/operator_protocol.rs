@@ -269,6 +269,8 @@ impl Drop for Evidence {
 }
 
 pub fn run(root: &Path, args: &[String]) -> Result {
+    let _cancellation =
+        crate::release_cancellation::Cancellation::install().map_err(|_| FAILURE)?;
     execute(root, args).map_err(|_| FAILURE.to_owned())
 }
 fn execute(root: &Path, args: &[String]) -> Result {
@@ -389,12 +391,21 @@ fn run_test(
             .env("LLXPRT_OPERATOR_INTEROP_SERVICE", &state.service)
             .env("LLXPRT_OPERATOR_INTEROP_ACCOUNT", ACCOUNT);
     }
+    reader
+        .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+        .map_err(|_| FAILURE)?;
     let mut child = command.spawn().map_err(|_| FAILURE)?;
     drop(command);
     let mut capture = Vec::new();
-    let read = reader.take(MAX_CAPTURE + 1).read_to_end(&mut capture);
+    let read = capture_output(reader, &mut capture);
+    if read.is_err() {
+        let _ = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+    }
+    // The required external watchdog bounds and reaps its Cargo child.
     let status = child.wait().map_err(|_| FAILURE)?;
-    read.map_err(|_| FAILURE)?;
+    read?;
     if !status.success() || capture.len() as u64 > MAX_CAPTURE {
         return Err(FAILURE.into());
     }
@@ -425,6 +436,30 @@ fn run_test(
     fs::write(state.mode_dir.join("test-output.capture"), capture).map_err(|_| FAILURE)?;
     Ok(result.trim_end_matches('\n').into())
 }
+fn capture_output(mut reader: std::os::unix::net::UnixStream, capture: &mut Vec<u8>) -> Result {
+    let mut buffer = [0; 8192];
+    loop {
+        crate::release_cancellation::check()?;
+        let remaining = (MAX_CAPTURE + 1).saturating_sub(capture.len() as u64) as usize;
+        if remaining == 0 {
+            return Err(FAILURE.into());
+        }
+        let bound = remaining.min(buffer.len());
+        match reader.read(&mut buffer[..bound]) {
+            Ok(0) => return Ok(()),
+            Ok(count) => capture.extend_from_slice(&buffer[..count]),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return Err(FAILURE.into()),
+        }
+    }
+}
+
 fn record(state: &mut Evidence, mode: &Mode, head: &str, result: &str) -> Result {
     let capture = state.mode_dir.join("test-output.capture");
     let hash = digest(&capture)?;
