@@ -2,9 +2,14 @@
 use super::*;
 use std::process::Command;
 
+#[path = "child.rs"]
+mod child;
+#[path = "delegation.rs"]
+pub(super) mod delegation;
+
 const CHILD_CASE: &str = "LLXPRT_CTXREC_ISOLATION_CASE";
 
-fn trace(store: &SessionStore, cwd: &Path) {
+fn trace(store: &SessionStore, config: &Path, cwd: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -12,7 +17,7 @@ fn trace(store: &SessionStore, cwd: &Path) {
         eprintln!(
             "session={} config={} workspace={} dev={} ino={} store={} handle={:p}",
             store.session_id,
-            root().display(),
+            config.display(),
             cwd.display(),
             metadata.dev(),
             metadata.ino(),
@@ -29,12 +34,12 @@ fn concurrent_fixtures_keep_fixed_sessions_independent() {
         let threads: Vec<_> = (0..8)
             .map(|_| {
                 scope.spawn(|| {
+                    barrier.wait();
                     let cwd = workspace();
                     let config = root();
                     let sid = SessionId::parse("same-session").unwrap();
-                    barrier.wait();
                     let store = SessionStore::load_at(&sid, &config).unwrap();
-                    trace(&store, &cwd);
+                    trace(&store, &config, &cwd);
                     run_bulk_turn(&store, &cwd, "bulk.txt", "c0");
                     let reopened = reopen(&store);
                     let wrong = cwd.join("wrong");
@@ -74,22 +79,22 @@ fn reused_process_root_child() {
         return;
     };
     let stale = std::env::temp_dir().join(format!("llxprt-rs-ctxrec-{}", std::process::id()));
-    let old_workspace = stale.join("ws-previous-run");
+    let old_workspace = stale.join(if case == "checkpoint-history" {
+        "ws-0"
+    } else {
+        "ws-previous-run"
+    });
     std::fs::create_dir_all(&old_workspace).unwrap();
     let id = match case.as_str() {
-        "checkpoint" => "checkpoint-digest-0",
+        "checkpoint" | "checkpoint-history" => "checkpoint-digest-0",
         "symlink" => "symlink-vault-0",
         "entropy" => "vault-key-public-seed-a",
         _ => panic!("unknown child case"),
     };
     let sid = SessionId::parse(id).unwrap();
     let store = SessionStore::load_at(&sid, &stale).unwrap();
-    eprintln!(
-        "seed session={id} config={} workspace={} store={}",
-        stale.display(),
-        old_workspace.display(),
-        store.session_dir.display()
-    );
+    eprintln!("seed case={case}");
+    trace(&store, &stale, &old_workspace);
     let request = reserved(&store, None, None, "old run", &old_workspace).unwrap();
     let output = agent(
         Box::new(MockBackend::new(vec![result("done")])),
@@ -99,21 +104,62 @@ fn reused_process_root_child() {
     .unwrap();
     assert_eq!(output.status, "ok");
     drop(store);
+    if case == "checkpoint-history" {
+        // A second ordinary no-tool turn through a fresh handle preserves the
+        // first empty-spine checkpoint. No artifact or event injection: this
+        // models persisted history at the same still-existing ws-0 identity.
+        let store = SessionStore::load_at(&sid, &stale).unwrap();
+        trace(&store, &stale, &old_workspace);
+        let request = reserved(&store, None, None, "old continuation", &old_workspace).unwrap();
+        assert!(!request.replay);
+        let output = agent(
+            Box::new(MockBackend::new(vec![result("done")])),
+            &old_workspace,
+        )
+        .run(&store, &request)
+        .unwrap();
+        assert_eq!(output.status, "ok");
+        assert_eq!(checkpoint_positions(&store), vec![0, 0]);
+    }
+    delegation::arm(id);
     match case.as_str() {
-        "checkpoint" => checkpoint_digests_cover_exactly_the_content_they_name(),
+        "checkpoint" | "checkpoint-history" => {
+            checkpoint_digests_cover_exactly_the_content_they_name()
+        }
         "symlink" => symlinked_vault_artifact_fails_recovery(),
         "entropy" => vault_key_is_private_entropy_not_a_function_of_public_state(),
         _ => unreachable!(),
     }
+    delegation::finish();
     assert_ne!(root(), stale, "a fresh run must not adopt stale sessions");
+    eprintln!("completed delegated case={case}");
+}
+
+fn checkpoint_positions(store: &SessionStore) -> Vec<u64> {
+    let bytes = artifact(store, "checkpoints");
+    let positions = bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            serde_json::from_slice::<serde_json::Value>(line).unwrap()["applied"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    eprintln!(
+        "checkpoint session={} positions={positions:?}",
+        store.session_id
+    );
+    positions
 }
 
 #[test]
 fn repeated_executables_reject_stale_pid_identity() {
     let parent = tempfile::tempdir().unwrap();
     for round in 0..2 {
-        for case in ["checkpoint", "symlink", "entropy"] {
-            let output = Command::new(std::env::current_exe().unwrap())
+        for case in ["checkpoint", "checkpoint-history", "symlink", "entropy"] {
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
                 .args([
                     "--exact",
                     "isolation::reused_process_root_child",
@@ -122,10 +168,10 @@ fn repeated_executables_reject_stale_pid_identity() {
                 .env(CHILD_CASE, case)
                 .env("TMPDIR", parent.path())
                 .env("TMP", parent.path())
-                .env("TEMP", parent.path())
-                .env("LLXPRT_CONFIG_HOME", parent.path().join("config"))
-                .output()
-                .unwrap();
+                .env("TEMP", parent.path());
+            // No live CLI/provider child: all stores use load_at. Preserve any
+            // native supplied LLXPRT_CONFIG_HOME rather than replacing it.
+            let output = child::run(command, case, round);
             eprintln!(
                 "round={round} case={case}\n{}\n{}",
                 String::from_utf8_lossy(&output.stdout),
@@ -136,6 +182,7 @@ fn repeated_executables_reject_stale_pid_identity() {
                 "child {case} round {round}: {}",
                 output.status
             );
+            child::assert_executed(&output, case);
         }
     }
 }
