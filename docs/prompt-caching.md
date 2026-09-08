@@ -38,7 +38,10 @@ Anthropic reports input excluding both cache reads and creation. Total input is 
 sum of all three; uncached input includes creation. Creation is separately exposed
 because it has a different price. No currency savings are inferred.
 
-Missing provider counters remain JSON null, not zero. A call enters the ratio only
+Missing provider counters remain JSON null, not zero, including absent Anthropic
+input usage. Inconsistent external counters (reads exceeding inclusive input, or
+an overflowing per-call sum) preserve the raw values but omit invalid derived
+values and do not enter the ratio. A call enters the ratio only
 when its total denominator and cached-read count are known. A zero-token denominator
 produces null ratio. Cache-off calls can still report implicit hits. Failed transports
 have no completion usage and do not enter the aggregate. These numbers describe

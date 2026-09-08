@@ -45,11 +45,7 @@ impl InputAccounting {
                 usage
                     .request_tokens
                     .zip(usage.cache_read_tokens)
-                    .map(|(input, read)| {
-                        input
-                            .checked_sub(read)
-                            .expect("cached input exceeds total input")
-                    }),
+                    .and_then(|(input, read)| input.checked_sub(read)),
                 "input_includes_cache_reads",
             ),
             Self::Anthropic => {
@@ -57,21 +53,17 @@ impl InputAccounting {
                     .request_tokens
                     .zip(usage.cache_creation_tokens)
                     .zip(usage.cache_read_tokens)
-                    .map(|((input, creation), read)| {
+                    .and_then(|((input, creation), read)| {
                         input
                             .checked_add(creation)
                             .and_then(|n| n.checked_add(read))
-                            .expect("input accounting overflow")
                     });
                 (
                     total,
-                    usage.request_tokens.zip(usage.cache_creation_tokens).map(
-                        |(input, creation)| {
-                            input
-                                .checked_add(creation)
-                                .expect("input accounting overflow")
-                        },
-                    ),
+                    usage
+                        .request_tokens
+                        .zip(usage.cache_creation_tokens)
+                        .and_then(|(input, creation)| input.checked_add(creation)),
                     "input_excludes_cache_reads_and_creation",
                 )
             }
@@ -96,8 +88,8 @@ impl RunCache {
         if let Some((input, read)) = observation
             .total_input_tokens
             .zip(observation.cached_input_tokens)
+            .filter(|(input, read)| read <= input)
         {
-            assert!(read <= input, "cached input exceeds total input");
             self.measured_calls += 1;
             self.measured_input_tokens = self
                 .measured_input_tokens
@@ -204,5 +196,33 @@ mod tests {
         );
         assert_eq!(missing.total_input_tokens, None);
         assert_eq!(run.measured_calls, 3);
+    }
+
+    #[test]
+    fn inconsistent_external_counters_do_not_panic_or_pollute_ratio() {
+        let mut run = RunCache::default();
+        let inconsistent = run.record(
+            InputAccounting::Inclusive,
+            &LlmUsage {
+                request_tokens: Some(1),
+                cache_read_tokens: Some(2),
+                ..Default::default()
+            },
+        );
+        assert_eq!(inconsistent.cached_input_tokens, Some(2));
+        assert_eq!(inconsistent.uncached_input_tokens, None);
+        let overflow = run.record(
+            InputAccounting::Anthropic,
+            &LlmUsage {
+                request_tokens: Some(u64::MAX),
+                cache_creation_tokens: Some(1),
+                cache_read_tokens: Some(1),
+                ..Default::default()
+            },
+        );
+        assert_eq!(overflow.total_input_tokens, None);
+        assert_eq!(overflow.uncached_input_tokens, None);
+        assert_eq!(run.measured_calls, 0);
+        assert_eq!(run.hit_ratio, None);
     }
 }

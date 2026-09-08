@@ -111,6 +111,9 @@ impl ChatBackend for ResponsesBackend {
 }
 
 #[cfg(test)]
+mod cache_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -169,7 +172,7 @@ mod tests {
     }
 
     /// Offset just past the CRLF CRLF header/body separator.
-    fn find_body_start(request: &[u8]) -> Option<usize> {
+    pub(super) fn find_body_start(request: &[u8]) -> Option<usize> {
         request
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -253,7 +256,7 @@ mod tests {
 
     /// Reads one full HTTP request (headers plus a content-length body) off
     /// the accepted codex connection.
-    fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    pub(super) fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         use std::io::Read as _;
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(10)))
@@ -283,7 +286,7 @@ mod tests {
     /// real codex backend: the terminal response event, then EOF, no
     /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
     /// covered.
-    fn codex_turn_sse_payload(round: usize) -> String {
+    pub(super) fn codex_turn_sse_payload(round: usize) -> String {
         let turn = if round == 0 { "one" } else { "two" };
         let response_id = format!("resp_loopback_{round}");
         let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
