@@ -25,6 +25,36 @@ fn bin() -> Command {
     command
 }
 
+fn printed_config(config_home: &std::path::Path, profile: Option<&str>) -> Value {
+    let mut command = bin();
+    command
+        .env("LLXPRT_CONFIG_HOME", config_home)
+        .arg("--turn-time")
+        .arg("11s")
+        .arg("--request-timeout")
+        .arg("13s")
+        .arg("--max-shell-output")
+        .arg("17000")
+        .arg("--max-tool-output")
+        .arg("19000")
+        .arg("--max-turn-output")
+        .arg("23000")
+        .arg("--print-config");
+    if let Some(profile) = profile {
+        command.arg("--profile").arg(profile);
+    }
+    let output = command.output().unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
 #[test]
 fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
     let config = tempfile::tempdir().unwrap();
@@ -36,31 +66,27 @@ fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
     )
     .unwrap();
 
-    let output = bin()
-        .env("LLXPRT_CONFIG_HOME", config.path())
-        .arg("--profile")
-        .arg("astra-headless")
-        .arg("--turn-time")
-        .arg("11s")
-        .arg("--request-timeout")
-        .arg("13s")
-        .arg("--max-shell-output")
-        .arg("17000")
-        .arg("--max-tool-output")
-        .arg("19000")
-        .arg("--max-turn-output")
-        .arg("23000")
-        .arg("--print-config")
-        .output()
-        .unwrap();
+    std::fs::write(
+        profiles.join("dsflash-mi300x.json"),
+        r#"{
+            "version": 1,
+            "provider": "openai",
+            "model": "paired-control-model",
+            "ephemeralSettings": {
+                "base-url": "https://paired-control.invalid/v1"
+            }
+        }"#,
+    )
+    .unwrap();
 
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let settings: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let settings = printed_config(config.path(), Some("astra-headless"));
+    let without_profile = printed_config(config.path(), None);
+    let fixture_base_url = serde_json::json!({
+        "value": "https://chatgpt.com/backend-api/codex",
+        "source": "profile"
+    });
+    assert_eq!(settings["provider"]["base_url"], fixture_base_url);
+    assert_ne!(without_profile["provider"]["base_url"], fixture_base_url);
     assert_eq!(
         settings["budgets"]["turn_time"],
         serde_json::json!({"value": 11, "source": "cli"})
