@@ -69,6 +69,9 @@ thread_local! {
 }
 
 /// Per-test configuration root, retained across authenticated reopens.
+/// Thread-bound: a worker calling this allocates a different root, and load_at
+/// creates on demand. Pass the original root explicitly to delegate operations
+/// on the same fixture; independent-fixture workers intentionally self-allocate.
 fn root() -> PathBuf {
     ROOT.with(|root| root.path().to_path_buf())
 }
@@ -99,6 +102,7 @@ fn reserved(
     prompt: &str,
     cwd: &Path,
 ) -> Result<ReservedRequest, StoreError> {
+    isolation::delegation::observe(store, cwd);
     store.start_request(turn, branch, prompt, cwd)
 }
 
