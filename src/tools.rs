@@ -969,6 +969,9 @@ pub(crate) fn execute_tool_with_limit(
     // The aggregate turn budget is the only clamp the per-result cap cannot explain: a
     // caller's own `max_output_bytes` is a request, not a clamp (issue 125).
     let requested = arg_u64(&map, "max_output_bytes").ok().flatten();
+    // Only the search path needs the clamp flag: the read path derives its header cause
+    // from `body_cut` and the requested window, so the flag is not passed on (issue 125
+    // cycle 2).
     let budget_clamped = output_limit < config.max_output_bytes
         && requested
             .is_none_or(|value| usize::try_from(value).unwrap_or(usize::MAX) > output_limit);
@@ -979,7 +982,6 @@ pub(crate) fn execute_tool_with_limit(
             output_limit,
             config.digest_size_floor,
             config.max_output_bytes,
-            budget_clamped,
         ),
         "write_file" => with_workspace_write_lock(&config.ws, || write_file_tool(&config.ws, &map)),
         "replace" => with_workspace_write_lock(&config.ws, || replace_tool(&config.ws, &map)),

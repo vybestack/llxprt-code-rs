@@ -1,5 +1,23 @@
 use super::*;
 
+/// Maps a digest-size-floor failure to its CLI boundary error (issue 125): a tightening
+/// refusal is a digest-size-floor configuration error carrying the actionable message;
+/// a recovery or publication failure keeps the code/path the matching failure at this
+/// boundary already uses.
+fn digest_floor_error(error: crate::session::DigestFloorError) -> AppError {
+    match error {
+        crate::session::DigestFloorError::Refused { .. } => {
+            AppError::new(Code::Config, "digest-size-floor", error.refusal_message())
+        }
+        crate::session::DigestFloorError::Recovery(message) => {
+            AppError::new(Code::Session, "context-recovery", message)
+        }
+        crate::session::DigestFloorError::Publish(message) => {
+            AppError::new(Code::Session, "context-publish", message)
+        }
+    }
+}
+
 /// Run while publishing optional memory-profile boundaries.
 pub fn run_profiled(
     args: Args,
@@ -48,17 +66,7 @@ pub fn run_profiled(
     // must stay under.
     store
         .set_digest_size_floor(resolved_digest_size_floor(&settings)?)
-        .map_err(|error| match error {
-            // A tightening refusal is a digest-size-floor configuration error carrying
-            // the actionable message; a recovery failure keeps the context-recovery
-            // code/path every other recovery failure at this boundary uses.
-            crate::session::context_persist::DigestFloorError::Refused { .. } => {
-                AppError::new(Code::Config, "digest-size-floor", error.refusal_message())
-            }
-            crate::session::context_persist::DigestFloorError::Recovery(message) => {
-                AppError::new(Code::Session, "context-recovery", message)
-            }
-        })?;
+        .map_err(digest_floor_error)?;
     let _ = store.take_profile_metrics();
     let reserved = store
         .start_request_with_workspace(

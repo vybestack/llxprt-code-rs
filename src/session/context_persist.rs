@@ -602,93 +602,6 @@ fn normalized_pressure(bytes: usize) -> f64 {
     (bytes as f64 / BULK_RESULT_BYTES as f64).min(1.0)
 }
 
-/// Applies the resolved digest admission floor (issue 125) to the session's registry.
-///
-/// A floor above the version-1 baseline is an in-session relaxation of the same table:
-/// the floor is an admission parameter, so the rule version label moves and version 1
-/// keeps its baseline rules. The default floor leaves version 1 untouched. A floor below
-/// the session's active floor is a tightening the registry refuses, and the refusal names
-/// both numbers and the remediation instead of a bare "refused" (issue 125).
-pub(crate) fn apply_digest_size_floor(
-    state: &mut ContextState,
-    floor: usize,
-) -> Result<(), DigestFloorError> {
-    let mut rules = state.filters.rules().clone();
-    if rules.size_floor == floor {
-        return Ok(());
-    }
-    rules.version += 1;
-    rules.size_floor = floor;
-    state
-        .filters
-        .update_rules(rules)
-        .map(|_| ())
-        .map_err(|_| DigestFloorError::Refused {
-            requested: floor,
-            active: state.filters.rules().size_floor,
-        })
-}
-
-/// Why a digest-size-floor application failed: a tightening the registry refused (an
-/// actionable configuration refusal) or a failure recovering the durable context state
-/// this store was opened from. The two arms surface differently at the CLI boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DigestFloorError {
-    /// The resolved floor is below the session's active floor: name both numbers and the
-    /// remediation so the operator can raise the flag or start a new session.
-    Refused { requested: usize, active: usize },
-    /// The durable `context/` artifacts could not be recovered.
-    Recovery(String),
-}
-
-impl DigestFloorError {
-    /// The actionable refusal message (issue 125).
-    pub(crate) fn refusal_message(&self) -> String {
-        match self {
-            DigestFloorError::Refused { requested, active } => format!(
-                "digest-size-floor {requested} is below this session's active floor {active}; pass --digest-size-floor {active} or higher, or start a new session"
-            ),
-            DigestFloorError::Recovery(message) => message.clone(),
-        }
-    }
-}
-
-impl std::fmt::Display for DigestFloorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.refusal_message())
-    }
-}
-
-/// Applies the resolved digest admission floor (issue 125) to a store's filter registry,
-/// creating the lazily opened context state first so the floor is never lost. A recovery
-/// failure stays a recovery error; only the registry's own refusal is a floor refusal.
-pub(crate) fn set_digest_size_floor(
-    store: &SessionStore,
-    floor: usize,
-) -> Result<(), DigestFloorError> {
-    let mut guard = store
-        .context
-        .lock()
-        .map_err(|_| DigestFloorError::Recovery("context store lock poisoned".to_string()))?;
-    if guard.is_none() {
-        *guard = Some(recover_context_state(store).map_err(DigestFloorError::Recovery)?);
-    }
-    match guard.as_mut() {
-        Some(state) => {
-            apply_digest_size_floor(state, floor)?;
-            // An accepted raise is durable the moment it lands: a process that reopens
-            // the session must see the same active floor, and the manifest must carry
-            // the rule history (issue 125). A raise that cannot persist is a failure,
-            // not a value that silently reverts on restart.
-            crate::session::context_publish::persist_context(store, state)
-                .map_err(DigestFloorError::Recovery)
-        }
-        None => Err(DigestFloorError::Recovery(
-            "context store missing".to_string(),
-        )),
-    }
-}
-
 /// The same record shape computed entirely in memory: no store, no vault, no artifacts.
 ///
 /// Used when the store refuses the write, so a bulk result still never rides the
@@ -790,13 +703,18 @@ fn digest_record(
             .preserved
             .push(String::from_utf8_lossy(&digest.summary).into_owned());
     }
-    // The record names the floor its verdict used and carries exactly one deterministic
-    // re-fetch instruction: a pure function of the floor, so the durable and the
-    // re-derived records stay byte-identical (issue 125).
+    // The record names the floor its verdict used (issue 125). The re-fetch instruction
+    // is meaningful only for file-backed tools whose bytes a later read_file window can
+    // actually recover: a digested shell or directory result has no path to re-read, and
+    // an unexecutable instruction sends the model hunting for a nonexistent file. Still
+    // a pure function of (tool, floor), so the durable and the re-derived records stay
+    // byte-identical (issue 125 cycle 2).
     let floor = state.filters.rules().size_floor;
     record.push_str(&format!("floor={floor}\n"));
-    record.push_str(&crate::tools::read_window::digest_re_fetch_line(floor));
-    record.push('\n');
+    if matches!(tool, "read_file" | "search_file_content") {
+        record.push_str(&crate::tools::read_window::digest_re_fetch_line(floor));
+        record.push('\n');
+    }
     record
 }
 

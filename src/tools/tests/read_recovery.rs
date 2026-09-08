@@ -43,14 +43,9 @@ fn recipe_args(out: &str) -> (String, JsonValue) {
 /// byte is skipped (issue 125).
 fn rendered_body_len(out: &str) -> usize {
     let mut lines = out.lines();
-    lines.next();
-    let last = out.lines().next_back().unwrap_or("");
-    let body = out
-        .lines()
-        .skip(1)
-        .filter(|line| *line != last)
-        .collect::<Vec<_>>()
-        .join("\n");
+    lines.next(); // the header
+    lines.next_back(); // the recipe is guaranteed to be the last line
+    let body = lines.collect::<Vec<_>>().join("\n");
     body.strip_suffix("...").unwrap_or(&body).len()
 }
 
@@ -81,7 +76,7 @@ fn budget_clamped_read_states_the_bound_and_a_replayable_recipe() {
     let resume = 400 + rendered_body_len(&out);
     assert_eq!(
         line,
-        format!("re-fetch: {{\"path\":\"big.txt\",\"offset\":{resume},\"max_output_bytes\":896}}")
+        format!("re-fetch: {{\"path\":\"big.txt\",\"offset\":{resume},\"max_output_bytes\":512}}")
     );
     assert_eq!(args["path"], json!("big.txt"));
     assert_eq!(
@@ -90,10 +85,15 @@ fn budget_clamped_read_states_the_bound_and_a_replayable_recipe() {
         "the recipe continues at the last rendered body byte"
     );
     assert!(args["offset"].as_u64().unwrap() <= 800);
-    assert_eq!(args["max_output_bytes"], json!(896));
+    assert_eq!(args["max_output_bytes"], json!(512));
     assert!(
         args["max_output_bytes"].as_u64().unwrap() < 1024,
         "the recipe window stays under the digest floor"
+    );
+    assert_eq!(
+        args["max_output_bytes"].as_u64().unwrap(),
+        512,
+        "the bulk seam's fixed 1024-byte threshold caps the verbatim window"
     );
 }
 
@@ -122,7 +122,7 @@ fn eof_boundary_window_recipe_continues_where_the_window_stopped() {
         json!(200),
         "the recipe resumes at the window end"
     );
-    assert_eq!(args["max_output_bytes"], json!(896));
+    assert_eq!(args["max_output_bytes"], json!(512));
 
     // A window bounded by the caller's `max_output_bytes` (no explicit `limit`) is named
     // as such rather than blamed on the budget: the request bound the window, and the
@@ -161,8 +161,8 @@ fn recipe_window_tracks_the_configured_floor_and_whole_reads_carry_none() {
     let (_, args) = recipe_args(&out);
     assert_eq!(
         args["max_output_bytes"],
-        json!(3584),
-        "floor 4096 minus an eighth"
+        json!(512),
+        "the bulk seam's fixed threshold caps the window even at a raised floor"
     );
 
     std::fs::write(d.path().join("small.txt"), "whole file").unwrap();
@@ -290,9 +290,11 @@ fn a_bound_too_small_for_the_frame_is_a_typed_error() {
     let config = cfg_floor(d.path(), 1024);
     // The refusal message (~82 bytes) cannot survive the crate's 8-byte truncation
     // verbatim (a long value at cap 8 truncates to its marker prefix), so the tiny-bound
-    // case asserts the refusal plus that prefix, and a cap-87 call carries the exact
-    // message end to end (the smallest real frame for this file needs 88 bytes, so 87
-    // still refuses while the 82-byte message fits the cap).
+    // case asserts the refusal plus that prefix, and a cap-96 call carries the exact
+    // message end to end: the budget also caps the read itself (the window's end digit
+    // count moves with it), and the smallest real frame — short header + newline + cut
+    // marker + newline + the 63-byte recipe — sits in the low hundreds, so 96 is safely
+    // below it while the message fits the cap (issue 125 cycle 2).
     let (ok, out) = execute_tool_with_limit(
         d.path(),
         "read_file",
@@ -310,7 +312,7 @@ fn a_bound_too_small_for_the_frame_is_a_typed_error() {
         "read_file",
         json!({"path": "big.txt", "max_output_bytes": 4096}),
         &config,
-        87,
+        96,
     );
     assert!(
         !ok,
@@ -318,7 +320,7 @@ fn a_bound_too_small_for_the_frame_is_a_typed_error() {
     );
     assert_eq!(
         out,
-        "output budget 87 bytes is too small to render a read window and its re-fetch recipe"
+        "output budget 96 bytes is too small to render a read window and its re-fetch recipe"
     );
 }
 

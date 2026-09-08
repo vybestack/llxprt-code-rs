@@ -722,18 +722,72 @@ impl SessionStore {
         context_persist::context_exchange(self, rounds)
     }
 
-    /// Compacts one tool result before it is recorded into the round.
-    /// Applies the resolved digest admission floor (issue 125) as an in-session
-    /// relaxation of the session's filter registry, so every CTXDIGEST record this
-    /// process renders names the floor its re-fetch recipe must stay under. A refusal is
-    /// a typed configuration error; a context-recovery failure stays a recovery error.
-    pub fn set_digest_size_floor(
-        &self,
+    /// Applies the resolved digest admission floor (issue 125) to the session's registry.
+    ///
+    /// A floor above the version-1 baseline is an in-session relaxation of the same table:
+    /// the floor is an admission parameter, so the rule version label moves and version 1
+    /// keeps its baseline rules. The default floor leaves version 1 untouched. A floor below
+    /// the session's active floor is a tightening the registry refuses, and the refusal names
+    /// both numbers and the remediation instead of a bare "refused" (issue 125).
+    pub(crate) fn apply_digest_size_floor(
+        state: &mut context_persist::ContextState,
         floor: usize,
-    ) -> Result<(), crate::session::context_persist::DigestFloorError> {
-        context_persist::set_digest_size_floor(self, floor)
+    ) -> Result<(), DigestFloorError> {
+        let mut rules = state.filters.rules().clone();
+        if rules.size_floor == floor {
+            return Ok(());
+        }
+        rules.version += 1;
+        rules.size_floor = floor;
+        state
+            .filters
+            .update_rules(rules)
+            .map(|_| ())
+            .map_err(|_| DigestFloorError::Refused {
+                requested: floor,
+                active: state.filters.rules().size_floor,
+            })
     }
 
+    /// Applies the resolved digest admission floor (issue 125) to a store's filter
+    /// registry, creating the lazily opened context state first so the floor is never
+    /// lost. A recovery failure stays a recovery error; only the registry's own refusal
+    /// is a floor refusal.
+    ///
+    /// As an in-session relaxation of the filter registry: every CTXDIGEST record this
+    /// process renders names the floor its re-fetch recipe must stay under. A refusal is
+    /// a typed configuration error; a context-recovery failure stays a recovery error.
+    pub fn set_digest_size_floor(&self, floor: usize) -> Result<(), DigestFloorError> {
+        let mut guard = self
+            .context
+            .lock()
+            .map_err(|_| DigestFloorError::Recovery("context store lock poisoned".to_string()))?;
+        if guard.is_none() {
+            *guard = Some(
+                context_persist::recover_context_state(self).map_err(DigestFloorError::Recovery)?,
+            );
+        }
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| DigestFloorError::Recovery("context store missing".to_string()))?;
+        // Snapshot before the apply: a raise whose durable publication fails must not stay
+        // live in memory while reporting failure — the next compaction would publish it
+        // anyway, making the "failed" raise durable behind the caller's back (issue 125
+        // cycle 2).
+        let previous = state.filters.rules().clone();
+        SessionStore::apply_digest_size_floor(state, floor)?;
+        // An accepted raise is durable the moment it lands: a process that reopens
+        // the session must see the same active floor, and the manifest must carry
+        // the rule history (issue 125). A raise that cannot persist rolls the
+        // in-memory rules back and reports the publication failure as itself.
+        if let Err(error) = crate::session::context_publish::persist_context(self, state) {
+            let _ = state.filters.update_rules(previous);
+            return Err(DigestFloorError::Publish(error));
+        }
+        Ok(())
+    }
+
+    /// Compacts one tool result before it is recorded into the round.
     pub fn compact_tool_result(&self, tool: &str, result: &str) -> Result<String, StoreError> {
         context_persist::compact_tool_result(self, tool, result)
     }
@@ -829,6 +883,42 @@ pub(crate) fn load_session_store_in(
 ) -> Result<SessionStore, String> {
     SessionStore::load_in(session, config_root).map_err(|e| e.to_string())
 }
+
+/// Why a digest-size-floor application failed: a tightening the registry refused (an
+/// actionable configuration refusal) or a failure recovering the durable context state
+/// this store was opened from. The arms surface differently at the CLI boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DigestFloorError {
+    /// The resolved floor is below the session's active floor: name both numbers and the
+    /// remediation so the operator can raise the flag or start a new session.
+    Refused { requested: usize, active: usize },
+    /// The durable `context/` artifacts could not be recovered.
+    Recovery(String),
+    /// The raise was applied in memory but durable publication failed; the in-memory
+    /// rules were rolled back so the session continues at its previous floor.
+    Publish(String),
+}
+
+impl DigestFloorError {
+    /// The actionable refusal message (issue 125).
+    pub(crate) fn refusal_message(&self) -> String {
+        match self {
+            DigestFloorError::Refused { requested, active } => format!(
+                "digest-size-floor {requested} is below this session's active floor {active}; pass --digest-size-floor {active} or higher, or start a new session"
+            ),
+            DigestFloorError::Recovery(message) => message.clone(),
+            DigestFloorError::Publish(message) => message.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for DigestFloorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.refusal_message())
+    }
+}
+
+impl std::error::Error for DigestFloorError {}
 
 #[cfg(test)]
 mod tests;

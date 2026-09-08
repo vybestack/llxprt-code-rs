@@ -1909,7 +1909,7 @@ fn digest_record_names_the_floor_and_a_re_fetch_recipe() {
     );
     assert!(
         compacted.contains(
-            "re-fetch: read_file windows of at most 896 bytes via {\"path\":...,\"offset\":...,\"max_output_bytes\":896}"
+            "re-fetch: read_file windows of at most 512 bytes via {\"path\":...,\"offset\":...,\"max_output_bytes\":512}"
         ),
         "the record carries one deterministic recipe line: {compacted}"
     );
@@ -1922,5 +1922,84 @@ fn digest_record_names_the_floor_and_a_re_fetch_recipe() {
     assert_eq!(
         compacted, again,
         "the record is byte-identical across derivations"
+    );
+
+    // The re-fetch instruction is meaningful only for file-backed tools: a digested
+    // shell result has no path to re-read, and an unexecutable instruction would send
+    // the model hunting for a nonexistent file. The floor line stays for every tool
+    // (issue 125 cycle 2).
+    let shell_payload = "noise line 0000\n".repeat(96);
+    let shell_compacted = store
+        .compact_tool_result("run_shell_command", &shell_payload)
+        .expect("compact tool result");
+    assert!(
+        shell_compacted.starts_with("CTXDIGEST v1 tool=run_shell_command "),
+        "the shell corpus is digested too: {shell_compacted}"
+    );
+    assert!(
+        shell_compacted.contains("floor=1024") && !shell_compacted.contains("re-fetch:"),
+        "non-file tools keep the floor but carry no recipe: {shell_compacted}"
+    );
+}
+
+/// The raised floor changes ADMISSION, not just the record text (issue 125): a bulk
+/// corpus between the baseline floor and the raised floor is no longer admitted as a
+/// digest record. The filter's structural rules take over below the floor (recognized
+/// noise routes to the droppable class with a recoverable handle), so the observable
+/// contract is the absence of CTXDIGEST for mid-size corpora. A regression that records
+/// the floor without gating the verdict on it fails here.
+#[test]
+fn a_raised_floor_stops_mid_size_results_being_digested() {
+    let cwd = workspace();
+    let raised = store("floor-admission");
+    let first_turn = reserved(&raised, None, None, "P1", &cwd).unwrap();
+    let a = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    a.run(&raised, &first_turn).expect("first turn runs");
+    raised.set_digest_size_floor(4096).expect("raise to 4096");
+
+    // 2000 bytes: above the 1024 baseline floor (digested before the raise), below the
+    // raised floor (no longer bulk evidence, so no digest record rides the round).
+    let payload = "noise line 0000
+"
+    .repeat(125);
+    assert_eq!(payload.len(), 2000);
+    let compacted = raised
+        .compact_tool_result("read_file", &payload)
+        .expect("compact tool result");
+    assert!(
+        !compacted.contains("CTXDIGEST"),
+        "nothing between the floors is admitted as a digest: {compacted}"
+    );
+    assert!(
+        compacted.starts_with("CTXDROP v1 tool=read_file "),
+        "recognized bulk below the raised floor routes to the droppable class with a \
+         recoverable handle instead of a digest record: {compacted}"
+    );
+    assert!(
+        compacted.contains("handle="),
+        "the dropped evidence keeps its recoverable handle: {compacted}"
+    );
+    assert!(
+        !compacted.contains("CTXDIGEST"),
+        "nothing between the floors is digested: {compacted}"
+    );
+    assert!(
+        !compacted.contains("CTXDIGEST"),
+        "nothing between the floors is digested: {compacted}"
+    );
+
+    // The same corpus at the baseline floor is still digested: the raise relaxed
+    // admission only for itself, not the pinned v1 rule table.
+    let baseline_store = store("floor-admission-baseline");
+    let baseline_turn = reserved(&baseline_store, None, None, "P1", &cwd).unwrap();
+    let b = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd);
+    b.run(&baseline_store, &baseline_turn)
+        .expect("first turn runs");
+    let still = baseline_store
+        .compact_tool_result("read_file", &payload)
+        .expect("compact tool result");
+    assert!(
+        still.starts_with("CTXDIGEST v1 tool=read_file "),
+        "the baseline floor still digests the corpus: {still}"
     );
 }

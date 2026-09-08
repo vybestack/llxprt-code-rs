@@ -711,6 +711,47 @@ fn digest_size_floor_above_the_per_result_output_cap_is_refused() {
     assert_eq!(resolve(file).unwrap_err().to_string(), expected);
 }
 
+/// A sub-floor `--max-tool-output` at the DEFAULT floor resolves (issue 125 cycle 2):
+/// the cross-check would otherwise make every cap below 1024 unconfigurable with an
+/// error naming a flag the user never set. The combination is coherent pre-feature
+/// behavior: nothing is ever digested.
+#[test]
+fn a_sub_floor_output_cap_resolves_at_the_default_floor() {
+    let mut l = layers();
+    l.cli = output_caps(2048, 512, 16 * 1024 * 1024);
+    let got = resolve(l).unwrap();
+    assert_eq!(got.budgets.max_tool_output.value, 512);
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (
+            u64::try_from(crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR).unwrap(),
+            Source::Default
+        )
+    );
+}
+
+/// The same sub-floor cap with an EXPLICIT floor above it is still refused naming both
+/// values (issue 125 cycle 2): provenance gates the cross-check, not the check itself.
+#[test]
+fn an_explicit_floor_above_a_sub_floor_cap_is_still_refused() {
+    let mut l = layers();
+    l.cli = SettingsLayer {
+        budgets: SettingsBudgets {
+            max_tool_output: Some(512),
+            digest_size_floor: Some(2048),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(l).unwrap_err().to_string(),
+        "digest-size-floor (2048) is above the per-result output cap --max-tool-output (512): nothing could ever be admitted as a digest"
+    );
+}
+
 /// A raised floor changes the digest verdict for a fixed-size payload, and the override
 /// stays a rule-table relaxation (never a `rule_version` redefinition of version 1).
 #[test]
