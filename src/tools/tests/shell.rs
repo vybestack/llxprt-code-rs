@@ -203,15 +203,20 @@ fn shell_clamp_disclosure_survives_capped_large_output() {
             allow_shell: true,
         },
     };
+    // Prepare the oversized payload outside the timed command. Generating it with a
+    // shell loop makes this output-cap assertion depend on runner scheduling and can
+    // turn the successful case into an unrelated timeout under full-suite load.
+    let capped_output = format!("secret-fixture {}", "é".repeat(2048));
+    assert!(capped_output.len() > config.shell.max_shell_output);
+    std::fs::write(d.path().join("capped-output"), capped_output).unwrap();
+
     for (requested, label) in [(99, "99s"), (-1, "unlimited")] {
         for (ending, expected_ok, diagnostic) in [
             ("exit 0", true, ""),
             ("exit 7", false, "command exited with 7"),
             ("kill -TERM $$", false, "command was killed by a signal"),
         ] {
-            let command = format!(
-                "printf 'secret-fixture '; i=0; while [ $i -lt 2048 ]; do printf 'é'; i=$((i+1)); done; {ending}"
-            );
+            let command = format!("cat capped-output; {ending}");
             let (ok, output) = execute_tool(
                 d.path(),
                 "run_shell_command",
