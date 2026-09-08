@@ -358,20 +358,18 @@ fn encryption_green_fixture_flows_both_directions() {
 /// inspected AST, so such a crate fails closed: `build_crate_evidence` returns `None`.
 #[test]
 fn grader_fails_closed_on_unmodeled_attributes() {
-    for (name, attribute) in [("stability", "#[stable(feature = \"x\", since = \"1.0\")]")] {
-        let d = tempfile::tempdir().unwrap();
-        write_encryption_good(d.path());
-        let lib = std::fs::read_to_string(d.path().join("src/lib.rs")).expect("fixture source");
-        let marked = format!("\n{attribute}\npub fn marker() -> u32 {{ 1 }}\n");
-        std::fs::write(d.path().join("src/lib.rs"), format!("{lib}{marked}"))
-            .expect("rewrite fixture");
-        let roots: HashSet<String> = std::iter::once("aes_gcm".to_string()).collect();
-        let evidence = build_crate_evidence(&cap(d.path()), &roots);
-        assert!(
-            evidence.is_none(),
-            "{name}: an unmodeled attribute must fail closed instead of grading a divergent graph"
-        );
-    }
+    let attribute = "#[stable(feature = \"x\", since = \"1.0\")]";
+    let d = tempfile::tempdir().unwrap();
+    write_encryption_good(d.path());
+    let lib = std::fs::read_to_string(d.path().join("src/lib.rs")).expect("fixture source");
+    let marked = format!("\n{attribute}\npub fn marker() -> u32 {{ 1 }}\n");
+    std::fs::write(d.path().join("src/lib.rs"), format!("{lib}{marked}")).expect("rewrite fixture");
+    let roots: HashSet<String> = std::iter::once("aes_gcm".to_string()).collect();
+    let evidence = build_crate_evidence(&cap(d.path()), &roots);
+    assert!(
+        evidence.is_none(),
+        "an unmodeled attribute must fail closed instead of grading a divergent graph"
+    );
 }
 
 #[test]
