@@ -53,8 +53,6 @@ fn parse_api_selector(
     };
 
     let api_mode = parse_selector(settings, "apiMode", profile_name)?;
-    let responses_mode = parse_selector(settings, "responsesMode", profile_name)?;
-    let responses_mode_kebab = parse_selector(settings, "responses-mode", profile_name)?;
 
     if let Some(value) = settings.get("openaiResponsesEnabled") {
         value.as_bool().ok_or_else(|| {
@@ -62,7 +60,7 @@ fn parse_api_selector(
         })?;
     }
 
-    Ok(api_mode.or(responses_mode).or(responses_mode_kebab))
+    Ok(api_mode)
 }
 
 fn parse_selector(
@@ -114,18 +112,28 @@ mod tests {
     }
 
     #[test]
-    fn selector_spellings_and_precedence() {
+    fn api_mode_selects_and_removed_spellings_are_inert() {
         let selection = parse(
             ProviderId::OpenAi,
-            Some(&ephemeral(&[
-                ("apiMode", Value::String("chat".into())),
-                ("responsesMode", Value::String("responses".into())),
-            ])),
+            Some(&ephemeral(&[("apiMode", Value::String("chat".into()))])),
             "p",
         )
         .unwrap();
         // `apiMode` selects the API surface.
         assert_eq!(selection.api, Some(ApiSelector::Chat));
+
+        // The removed spellings are unrecognized keys: tolerated as
+        // unsupported metadata, no longer selecting anything.
+        let selection = parse(
+            ProviderId::OpenAi,
+            Some(&ephemeral(&[(
+                "responsesMode",
+                Value::String("responses".into()),
+            )])),
+            "p",
+        )
+        .unwrap();
+        assert_eq!(selection.api, None);
     }
 
     #[test]
@@ -145,11 +153,11 @@ mod tests {
         );
         let typed = parse(
             ProviderId::OpenAi,
-            Some(&ephemeral(&[("responsesMode", Value::Bool(true))])),
+            Some(&ephemeral(&[("apiMode", Value::Bool(true))])),
             "p",
         )
         .unwrap_err();
-        assert_eq!(typed, "profile p: 'responsesMode' must be a string");
+        assert_eq!(typed, "profile p: 'apiMode' must be a string");
     }
 
     #[test]
