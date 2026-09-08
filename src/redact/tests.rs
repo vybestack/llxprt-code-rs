@@ -1,3 +1,5 @@
+mod issue243_boundary;
+
 use super::*;
 
 #[test]

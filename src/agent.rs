@@ -461,27 +461,31 @@ impl CodingAgent {
             return Err(ToolCallFailure::OutputCap);
         }
         let parsed = parse_object_args(call).map_err(ToolCallFailure::Invalid)?;
-        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-            &self.cwd,
-            &call.name,
-            parsed,
-            config,
-            remaining_output,
-        );
-        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
-        attempt.usage.total_calls += 1;
+        // The notice must survive truncation, so reserve its bytes (plus the blank
+        // line that carries it) first; with no notice there is nothing to reserve.
+        // The reservation happens before the tool runs so the inner, registered
+        // renderer also sees the exact bytes the model will get: a digest cut by the
+        // inner cap and then cut again here would re-create the abbreviated-hash
+        // retry loop this boundary owns.
         let notice = if index + 1 == total {
-            budget_notice(self.max_tool_calls, attempt.usage.total_calls)
+            budget_notice(self.max_tool_calls, attempt.usage.total_calls + 1)
         } else {
             String::new()
         };
-        // The notice must survive truncation, so reserve its bytes (plus the blank
-        // line that carries it) first; with no notice there is nothing to reserve.
         let body_budget = if notice.is_empty() {
             remaining_output
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
+        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
+            &self.cwd,
+            &call.name,
+            parsed,
+            config,
+            body_budget,
+        );
+        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
+        attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
         let text = if notice.is_empty() {
             text

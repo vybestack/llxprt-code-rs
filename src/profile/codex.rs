@@ -141,8 +141,8 @@ fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result
     require_exact_string(map, "reasoning.stripFromContext", "none", name)?;
     require_exact_string(map, "text.verbosity", "medium", name)?;
     optional_exact_u64(map, "stream-idle-timeout-ms", 0, name)?;
-    optional_exact_u64(map, "task-default-timeout-seconds", 3_600, name)?;
-    optional_exact_u64(map, "task-max-timeout-seconds", 7_200, name)?;
+    validate_host_task_number(map, "task-default-timeout-seconds", name)?;
+    validate_host_task_number(map, "task-max-timeout-seconds", name)?;
 
     match optional_string(map, "prompt-caching", name)? {
         None | Some("off" | "1h" | "24h") => Ok(()),
@@ -360,6 +360,20 @@ fn require_exact_string(
         Ok(())
     } else {
         Err(format!("profile {name:?}: '{key}' must be '{expected}'"))
+    }
+}
+
+/// Validate only the persisted registry type for task-runner settings. The llxprt
+/// host owns their values and semantics; this headless Rust runtime has no task
+/// executor, so the values must not become provider, shell, request, or turn limits.
+fn validate_host_task_number(
+    map: &Map<String, Value>,
+    key: &str,
+    name: &str,
+) -> Result<(), String> {
+    match map.get(key) {
+        None | Some(Value::Number(_)) => Ok(()),
+        Some(_) => Err(format!("profile {name:?}: '{key}' must be a number")),
     }
 }
 
