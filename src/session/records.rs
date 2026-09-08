@@ -30,7 +30,8 @@ pub struct ToolCallRecord {
     /// Whether the tool run reported success.
     pub ok: bool,
     /// True when the host refused to run the call (budget exhaustion);
-    /// refused records never count as executed tool calls.
+    /// refused records never consume tool-call budget. Naming failures have
+    /// `ok=false, refused=false`: they consume budget without executing a capability.
     #[serde(default)]
     pub refused: bool,
     pub result: String,

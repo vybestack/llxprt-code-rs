@@ -486,6 +486,14 @@ pub(crate) const TOOL_CATALOGUE: &[&str] = &[
     "run_shell_command",
 ];
 
+/// Names are nonempty ASCII protocol identifiers, not commands, paths, or invocation frames.
+pub(crate) fn is_safe_tool_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 /// Whether a tool name is registered for dispatch. `run_shell_command` counts as
 /// known only when `allow_shell` is set, because callers reject shell tool calls
 /// when shell is not allowed. The underlying catalogue is shared with

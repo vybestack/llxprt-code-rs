@@ -49,7 +49,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
     assert_eq!(agent.run(&store, &reserved).unwrap().status, "ok");
     assert_eq!(agent.model_calls(), 3);
     let call = &store.snapshot().unwrap().branches[0].rounds[0].calls[0];
-    assert_eq!((call.ok, call.refused), (false, true));
+    assert_eq!((call.ok, call.refused), (false, false));
     assert!(call.result.contains("search_file_command"));
     assert!(call.result.contains("search_file_content"));
 }
@@ -98,7 +98,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
     assert_eq!(run.tool_count, 2);
     let round = &store.snapshot().unwrap().branches[0].rounds[0];
     assert_eq!(round.calls.len(), 1);
-    assert_eq!((round.calls[0].ok, round.calls[0].refused), (false, true));
+    assert_eq!((round.calls[0].ok, round.calls[0].refused), (false, false));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn disabled_shell_tool_gets_corrective_result() {
     );
     assert_eq!(agent.run(&store, &reserved).unwrap().status, "ok");
     let call = &store.snapshot().unwrap().branches[0].rounds[0].calls[0];
-    assert_eq!((call.ok, call.refused), (false, true));
+    assert_eq!((call.ok, call.refused), (false, false));
     assert!(!call
         .result
         .split("available: ")

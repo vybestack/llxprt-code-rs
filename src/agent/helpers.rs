@@ -64,6 +64,9 @@ pub(super) fn validate_provider_result(
 }
 
 fn validate_provider_call(call: &ToolCall, secrets: &[String]) -> Result<(), String> {
+    if !crate::tools::is_safe_tool_name(&call.name) {
+        return Err("model returned an invalid tool name identifier".into());
+    }
     if call.id.len() > super::MAX_TOOL_CALL_ID_BYTES {
         return Err(format!(
             "tool call id exceeds the {} byte cap",
@@ -131,34 +134,15 @@ pub(super) fn split_over_budget(
     fit.split_off(allowed)
 }
 
-/// Record a refusal for every unknown or disabled call so the model receives
-/// a corrective tool result and can continue the turn.
-pub(super) fn refuse_unknown_tools(
-    allow_shell: bool,
-    attempt: &mut super::AttemptState,
-    round: &mut super::RoundRecord,
-    refused: &[ToolCall],
-) {
+/// A naming slip is a failed, charged call, not an uncharged budget refusal.
+/// Never dispatch it; only advertise capabilities enabled for this turn.
+pub(super) fn naming_failure(allow_shell: bool, name: &str) -> String {
     let roster = crate::tools::tool_specs(allow_shell)
         .into_iter()
         .map(|spec| spec.name)
         .collect::<Vec<_>>()
         .join(", ");
-    for call in refused {
-        let text = format!(
-            "error: unknown or disabled tool {}; available: {roster}",
-            call.name
-        );
-        // The errored call still consumes a budget slot and is recorded in history like
-        // every other call (the restore path derives `total_calls` from all round calls),
-        // so a model that keeps hallucinating names cannot spin forever for free.
-        attempt.usage.total_calls += 1;
-        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-        attempt.requests.push(super::tool_return_request(
-            &call.name, &call.id, false, &text,
-        ));
-        round.calls.push(refused_call_record(call, text));
-    }
+    format!("error: unknown or disabled tool {name}; available: {roster}")
 }
 
 /// Record a refusal for every over-budget call so the assistant's tool
