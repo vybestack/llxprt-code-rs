@@ -921,7 +921,10 @@ fn invalid_model_identifier_fails_before_provider_connection() {
     }
 }
 
-fn spawn_responses_tool_server() -> (
+fn spawn_responses_tool_server(
+    name: &'static str,
+    arguments: &'static str,
+) -> (
     std::net::SocketAddr,
     std::sync::mpsc::Receiver<Vec<Value>>,
     std::thread::JoinHandle<()>,
@@ -973,8 +976,8 @@ fn spawn_responses_tool_server() -> (
                         "type": "function_call",
                         "status": "completed",
                         "call_id": "call-1",
-                        "name": "read_file",
-                        "arguments": "{\"path\":\"evidence.txt\"}"
+                        "name": name,
+                        "arguments": arguments
                     }],
                     "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
                 })
@@ -1012,7 +1015,8 @@ fn spawn_responses_tool_server() -> (
 #[test]
 #[cfg(unix)]
 fn openai_responses_replays_function_history_to_final_completion() {
-    let (address, requests, server) = spawn_responses_tool_server();
+    let (address, requests, server) =
+        spawn_responses_tool_server("read_file", r#"{"path":"evidence.txt"}"#);
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("evidence.txt"), "loopback evidence\n").unwrap();
     let profiles = workspace.path().join("profiles");
@@ -1415,3 +1419,6 @@ fn compiled_loopback_provider_refusal_of_forwarded_unknown_key_surfaces_in_envel
         "provider naming text missing from envelope: {parsed}"
     );
 }
+
+#[path = "compiled_loopback/directory_root.rs"]
+mod directory_root;

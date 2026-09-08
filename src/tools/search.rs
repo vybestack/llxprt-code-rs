@@ -132,35 +132,8 @@ pub(super) fn render_search_results(results: &[String], note: &str, limit: usize
     out
 }
 
-/// Re-open the retained search root descriptor-relative with an independent directory offset.
-/// `try_clone`/`dup` would share the directory stream offset and make later searches incomplete.
-fn reopen_search_root(root: &openat::Dir) -> Result<openat::Dir, String> {
-    reopen_directory(root)
-}
-
-/// The start directory of a search, opened descriptor-relative from the retained root with
-/// every component no-follow.
-fn search_start(cap: &WorkspaceCap, rel: Option<&str>) -> Result<openat::Dir, String> {
-    let d = ws_root(cap)?;
-    match rel {
-        None | Some("") => reopen_search_root(d),
-        Some(r) => {
-            let comps = resolve_comps(r)?;
-            if comps.is_empty() {
-                return reopen_search_root(d);
-            }
-            let (leaf_last, parent_comps) = comps.split_last().unwrap();
-            if parent_comps.is_empty() {
-                open_named_dir(d, leaf_last)
-            } else {
-                open_named_dir(&ensure_parent_dir_read(d, parent_comps)?, leaf_last)
-            }
-        }
-    }
-}
-
 fn search_prefix(rel: Option<&str>) -> Result<String, String> {
-    let Some(relative) = rel.filter(|value| !value.is_empty()) else {
+    let Some(relative) = rel.filter(|value| !matches!(*value, "" | ".")) else {
         return Ok(String::new());
     };
     Ok(resolve_comps(relative)?.join("/"))
@@ -375,7 +348,7 @@ pub(super) fn search_file_content_tool(
     let re =
         regex_lite::Regex::new(pattern).map_err(|e| format!("invalid pattern {pattern:?}: {e}"))?;
     let rel = arg_str(args, "path", false)?;
-    let start = search_start(cap, rel)?;
+    let start = open_directory_path(cap, rel.unwrap_or("."))?;
     let prefix = search_prefix(rel)?;
     let result_limit = MAX_SEARCH_RESULT_BYTES.min(max_output_bytes);
     let result_data_limit = result_limit;
