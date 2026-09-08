@@ -1,8 +1,8 @@
 //! Release-gate orchestration.
 //!
-//! The security-sensitive source archive builder and verifier remain in their reviewed
-//! Bash/Python implementations.  This module owns the ordered gate plan, temporary target
-//! directories, audit lockfile discovery, and GNU-tar reproducibility proof.
+//! Bundle policy, construction, verification, publication, and fixture dispatch live in
+//! xtask. Existing Python archive and descriptor helpers retain their security boundaries.
+//! This module owns gate order, temporary targets, audit discovery, and reproducibility.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -131,27 +131,15 @@ pub fn run_release_fixtures(root: &Path) -> Result<(), String> {
     heading("source and release publication adversarial cases");
     run(root, "python3", &["scripts/verify-source-object-policy.py"])?;
     run(root, "python3", &["scripts/test-source-oci-publication.py"])?;
-    run(root, "bash", &["scripts/test-source-bundle-verifier.sh"])?;
-    run(root, "bash", &["scripts/test-release-workflow.sh"])
+    crate::release_fixtures::run(root, "test-source-bundle-verifier")?;
+    crate::release_fixtures::run(root, "test-release-workflow")
 }
 
 pub fn run_source_bundle(root: &Path, args: &[String]) -> Result<(), String> {
-    let (script, script_args): (&str, Vec<&str>) = match args {
-        [operation] if operation == "build" => ("scripts/build-source-bundle.sh", Vec::new()),
-        [operation, output] if operation == "build" => {
-            ("scripts/build-source-bundle.sh", vec![output.as_str()])
-        }
-        [operation] if operation == "list" => ("scripts/build-source-bundle.sh", vec!["--list"]),
-        [operation] if operation == "verify" => ("scripts/verify-source-bundle.sh", Vec::new()),
-        [operation, bundle] if operation == "verify" => {
-            ("scripts/verify-source-bundle.sh", vec![bundle.as_str()])
-        }
-        [operation] if operation == "test" => {
-            return run(root, "bash", &["scripts/test-source-bundle-verifier.sh"]);
-        }
-        _ => return Err(source_bundle_usage()),
-    };
-    run_dynamic(root, "bash", std::iter::once(script).chain(script_args))
+    if args == ["test"] {
+        return crate::release_fixtures::run(root, "test-source-bundle-verifier");
+    }
+    crate::source_bundle::run(root, args)
 }
 
 pub fn source_bundle_usage() -> String {
@@ -207,16 +195,16 @@ fn run_xtask_checks(root: &Path) -> Result<(), String> {
 
 fn run_vendor_policy_fixtures(root: &Path) -> Result<(), String> {
     heading("vendor provenance regression cases");
+    crate::release_fixtures::run(root, "test-vendor-provenance")?;
+    crate::release_fixtures::run(root, "test-dependency-inventory")?;
     for script in [
-        "scripts/test-vendor-provenance.sh",
-        "scripts/test-dependency-inventory.sh",
         "scripts/test-vendor-license.sh",
         "scripts/test-upstream-evidence.sh",
     ] {
         run(root, "bash", &[script])?;
     }
     heading("resolved provider feature graph");
-    run(root, "bash", &["scripts/test-provider-features.sh"])?;
+    crate::release_fixtures::run(root, "test-provider-features")?;
     run(root, "python3", &["scripts/verify-provider-features.py"])
 }
 
@@ -491,8 +479,13 @@ fn run_build_with_umask(root: &Path, mask: &str, output: &Path) -> Result<(), St
         OsString::from("umask \"$1\"; shift; exec \"$@\""),
         OsString::from("xtask-umask"),
         OsString::from(mask),
-        OsString::from("bash"),
-        OsString::from("scripts/build-source-bundle.sh"),
+        std::env::current_exe()
+            .map_err(|e| format!("xtask executable: {e}"))?
+            .into_os_string(),
+        OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        OsString::from("source-bundle"),
+        OsString::from("build"),
         output.as_os_str().to_os_string(),
     ];
     run_os(root, "bash", &args, &[])
