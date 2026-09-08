@@ -1,4 +1,8 @@
 /// Build the coding-agent system prompt.
+///
+/// Cache invariant: this head depends only on immutable session configuration.
+/// Never include timestamps, request IDs, remaining budgets, or per-round data.
+/// The compiled HTTP prefix tests guard this together with tool serialization.
 pub fn coding_system_prompt(
     cwd: &std::path::Path,
     reasoning: &str,

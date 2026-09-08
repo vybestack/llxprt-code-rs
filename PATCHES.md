@@ -1,5 +1,16 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 79: stateless prompt-cache routing
+
+The retained Responses client adds an optional `prompt_cache_key` request field and
+construction-time setter. The host supplies the session label when caching is enabled,
+including Codex HTTP. It also preserves optional `input_tokens_details.cached_tokens`
+through both SSE completion assembly and JSON response conversion, which previously
+discarded this counter. No transport behavior changes. The upstream revision and licenses
+remain unchanged; the aggregate `SERDES-AI-0.2.6.patch` contains this delta and fixture
+updates. Cache usage interpretation and reporting live in the host provider layer.
+
+
 `llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path dependency
 `vendor/serdes-ai` (`default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"]`).
 The retained crates are based on the 0.2.6 release. The Responses client is based on the tested `serdes-ai-responses` subtree at Git commit `bd6aefc96f699276afb6384257b101039a663b5f`. The local transport patches below adapt those sources into one offline build.

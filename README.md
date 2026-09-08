@@ -176,9 +176,9 @@ Example success object:
 ## `--session` and `--turn` semantics (documented current behavior)
 
 - `--session ID` is a directory name under `<config>/code-rs-sessions/`. Turn numbers
-  restart per session and are 1-based. Public OpenAI Responses uses this validated label as
-  `prompt_cache_key` unless prompt caching is `off`; it never uses it as response-continuation
-  state. The Codex WebSocket transport sends neither a session header nor a prompt-cache key.
+  restart per session and are 1-based. OpenAI Chat, public OpenAI Responses, and Codex HTTP
+  use this validated label as `prompt_cache_key` unless prompt caching is `off`; it is
+  independent of response-continuation state. See [prompt caching](docs/prompt-caching.md).
   Omitting `--session` uses the literal label `default`. Do not use a sensitive value as a
   session ID.
 - No `--turn` runs the **next** turn: the first invocation of a session runs turn 1,

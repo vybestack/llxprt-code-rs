@@ -16,7 +16,17 @@ pub(super) struct ParsedCodexSettings {
 pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexSettings, String> {
     let ephemeral = object_field(obj, "ephemeralSettings", name)?;
     let model_params = object_field(obj, "modelParams", name)?;
-    let mut settings = EphemeralSettings::default();
+    let mut settings = EphemeralSettings {
+        prompt_caching: Some(
+            super::provider_settings::PromptCachingSetting::openai_responses(optional_string(
+                &ephemeral,
+                "prompt-caching",
+                name,
+            )?)
+            .map_err(|error| format!("profile {name:?}: 'prompt-caching' {error}"))?,
+        ),
+        ..Default::default()
+    };
 
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;

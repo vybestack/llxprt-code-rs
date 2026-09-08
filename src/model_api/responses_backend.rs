@@ -205,6 +205,7 @@ mod tests {
             format!("http://127.0.0.1:{port}/responses"),
         )
         .codex_http()
+        .with_prompt_cache_key(Some("loopback-session".to_string()))
         .bearer("loopback-codex-key");
         let backend = ResponsesBackend::new(
             model,
@@ -237,6 +238,8 @@ mod tests {
 
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
         assert_codex_wire_contract(&bodies);
+        assert_eq!(first.usage.cache_read_tokens, Some(6));
+        assert_eq!(second.usage.cache_read_tokens, Some(6));
         assert!(
             first.text.contains("codex turn one"),
             "folded output missing: {first:?}"
@@ -291,11 +294,13 @@ mod tests {
                 .unwrap(),
         );
         object.status = serdes_ai_responses::types::ResponseStatus::Completed;
-        object.usage = Some(serdes_ai_responses::types::ResponseUsage {
-            input_tokens: Some(11),
-            output_tokens: Some(7),
-            total_tokens: Some(18),
-        });
+        object.usage = Some(
+            serde_json::from_value(serde_json::json!({
+                "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
+                "input_tokens_details": {"cached_tokens": 6}
+            }))
+            .unwrap(),
+        );
         let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
             sequence_number: 0,
             response: object.clone(),
@@ -369,6 +374,7 @@ mod tests {
         assert_eq!(bodies.len(), 2);
         for body in bodies {
             assert_eq!(body["store"], false, "codex must never store");
+            assert_eq!(body["prompt_cache_key"], "loopback-session");
             assert_eq!(body["stream"], true, "codex must stream over SSE");
             assert!(
                 body.get("max_output_tokens").is_none(),
