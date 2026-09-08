@@ -298,6 +298,13 @@ fn same_prompt_replay_does_no_network() {
     let backend = MockBackend::new(Vec::new());
     let r = reserved(&st, Some(1), None, "P1", &cwd).unwrap();
     assert!(r.replay, "same completed prompt must replay");
+    assert!(
+        r.rounds
+            .iter()
+            .flat_map(|round| &round.calls)
+            .all(|call| call.result_live.is_empty()),
+        "replay materializes only the compact resident transcript"
+    );
     let a = agent(Box::new(backend), &cwd);
     let out = a.run(&st, &r).expect("replay");
     assert_eq!(out.status, "ok", "replayed run reports ok");
@@ -922,6 +929,10 @@ fn later_round_context_overflow_stops_before_next_call() {
         .run(&st, &r)
         .expect_err("the live-byte replay must be refused by the context limit");
     assert_eq!(e.key, "context-limit", "{e:?}");
+    assert_eq!(
+        e.terminal_outcome, None,
+        "a context-limit refusal declares no agent terminal outcome"
+    );
     assert!(
         e.message.contains("after one compaction attempt, still"),
         "the refusal records #82's single pre-send compaction attempt: {e:?}"
@@ -941,6 +952,14 @@ fn later_round_context_overflow_stops_before_next_call() {
         branch.lifecycle,
         Lifecycle::Failed,
         "the refused attempt is terminal, not pending"
+    );
+    assert!(
+        branch
+            .rounds
+            .iter()
+            .flat_map(|round| &round.calls)
+            .all(|call| call.result_live.is_empty()),
+        "the failed resident branch retains no live provider payloads"
     );
 
     // The bulk content was contained rather than replayed raw.
@@ -966,10 +985,6 @@ fn later_round_context_overflow_stops_before_next_call() {
         context_artifact(&st, "sanitized").len() >= payload_len,
         "the sanitized spine holds the payload bytes"
     );
-    assert!(
-        context_artifact(&st, "vault").len() >= payload_len,
-        "the vault holds the full payload bytes"
-    );
     let first = st
         .context_read_page(0..64, 64)
         .expect("bounded context read-back");
@@ -987,6 +1002,40 @@ fn later_round_context_overflow_stops_before_next_call() {
         !raw_present,
         "raw bulk evidence never reaches the transcript"
     );
+    // Save the committed artifact through the test's context-artifact API.
+    // The fresh store below consumes and validates these exact durable bytes
+    // before the test parses their terminal field.
+    let manifest_bytes = context_artifact(&st, "manifest.json");
+
+    // A fresh store must consume that durable manifest through normal context
+    // recovery before admitting its next record.  This is deliberately a real
+    // admission rather than a helper-level parser test.
+    let sid = SessionId::parse("sctx2").unwrap();
+    let recovered = SessionStore::load(&sid).expect("authenticated session reopen");
+    let recovered_projection = recovered
+        .compact_tool_result("read_file", &"r".repeat(1024))
+        .expect("recovery consumes and authenticates the published manifest before admission");
+    assert!(
+        recovered_projection
+            .persisted
+            .starts_with("CTXDIGEST v1 tool=read_file "),
+        "the recovered store admits and compacts the next bulk result"
+    );
+
+    // Parse the artifact that authenticated recovery just consumed. A
+    // context-limit refusal is not a context-policy terminal; quarantine
+    // remains optional and is intentionally not asserted here.
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)
+        .expect("authenticated published context manifest is valid JSON");
+    let terminal_outcome = manifest
+        .get("terminal_outcome")
+        .expect("the authenticated manifest durably records terminal_outcome");
+    assert_eq!(
+        terminal_outcome,
+        &serde_json::Value::Null,
+        "a pre-send context-limit refusal has no context-policy terminal outcome: {manifest}"
+    );
+
     let journal = context_artifact(&st, "rewrite-journal.log");
     assert!(!journal.is_empty(), "policy rewrite accounting is durable");
     assert!(!context_artifact(&st, "events.log").is_empty());
@@ -1083,14 +1132,14 @@ fn multiple_tool_calls_share_remaining_output_budget() {
     // A small per-test cap exercises the exact same shared LIVE-byte boundary without
     // repeatedly publishing multi-megabyte evidence during this focused unit test.
     let turn_budget = 16 * framed_len - 1;
-    std::fs::write(cwd.join("megabyte.txt"), "z".repeat(payload_len)).unwrap();
+    std::fs::write(cwd.join("four-kib.txt"), "z".repeat(payload_len)).unwrap();
     let st = store("sagg-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let calls = (0..16)
         .map(|index| ToolCall {
             id: format!("read-{index}"),
             name: "read_file".into(),
-            args_json: r#"{"path":"megabyte.txt"}"#.into(),
+            args_json: r#"{"path":"four-kib.txt"}"#.into(),
         })
         .collect();
     let tool_round = LlmResult {
@@ -1187,7 +1236,7 @@ fn multiple_tool_calls_share_remaining_output_budget() {
     let output_bytes: usize = retained_calls.iter().map(|call| call.result.len()).sum();
     assert!(
         output_bytes < 16 * 1024,
-        "16 bounded digest records are retained, not 16 MiB of raw output: {output_bytes}"
+        "16 bounded digest records retain compact records rather than the 16 full 4,096-byte payloads: {output_bytes}"
     );
     let handle = digest_handle(&retained_calls[0].result);
     assert!(
@@ -1314,6 +1363,22 @@ fn admitted_live_bytes_are_digest_only_after_authenticated_reopen() {
     );
     drop(batches);
 
+    // Publication stores only the compact transcript clone.  The agent's own
+    // rounds above remained live long enough to send the second provider request,
+    // but this resident state has released every provider payload allocation.
+    let resident = st.snapshot().expect("published state is readable");
+    let resident_call = &resident
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == r.branch_id)
+        .expect("published branch")
+        .rounds[0]
+        .calls[0];
+    assert!(
+        resident_call.result_live.is_empty(),
+        "the resident transcript retains no admitted live bytes"
+    );
+
     // The durable side is the ONE bounded CTXDIGEST record. Reopen ONLY through the
     // authenticated loader (the digest-chained session log and state slots are validated
     // there; we never hand-parse unauthenticated JSON as authentication evidence).
@@ -1387,7 +1452,7 @@ fn admitted_live_bytes_are_digest_only_after_authenticated_reopen() {
 }
 
 /// The exhaustion boundary of the shared output budget: once the LIVE bytes charged so
-/// far reach MAX_TURN_OUTPUT_BYTES, the next call fails BEFORE it executes with the
+/// far reach this test's resolved `OutputCaps::turn`, the next call fails BEFORE it executes with the
 /// output-cap refusal (AgentError key "limit"). The steps are sized so the budget is
 /// exhausted exactly, so the boundary itself - not an overshoot - is what refuses.
 ///
@@ -1414,7 +1479,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     // Keep the exact exhaustion proof small: the production threshold remains 1024
     // bytes, while this test's explicitly resolved turn cap is sixteen framed reads.
     let turn_budget = 16 * framed_len;
-    std::fs::write(cwd.join("megabyte.txt"), "a".repeat(payload_len)).unwrap();
+    std::fs::write(cwd.join("one-kib.txt"), "a".repeat(payload_len)).unwrap();
     // One granted write that MUST execute, and then the one that must NOT. Nothing is
     // pre-created: both write targets are absent before the turn, so the files below are
     // written by the tool calls themselves (or not at all). The grant of that one write and
@@ -1463,7 +1528,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     let reads = (0..15).map(|index| ToolCall {
         id: format!("read-{index}"),
         name: "read_file".into(),
-        args_json: r#"{"path":"megabyte.txt"}"#.into(),
+        args_json: r#"{"path":"one-kib.txt"}"#.into(),
     });
     let write_ok = ToolCall {
         id: "write-evidenced".into(),
@@ -1492,10 +1557,10 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     // The turn budget is the subject here, not the context limit: the FIFTEEN frames that
-    // ride the one post-round request are ~15.7 MiB of LIVE bytes, so this sets a context
-    // large enough to hold them (the context is counted in tokens at the 3-bytes-per-token
-    // heuristic guard). A smaller expression would trip the pre-send context gate BEFORE the
-    // shared output budget ever binds, exactly as the completed sibling test documents.
+    // ride the one post-round request are 15,720 bytes (~15.4 KiB) of LIVE bytes, so this
+    // context leaves enough room under the 3-bytes-per-token heuristic guard. A smaller
+    // expression would trip the pre-send context gate BEFORE the shared output budget ever
+    // binds, exactly as the completed sibling test documents.
     // (Bound to `refusing` so the positive control below can still reach the `agent`
     // helper instead of this value.)
     let refusing = agent(
@@ -1563,7 +1628,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     // executed-write proof rather than an inherited artifact of the refused run.
     let ok_st = store("sagg-output-exhausted-ok");
     let ok_cwd = new_cwd();
-    std::fs::write(ok_cwd.join("megabyte.txt"), "a".repeat(payload_len)).unwrap();
+    std::fs::write(ok_cwd.join("one-kib.txt"), "a".repeat(payload_len)).unwrap();
     std::fs::write(
         ok_cwd.join("tail.txt"),
         "t".repeat(budget_for_tail.saturating_sub(1)),
@@ -1581,15 +1646,14 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         calls: below,
         finish_reason: Some(FinishReason::ToolCall),
     };
-    let ok_agent = agent(
-        Box::new(MockBackend::new(vec![below_round, result("done")])),
-        &ok_cwd,
-    )
-    .with_context_limit(Some(turn_budget as u64))
-    .with_output_caps(OutputCaps {
-        turn: turn_budget,
-        ..OutputCaps::default()
-    });
+    let ok_backend = CapturingBackend::new(vec![below_round, result("done")]);
+    let ok_captured = ok_backend.captured_handle();
+    let ok_agent = agent(Box::new(ok_backend), &ok_cwd)
+        .with_context_limit(Some(turn_budget as u64))
+        .with_output_caps(OutputCaps {
+            turn: turn_budget,
+            ..OutputCaps::default()
+        });
     ok_agent
         .run(&ok_st, &ok_reserved)
         .expect("under budget succeeds");
@@ -1611,31 +1675,76 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         ok_branch.rounds[0].calls.iter().all(|call| !call.refused),
         "an under-budget round never refuses a call"
     );
-    // The retained records state the charged bytes themselves: the fifteen whole framed
-    // reads, the granted write's own result string, and the tail's clipped read, summing
-    // to the whole shared cap with nothing refused.
-    let witnessed = &ok_branch.rounds[0].calls;
-    for call in &witnessed[..15] {
+    // Measure the actual post-tool provider request, rather than reconstructing
+    // its charge from fixture constants or from the store-side clone. Bulk reads
+    // are compact only in the resident transcript; the provider sees all fifteen
+    // framed results. The below-threshold clipped tail is verbatim, not CTXDIGEST.
+    let batches = ok_captured.lock().unwrap();
+    assert_eq!(batches.len(), 2, "opening and post-tool provider requests");
+    let sent_results: Vec<String> = batches[1]
+        .iter()
+        .flat_map(|request| request.parts.iter())
+        .filter_map(|part| match part {
+            serdes_ai::core::ModelRequestPart::ToolReturn(tool_return) => {
+                Some(tool_return.content.to_string_content())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent_results.len(),
+        17,
+        "the post-tool request carries every executed tool result"
+    );
+    for (index, sent) in sent_results[..15].iter().enumerate() {
         assert_eq!(
-            call.result_live.len(),
+            sent.len(),
             framed_len,
-            "each whole framed read charges its full framed size: {:?}",
-            call.result_live
+            "provider result {index} carries the complete framed read"
         );
     }
     assert_eq!(
-        witnessed[15].result_live, granted,
-        "the granted write's result is carried verbatim, not digested"
+        sent_results[15], granted,
+        "the provider receives the granted write response verbatim"
     );
     assert_eq!(
-        witnessed[15].result_live.len(),
-        granted.len(),
-        "the granted write charges exactly the result the tool formats"
+        sent_results[16].len(),
+        budget_for_tail,
+        "the provider receives the tail at the clipped remaining size"
     );
     assert!(
-        witnessed[16].result_live.len() < framed_len,
-        "the tail read is clipped to what the cap had left: {:?}",
-        witnessed[16].result_live
+        sent_results[16].len() < framed_len,
+        "the tail is clipped rather than a full framed read"
+    );
+    let charged: usize = sent_results.iter().map(String::len).sum();
+    assert_eq!(
+        charged, turn_budget,
+        "the actual sent tool results fill the resolved turn cap"
+    );
+    drop(batches);
+
+    // The resident store-side transcript has released every live projection;
+    // its compact records retain the durable, bounded representation instead.
+    let witnessed = &ok_branch.rounds[0].calls;
+    assert!(
+        witnessed.iter().all(|call| call.result_live.is_empty()),
+        "a resident SessionState never retains provider live payloads"
+    );
+    for call in &witnessed[..15] {
+        assert!(
+            call.result.contains(&format!("bytes={framed_len}")),
+            "each whole framed read records its full charged size: {}",
+            call.result
+        );
+    }
+    assert_eq!(
+        witnessed[15].result, granted,
+        "the granted write's persisted result remains verbatim"
+    );
+    assert_eq!(
+        witnessed[16].result.len(),
+        budget_for_tail,
+        "the below-threshold tail remains verbatim at its clipped live size"
     );
     assert_eq!(
         std::fs::read(ok_cwd.join(granted_path))
@@ -1643,10 +1752,10 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         granted_bytes,
         "the write's file carries exactly the bytes the call wrote"
     );
-    let charged: usize = witnessed.iter().map(|call| call.result_live.len()).sum();
+    let charged = 15 * framed_len + granted.len() + budget_for_tail;
     assert_eq!(
         charged, turn_budget,
-        "the granted prefix through the tail charges the whole shared cap"
+        "the persisted records' witnessed quantities fill the resolved turn cap"
     );
 }
 
@@ -1770,6 +1879,14 @@ fn checkpoint_extends_lease() {
         }],
     }];
     st.checkpoint(&r, &rounds).unwrap();
+    assert_eq!(
+        rounds[0].calls[0].result_live, "checkpoint result",
+        "checkpoint publication must not clear the agent-owned live projection"
+    );
+    // Re-submitting the agent-owned rounds (which still carry their live
+    // projection) normalizes them again and finds an empty persisted suffix.
+    // This keeps checkpoint retry/idempotency independent of live storage.
+    st.checkpoint(&r, &rounds).unwrap();
     let after = on_disk_lease(&st, &r);
     assert!(
         after > before,
@@ -1783,7 +1900,101 @@ fn checkpoint_extends_lease() {
         .unwrap();
     assert_eq!(b.lifecycle, Lifecycle::Pending, "checkpoint leaves pending");
     assert_eq!(b.rounds.len(), 1);
+    assert!(
+        b.rounds[0].calls[0].result_live.is_empty(),
+        "checkpoint's resident transcript releases live payloads"
+    );
     assert_eq!(b.owner, r.owner);
+}
+
+/// The publication seam clones the agent-owned transcript before releasing live
+/// provider bytes.  Exercise all terminal publication paths directly: this is
+/// deliberately not a clone/helper test, because checkpoint, completion, and
+/// failure each append a real session event and publish context state.
+#[test]
+fn store_publication_releases_resident_live_bytes_without_mutating_agent_rounds() {
+    let cwd = new_cwd();
+    let checkpoint_store = store("live-publication-completed");
+    let checkpoint_reservation = reserved(&checkpoint_store, None, None, "P1", &cwd).unwrap();
+    let rounds = vec![
+        RoundRecord {
+            assistant: "working".into(),
+            calls: vec![ToolCallRecord {
+                id: "live-completed".into(),
+                name: "read_file".into(),
+                args: r#"{"path":"fixture.txt"}"#.into(),
+                ok: true,
+                refused: false,
+                result: "persisted tool result".into(),
+                result_live: "provider-only live result".into(),
+            }],
+        },
+        RoundRecord {
+            assistant: "done".into(),
+            calls: Vec::new(),
+        },
+    ];
+
+    checkpoint_store
+        .checkpoint(&checkpoint_reservation, &rounds[..1])
+        .expect("checkpoint publishes its resident transcript");
+    assert_eq!(
+        rounds[0].calls[0].result_live, "provider-only live result",
+        "checkpoint must not mutate the agent-owned provider projection"
+    );
+    checkpoint_store
+        .finalize(&checkpoint_reservation, "done", &rounds)
+        .expect("completion publishes its resident transcript");
+    assert_eq!(
+        rounds[0].calls[0].result_live, "provider-only live result",
+        "completion must not mutate the agent-owned provider projection"
+    );
+    let completed = checkpoint_store
+        .snapshot()
+        .expect("completed state is readable");
+    let completed_branch = completed
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == checkpoint_reservation.branch_id)
+        .expect("completed branch");
+    assert_eq!(completed_branch.lifecycle, Lifecycle::Completed);
+    assert!(
+        completed_branch.rounds[0].calls[0].result_live.is_empty(),
+        "completed resident state releases the live provider allocation"
+    );
+
+    let failed_store = store("live-publication-failed");
+    let failed_reservation = reserved(&failed_store, None, None, "P1", &cwd).unwrap();
+    let failed_rounds = vec![RoundRecord {
+        assistant: "working".into(),
+        calls: vec![ToolCallRecord {
+            id: "live-failed".into(),
+            name: "read_file".into(),
+            args: r#"{"path":"fixture.txt"}"#.into(),
+            ok: true,
+            refused: false,
+            result: "persisted failure-prefix result".into(),
+            result_live: "provider-only failed live result".into(),
+        }],
+    }];
+    failed_store
+        .fail(&failed_reservation, "intentional failure", &failed_rounds)
+        .expect("failure publishes its resident transcript");
+    assert_eq!(
+        failed_rounds[0].calls[0].result_live, "provider-only failed live result",
+        "failure must not mutate the agent-owned provider projection"
+    );
+    let failed = failed_store.snapshot().expect("failed state is readable");
+    let failed_branch = failed
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == failed_reservation.branch_id)
+        .expect("failed branch");
+    assert_eq!(failed_branch.lifecycle, Lifecycle::Failed);
+    assert!(
+        failed_branch.rounds[0].calls[0].result_live.is_empty(),
+        "failed resident state releases the live provider allocation"
+    );
 }
 
 #[test]

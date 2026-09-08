@@ -439,3 +439,31 @@ fn tool_call_record_durable_form_omits_result_live() {
     assert_eq!(reloaded.result, "persisted-result");
     assert_eq!(reloaded.result_live, "");
 }
+
+#[test]
+fn tool_call_record_debug_omits_live_payload_in_embedded_round() {
+    let live_secret = "live-payload-must-not-appear";
+    let round = RoundRecord {
+        assistant: "assistant".to_string(),
+        calls: vec![ToolCallRecord {
+            id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            args: "{}".to_string(),
+            ok: true,
+            refused: false,
+            result: "CTXDIGEST v1 tool=read_file".to_string(),
+            result_live: live_secret.to_string(),
+        }],
+    };
+
+    let call_debug = format!("{:?}", round.calls[0]);
+    let embedded_debug = format!("{round:?}");
+    for debug in [&call_debug, &embedded_debug] {
+        assert!(
+            !debug.contains(live_secret),
+            "Debug must not expose a live provider payload: {debug}"
+        );
+        assert!(debug.contains("result_live_len"));
+        assert!(debug.contains("CTXDIGEST v1"));
+    }
+}

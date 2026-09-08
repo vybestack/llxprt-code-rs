@@ -19,7 +19,7 @@ pub struct RoundRecord {
 }
 
 /// A recorded tool call for a persisted tool transcript.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ToolCallRecord {
     /// The provider-assigned tool call id (persisted and replayed verbatim).
     pub id: String,
@@ -43,11 +43,30 @@ pub struct ToolCallRecord {
     ///
     /// Transient by design: it is exactly the payload the durable representation
     /// exists to keep OUT of the transcript, so it is never serialized. The
-    /// in-memory rounds keep it for forced-summary usage reconstruction; a
-    /// reloaded record reads it back as the empty string (the compact `result`
-    /// stays the only persisted form).
+    /// agent-owned rounds keep it until the provider request and forced-summary
+    /// usage reconstruction have consumed it. Store-side transcript clones
+    /// release it before checkpoint/finalize/fail publication; a reloaded
+    /// record reads it back as the empty string (the compact `result` stays the
+    /// only persisted form).
     #[serde(default, skip_serializing)]
     pub result_live: String,
+}
+
+/// Debug intentionally omits the transient live payload.  Unlike `result`, that
+/// payload is the admitted provider evidence and must never be exposed by a
+/// diagnostic of an in-memory session record.
+impl std::fmt::Debug for ToolCallRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolCallRecord")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("args", &self.args)
+            .field("ok", &self.ok)
+            .field("refused", &self.refused)
+            .field("result", &self.result)
+            .field("result_live_len", &self.result_live.len())
+            .finish()
+    }
 }
 
 /// Lifecycle of one branch.

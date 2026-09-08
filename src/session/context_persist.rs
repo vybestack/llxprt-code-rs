@@ -792,6 +792,14 @@ fn digest_record(
     record
 }
 
+/// Drops the transient provider projection from a store-side transcript clone.
+/// Replacing rather than clearing each `String` releases the payload allocation.
+fn release_live_payloads(rounds: &mut [RoundRecord]) {
+    for call in rounds.iter_mut().flat_map(|round| round.calls.iter_mut()) {
+        call.result_live = String::new();
+    }
+}
+
 /// Replaces every bulk tool result's PERSISTED projection with a deterministic
 /// compact record after moving the full bytes through the fail-closed ingress
 /// transaction into the spine and the vault.
@@ -924,6 +932,13 @@ pub(crate) fn context_exchange(
         // entered the store, so the session must not advance (issue #106).
         return Err(StoreError::Invalid(reason));
     }
+    // This clone is exclusively the store-side transcript.  The agent retains
+    // `rounds` and its live projections for the next provider request and
+    // forced-summary charging, but no resident SessionState may retain those
+    // payload allocations.  Do this for every call, not only calls the digest
+    // pass changed: pre-compacted and below-threshold calls also carry a live
+    // projection that must not survive checkpoint/finalize/fail publication.
+    release_live_payloads(&mut transformed);
     if let Err(reason) = persist_context(store, state) {
         state.quiesce = Some("quiesce_unwritable".to_string());
         state.detail = Some(reason.clone());
