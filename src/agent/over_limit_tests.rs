@@ -10,11 +10,11 @@ use std::sync::Mutex;
 
 /// Scripted provider failures plus optional request capture for over-limit recovery.
 struct RecoveryBackend {
-    replies: Mutex<std::collections::VecDeque<Result<LlmResult, String>>>,
+    replies: Mutex<std::collections::VecDeque<Result<LlmResult, crate::adapter::ModelFailure>>>,
     requests: Mutex<Vec<Vec<serdes_ai::core::ModelRequest>>>,
 }
 impl RecoveryBackend {
-    fn new(replies: Vec<Result<LlmResult, String>>) -> Self {
+    fn new(replies: Vec<Result<LlmResult, crate::adapter::ModelFailure>>) -> Self {
         Self {
             replies: Mutex::new(replies.into()),
             requests: Mutex::new(Vec::new()),
@@ -101,7 +101,7 @@ fn over_limit_provider_verdict_compacts_once_and_proceeds() {
     let (cwd, store, reserved) = recovery_store("over-provider");
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![
-            Err("Model context length exceeded (1 tokens maximum, 2 requested)".into()),
+            Err(context_limit()),
             Ok(stop_reply()),
         ])),
         cwd.path().to_path_buf(),
@@ -130,7 +130,7 @@ fn over_limit_twice_fails_naming_both_attempts() {
 #[test]
 fn provider_verdict_twice_fails_naming_both_attempts() {
     let (cwd, store, reserved) = recovery_store("provider-twice");
-    let message = "Model context length exceeded (1 tokens maximum, 2 requested)".to_string();
+    let message = context_limit();
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![
             Err(message.clone()),
@@ -151,7 +151,9 @@ fn unrelated_provider_error_untouched() {
     let (cwd, store, reserved) = recovery_store("provider-unrelated");
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![Err(
-            "Model request rate limited (no retry delay supplied)".into(),
+            crate::adapter::ModelFailure::Terminal(
+                "Model request rate limited (no retry delay supplied)".into(),
+            ),
         )])),
         cwd.path().to_path_buf(),
         false,
@@ -160,4 +162,13 @@ fn unrelated_provider_error_untouched() {
     assert_eq!(agent.model_calls(), 1);
     assert_eq!(error.key, "model");
     assert!(!error.message.contains("context length exceeded"));
+}
+
+fn context_limit() -> crate::adapter::ModelFailure {
+    crate::adapter::ModelFailure::from_model_error(
+        serdes_ai::models::ModelError::ContextLengthExceeded {
+            max_tokens: 1,
+            requested_tokens: 2,
+        },
+    )
 }

@@ -14,6 +14,7 @@ fn success_envelope_bytes_are_pinned() {
             turn: 16777216,
         },
         run: CompletedRun {
+            request_attempts: Default::default(),
             turn: 2,
             attempt: 1,
             branch_id: "branch-\"snow-雪".into(),
@@ -32,11 +33,11 @@ fn success_envelope_bytes_are_pinned() {
     let line = cli::envelope(&outcome, "sess_1").to_line();
     assert_eq!(
         String::from_utf8_lossy(&line),
-        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
+        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
     assert_eq!(
         line,
-        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
+        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
 }
 
@@ -47,11 +48,11 @@ fn nested_error_envelope_bytes_are_pinned() {
     let line = cli::envelope(&outcome, "sess_1").to_line();
     assert_eq!(
         String::from_utf8_lossy(&line),
-        "{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n雪\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        "{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n雪\"},\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
     assert_eq!(
         line,
-        b"{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n\xe9\x9b\xaa\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        b"{\"error\":{\"code\":\"model-\\\"bad\",\"message\":\"line one\\n\xe9\x9b\xaa\"},\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
 }
 
@@ -83,11 +84,27 @@ fn clap_usage_envelope_bytes_are_pinned() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        "{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
     assert_eq!(
         output.stdout,
-        b"{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
+        b"{\"error\":{\"code\":\"usage\",\"message\":\"invalid arguments\"},\"request_attempts\":{\"attempts\":0,\"retries\":0},\"session_id\":\"sess_1\",\"status\":\"error\"}\n"
     );
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn terminal_and_profile_errors_retain_started_retry_counts() {
+    for code in [Code::Model, Code::Session, Code::Profiling] {
+        let mut error = AppError::new(code, "model", "failed");
+        error.request_attempts = Box::new(llxprt_code_rs::envelope::RequestAttempts {
+            attempts: 3,
+            retries: 1,
+        });
+        let document = cli::envelope(&Err(error), "sess").to_value();
+        assert_eq!(
+            document["request_attempts"],
+            serde_json::json!({"attempts":3,"retries":1})
+        );
+    }
 }

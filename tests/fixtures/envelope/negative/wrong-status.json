@@ -1,1 +1,1 @@
-{"error":{"code":"usage","message":"bad arguments"},"session_id":"demo","status":"failure"}
+{"error":{"code":"usage","message":"bad arguments"},"session_id":"demo","status":"failure","request_attempts":{"attempts":0,"retries":0}}

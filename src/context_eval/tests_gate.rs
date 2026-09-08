@@ -85,7 +85,7 @@ for arg in "$@"; do
   if [ "$prev" = "--turn" ]; then turn="$arg"; fi
   prev="$arg"
 done
-printf '{{"attempt":1,"branch":false,"branch_id":"fake-branch","budget_exhausted":false,"declared_tool_calls":-1,"prompt_digest":"{digest}","replayed":false,"session_dir":"/tmp/fake-sessions/%s","session_id":"%s","status":"ok","summary":"CTXEVAL final: CTXEVAL-FINAL-GATE","terminal_outcome":"wrap_up","tool_calls":0,"turn":%s,"zero_call_tail":1}}\n' "$session" "$session" "$turn"
+printf '{{"attempt":1,"branch":false,"branch_id":"fake-branch","budget_exhausted":false,"declared_tool_calls":-1,"prompt_digest":"{digest}","replayed":false,"request_attempts":{{"attempts":1,"retries":0}},"session_dir":"/tmp/fake-sessions/%s","session_id":"%s","status":"ok","summary":"CTXEVAL final: CTXEVAL-FINAL-GATE","terminal_outcome":"wrap_up","tool_calls":0,"turn":%s,"zero_call_tail":1}}\n' "$session" "$session" "$turn"
 "#
     )
 }

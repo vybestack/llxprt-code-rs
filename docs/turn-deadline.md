@@ -31,3 +31,7 @@ The current macOS credential code reports its lookup phase and separately bounds
 the caller's Keychain wait to 10 seconds. The OS authorization call itself is not
 cancellation-safe: that implementation abandons the lookup thread on timeout.
 This issue does not change or claim to cancel that distinct OS credential path.
+
+Typed transient retries (#49) also share this boundary; see
+[request retry policy and envelope counts](request-retry.md). Backoff never starts
+a new turn clock and never turns an incomplete tool frame into executable work.

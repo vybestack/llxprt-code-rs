@@ -161,10 +161,13 @@ fn resolved_output_caps(settings: &Settings) -> crate::agent::OutputCaps {
 
 fn agent_error(error: crate::agent::AgentError) -> AppError {
     if error.code == Code::Profiling {
-        return AppError::profiling_at(error.key, error.message);
+        let mut app = AppError::profiling_at(error.key, error.message);
+        app.request_attempts = Box::new(error.request_attempts);
+        return app;
     }
     let mut app =
         AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code);
+    app.request_attempts = Box::new(error.request_attempts);
     if error.terminal_outcome.is_some() {
         // The run declared its own terminal verdict (issues 146 and 153); carry it into
         // the stdout envelope so a headless caller can branch on this condition alone.

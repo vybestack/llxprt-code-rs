@@ -356,6 +356,19 @@ fn fill(
     spec: &InvocationSpec,
     state: &mut ContinuationState,
 ) -> Result<(), String> {
+    let counts = match env {
+        Envelope::Ok(env) => env.request_attempts,
+        Envelope::Error(env) => env.request_attempts,
+    };
+    let max_retries = counts.attempts - counts.attempts.div_ceil(4);
+    if counts.retries > max_retries {
+        return Err("request attempt/retry counts exceed the four-attempt policy".into());
+    }
+    if let Envelope::Ok(env) = env {
+        if env.replayed && counts.attempts != 0 {
+            return Err("replayed invocation cannot report provider attempts".into());
+        }
+    }
     match env {
         Envelope::Ok(env) => fill_ok(result, env, spec, state),
         Envelope::Error(env) => fill_error(result, env),

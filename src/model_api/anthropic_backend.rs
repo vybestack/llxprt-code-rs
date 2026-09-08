@@ -4,7 +4,7 @@ use serdes_ai::core::ModelRequest;
 use serdes_ai::models::Model as _;
 use serdes_ai::ModelSettings;
 
-use crate::adapter::{schema_for, ChatBackend, LlmResult};
+use crate::adapter::{schema_for, ChatBackend, LlmResult, ModelFailure};
 use crate::model::SerdeAiParams;
 
 /// Host adapter for the vendored Anthropic Messages model.
@@ -30,7 +30,7 @@ impl AnthropicBackend {
         &self,
         requests: &[ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, ModelFailure> {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
@@ -42,19 +42,7 @@ impl AnthropicBackend {
                 &params.to_model_request_parameters(),
             )
             .await
-            .map_err(|error| {
-                let error = crate::transport::context_length_400(&error).unwrap_or(error);
-                match &error {
-                    serdes_ai::models::ModelError::InvalidResponse(detail)
-                    | serdes_ai::models::ModelError::Network(detail) => {
-                        format!("{error}: {detail}")
-                    }
-                    _ => match crate::transport::TransportFailure::from_model_error(&error) {
-                        Some(failure) => failure.diagnostic(),
-                        None => error.to_string(),
-                    },
-                }
-            })?;
+            .map_err(ModelFailure::from_model_error)?;
         Ok(LlmResult::from(&response))
     }
 }

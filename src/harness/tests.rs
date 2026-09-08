@@ -98,6 +98,7 @@ fn spec(session: &str) -> InvocationSpec {
 fn ok_env(success: &str) -> OkEnvelope {
     serde_json::from_value(serde_json::json!({
         "session_id": success,
+        "request_attempts": {"attempts": 0, "retries": 0},
         "session_dir": "/tmp/sessions/sess",
         "turn": 1,
         "attempt": 1,
@@ -125,7 +126,7 @@ fn ok_envelope_contract_passes() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok",
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -158,7 +159,7 @@ fn ok_envelope_contract_passes() {
 fn previous_adversarial_envelope_ok_false() {
     let json = serde_json::json!({
         "session_id": "sess",
-        "status": "ok",
+        "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok",
         "turn": 1,
         "attempt": 0,
         "branch_id": "b1",
@@ -213,7 +214,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok",
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -233,7 +234,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok",
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -459,7 +460,7 @@ fn error_envelope_requires_detail_and_nonzero_exit() {
     let mut r = test_result(false);
     r.exit = Some(0);
     let env: Envelope = serde_json::from_str(
-        r#"{"session_id":"sess","status":"error","error":{"code":"model","message":"boom"}}"#,
+        r#"{"request_attempts":{"attempts":0,"retries":0},"session_id":"sess","status":"error","error":{"code":"model","message":"boom"}}"#,
     )
     .unwrap();
     let err = fill(
@@ -491,7 +492,7 @@ fn error_envelope_requires_detail_and_nonzero_exit() {
 #[test]
 fn ok_envelope_missing_required_field_is_rejected() {
     let without = serde_json::json!({
-        "session_id": "sess", "status": "ok"
+        "session_id": "sess", "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok"
     });
     let env: Result<Envelope, _> = serde_json::from_value(without);
     assert!(env.is_err(), "status-only ok must fail the typed parse");
@@ -526,7 +527,7 @@ fn trailing_or_multiple_json_is_rejected_by_parse() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok",
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -761,6 +762,7 @@ fn cli_and_harness_share_one_prompt_digest() {
             session_dir: std::path::PathBuf::from("/config/code-rs-sessions/s"),
             output_caps: crate::agent::OutputCaps::default(),
             run: CompletedRun {
+                request_attempts: Default::default(),
                 turn: 1,
                 attempt: 1,
                 branch_id: "b1".into(),
@@ -785,7 +787,7 @@ fn cli_and_harness_share_one_prompt_digest() {
         let env: Envelope = serde_json::from_value(serde_json::json!({
             "session_id": "s", "session_dir": "/tmp/sessions/s",
             "turn": 1, "attempt": 1, "branch_id": "b1", "branch": false,
-            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1,
+            "replayed": false, "request_attempts": {"attempts": 0, "retries": 0}, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1,
             "prompt_digest": digest,
         }))
         .unwrap();
@@ -803,5 +805,23 @@ fn cli_and_harness_share_one_prompt_digest() {
         };
         fill(&mut r, &env, &spec, &mut ContinuationState::default()).unwrap();
         assert!(r.ok, "harness accepts the shared digest for {prompt:?}");
+    }
+}
+
+#[test]
+fn retry_counts_obey_attempt_limit_and_replay_contract() {
+    for (attempts, retries, replayed) in [(0, 1, false), (4, 4, false), (5, 4, false), (1, 0, true)]
+    {
+        let mut env = ok_env("sess");
+        env.request_attempts = crate::envelope::RequestAttempts { attempts, retries };
+        env.replayed = replayed;
+        let error = fill(
+            &mut test_result(false),
+            &Envelope::Ok(env),
+            &spec("sess"),
+            &mut ContinuationState::default(),
+        )
+        .unwrap_err();
+        assert!(error.contains("attempt"));
     }
 }

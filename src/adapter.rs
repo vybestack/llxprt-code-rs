@@ -10,8 +10,8 @@
 //! whole turn loop against a mock with no network.
 
 use crate::model::{ModelConfig, SerdeAiParams, SerdeAiSettings};
+pub use crate::model_failure::ModelFailure;
 use crate::session::RoundRecord;
-use crate::transport::TransportFailure;
 use serdes_ai::core::{
     messages::ToolCallArgs,
     messages::{FinishReason, ModelResponse, ModelResponsePart},
@@ -94,12 +94,12 @@ impl From<&ModelResponse> for LlmResult {
 /// transport; implementations must not block the executor. Transport tasks must
 /// stay on the caller's runtime so turn teardown cancels them as well.
 pub type ModelFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, String>> + 'a>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, ModelFailure>> + 'a>>;
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
     /// Send the accumulated parts and map the reply. A network/transport error becomes
-    /// `Err(String)`; the agent turns that into a terminal failure.
+    /// a typed failure; the turn executor owns bounded safe-request retries.
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],
@@ -307,13 +307,12 @@ pub fn openai_chat_model(
 }
 
 impl ModelAdapter {
-    /// Send a request and map the reply, translating errors into the `Err(String)` the
-    /// loop converts to a failed result.
+    /// Send one complete request and preserve typed failure metadata.
     pub async fn request_async(
         &self,
         requests: &[ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, ModelFailure> {
         let tool_defs = tools.iter().map(schema_for).collect::<Vec<_>>();
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tool_defs),
@@ -328,13 +327,7 @@ impl ModelAdapter {
             .inner
             .request(requests, &settings, &params.to_model_request_parameters())
             .await
-            .map_err(|e| {
-                let e = crate::transport::context_length_400(&e).unwrap_or(e);
-                match TransportFailure::from_model_error(&e) {
-                    Some(failure) => failure.diagnostic(),
-                    None => e.to_string(),
-                }
-            })?;
+            .map_err(ModelFailure::from_model_error)?;
         Ok(LlmResult::from(&resp))
     }
 }

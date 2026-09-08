@@ -51,6 +51,16 @@ impl Default for OutputCaps {
     }
 }
 
+/// Provider request attempts actually started in this invocation (zero for replay
+/// or setup failure). Retries are the subset re-issued after typed transient
+/// failures; context/truncation re-issues start a new logical request, not a retry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestAttempts {
+    pub attempts: u64,
+    pub retries: u64,
+}
+
 /// The exactly-one-object stdout shape, discriminated by `status`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -65,6 +75,7 @@ pub enum Envelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OkEnvelope {
+    pub request_attempts: RequestAttempts,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -99,6 +110,7 @@ pub struct OkEnvelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorEnvelope {
+    pub request_attempts: RequestAttempts,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -143,6 +155,7 @@ impl Envelope {
         message: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            request_attempts: RequestAttempts::default(),
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: code.into(),
@@ -162,6 +175,7 @@ impl Envelope {
         session_status: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            request_attempts: RequestAttempts::default(),
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: "mem-profile".into(),
@@ -174,26 +188,8 @@ impl Envelope {
     }
 
     /// Serialize through `Value`, retaining the CLI's historical sorted-key wire bytes.
-    /// If serialization ever becomes fallible, preserve the stdout contract with a minimal
-    /// schema-valid error envelope.
     pub fn to_value(&self) -> Value {
-        serde_json::to_value(self).unwrap_or_else(|_| {
-            let session_id = match self {
-                Self::Ok(envelope) => &envelope.session_id,
-                Self::Error(envelope) => &envelope.session_id,
-            };
-            let mut error = Map::new();
-            error.insert("code".into(), Value::String("serialization".into()));
-            error.insert(
-                "message".into(),
-                Value::String("envelope serialization failed".into()),
-            );
-            let mut fallback = Map::new();
-            fallback.insert("error".into(), Value::Object(error));
-            fallback.insert("session_id".into(), Value::String(session_id.clone()));
-            fallback.insert("status".into(), Value::String("error".into()));
-            Value::Object(fallback)
-        })
+        serde_json::to_value(self).expect("typed envelope is JSON-serializable")
     }
 
     /// Return the exact stdout bytes, including one terminal newline.

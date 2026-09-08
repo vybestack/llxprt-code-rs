@@ -108,3 +108,19 @@ fn fixture_scanner_rejects_a_windows_machine_path() {
         Some(WINDOWS_MACHINE_PREFIX)
     );
 }
+
+#[test]
+fn retry_evidence_is_required_and_closed_on_both_outcomes() {
+    let schema: Value = serde_json::from_slice(&schema_bytes()).unwrap();
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    for path in documents("positive") {
+        let mut document = read_json(&path);
+        document.as_object_mut().unwrap().remove("request_attempts");
+        assert!(!validator.is_valid(&document));
+        assert!(serde_json::from_value::<Envelope>(document.clone()).is_err());
+        document["request_attempts"] =
+            serde_json::json!({"attempts": 2, "retries": 1, "unknown": 0});
+        assert!(!validator.is_valid(&document));
+        assert!(serde_json::from_value::<Envelope>(document).is_err());
+    }
+}

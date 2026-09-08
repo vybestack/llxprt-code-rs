@@ -228,117 +228,6 @@ impl TransportFailure {
         }
     }
 
-    /// Extract the classification from a backend error message. The backend renders a
-    /// transport failure as its diagnostic text, which this recognizes by its stable
-    /// framing so the envelope can report the classification without a second channel.
-    ///
-    /// Known limitation: [`crate::adapter::ChatBackend`] still carries `String`
-    /// errors, so the round trip here re-parses the host's own framed diagnostic prose
-    /// rather than a typed failure. Restructuring the backend onto a typed error is
-    /// deliberately out of scope for this change; the framing is fixed and stable, and
-    /// anything unrecognized falls back to the plain model error.
-    pub fn from_message(message: &str) -> Option<Self> {
-        Self::from_framed(message).or_else(|| {
-            Self::provider_prose(message).map(|kind| Self {
-                kind,
-                origin: "unknown",
-                url_class: None,
-                status: None,
-                body_prefix: None,
-                body_bytes: 0,
-                retry_after: None,
-            })
-        })
-    }
-
-    /// Recognize the structured framing the host backends render for a transport
-    /// failure. The framing is a fixed prefix carrying the classification facts, so the
-    /// envelope reports the class without matching on diagnostic prose.
-    ///
-    /// Known limitation, accepted for this change: [`crate::adapter::ChatBackend`]
-    /// still carries `String` errors and the backends flatten a classified failure to
-    /// its diagnostic text, so this re-parses the host's own framed prose instead of a
-    /// typed failure. The framing is fixed and stable, and anything unrecognized falls
-    /// back to the plain model error; restructuring the backend onto a typed error is
-    /// deliberately out of scope here.
-    fn from_framed(message: &str) -> Option<Self> {
-        const PREFIX: &str = "model transport failed (";
-        let rest = message.strip_prefix(PREFIX)?;
-        let end = rest.find(')')?;
-        let fields = &rest[..end];
-        let tail = &rest[end + 1..];
-        let mut status = None;
-        let mut origin = "unknown";
-        let mut url_class = None;
-        for field in fields.split(", ") {
-            if let Some(value) = field.strip_prefix("status ") {
-                status = value.parse::<u16>().ok();
-            } else if let Some(value) = field.strip_prefix("origin ") {
-                origin = static_origin(value)?;
-            } else if let Some(value) = field.strip_prefix("url ") {
-                url_class = Some(static_url_class(value)?);
-            }
-        }
-        let kind = fields
-            .split_once("class ")
-            .and_then(|(_, rest)| rest.split_once(','))
-            .map(|(token, _)| token)
-            .and_then(kind_from_token)?;
-        // The body prefix ends at the `retry-after` field when one is present. The framed
-        // counts carry the retained prefix and the total body length, so the total
-        // survives the round trip instead of being reset to zero here. The trailing
-        // ` bytes` unit is part of the framing, not the number, and a missing or
-        // unparseable total stays zero so the renderer omits it.
-        let body = tail.split_once(" body[").and_then(|(_, rest)| {
-            rest.split_once("]: ").map(|(counts, body)| {
-                let body_bytes = counts
-                    .split_once('/')
-                    .and_then(|(_, total)| total.strip_suffix(" bytes"))
-                    .and_then(|total| total.parse::<usize>().ok())
-                    .unwrap_or(0);
-                let body_prefix = match body.split_once(" retry-after ") {
-                    Some((prefix, _)) => prefix.to_string(),
-                    None => body.to_string(),
-                };
-                (body_prefix, body_bytes)
-            })
-        });
-        let (body_prefix, body_bytes) = match body {
-            Some((prefix, bytes)) => (Some(prefix), bytes),
-            None => (None, 0),
-        };
-        let retry_after = tail
-            .split_once(" retry-after ")
-            .and_then(|(_, rest)| rest.strip_suffix('s'))
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_secs);
-        Some(Self {
-            kind,
-            origin,
-            url_class,
-            status,
-            body_prefix,
-            body_bytes,
-            retry_after,
-        })
-    }
-
-    /// Recognize the transport sentences the vendored crate and the host backends have
-    /// always emitted, so pre-existing failures classify too.
-    fn provider_prose(message: &str) -> Option<TransportKind> {
-        if message.contains("rate limited") {
-            Some(TransportKind::RateLimit)
-        } else if message.contains("connection failed")
-            || message.contains("network request failed")
-            || message.contains("timed out")
-            || message.contains("transport failed")
-        {
-            Some(TransportKind::Connectivity)
-        } else {
-            None
-        }
-    }
-
     /// The stable `error.code` component for this failure: the model code plus the
     /// classification token, for example `model-quota-exhausted`.
     pub fn transport_key(&self) -> &'static str {
@@ -388,32 +277,6 @@ impl TransportFailure {
             out.push_str(&format!(" retry-after {}s", retry_after.as_secs()));
         }
         out
-    }
-}
-
-/// Map an origin token back to its static string.
-fn static_origin(token: &str) -> Option<&'static str> {
-    const TOKENS: [&str; 8] = [
-        "connect", "timeout", "request", "body", "decode", "redirect", "status", "unknown",
-    ];
-    TOKENS.into_iter().find(|candidate| *candidate == token)
-}
-
-/// Map a URL scheme-class token back to its static string.
-fn static_url_class(token: &str) -> Option<&'static str> {
-    const TOKENS: [&str; 3] = ["https", "http", "other"];
-    TOKENS.into_iter().find(|candidate| *candidate == token)
-}
-
-/// Map a classification token back to its kind.
-fn kind_from_token(token: &str) -> Option<TransportKind> {
-    match token {
-        "rate-limit" => Some(TransportKind::RateLimit),
-        "quota-exhausted" => Some(TransportKind::QuotaExhausted),
-        "transient-server" => Some(TransportKind::TransientServer),
-        "connectivity" => Some(TransportKind::Connectivity),
-        "permanent" => Some(TransportKind::Permanent),
-        _ => None,
     }
 }
 
@@ -594,83 +457,7 @@ mod tests {
         );
     }
 
-    /// Read the framed `body[<shown>[/<total>] bytes]` counts out of a rendered
-    /// diagnostic, so the test asserts what the human reads.
-    fn framed_counts(diagnostic: &str) -> (usize, Option<usize>) {
-        let counts = diagnostic
-            .split_once(" body[")
-            .and_then(|(_, rest)| rest.split_once("]: "))
-            .map(|(counts, _)| counts)
-            .expect("the diagnostic must frame its body");
-        let parse = |value: &str| -> Option<usize> {
-            value.strip_suffix(" bytes").unwrap_or(value).parse().ok()
-        };
-        match counts.split_once('/') {
-            Some((shown, total)) => (parse(shown).expect("shown count"), parse(total)),
-            None => (parse(counts).expect("shown count"), None),
-        }
-    }
-
-    fn long_body() -> String {
-        "y".repeat(MAX_TRANSPORT_DIAGNOSTIC_BYTES * 4)
-    }
-
-    /// A round-tripped diagnostic never states a total body length smaller than the
-    /// prefix it retained, whatever the provider body held.
-    #[test]
-    fn round_trip_never_states_a_total_below_the_retained_prefix() {
-        // A long body is truncated, so the total is well past the retained prefix.
-        let long = long_body();
-        let cases = [
-            // A short body is shown whole, so shown and total agree.
-            "short body",
-            long.as_str(),
-            // A body carrying the framing separator can only degrade the recovered
-            // prefix, so the stated total still never falls below what is retained.
-            "leak ]: inside the provider body",
-            // A body carrying the `retry-after` framing genuinely truncates the
-            // recovered prefix; the total must still never fall below what is shown.
-            "oops retry-after 3s and then more provider text",
-        ];
-        for body in cases {
-            let rendered = TransportFailure {
-                body_bytes: body.len(),
-                body_prefix: Some(body.to_string()),
-                ..status_failure(503, "", None)
-            };
-            let first = rendered.diagnostic();
-            let round = TransportFailure::from_message(&first)
-                .expect("the framed diagnostic must classify");
-            let second = round.diagnostic();
-            for diagnostic in [&first, &second] {
-                let (shown, total) = framed_counts(diagnostic);
-                if let Some(total) = total {
-                    assert!(
-                        total >= shown,
-                        "total {total} below shown {shown}: {diagnostic}"
-                    );
-                } else {
-                    // An omitted total must not be smuggled in as a bare zero count.
-                    assert!(
-                        shown > 0,
-                        "the retained prefix must stay countable: {diagnostic}"
-                    );
-                }
-            }
-            assert_eq!(round.body_bytes, body.len(), "total survives: {first}");
-            // A body carrying framing text is an accepted degradation: the recovered
-            // prefix can only shrink, never grow past the provider body, and the total
-            // still survives the round trip.
-            let recovered = round.body_prefix.as_deref().unwrap_or("");
-            assert!(
-                recovered.len() <= body.len(),
-                "the recovered prefix must not grow: {first}"
-            );
-        }
-    }
-
-    /// A total that never parses stays omitted instead of being stated as zero, so a
-    /// degraded framing cannot claim a zero-byte provider body.
+    /// An absent total is never presented as a reported zero.
     #[test]
     fn diagnostic_omits_an_absent_total_instead_of_printing_zero() {
         let degraded = TransportFailure {
@@ -682,28 +469,6 @@ mod tests {
             degraded.diagnostic(),
             "model transport failed (status 503, origin status, class transient-server, retryable) body[16 bytes]: provider said no"
         );
-    }
-
-    /// The framed host rendering round trips back into the classification the envelope
-    /// reports, and provider prose still classifies.
-    #[test]
-    fn framed_and_provider_prose_messages_classify() {
-        let rendered = status_failure(429, "slow down", Some(Duration::from_secs(3)));
-        let round = TransportFailure::from_message(&rendered.diagnostic())
-            .expect("the framed diagnostic must classify");
-        assert_eq!(round.kind, TransportKind::RateLimit);
-        assert_eq!(round.status, Some(429));
-        assert_eq!(round.origin, "status");
-        assert_eq!(round.retry_after, Some(Duration::from_secs(3)));
-        // The framed body prefix ends where the `retry-after` field begins.
-        assert_eq!(round.body_prefix.as_deref(), Some("slow down"));
-        assert_eq!(round.transport_key(), "model-rate-limit");
-
-        let prose = TransportFailure::from_message("Model network request failed")
-            .expect("provider connectivity prose must classify");
-        assert_eq!(prose.kind, TransportKind::Connectivity);
-        assert_eq!(prose.origin, "unknown");
-        assert!(TransportFailure::from_message("Model operation failed").is_none());
     }
 
     /// The vendored variants classify through the same host kinds.

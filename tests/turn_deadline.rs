@@ -218,7 +218,9 @@ fn timed_out_turn_teardown_cancels_spawned_transport_work() {
                 });
                 tokio::task::yield_now().await;
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                Err("outer request completed instead of being cancelled".into())
+                Err(llxprt_code_rs::adapter::ModelFailure::Terminal(
+                    "outer request completed instead of being cancelled".into(),
+                ))
             })
         }
     }

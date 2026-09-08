@@ -98,14 +98,16 @@ impl super::Turn<'_> {
         rounds: &[RoundRecord],
     ) -> AgentError {
         match failure {
-            RoundFailure::Model(message) => self.dead(store, reserved, "model", &message, rounds),
+            RoundFailure::Model(message) | RoundFailure::ContextLimit(message) => {
+                self.dead(store, reserved, "model", &message, rounds)
+            }
             RoundFailure::ModelTransport(failure) => {
                 let key = failure.transport_key();
                 self.dead(store, reserved, "model", &failure.diagnostic(), rounds)
                     .with_envelope_code(key)
             }
             RoundFailure::TurnTime => self.time_exhausted(store, reserved, rounds),
-            RoundFailure::Profiling(error) => error,
+            RoundFailure::Profiling(error) | RoundFailure::Persistence(error) => error,
         }
     }
 }
