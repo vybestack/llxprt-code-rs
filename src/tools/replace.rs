@@ -231,9 +231,9 @@ fn validate_full_sha256(value: &str) -> Result<(), String> {
         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
     let reason = if value.is_empty() {
         "an empty string".to_string()
-    } else if length < 64 {
+    } else if length < crate::redact::SHA256_HEX_LEN {
         format!("{length} characters; a {length}-character abbreviation is not usable")
-    } else if length > 64 {
+    } else if length > crate::redact::SHA256_HEX_LEN {
         format!("{length} characters")
     } else if is_lowercase_hex {
         return Ok(());
@@ -243,8 +243,9 @@ fn validate_full_sha256(value: &str) -> Result<(), String> {
         "non-hexadecimal characters".to_string()
     };
     Err(format!(
-        "it must be the full 64-character lowercase hex sha256 of the complete current content; \
-         got {reason}"
+        "it must be the full {}-character lowercase hex sha256 of the complete current \
+         content; got {reason}",
+        crate::redact::SHA256_HEX_LEN
     ))
 }
 

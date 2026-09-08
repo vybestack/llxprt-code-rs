@@ -115,6 +115,9 @@ pub const TRUNCATION_MARKER: &str = "[truncated]";
 /// guessed "plausible abbreviation" threshold: a boundary that lands anywhere inside one
 /// of these tokens must back off to the token's start so the model is never handed a
 /// usable-looking fragment.
+///
+/// The `replace` validator's length checks and the tool schema's `minLength`/`maxLength`/
+/// `pattern` all derive from this constant, so it is the single source of digest length.
 pub(crate) const SHA256_HEX_LEN: usize = 64;
 
 /// Move a byte cut back to the start of the digest token it would split, so a truncated

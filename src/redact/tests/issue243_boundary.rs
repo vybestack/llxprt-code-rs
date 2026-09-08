@@ -51,6 +51,13 @@ fn assert_field_whole_or_absent(out: &str, full: &str, at: usize, marker_head: &
     if out.contains(token) {
         return;
     }
+    if out.len() != full.len() && out.len() >= marker_head.len() {
+        assert!(
+            out.contains(marker_head),
+            "{label}: the truncation marker head {marker_head:?} is absent from a truncated \
+             rendering, so the marker format may have drifted; output: {out}"
+        );
+    }
     let body = retained_len(out, marker_head);
     assert!(
         body <= at,

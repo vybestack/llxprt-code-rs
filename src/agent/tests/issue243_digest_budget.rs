@@ -196,14 +196,18 @@ fn agent_refusal_digest_is_whole_or_omitted_under_a_shrinking_turn_budget() {
         .result
         .clone();
     // Every cut inside the digest itself, including the 1..7-byte cuts below any guessed
-    // "plausible prefix" threshold, at the notice-reserved boundary.
+    // "plausible prefix" threshold.
     let digest_at = uncut
         .find(&digest)
         .expect("the uncut rendering carries the digest");
     let caps = [
         40usize, 96, 160, 224, 288, 352, 416, 480, 544, 608, 700, 1024, 4096,
     ];
-    let exhaustive: Vec<usize> = (digest_at + 1..=digest_at + 64).collect();
+    // The inner cut sits at turn_cap - (reserved notice + "\n\n" + marker) bytes, so a window
+    // anchored on digest_at alone never lands inside the digest. Sweep past the whole recorded
+    // result so every effective cut offset is covered, including every position inside the
+    // digest token itself.
+    let exhaustive: Vec<usize> = (digest_at + 1..=uncut.len() + 1).collect();
     for turn_cap in caps.into_iter().chain(exhaustive) {
         let Turn {
             run,

@@ -47,6 +47,13 @@ fn assert_no_partial_digest(uncut: &str, msg: &str, digest: &str, label: &str) {
     };
     // Only the retained body matters: the marker is the cut's own signal, so the body is
     // whatever precedes it. The field is either fully inside that body or fully outside it.
+    if msg.len() < uncut.len() {
+        assert!(
+            msg.contains("...  ["),
+            "{label}: a truncated message carries no truncation marker, so the marker format \
+             may have drifted; message: {msg}"
+        );
+    }
     let body = msg.split("...  [").next().unwrap_or(msg);
     let carried = body.len().saturating_sub(at);
     if carried > 0 && carried < digest.len() {
@@ -145,7 +152,9 @@ fn refusal_digest_invariant_with_long_paths() {
         16 * 1024,
     );
     assert!(!ok0, "{uncut}");
-    for remaining in [40usize, 72, 120, 200, 300, 456, 700, 900, 1200, 2048] {
+    for remaining in [
+        40usize, 72, 120, 200, 300, 384, 400, 424, 456, 700, 900, 1200, 2048,
+    ] {
         let (ok, msg) = replace_with_budget(
             &fx,
             "content",

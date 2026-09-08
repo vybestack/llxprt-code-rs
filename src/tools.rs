@@ -502,6 +502,8 @@ pub(crate) fn is_known_tool_name(name: &str) -> bool {
 }
 
 pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
+    let sha_len = crate::redact::SHA256_HEX_LEN as u64;
+    let sha_pattern = format!("^[0-9a-f]{{{sha_len}}}$");
     let mut specs = vec![
         ToolSpec {
             name: "read_file".into(),
@@ -535,7 +537,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
                 ("expected".into(), json!({"type": "integer"}), false),
                 (
                     "expected_sha256".into(),
-                    json!({"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}),
+                    json!({"type": "string", "minLength": sha_len, "maxLength": sha_len, "pattern": sha_pattern}),
                     false,
                 ),
             ],
