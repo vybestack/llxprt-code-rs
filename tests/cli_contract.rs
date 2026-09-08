@@ -628,6 +628,87 @@ fn help_is_a_protocol_exception() {
     assert!(s.contains("--allow-shell"));
 }
 
+/// Issue 183: a separated hyphen-prefixed unlimited budget must be consumed as the
+/// budget's value, just like the equals form.  Every accepted spelling gets as far as
+/// profile loading; the deliberately nonexistent profile proves no network is involved.
+#[test]
+fn max_tool_calls_forms_parse_before_profile_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls", "-1"],
+        vec!["--max-tool-calls=-1"],
+        vec!["--max-tool-calls", "7"],
+        vec!["--max-tool-calls=7"],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--profile", "issue183-no-such-profile", "--prompt", "hi"])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3));
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["error"]["code"], "profile-missing");
+    }
+}
+
+/// Parsing diagnostics use only Clap's structured class and fixed option spellings:
+/// supplied prompts, paths, profile names, and environment values must never be reflected.
+#[test]
+fn clap_usage_diagnostics_are_sanitized_and_identify_budget_or_error_class() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--max-tool-calls",
+            "BUDGET_SECRET_SENTINEL",
+        ],
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--cwd",
+            "/PATH_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--UNKNOWN_SECRET_SENTINEL",
+        ],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .env("LLXPRT_API_KEY", "ENV_SECRET_SENTINEL")
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(parsed["error"]["code"], "usage");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--max-tool-calls")
+                || parsed["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unknown argument")
+        );
+        for secret in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "BUDGET_SECRET_SENTINEL",
+            "PATH_SECRET_SENTINEL",
+            "UNKNOWN_SECRET_SENTINEL",
+            "ENV_SECRET_SENTINEL",
+        ] {
+            assert!(!stdout.contains(secret), "usage diagnostic leaked {secret}");
+        }
+    }
+}
+
 /// CLI flag validation ordering (issue 60): an invalid `--max-tool-calls` or
 /// `--turn-time` is a usage error (exit 2) that must be reported **before** any
 /// profile resolution or credential access. The named profile here does not exist
@@ -684,4 +765,100 @@ fn invalid_turn_time_fails_before_profile_and_credentials() {
         parsed["error"]["message"],
         "--turn-time needs an s/m/h unit (got \"90\"); pass 0 to disable"
     );
+}
+
+/// Print-config must reject semantic CLI limits before the deliberately missing
+/// profile, just like normal startup, and must not expose supplied profile/prompt data.
+fn assert_print_config_rejects_tool_call_limit(value: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls".to_string(), value.to_string()],
+        vec![format!("--max-tool-calls={value}")],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args([
+                "--print-config",
+                "--profile",
+                "PROFILE_SECRET_SENTINEL",
+                "--prompt",
+                "PROMPT_SECRET_SENTINEL",
+            ])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "invalid limit {value}: {out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["error"]["code"], "max-tool-calls");
+        assert_eq!(
+            parsed["error"]["message"],
+            format!("--max-tool-calls must be -1 or an integer from 1 through 512 (got {value})")
+        );
+        assert!(out.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for forbidden in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "profile-missing",
+            "config",
+        ] {
+            assert!(
+                !stdout.contains(forbidden),
+                "unexpected diagnostic: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
+fn print_config_rejects_above_ceiling_before_profile() {
+    assert_print_config_rejects_tool_call_limit("513");
+}
+
+#[test]
+fn print_config_rejects_zero_before_profile() {
+    assert_print_config_rejects_tool_call_limit("0");
+}
+
+#[test]
+fn print_config_rejects_negative_before_profile() {
+    assert_print_config_rejects_tool_call_limit("-2");
+}
+
+#[test]
+fn print_config_preserves_valid_tool_call_limits_without_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile.json");
+    // No credentials: print-config must not construct a backend or consume stdin.
+    std::fs::write(&profile, r#"{"provider":"openai","model":"m"}"#).unwrap();
+    for (arguments, expected, source) in [
+        (vec![], 256, "default"),
+        (vec!["--max-tool-calls", "-1"], -1, "cli"),
+        (vec!["--max-tool-calls=-1"], -1, "cli"),
+        (vec!["--max-tool-calls", "1"], 1, "cli"),
+        (vec!["--max-tool-calls=7"], 7, "cli"),
+        (vec!["--max-tool-calls", "256"], 256, "cli"),
+        (vec!["--max-tool-calls=512"], 512, "cli"),
+    ] {
+        let out = bin()
+            .env_clear()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--print-config", "--profile-load"])
+            .arg(&profile)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(
+            parsed["budgets"]["max_tool_calls"],
+            serde_json::json!({"value": expected, "source": source})
+        );
+        assert!(
+            parsed.get("status").is_none(),
+            "settings, not a run envelope"
+        );
+        assert!(out.stderr.is_empty());
+    }
 }
