@@ -110,6 +110,50 @@ pub const MAX_ERROR_TEXT_BYTES: usize = 8192;
 /// The literal marker appended by [`truncate_utf8`] when anything was cut.
 pub const TRUNCATION_MARKER: &str = "[truncated]";
 
+/// The exact length of a sha256 digest token as the `replace` guard mints it (and as the
+/// context records already recognize). This is a property of the digest itself, not a
+/// guessed "plausible abbreviation" threshold: a boundary that lands anywhere inside one
+/// of these tokens must back off to the token's start so the model is never handed a
+/// usable-looking fragment.
+pub(crate) const SHA256_HEX_LEN: usize = 64;
+
+/// Move a byte cut back to the start of the digest token it would split, so a truncated
+/// string never carries a partial digest. Only a run of exactly [`SHA256_HEX_LEN`]
+/// lowercase-hex bytes flanked by non-hex bytes is treated as digest-shaped; that
+/// recognition is what keeps ordinary short hex-looking prose (a decimal constant, a hex
+/// literal in source, `gate.txt`) un-reshaped, because those runs are shorter than
+/// [`SHA256_HEX_LEN`] bytes or not flanked the way a rendered digest is.
+pub(crate) fn avoid_partial_hex_run(s: &str, end: usize) -> usize {
+    let bytes = s.as_bytes();
+    if end == 0 || end >= bytes.len() || !is_lower_hex(bytes[end]) {
+        // No cut, or the cut sits between runs: nothing to protect.
+        return end;
+    }
+    let mut start = end;
+    while start > 0 && is_lower_hex(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut stop = end;
+    while stop < bytes.len() && is_lower_hex(bytes[stop]) {
+        stop += 1;
+    }
+    // A hex run that is not exactly one whole digest is ordinary prose (a decimal
+    // constant, a short hex literal, or repeated filler), so it keeps its exact bytes.
+    if stop - start != SHA256_HEX_LEN {
+        return end;
+    }
+    // The run is digest-shaped, and the cut lands inside it: no matter which byte of the
+    // token the budget reached, what survives would be a usable-looking abbreviation, so
+    // the whole token is omitted instead. Hex bytes are ASCII, so `start` is already a
+    // char boundary.
+    start
+}
+
+/// The character set a rendered sha256 token uses: lowercase hex only.
+fn is_lower_hex(byte: u8) -> bool {
+    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+}
+
 /// The fixed cap for one scrubbed secret value (bytes). A secret over this is not a
 /// value the scrubber can redact by exact substitution; keeping the cap guarantees every
 /// accepted secret bounds the scrub. See [`MAX_KEY_BYTES`] /
@@ -236,6 +280,9 @@ pub fn truncate_utf8(s: String, max_bytes: usize) -> String {
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
+        // A cut inside a digest token would advertise an abbreviation: back off to the run's
+        // start so the whole token is omitted instead (issue 243).
+        let end = avoid_partial_hex_run(&s, end);
         let mut out: String = s[..end].to_string();
         out.push_str(marker);
         out

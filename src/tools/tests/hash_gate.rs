@@ -8,18 +8,18 @@ use super::*;
 /// A SHA-256 over the *whole* file, matching `replace`'s documented digest. Computed with the
 /// crate's own `digest_hex` (the same function the production checkpoint uses), so the tests
 /// assert on real file content rather than a stub.
-fn whole_file_digest(path: &std::path::Path) -> String {
+pub(super) fn whole_file_digest(path: &std::path::Path) -> String {
     digest_hex(&std::fs::read(path).unwrap())
 }
 
 /// One staged fixture: a tempdir root plus the file name every call in this module uses.
-struct Fixture {
-    _dir: tempfile::TempDir,
-    root: std::path::PathBuf,
-    path: std::path::PathBuf,
+pub(super) struct Fixture {
+    pub(super) _dir: tempfile::TempDir,
+    pub(super) root: std::path::PathBuf,
+    pub(super) path: std::path::PathBuf,
 }
 
-fn stage(contents: &str) -> Fixture {
+pub(super) fn stage(contents: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("gate.txt");
     std::fs::write(&path, contents).unwrap();
@@ -208,10 +208,6 @@ fn repeated_abbreviation_sequence_recovers_with_the_full_digest() {
         "old_string must be reconfirmed"
     );
     let intended_replacement = "DRAFT";
-    assert_ne!(
-        intended_replacement, "draft",
-        "replacement intent must be explicit"
-    );
     let current = whole_file_digest(&fx.path);
     assert!(
         seen.contains(&current),

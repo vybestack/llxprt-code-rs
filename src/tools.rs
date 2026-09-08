@@ -659,6 +659,9 @@ fn truncate(s: &str, max: usize) -> String {
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
+        // A cut inside a digest token would advertise an abbreviation: back off to the run's
+        // start so the whole token is omitted instead (issue 243).
+        let end = crate::redact::avoid_partial_hex_run(s, end);
         let mut out: String = s[..end].to_string();
         out.push_str(&marker);
         out
