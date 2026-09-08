@@ -234,7 +234,7 @@ fn parse_ephemeral_primary(
         "shell-max-timeout-seconds" => {
             settings.shell_max_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
         }
-        "apiMode" | "responsesMode" | "responses-mode" | "openaiResponsesEnabled" => {}
+        "apiMode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;
             let url = parse_url(raw)?;

@@ -252,8 +252,6 @@ fn parse_allowed_tools(map: &Map<String, Value>, name: &str) -> Result<(), Strin
 fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), String> {
     const ALLOWED: &[&str] = &[
         "apiMode",
-        "responsesMode",
-        "responses-mode",
         "openaiResponsesEnabled",
         "base-url",
         "auth-key-name",
