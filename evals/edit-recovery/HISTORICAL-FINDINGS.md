@@ -65,8 +65,8 @@ the immutable `impl2-*` command reports, not inferred from worker summaries.
 
 ## Interpretation
 
-Explicit guidance changed editor selection in these observations, but did not
-establish a completion or preservation improvement. Both current arms already
+Explicit guidance coincided with registered `replace` selection in these observations,
+without establishing a completion or preservation improvement. Both current arms already
 produced source-preserving edits; explicit arms used more calls and time, including
 SHA precondition retries. This is one sample per cell, with fixed order and no
 randomization. Do not infer model-general rates, statistical significance, caching
@@ -100,3 +100,27 @@ Under `evalwork/results/branch4-wave2/issue220/`:
 `HISTORICAL.md` documents reproduction and grader limitations. The original
 `completion.md`, `README.md` and `FINDINGS.md` remain the earlier blocked report,
 not final acceptance. The driver owns independent final acceptance and review.
+
+## Final integration qualification (impl3)
+
+Ordinary/explicit had five preceding calls: FOUR successful and one failed replace,
+then its first successful edit at call 6. The earlier completion table's phrase
+"5 successful" is incorrect; its raw trials and reports remain unchanged.
+Editor selection is an observation, not a causal guidance effect from one
+fixed-order trial per cell. No guidance-benefit claim is established.
+
+The independent acceptance220 audit supports these four candidate/Astra cells,
+not unqualified final acceptance. The retained full-test status 0 includes the
+malformed shared parity Python fixture diagnosed in #252. External scratch alone
+would not restore its intended adversarial coverage. Known-PID absence does not
+prove complete descendant cleanup; no unsupported historical issue220 orphan event
+is inferred. Separate #252 ownership was requested in comment5577761171. Mandatory
+full-gate coverage, identity-safe cleanup evidence and later driver review remain
+outstanding. New final-source commands and identities are in `completion-impl3.md`
+and `impl3-*` evidence; they do not rerun or replace the measured trials.
+
+Retained production-checked trace linkage is not fresh authenticated replay or a
+wire capture. Old outbound wire/authentication is missing, and the shared historical
+target was reused without a separately retained executable hash per cell. Candidate,
+final-source CLI and older dirty d666 authoring binary identities remain distinct.
+The earlier four failed no-edit trials remain failures, not pooled with these cells.
