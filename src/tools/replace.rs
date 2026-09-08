@@ -220,6 +220,61 @@ fn replace_size_error(path: &Path) -> String {
     )
 }
 
+/// Validate a caller-supplied `expected_sha256` as the documented full form: exactly 64 ASCII
+/// lowercase hexadecimal characters. Anything else (empty, an abbreviated prefix, a wrong
+/// length, uppercase, or non-hex) is a syntax error, never a content mismatch, so the caller is
+/// told how to obtain the real digest instead of retrying with a prefix.
+fn validate_full_sha256(value: &str) -> Result<(), String> {
+    let length = value.chars().count();
+    let is_lowercase_hex = value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    let reason = if value.is_empty() {
+        "an empty string".to_string()
+    } else if length < 64 {
+        format!("{length} characters; a {length}-character abbreviation is not usable")
+    } else if length > 64 {
+        format!("{length} characters")
+    } else if is_lowercase_hex {
+        return Ok(());
+    } else if value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        "uppercase hex digits; use lowercase".to_string()
+    } else {
+        "non-hexadecimal characters".to_string()
+    };
+    Err(format!(
+        "it must be the full 64-character lowercase hex sha256 of the complete current content; \
+         got {reason}"
+    ))
+}
+
+fn require_expected_sha256(
+    expected: Option<&str>,
+    display: &Path,
+    current: &str,
+) -> Option<String> {
+    let want = expected?;
+    if let Err(problem) = validate_full_sha256(want) {
+        return Some(format!(
+            "replace blocked: expected_sha256 is invalid ({problem}); the current full digest of \
+             {} is {current}; no change made; use read_file to re-read the current content, confirm \
+             old_string and new_string still express the intended edit, then retry with that full \
+             digest; do not omit expected_sha256",
+            display.display()
+        ));
+    }
+    if want != current {
+        return Some(format!(
+            "replace blocked: expected_sha256 {want} is stale for {}; the current content hashes \
+             to {current}; no change made; use read_file to re-read the current content, confirm \
+             old_string still identifies the intended text and new_string is still the intended \
+             replacement, then retry with that full digest; do not omit expected_sha256",
+            display.display()
+        ));
+    }
+    None
+}
+
 pub(super) fn replace_tool(
     cap: &WorkspaceCap,
     args: &BTreeMap<String, JsonValue>,
@@ -245,6 +300,13 @@ pub(super) fn replace_tool(
     let source_file = load_replace_source(cap, rel)?;
     let source = &source_file.source;
     let rela_leaf = &source_file.display;
+    // Check the caller's optional optimistic-concurrency precondition against this whole-file
+    // snapshot before deriving a replacement or publishing any bytes.
+    if let Some(error) =
+        require_expected_sha256(expected_sha256, rela_leaf, &source_file.checkpoint.sha256)
+    {
+        return Err(error);
+    }
     let count = source.matches(old).count();
     let replace_count = match expected {
         Some(expected) if count == expected as usize => expected,
@@ -274,18 +336,6 @@ pub(super) fn replace_tool(
         );
     }
     let updated = replace_n(source, old, new, replace_count);
-    // Optimistic-concurrency gate: when the caller supplies `expected_sha256`, it must match
-    // the exact bytes the replacement was derived from (the caller's precondition, e.g. from a
-    // prior read), or the replace fails before writing anything.
-    if let Some(want) = expected_sha256 {
-        if want != source_file.checkpoint.sha256 {
-            return Err(format!(
-                "replace blocked: expected_sha256 {want} does not match current content (sha256 {}) in {}; no change made; re-read and retry",
-                &source_file.checkpoint.sha256[..16],
-                rela_leaf.display()
-            ));
-        }
-    }
     replace_publish_atomic(
         &source_file.parent,
         &source_file.leaf,

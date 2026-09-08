@@ -666,6 +666,18 @@ fn replace_expected_sha256_optimistic_gate() {
         msg.contains("expected_sha256"),
         "the failure must name the digest gate: {msg}"
     );
+    assert!(
+        msg.contains("stale"),
+        "a full stale digest is a mismatch refusal, not a syntax error: {msg}"
+    );
+    assert!(
+        !msg.contains("expected_sha256 is invalid"),
+        "a well-formed stale digest must not be called invalid: {msg}"
+    );
+    assert!(
+        msg.contains(&digest_hex(b"one two three")),
+        "the refusal must report the full current digest: {msg}"
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         before,

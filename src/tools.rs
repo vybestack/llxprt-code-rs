@@ -527,13 +527,17 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "replace".into(),
-            description: "Replace a string in a file. Rejected unless the old string occurs exactly once (or the expected count is given). Concurrency: cooperating write_file and replace calls are serialized by an advisory lock on the retained workspace directory. After deriving the new bytes, replace also re-opens the target no-follow just before publishing and verifies the pathname still names the same unchanged content. If the inode, size, or a SHA-256 digest of the bytes it read differs, the replace fails with a conflict. `expected_sha256` (an independently computed lowercase hex SHA-256 of the complete current content) makes that same check an up-front requirement. The verify is not an atomic compare-and-swap: the re-open and rename are separate syscalls, and unrelated programs that do not honor the advisory lock can still change the name between them.".into(),
+            description: "Replace a string in a file. Rejected unless the old string occurs exactly once (or the expected count is given). Concurrency: cooperating write_file and replace calls are serialized by an advisory lock on the retained workspace directory. After deriving the new bytes, replace also re-opens the target no-follow just before publishing and verifies the pathname still names the same unchanged content. If the inode, size, or a SHA-256 digest of the bytes it read differs, the replace fails with a conflict. `expected_sha256` (an independently computed full 64-character lowercase hex SHA-256 of the complete current content; an abbreviation or prefix is refused as invalid) makes that same check an up-front requirement, and a stale digest is refused with the current full digest. Before retrying, use read_file to recheck the current content and confirm that old_string and new_string still express the intended edit. The verify is not an atomic compare-and-swap: the re-open and rename are separate syscalls, and unrelated programs that do not honor the advisory lock can still change the name between them.".into(),
             properties: vec![
                 ("path".into(), json!({"type": "string"}), true),
                 ("old_string".into(), json!({"type": "string"}), true),
                 ("new_string".into(), json!({"type": "string"}), true),
                 ("expected".into(), json!({"type": "integer"}), false),
-                ("expected_sha256".into(), json!({"type": "string"}), false),
+                (
+                    "expected_sha256".into(),
+                    json!({"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}),
+                    false,
+                ),
             ],
         },
         ToolSpec {

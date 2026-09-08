@@ -332,8 +332,12 @@ replacement bytes, then publishes them atomically with a temporary file and rena
 before the rename it re-opens the final name no-follow and verifies identity (`dev`/`ino`), file
 type, size, and a SHA-256 digest against the bytes from which the replacement was derived. A
 change detected by that check returns a conflict. Callers can also pass `expected_sha256`, an
-independently computed lowercase hex SHA-256 of the complete current content, as an up-front
-precondition.
+independently computed full 64-character lowercase hex SHA-256 of the complete current content,
+as an up-front precondition. An empty, abbreviated, wrong-length, uppercase, or non-hex value is
+refused as invalid syntax before any write; a well-formed but stale value is refused as a
+mismatch that reports the current full digest. Before retrying, use `read_file` to recheck the
+current content and confirm that both the old text and proposed replacement are still intended;
+then use the reported full digest. Prefix matches are never accepted.
 
 The advisory lock only coordinates programs that honor it. The verification is not an atomic
 compare-and-swap because the re-open/verify and rename are separate syscalls. An unrelated process

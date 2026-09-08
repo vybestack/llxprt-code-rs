@@ -5,6 +5,7 @@ use std::time::Duration;
 mod advanced;
 mod cancellation;
 mod catalogue;
+mod hash_gate;
 mod output_caps;
 mod redaction;
 
