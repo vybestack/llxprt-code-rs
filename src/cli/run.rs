@@ -21,7 +21,7 @@ pub fn run_profiled(
     };
     // Resolve every settings layer before production dependencies can read credentials.
     let settings = resolve_settings(&args)?;
-    let dependencies = RuntimeDependencies::production()
+    let dependencies = RuntimeDependencies::production(!args.emit.is_empty())
         .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
     let mut profile = resolve_profile(&args, settings.paths.config_root.value.as_path())?;
     apply_runtime_settings(&mut profile, &settings)?;
@@ -135,6 +135,7 @@ fn build_agent(
     let turn_time = settings.budgets.turn_time.value;
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?
+        .with_emission(args.emit.clone())
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
         .with_max_rounds(constructed.max_rounds)

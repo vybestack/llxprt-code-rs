@@ -23,6 +23,7 @@ struct MockBackend {
 
 fn result(text: &str) -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: text.to_string(),
         calls: Vec::new(),
@@ -148,6 +149,7 @@ fn page_text(store: &SessionStore) -> Vec<u8> {
 fn run_bulk_turn(store: &SessionStore, cwd: &Path, name: &str, id: &str) {
     std::fs::write(cwd.join(name), "q".repeat(64 * 1024)).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls: vec![ToolCall {
@@ -382,6 +384,7 @@ fn restart_reopens_spine_vault_and_filter_versions() {
     let second = reopen(&first);
     std::fs::write(cwd.join("second.txt"), "r".repeat(64 * 1024)).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls: vec![ToolCall {
@@ -484,6 +487,7 @@ fn digest_records_stay_inside_the_preserved_span_byte_budget() {
     let big = format!("needle {}\n", "w".repeat(8 * 1024));
     std::fs::write(cwd.join("span.txt"), &big).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls: vec![ToolCall {
@@ -690,6 +694,7 @@ fn checkpoint_digests_cover_exactly_the_content_they_name() {
     let second = reopen(&first);
     std::fs::write(cwd.join("second.txt"), "r".repeat(64 * 1024)).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls: vec![ToolCall {
@@ -1560,6 +1565,7 @@ fn fit_saturated_wrap_up_refuses_completion() {
     let bulk = "sticky-bulk.txt";
     std::fs::write(cwd.join(bulk), "z".repeat(256 * 1024)).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls: vec![ToolCall {

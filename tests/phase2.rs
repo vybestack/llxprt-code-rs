@@ -27,6 +27,7 @@ struct MockBackend {
 
 fn result(text: &str) -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: text.to_string(),
         calls: Vec::new(),
@@ -205,6 +206,7 @@ fn multi_tool_turn_persists_call_ids_results_and_turn2_replays_roles() {
     let cwd = new_cwd();
     let st = store("s2");
     let round1 = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".to_string(),
         calls: vec![
@@ -540,6 +542,7 @@ fn length_finish_reason_persists_failed() {
     let st = store("s11");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let truncated = |text: &str| LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: text.to_string(),
         calls: Vec::new(),
@@ -574,6 +577,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
     let st = store("s11-mid");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -584,6 +588,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let truncated = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "half".to_string(),
         calls: Vec::new(),
@@ -631,6 +636,7 @@ fn empty_id_fails_before_side_effect() {
     let cwd = new_cwd();
     let st = store("s12");
     let bad = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
         calls: vec![ToolCall {
@@ -656,6 +662,7 @@ fn duplicate_ids_fail() {
     let cwd = new_cwd();
     let st = store("s13");
     let dup = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
         calls: vec![
@@ -690,6 +697,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
     // default budget is unlimited; caps are opt-in.)
     let mut replies: Vec<LlmResult> = (0..17)
         .map(|i| LlmResult {
+            thinking: String::new(),
             usage: LlmUsage::default(),
             text: String::new(),
             calls: vec![ToolCall {
@@ -701,6 +709,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
         })
         .collect();
     replies.push(LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "wrapped up".into(),
         calls: Vec::new(),
@@ -734,6 +743,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
                 args_json: format!(r#"{{"path":"n{i}.txt","content":"x"}}"#),
             }],
             finish_reason: Some(FinishReason::ToolCall),
+            thinking: String::new(),
             usage: LlmUsage::default(),
         })
         .collect();
@@ -742,6 +752,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
         text: "all done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     });
     let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(2));
@@ -768,12 +779,14 @@ fn natural_wrapup_below_cap_reports_budget_available() {
             args_json: r#"{"path":"one.txt","content":"x"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let a =
@@ -792,6 +805,7 @@ fn failed_state_persists_error() {
     let st = store("s15");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let bad = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
         calls: Vec::new(),
@@ -845,6 +859,7 @@ fn later_round_context_overflow_stops_before_next_call() {
     let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
     std::fs::write(cwd.join("big.txt"), "y".repeat(payload_len)).unwrap();
     let round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".to_string(),
         calls: vec![ToolCall {
@@ -934,6 +949,7 @@ fn aggregate_assistant_bytes_across_rounds_rejected() {
     let st = store("sagg1");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let big_tool = |id: &str, path: &str, ch: char, n: usize| LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: ch.to_string().repeat(n),
         calls: vec![ToolCall {
@@ -968,6 +984,7 @@ fn aggregate_args_across_rounds_rejected() {
     let st = store("sagg2");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let arg_round = |id: &str, path: &str, ch: char| LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "working".to_string(),
         calls: vec![ToolCall {
@@ -1018,6 +1035,7 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         })
         .collect();
     let tool_round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
         calls,
@@ -1098,6 +1116,7 @@ fn oversized_search_output_is_bounded_before_retention() {
     let st = store("sagg-search-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "searching".into(),
         calls: vec![ToolCall {
@@ -1245,6 +1264,7 @@ fn second_model_call_observes_renewed_lease_after_elapsed_interval() {
     let before = on_disk_lease(&st, &r);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let tool = LlmResult {
+        thinking: String::new(),
         usage: LlmUsage::default(),
         text: "next".to_string(),
         calls: vec![ToolCall {
