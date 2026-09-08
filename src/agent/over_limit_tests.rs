@@ -51,6 +51,7 @@ fn stop_reply() -> LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     }
 }

@@ -163,8 +163,18 @@ fn corrupt(message: &str) -> StoreError {
 pub(super) fn replay_from(
     file: &mut std::fs::File,
     state: &mut SessionState,
+    cursor: ReplayCursor,
+    permit_tail_repair: bool,
+) -> Result<ReplayResult, StoreError> {
+    replay_read_mode(file, state, cursor, permit_tail_repair, true)
+}
+
+pub(super) fn replay_read_mode(
+    file: &mut std::fs::File,
+    state: &mut SessionState,
     mut cursor: ReplayCursor,
     permit_tail_repair: bool,
+    writable: bool,
 ) -> Result<ReplayResult, StoreError> {
     let bytes = read_replay_bytes(file, &cursor)?;
     let base_offset = cursor.offset;
@@ -176,7 +186,13 @@ pub(super) fn replay_from(
             if available <= MAGIC.len() && bytes[at..] != MAGIC[..available] {
                 return Err(corrupt("garbage follows the final session frame"));
             }
-            repaired = repair_tail(file, base_offset + at as u64, permit_tail_repair)?;
+            repaired = if writable {
+                repair_tail(file, base_offset + at as u64, permit_tail_repair)?
+            } else if permit_tail_repair {
+                false
+            } else {
+                return Err(corrupt("retained session segment has an incomplete frame"));
+            };
             break;
         }
         let header = &bytes[at..at + HEADER_LEN];
@@ -186,7 +202,13 @@ pub(super) fn replay_from(
             .and_then(|value| value.checked_add(DIGEST_LEN))
             .ok_or_else(|| corrupt("session frame length overflow"))?;
         if available < frame_len {
-            repaired = repair_tail(file, base_offset + at as u64, permit_tail_repair)?;
+            repaired = if writable {
+                repair_tail(file, base_offset + at as u64, permit_tail_repair)?
+            } else if permit_tail_repair {
+                false
+            } else {
+                return Err(corrupt("retained session segment has an incomplete frame"));
+            };
             break;
         }
         let frame = &bytes[at..at + frame_len];

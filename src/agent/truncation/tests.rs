@@ -11,6 +11,7 @@ fn truncated(text: &str) -> LlmResult {
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     }
 }
@@ -21,6 +22,7 @@ fn healthy(text: &str) -> LlmResult {
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     }
 }
@@ -71,6 +73,7 @@ fn truncated_first_turn_with_calls_is_not_executed_before_retry() {
         }],
         finish_reason: Some(FinishReason::Length),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -132,6 +135,7 @@ fn mid_work_truncation_after_tool_calls_stays_fatal() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -179,6 +183,7 @@ fn retried_turn_can_continue_into_tool_work() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(

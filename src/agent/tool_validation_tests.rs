@@ -21,6 +21,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let read = LlmResult {
@@ -32,6 +33,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
@@ -39,6 +41,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -68,6 +71,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
             args_json: r#"{"path":".","pattern":"x"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let read = LlmResult {
@@ -78,12 +82,14 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
             args_json: r#"{"path":"missing"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -116,6 +122,7 @@ fn disabled_shell_tool_gets_corrective_result() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
@@ -123,6 +130,7 @@ fn disabled_shell_tool_gets_corrective_result() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -154,6 +162,7 @@ fn assert_invalid_tool_call(call: ToolCall) {
         calls: vec![call],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -192,6 +201,7 @@ fn duplicate_tool_call_id_still_fatal() {
         calls: vec![call.clone(), call],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(

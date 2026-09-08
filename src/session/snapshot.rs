@@ -1,7 +1,9 @@
 //! Snapshots, manifest publication, migration, recovery-set selection, and compaction.
 
 use super::*;
+mod read_only;
 use log::{ReplayCursor, ReplayResult};
+pub(super) use read_only::read_transcript;
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
 use std::os::fd::AsRawFd as _;
@@ -348,6 +350,16 @@ fn load_set(
     set: &RecoverySet,
     active: bool,
 ) -> Result<LoadedStore, StoreError> {
+    load_set_mode(dir, manifest, set, active, true)
+}
+
+fn load_set_mode(
+    dir: &openat::Dir,
+    manifest: &Manifest,
+    set: &RecoverySet,
+    active: bool,
+    writable: bool,
+) -> Result<LoadedStore, StoreError> {
     if manifest.format_version != log::FORMAT_VERSION || set.base_seq != set.last_seq && active {
         return Err(StoreError::Corrupt(
             "unsupported or inconsistent session manifest".into(),
@@ -370,7 +382,7 @@ fn load_set(
         ));
     }
     check_logical_read(&snapshot.state)?;
-    let mut segment = open_segment(dir, set, active)?;
+    let mut segment = open_segment(dir, set, active && writable)?;
     if let (Some(length), Some(digest)) = (set.sealed_len, set.sealed_digest.as_ref()) {
         let bytes = read_artifact(
             dir,
@@ -392,7 +404,7 @@ fn load_set(
     let ReplayResult {
         cursor,
         repaired_tail,
-    } = log::replay_from(
+    } = log::replay_read_mode(
         &mut segment,
         &mut state,
         ReplayCursor {
@@ -402,6 +414,7 @@ fn load_set(
             events: 0,
         },
         active,
+        writable,
     )?;
     if !active && cursor.seq != set.last_seq {
         return Err(StoreError::Corrupt(
