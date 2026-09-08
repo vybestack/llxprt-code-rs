@@ -1344,14 +1344,14 @@ if ! git -C "$root" check-ignore -q -- "$ignored_scratch"; then
   echo "source-bundle ignored-scratch fixture is not ignored" >&2
   exit 1
 fi
-ignored_scratch_archive="$tmp/ignored-scratch-source.tar.gz"
-if ! bash "$build" "$ignored_scratch_archive" >"$tmp/stdout" 2>"$tmp/stderr"; then
+ignored_scratch_manifest="$tmp/ignored-scratch-members.txt"
+if ! bash "$build" --list >"$ignored_scratch_manifest" 2>"$tmp/stderr"; then
   cat "$tmp/stderr" >&2
   echo "source-bundle builder rejected ignored scratch outside source roots" >&2
   exit 1
 fi
-if tar -tzf "$ignored_scratch_archive" | grep -Fq "/tmp/.bundle-verifier-ignored-scratch-$$/"; then
-  echo "source-bundle builder archived ignored scratch" >&2
+if grep -Fq "tmp/.bundle-verifier-ignored-scratch-$$/" "$ignored_scratch_manifest"; then
+  echo "source-bundle builder listed ignored scratch as an archive member" >&2
   exit 1
 fi
 rm -rf "$ignored_scratch_dir"
