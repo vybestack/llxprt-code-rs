@@ -358,10 +358,7 @@ fn encryption_green_fixture_flows_both_directions() {
 /// inspected AST, so such a crate fails closed: `build_crate_evidence` returns `None`.
 #[test]
 fn grader_fails_closed_on_unmodeled_attributes() {
-    for (name, attribute) in [
-        ("retired_attribute", concat!("#", "[depre", "cated", "]")),
-        ("stability", "#[stable(feature = \"x\", since = \"1.0\")]"),
-    ] {
+    for (name, attribute) in [("stability", "#[stable(feature = \"x\", since = \"1.0\")]")] {
         let d = tempfile::tempdir().unwrap();
         write_encryption_good(d.path());
         let lib = std::fs::read_to_string(d.path().join("src/lib.rs")).expect("fixture source");

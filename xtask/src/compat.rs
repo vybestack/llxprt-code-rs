@@ -312,4 +312,33 @@ mod tests {
         assert!(error.contains("compat gate failed"), "error: {error}");
         assert!(error.contains("1 findings"), "error: {error}");
     }
+
+    /// The rustc-attribute spelling the flow grader deliberately does not model
+    /// is pinned here unobfuscated so it can never be reintroduced under a
+    /// scrambled name: writing a realistic grader source line containing it
+    /// into an ordinary scanned root must fail the public `run` scan, and no
+    /// fabricated authorization file changes that outcome.
+    #[test]
+    fn unmodeled_attribute_name_still_fails_the_public_scan() {
+        for name in ["plain", "with_fabricated_authorization_files"] {
+            let root = temp_root(&format!("unmodeled-attr-{name}"));
+            write(
+                &root,
+                "src/grade/flow/collector.rs",
+                "impl<'ast> syn::visit::Visit<'ast> for UnsupportedSyntaxCollector {\n    fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {\n        if attr.path().is_ident(\"inline\") || attr.path().is_ident(\"deprecated\") {\n            self.unsupported.insert(attr.span());\n        }\n    }\n}\n",
+            );
+            if name == "with_fabricated_authorization_files" {
+                write(
+                    &root,
+                    "compat-ledger.md",
+                    "| Site | Reason |\n| --- | --- |\n| src/grade/flow/collector.rs:3 | retired authorization |\n",
+                );
+                fs::create_dir_all(root.join("xtask")).unwrap();
+                fs::write(root.join("xtask/compat-allowlist"), "250\n").unwrap();
+            }
+            let error = run(&root).expect_err("the unmodeled attribute name must be a finding");
+            fs::remove_dir_all(&root).unwrap();
+            assert!(error.contains("compat gate failed"), "error: {error}");
+        }
+    }
 }
