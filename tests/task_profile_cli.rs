@@ -15,6 +15,10 @@ const SCRUBBED_ENV: &[&str] = &[
     "LLXPRT_MAX_SHELL_OUTPUT",
     "LLXPRT_MAX_TOOL_OUTPUT",
     "LLXPRT_MAX_TURN_OUTPUT",
+    // These env layers outrank the profile, so leaving them set in the ambient
+    // environment would leak through `--print-config`.
+    "LLXPRT_MAX_TOOL_CALLS",
+    "LLXPRT_MODEL_PARAMS_MODE",
 ];
 
 fn bin() -> Command {
