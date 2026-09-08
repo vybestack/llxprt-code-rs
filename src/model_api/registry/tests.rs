@@ -618,7 +618,7 @@ fn responses_endpoint_routes_normalize_to_one_suffix() {
 }
 
 #[test]
-fn loose_mode_forwards_unknown_keys_and_warns_for_unsupported() {
+fn loose_mode_keeps_forwarded_keys_but_refuses_unapplied_known_keys() {
     let profile = crate::profile::parse_profile_value(
         &serde_json::json!({
             "provider": "openai",
@@ -636,24 +636,20 @@ fn loose_mode_forwards_unknown_keys_and_warns_for_unsupported() {
         "chat",
     )
     .unwrap();
-    // `custom_wire_param` lands in forwarded; `top_k`/`stop` are typed but not
-    // wire-serializable for OpenAI Chat and land in unsupported.
+    // Unknown values remain forwardable, but known unapplied declarations fail.
     assert!(profile
         .model_params
         .forwarded
         .contains_key("custom_wire_param"));
-    assert!(profile
-        .model_params
-        .unsupported
-        .contains(&"top_k".to_string()));
+    assert_eq!(profile.model_params.top_k, Some(16));
     let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
-    // Loose accepts the profile; unsupported keys warn (never an error).
-    assert!(apply_model_params_policy(
-        &profile,
-        &resolved,
-        crate::settings::ModelParamsMode::Loose
-    )
-    .is_ok());
+    let error =
+        apply_model_params_policy(&profile, &resolved, crate::settings::ModelParamsMode::Loose)
+            .unwrap_err();
+    assert_eq!(
+        error,
+        "provider openai API chat cannot apply modelParams key(s): stop, top_k"
+    );
 }
 
 #[test]
@@ -696,8 +692,8 @@ fn known_model_mode_accepts_registry_keys_and_refuses_unknown() {
         "anthropic",
     )
     .unwrap();
-    // `top_k` is typed but not wire-serializable for Anthropic Messages, so the
-    // policy-level check uses a forwarded key the registry knows.
+    // Typed top_k is applicable to Messages; the registry additionally accepts
+    // the provider-specific forwarded stop_sequences key.
     let mut profile2 = profile.clone();
     profile2
         .model_params
