@@ -46,23 +46,26 @@ pub(crate) const FAULT_SEQUENCE_HELPER: &str = "LLXPRT_TEST_FAULT_SEQUENCE";
 /// the test before the helper is spawned, so no two sequences can share one.
 pub(crate) const FAULT_SEQUENCE_DIR: &str = "LLXPRT_TEST_FAULT_SEQUENCE_DIR";
 
-/// Supervise one fault-sequence helper to its natural end (see [`supervise_helper`]).
-/// `tests_etxtbsy` reuses this for its Linux witness helper so both halves share one
-/// real, bounded supervisor; only that Linux-gated caller needs it, so it is compiled
-/// only there and never reads as dead code on Darwin.
+/// Supervise one fault-sequence helper to its natural end inside `bound` (see
+/// [`supervise_helper_inner`]). `tests_etxtbsy` reuses this for its Linux witness helper,
+/// passing its own outer bound that strictly exceeds every budget nested inside that
+/// helper; only that Linux-gated caller needs it, so it is compiled only there and never
+/// reads as dead code on Darwin.
 #[cfg(target_os = "linux")]
-pub(crate) fn supervise_helper(child: std::process::Child) -> HelperRun {
-    supervise_helper_inner(child)
+pub(crate) fn supervise_helper(child: std::process::Child, bound: Duration) -> HelperRun {
+    supervise_helper_inner(child, bound)
 }
 
 /// Deadline for one helper's whole supervised lifetime: its verdict, libtest's footer, and
 /// its exit all have to arrive inside this bound, so a dead helper path fails the test
-/// instead of hanging it.
-const HELPER_BOUND: Duration = Duration::from_secs(120);
+/// instead of hanging it. A supervisor that nests another whole supervised helper inside
+/// the one it waits on must pass a bound of its own that exceeds the nested one, or the
+/// outer deadline expires first and reports a timeout the inner helper never caused.
+pub(crate) const HELPER_BOUND: Duration = Duration::from_secs(120);
 
 /// Deadline for one helper's own bounded step (a pid registration, a boundary kill, a
 /// confirmed death): a dead path fails the helper instead of hanging it.
-const HELPER_STEP_BOUND: Duration = Duration::from_secs(30);
+pub(crate) const HELPER_STEP_BOUND: Duration = Duration::from_secs(30);
 
 /// `poll(2)` tick while supervising a helper, short enough that the deadline and a kill are
 /// noticed promptly and long enough that an idle wait costs nothing.
@@ -80,29 +83,43 @@ pub(crate) struct HelperRun {
 }
 
 /// Reap one helper inside `HELPER_STEP_BOUND`, `SIGKILL`ing it at the deadline: no reap in
-/// this module blocks forever, and not even a ptraced helper can outlive its bound. Returns
-/// the exit status (if it ever arrived) and whether the bound had to kill.
-fn reap_bounded(
-    child: &mut std::process::Child,
-    what: &str,
-) -> (Option<std::process::ExitStatus>, bool) {
+/// this module blocks forever, and not even a ptraced helper can outlive its bound.
+///
+/// The post-kill collect is bounded the same way rather than a blocking `wait()`, because
+/// a child in uninterruptible sleep ignores even `SIGKILL` and a blocking collect would
+/// then hang this process past the very invariant this function exists to enforce. `None`
+/// is returned only in that case — a corpse that stayed uncollectable inside a whole
+/// second step bound — and the supervisor surfaces it through `HelperRun::failure`; every
+/// other path returns a collected status.
+fn reap_bounded(child: &mut std::process::Child, what: &str) -> Option<std::process::ExitStatus> {
     let pid = child.id();
-    let deadline = Instant::now() + HELPER_STEP_BOUND;
-    while Instant::now() < deadline {
+    let start = Instant::now();
+    let mut killed = false;
+    // One loop, two bounds: poll until the corpse arrives, `SIGKILL` at the first step
+    // bound, then keep polling until a second step bound covers the post-kill collect.
+    loop {
         match child.try_wait() {
-            Ok(Some(status)) => return (Some(status), false),
+            Ok(Some(status)) => return Some(status),
             Ok(None) => {}
             Err(error) => panic!("reap {what} {pid}: {error}"),
         }
+        let elapsed = start.elapsed();
+        if !killed {
+            if elapsed < HELPER_STEP_BOUND {
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            // Past the bound the helper is killed and its corpse is collected on the same
+            // bounded polling pattern, so even a wedged or ptraced helper cannot hang here.
+            let _ = child.kill();
+            killed = true;
+            continue;
+        }
+        if elapsed >= HELPER_STEP_BOUND + HELPER_STEP_BOUND {
+            return None;
+        }
         std::thread::sleep(Duration::from_millis(5));
     }
-    // Past the bound the helper is killed and the corpse is collected, so even a wedged or
-    // ptraced helper cannot hang the reap; `true` reports that the bound had to kill.
-    let _ = child.kill();
-    let status = child
-        .wait()
-        .unwrap_or_else(|error| panic!("reap {what} {pid} after SIGKILL: {error}"));
-    (Some(status), true)
 }
 
 /// Why supervision left its read loop: the helper closed its stdout, the deadline fired, or
@@ -110,7 +127,7 @@ fn reap_bounded(
 enum Stop {
     /// EOF: the helper and every process it spawned are done writing.
     Eof,
-    /// `HELPER_BOUND` elapsed before EOF.
+    /// `HELPER_BOUND` (or the caller's own bound) elapsed before EOF.
     Deadline,
     /// `poll` failed with a real errno (not `EINTR`).
     Poll(String),
@@ -124,14 +141,14 @@ enum Stop {
 /// never writes into a closed pipe and its errors always reach this assertion instead of
 /// dying as `EPIPE` (issue #264).
 ///
-/// The bound is real, not decorative: past `HELPER_BOUND` the helper is `SIGKILL`ed, the
+/// The bound is real, not decorative: past it the helper is `SIGKILL`ed, the still-open
 /// still-open pipe is closed, and the corpse is reaped, so a wedged helper fails the test.
 /// Every failure path — the deadline, a failed poll, a failed read, a failed kill — reaps
 /// the same way, because an unreaped child would outlive the test as a zombie holding its
 /// pid. A poll or read failure is reported to the caller through `HelperRun::failure`
 /// rather than panicked, because the pipe is about to be dropped and the status the caller
 /// asserts on must be the helper's real one.
-fn supervise_helper_inner(mut child: std::process::Child) -> HelperRun {
+fn supervise_helper_inner(mut child: std::process::Child, bound: Duration) -> HelperRun {
     use std::io::Read;
 
     let mut pipe = child
@@ -145,7 +162,7 @@ fn supervise_helper_inner(mut child: std::process::Child) -> HelperRun {
         events: libc::POLLIN,
         revents: 0,
     };
-    let deadline = Instant::now() + HELPER_BOUND;
+    let deadline = Instant::now() + bound;
     let stop = loop {
         if Instant::now() >= deadline {
             break Stop::Deadline;
@@ -183,12 +200,21 @@ fn supervise_helper_inner(mut child: std::process::Child) -> HelperRun {
     // `EPIPE`); the bounded reap below is what actually waits for it.
     drop(pipe);
     let pid = child.id();
-    let (status, killed) = reap_bounded(&mut child, "the fault-sequence helper");
+    let status = reap_bounded(&mut child, "the fault-sequence helper");
+    // The deadline is the only stop that leaves the helper alive, and the reap above
+    // `SIGKILL`s it at its own step bound, so the deadline's failure is that the bound
+    // itself was exceeded; the other stops all arrive with the helper already finished.
     let failure = match stop {
+        Stop::Eof if status.is_none() => Some(format!(
+            "the fault-sequence helper {pid} never became collectable after its EOF"
+        )),
         Stop::Eof => None,
-        Stop::Deadline if killed => None,
+        Stop::Deadline if status.is_none() => Some(format!(
+            "the fault-sequence helper {pid} was killed at its deadline and never became \
+             collectable"
+        )),
         Stop::Deadline => Some(format!(
-            "the fault-sequence helper {pid} was killed at its deadline and would not exit"
+            "the fault-sequence helper {pid} was killed at its deadline"
         )),
         Stop::Poll(message) | Stop::Read(message) => Some(message),
     };
@@ -204,14 +230,45 @@ fn supervise_helper_inner(mut child: std::process::Child) -> HelperRun {
 /// fixed interval, so the tests wait the same way and never hang on a dead path: the
 /// probe is retried until it holds or the deadline passes, and the deadline is what
 /// makes a dead path fail fast rather than hang.
-fn eventually(what: &str, deadline: Duration, mut probe: impl FnMut() -> bool) {
+///
+/// The probe is handed the target child it is waiting on, so the timeout panic cannot
+/// leave that child as an orphan: it is killed and its corpse collected (see
+/// [`kill_and_reap`]) before the panic leaves this process. That is the module's stated
+/// invariant for every bounded wait in a helper that spawned the child it waits beside.
+fn eventually(
+    what: &str,
+    deadline: Duration,
+    child: &mut std::process::Child,
+    mut probe: impl FnMut(&mut std::process::Child) -> bool,
+) {
     let start = Instant::now();
-    while !probe() {
+    while !probe(child) {
         if start.elapsed() >= deadline {
+            kill_and_reap(child);
             panic!("timed out waiting for {what}");
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// Kill a child target and collect its corpse, bounded by [`HELPER_STEP_BOUND`]: the
+/// module's invariant is that no child the helper spawned outlives it, not even on a
+/// failing path and not even as an unreaped zombie. Used on every path that is about to
+/// panic away a still-live child, mirroring what `reap_bounded` does for a supervised
+/// helper.
+fn kill_and_reap(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let pid = child.id();
+    let deadline = Instant::now() + HELPER_STEP_BOUND;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => panic!("reap the wrapper target {pid} after SIGKILL: {error}"),
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("the wrapper target {pid} would not exit after SIGKILL");
 }
 
 /// A fresh tempdir per test, unique so tests can run in parallel.
@@ -468,7 +525,7 @@ fn run_sequence_helper(injected: &[&str], identity: &str) {
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .expect("spawn the fault-sequence helper");
-    let run = supervise_helper_inner(child);
+    let run = supervise_helper_inner(child, HELPER_BOUND);
     assert!(
         !run.timed_out,
         "the fault-sequence helper for {joined} outlived its bound; output so far:\n{}",
@@ -481,7 +538,9 @@ fn run_sequence_helper(injected: &[&str], identity: &str) {
         run.output
     );
     assert!(
-        run.status.expect("supervise always reaps").success(),
+        run.status
+            .expect("a failure-free supervisor always reaps")
+            .success(),
         "the fault-sequence helper failed for {joined}:\n{}",
         run.output
     );
@@ -556,13 +615,7 @@ fn run_wrapper_boundary_sequence(sequence: FaultSequence, dir: &Path) -> String 
     // The wrapper is installed where the bounded runner picks the target up from, and
     // the target this sequence execs through it is a real, short-lived child.
     assert!(dir.join("cli-wrapper.sh").is_file());
-    let mut child = spawn_wrapper_target(dir, "30");
-    let registered = registered_pid(dir.join("child.pid"));
-    assert_eq!(
-        registered,
-        child.id(),
-        "the registered pid is not the exec'd target"
-    );
+    let mut child = spawn_and_confirm_registration(dir, "the fault-sequence target");
 
     match sequence {
         FaultSequence::Restart => {
@@ -594,9 +647,12 @@ fn run_wrapper_boundary_sequence(sequence: FaultSequence, dir: &Path) -> String 
         }
     }
 
-    eventually("the fault to kill the target", HELPER_STEP_BOUND, || {
-        matches!(child.try_wait(), Ok(Some(_)))
-    });
+    eventually(
+        "the fault to kill the target",
+        HELPER_STEP_BOUND,
+        &mut child,
+        |child| matches!(child.try_wait(), Ok(Some(_))),
+    );
     let trigger = armed_fault
         .handle
         .join()
@@ -636,6 +692,24 @@ fn set_tool_rounds(observations: &Arc<Mutex<loopback::Observations>>, rounds: us
         .tool_calls_issued = rounds;
 }
 
+/// Directly `exec` the wrapper in `dir` as the acceptance target and confirm the pid it
+/// registered is the pid that was spawned. On a mismatch the still-live target is killed
+/// and its corpse collected before the failing assertion panics, which is the module's
+/// invariant for every child a helper spawns.
+fn spawn_and_confirm_registration(dir: &Path, what: &str) -> std::process::Child {
+    let mut child = spawn_wrapper_target(dir, "30");
+    let registered = registered_pid(dir.join("child.pid"), &mut child);
+    if registered != child.id() {
+        kill_and_reap(&mut child);
+    }
+    assert_eq!(
+        registered,
+        child.id(),
+        "{what}: the registered pid is not the exec'd target"
+    );
+    child
+}
+
 /// Spawn the wrapper directly as the acceptance target, with its argument forwarded.
 fn spawn_wrapper_target(dir: &Path, arg: &str) -> std::process::Child {
     Command::new(dir.join("cli-wrapper.sh"))
@@ -653,18 +727,31 @@ fn spawn_wrapper_target(dir: &Path, arg: &str) -> std::process::Child {
 }
 
 /// Read the pid the wrapper in `dir` registered, bounded by the helper's step bound so
-/// a wrapper that never registers fails instead of hanging.
-fn registered_pid(pid_file: PathBuf) -> u32 {
-    eventually("the wrapper to register its pid", HELPER_STEP_BOUND, || {
-        fs::read_to_string(&pid_file)
-            .map(|s| s.trim().parse::<u32>().is_ok())
-            .unwrap_or(false)
-    });
+/// a wrapper that never registers fails instead of hanging. The target child is passed
+/// in so the same invariant holds on every failing path out of here: it is killed and
+/// reaped before the panic leaves this process.
+fn registered_pid(pid_file: PathBuf, child: &mut std::process::Child) -> u32 {
+    eventually(
+        "the wrapper to register its pid",
+        HELPER_STEP_BOUND,
+        child,
+        |_| {
+            fs::read_to_string(&pid_file)
+                .map(|s| s.trim().parse::<u32>().is_ok())
+                .unwrap_or(false)
+        },
+    );
     fs::read_to_string(&pid_file)
-        .unwrap_or_else(|error| panic!("read {}: {error}", pid_file.display()))
+        .unwrap_or_else(|error| {
+            kill_and_reap(child);
+            panic!("read {}: {error}", pid_file.display())
+        })
         .trim()
         .parse()
-        .unwrap_or_else(|error| panic!("parse the pid in {}: {error}", pid_file.display()))
+        .unwrap_or_else(|error| {
+            kill_and_reap(child);
+            panic!("parse the pid in {}: {error}", pid_file.display())
+        })
 }
 
 /// A fault must hold at a boundary it did not declare: the target is still alive after
@@ -673,17 +760,17 @@ fn registered_pid(pid_file: PathBuf) -> u32 {
 /// The hold is confirmed without a window that can be slept through and without
 /// leaving an orphan: the fault thread polls the loopback on its own interval, so the
 /// observation is re-read after that interval has certainly passed, and a target that
-/// died anyway is killed and reaped before the assertion fails.
+/// died anyway is killed and reaped before the assertion fails (see
+/// [`kill_and_reap`]).
 fn assert_bound_holds(child: &mut std::process::Child, message: &str) {
-    assert!(
-        matches!(child.try_wait(), Ok(None)),
-        "the wrapper target died before its boundary: {message}"
-    );
+    if !matches!(child.try_wait(), Ok(None)) {
+        kill_and_reap(child);
+        panic!("the wrapper target died before its boundary: {message}");
+    }
     std::thread::sleep(Duration::from_millis(60));
     let held = matches!(child.try_wait(), Ok(None));
     if !held {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_and_reap(child);
     }
     assert!(held, "{message}");
 }
@@ -700,25 +787,26 @@ fn run_kill_path_sequence(dir: &Path) -> String {
 
     // The wrapper is executable and execs the target, so it registers its own pid
     // before becoming `/bin/sleep`: the pid it writes is the pid that actually sleeps.
-    let mut child = spawn_wrapper_target(dir, "30");
-    let registered = registered_pid(pid_file);
-    assert_eq!(
-        registered,
-        child.id(),
-        "the registered pid is not the exec'd target"
-    );
+    let mut child = spawn_and_confirm_registration(dir, "the kill-path target");
 
     // The group kill: a negative pid reaches every descendant, with a direct kill as the
     // documented fallback.
+    let registered = child.id();
     let killed = unsafe { libc::kill(-(registered as i32), libc::SIGKILL) == 0 }
         || unsafe { libc::kill(registered as i32, libc::SIGKILL) == 0 };
+    if !killed {
+        // `SIGKILL` not reaching the target means it is still alive, so reap it before
+        // the failing assertion panics rather than orphaning a `/bin/sleep`.
+        kill_and_reap(&mut child);
+    }
     assert!(killed, "SIGKILL did not reach the exec'd target");
     eventually(
         "the killed child to disappear",
         HELPER_STEP_BOUND,
+        &mut child,
         // Reaping the way the bounded runner does: an unreaped corpse still answers
         // `kill(pid, 0)`, so death is confirmed by collecting the exit instead.
-        || matches!(child.try_wait(), Ok(Some(_))),
+        |child| matches!(child.try_wait(), Ok(Some(_))),
     );
     let _ = child.wait();
     "arm-sequence-ok:none".to_string()

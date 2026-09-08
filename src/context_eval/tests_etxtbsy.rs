@@ -23,7 +23,9 @@
 #[cfg(target_os = "linux")]
 use crate::context_eval::{
     faults,
-    tests_inject::{supervise_helper, HelperRun, FAULT_SEQUENCE_DIR, FAULT_SEQUENCE_HELPER},
+    tests_inject::{
+        supervise_helper, HelperRun, FAULT_SEQUENCE_DIR, FAULT_SEQUENCE_HELPER, HELPER_BOUND,
+    },
 };
 
 #[cfg(target_os = "linux")]
@@ -32,7 +34,7 @@ use std::{
     io::Write,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -42,9 +44,36 @@ use std::{
 const WITNESS_HELPER: &str = "LLXPRT_TEST_ETXTBSY_HELPER";
 
 /// Bound for every witness rendezvous: a report, a release, or an exit that never arrives
-/// fails the witness instead of hanging it.
+/// fails the witness instead of hanging it. Kept as a named second count so the outer
+/// supervision bound below can be stated as an exact multiple of it.
 #[cfg(target_os = "linux")]
-const WITNESS_BOUND: Duration = Duration::from_secs(120);
+const WITNESS_BOUND_SECS: u64 = 120;
+
+/// Bound for every witness rendezvous: a report, a release, or an exit that never arrives
+/// fails the witness instead of hanging it. This is the witness's own inner bound, shared
+/// by both halves and unchanged by the outer bound below.
+#[cfg(target_os = "linux")]
+const WITNESS_BOUND: Duration = Duration::from_secs(WITNESS_BOUND_SECS);
+
+/// Bound for the library test's supervision of the whole witness helper process. That
+/// outer supervisor pays for every budget nested inside the helper it waits on, so its
+/// bound must strictly exceed their sum or it expires first and reports a timeout no
+/// inner step caused. Nested inside one witness run, worst case:
+///
+/// * the red half's two rendezvous (sibling report, sibling exit): `2 * WITNESS_BOUND`
+/// * the green half's two rendezvous (sibling report, sibling exit): `2 * WITNESS_BOUND`
+/// * the nested `fault_sequence_helper`'s own supervised bound: `tests_inject`'s
+///   `HELPER_BOUND`, which equals `WITNESS_BOUND`
+/// * that helper's bounded reaps: `2 * HELPER_STEP_BOUND` (30 s each)
+///
+/// which is `5 * WITNESS_BOUND + 60 s = 660 s`. Eight rendezvous bounds (`8 *
+/// WITNESS_BOUND_SECS = 960 s`) strictly exceed that sum by 300 s, more than two whole
+/// rendezvous bounds of slack for the witness's own verdict line, its exit, and the
+/// library test's supervision overhead, so the outer supervisor always outlives the last
+/// inner budget. Only this outer bound is new: every inner bound above keeps exactly the
+/// meaning it had for the tests that use it directly.
+#[cfg(target_os = "linux")]
+const WITNESS_OUTER_BOUND: Duration = Duration::from_secs(8 * WITNESS_BOUND_SECS);
 
 /// Fixed-width report a held sibling writes between its own `fork` and its first `exec`:
 /// `[present:1][pid:4][fd:4][dev:8][ino:8][F_GETFD:8][F_GETFL:8]`, every field big-endian.
@@ -93,9 +122,11 @@ impl Inherited {
         }
     }
 
-    /// Whether `F_GETFL` reports a writable access mode (`O_WRONLY` or `O_RDWR`).
+    /// Whether `F_GETFL` reports a writable access mode: `O_WRONLY` and `O_RDWR` both
+    /// mean the holder can write through this descriptor, so `O_RDONLY` is the only
+    /// access mode that is not writable.
     fn writable(&self) -> bool {
-        self.acc_mode & libc::O_WRONLY as i64 != 0
+        self.acc_mode & (libc::O_WRONLY | libc::O_RDWR) as i64 != 0
     }
 
     /// Whether `F_GETFD` reports `FD_CLOEXEC`, which closes on exec but not on fork.
@@ -407,6 +438,41 @@ fn witness_header() {
     );
 }
 
+/// Kill one child the witness spawned and collect its corpse inside `WITNESS_BOUND`, on
+/// the bounded `try_wait` polling pattern rather than a blocking `wait()`: a target in
+/// uninterruptible sleep survives even `SIGKILL`, and a blocking collect would then hang
+/// this process past the witness's own no-unbounded-reap rule. Used on every path that is
+/// about to panic away a still-live child, so no child and no zombie outlives the witness.
+#[cfg(target_os = "linux")]
+fn reap_killed_target(child: &mut std::process::Child, what: &str) {
+    let _ = child.kill();
+    let deadline = Instant::now() + WITNESS_BOUND;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => panic!("reap {what} {}: {error}", child.id()),
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("{what} {} would not exit after SIGKILL", child.id());
+}
+
+/// Remove the witness's scratch tree even on a failing path. Both halves write a
+/// mode-0755 wrapper and their own artifacts into it, so a failing assertion that simply
+/// unwound out of the witness would leak them into the temp directory; this guard runs on
+/// unwind and on return, and the success path keeps its own explicit removal (the guard's
+/// second removal of an already-gone tree is a no-op).
+#[cfg(target_os = "linux")]
+struct ScratchGuard(PathBuf);
+
+#[cfg(target_os = "linux")]
+impl Drop for ScratchGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 /// RED (the mirrored failure mechanism): this process opens, writes, and `chmod`s a real
 /// wrapper through one descriptor, forks a sibling while that writer is still open and
 /// holds it before its first `exec`, closes its own writer, and then makes exactly one
@@ -478,8 +544,16 @@ fn red_writer_inherited_and_exec_refused(dir: &Path) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    let error =
-        refused.expect_err("the direct wrapper exec succeeded while a sibling held its writer");
+    // An unexpected success leaves a live `/bin/sleep` child in `refused`, so it is killed
+    // and its corpse collected before the failing assertion panics: no child this witness
+    // spawned may outlive it, not even on the path that should not have been reached.
+    let error = match refused {
+        Err(error) => error,
+        Ok(mut succeeded) => {
+            reap_killed_target(&mut succeeded, "the unexpected wrapper exec");
+            panic!("the direct wrapper exec succeeded while a sibling held its writer");
+        }
+    };
     assert_eq!(
         error.raw_os_error(),
         Some(libc::ETXTBSY),
@@ -550,7 +624,7 @@ fn run_repaired_helper_sequence(helper_dir: &Path) -> HelperRun {
         .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn the repaired fault-sequence helper");
-    let run = supervise_helper(helper);
+    let run = supervise_helper(helper, HELPER_BOUND);
     println!(
         "#264 green: repaired helper output while the sibling was held:\n{}",
         run.output
@@ -574,7 +648,9 @@ fn assert_repaired_helper_verdict(run: &HelperRun) {
         run.output
     );
     assert!(
-        run.status.expect("supervise always reaps").success(),
+        run.status
+            .expect("a failure-free supervisor always reaps")
+            .success(),
         "the repaired sequence failed while a held sibling never saw its writer:\n{}",
         run.output
     );
@@ -586,9 +662,16 @@ fn assert_repaired_helper_verdict(run: &HelperRun) {
     );
 }
 
-/// Check the held sibling's real descriptor set after the repaired sequence: it still
-/// holds the stand-in writer it was forked with, and it never held the wrapper the helper
-/// wrote and exec'd, which is the isolation the repaired topology exists to give.
+/// Check the held sibling's real descriptor set after the repaired sequence.
+///
+/// The second check is a structural precondition of the witness, not the regression
+/// guard: the sibling is forked before the helper (and so before its wrapper) exists, and
+/// its async-signal-safe body opens no descriptor, so on the repaired topology it cannot
+/// hold the helper's wrapper. It is kept because a failure here means the witness stopped
+/// measuring what it claims to measure. The regression guard for the repair itself is
+/// [`assert_repaired_helper_verdict`]: that is the assertion a reintroduced writer leak
+/// actually fails, because the helper's own direct wrapper `exec` returns `ETXTBSY` when a
+/// sibling inherited its writer, which fails that helper run and this verdict with it.
 #[cfg(target_os = "linux")]
 fn assert_held_sibling_isolated(inherited: &Inherited, helper_dir: &Path) {
     assert!(
@@ -606,6 +689,7 @@ fn assert_held_sibling_isolated(inherited: &Inherited, helper_dir: &Path) {
             helper_dir.join("cli-wrapper.sh").display()
         )
     });
+    // Structural precondition, not the regression guard; see this function's docs.
     assert!(
         !holds_descriptor(
             inherited.pid,
@@ -633,7 +717,7 @@ fn held_sibling_inherits_wrapper_writer_and_repairs_isolate_it() {
         .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn the #264 witness helper");
-    let run = supervise_helper(helper);
+    let run = supervise_helper(helper, WITNESS_OUTER_BOUND);
     println!("#264 witness helper output:\n{}", run.output);
     assert!(
         !run.timed_out,
@@ -647,7 +731,9 @@ fn held_sibling_inherits_wrapper_writer_and_repairs_isolate_it() {
         run.output
     );
     assert!(
-        run.status.expect("supervise always reaps").success(),
+        run.status
+            .expect("a failure-free supervisor always reaps")
+            .success(),
         "the #264 witness helper failed:\n{}",
         run.output
     );
@@ -668,6 +754,9 @@ fn witness_helper() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("ctxeval-etxtbsy-{}", crate::harness::uniq()));
+    // Guards the scratch tree for both halves: dropped on the failing path too, so no
+    // assertion leaves the 0755 wrapper or the artifacts behind.
+    let _scratch = ScratchGuard(dir.clone());
     witness_header();
     red_writer_inherited_and_exec_refused(&dir.join("red"));
     green_repaired_sequence_succeeds_while_sibling_held(&dir.join("green"));
