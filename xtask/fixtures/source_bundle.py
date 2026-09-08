@@ -247,7 +247,9 @@ def main():
         task(ROOT, 'verify', tmp / 'bash-env-candidate.bundle', cwd=tmp, env={'BASH_ENV': 'Cargo.toml'}, accepted=False, contains='bundle content does not match')
         assert not marker.exists() and not marker.is_symlink()
         task(ROOT, 'verify', tmp / 'valid-candidate.bundle')
-        output_policy(ROOT, tmp)
+        policy_source = tmp / 'policy-source'
+        clean_copy(ROOT, policy_source)
+        output_policy(policy_source, tmp)
         git_inputs(ROOT, tmp)
         bundle_publication.run(ROOT / 'scripts/source-bundle-publish.py', tmp)
         builder_cases(ROOT, tmp)
