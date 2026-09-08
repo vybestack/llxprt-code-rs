@@ -51,6 +51,10 @@ pub struct ResolvedBudgets {
     pub max_shell_output: Resolved<u64>,
     pub max_tool_output: Resolved<u64>,
     pub max_turn_output: Resolved<u64>,
+    /// Digest admission floor (issue 125): results at or above this size are bulk
+    /// evidence and are digested before they reach the request list. Defaults to the
+    /// version-1 rule table's baseline floor.
+    pub digest_size_floor: Resolved<u64>,
     #[serde(with = "duration_option")]
     pub turn_time: Resolved<Option<Duration>>,
     #[serde(with = "duration")]
@@ -118,6 +122,12 @@ pub struct SettingsBudgets {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_turn_output: Option<u64>,
+    #[serde(
+        rename = "digest-size-floor",
+        alias = "digest_size_floor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub digest_size_floor: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_timeout: Option<String>,
 }
@@ -129,6 +139,7 @@ impl SettingsBudgets {
             && self.max_shell_output.is_none()
             && self.max_tool_output.is_none()
             && self.max_turn_output.is_none()
+            && self.digest_size_floor.is_none()
             && self.request_timeout.is_none()
     }
 }
@@ -186,6 +197,7 @@ pub fn environment_layer() -> Result<SettingsLayer, String> {
             max_shell_output: env_byte_cap("LLXPRT_MAX_SHELL_OUTPUT", "--max-shell-output")?,
             max_tool_output: env_byte_cap("LLXPRT_MAX_TOOL_OUTPUT", "--max-tool-output")?,
             max_turn_output: env_byte_cap("LLXPRT_MAX_TURN_OUTPUT", "--max-turn-output")?,
+            digest_size_floor: env_byte_cap("LLXPRT_DIGEST_SIZE_FLOOR", "--digest-size-floor")?,
             request_timeout: std::env::var("LLXPRT_REQUEST_TIMEOUT").ok(),
         },
         ..Default::default()
@@ -215,6 +227,30 @@ pub fn validate_output_caps(shell: u64, tool: u64, turn: u64) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+/// Validate the resolved digest admission floor (issue 125). The floor rides into the
+/// versioned filter registry as a relaxation, and the registry refuses a tightening, so
+/// a floor below the baseline is a typed configuration error instead of a silent change
+/// to what an already-digested record means.
+pub fn validate_digest_size_floor(value: u64) -> Result<u64, String> {
+    let baseline = baseline_floor_u64();
+    if value < baseline {
+        return Err(format!(
+            "--digest-size-floor ({value}) must be at least the baseline floor ({baseline})"
+        ));
+    }
+    Ok(value)
+}
+
+/// The version-1 baseline digest admission floor as `u64`, shared by validation and
+/// resolution so the conversion lives in one place. Fails closed: the baseline is a
+/// `usize` constant that always fits, so a target with a `usize` wider than `u64` is an
+/// unsupported-target invariant violation worth failing on rather than rewriting the
+/// baseline to `u64::MAX` (which would silently admit every floor).
+pub(crate) fn baseline_floor_u64() -> u64 {
+    u64::try_from(crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR)
+        .expect("the baseline digest-size floor always fits u64")
 }
 
 /// The `modelParams` acceptance policy (issue 64).

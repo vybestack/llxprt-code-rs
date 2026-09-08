@@ -703,6 +703,18 @@ fn digest_record(
             .preserved
             .push(String::from_utf8_lossy(&digest.summary).into_owned());
     }
+    // The record names the floor its verdict used (issue 125). The re-fetch instruction
+    // is meaningful only for file-backed tools whose bytes a later read_file window can
+    // actually recover: a digested shell or directory result has no path to re-read, and
+    // an unexecutable instruction sends the model hunting for a nonexistent file. Still
+    // a pure function of (tool, floor), so the durable and the re-derived records stay
+    // byte-identical (issue 125 cycle 2).
+    let floor = state.filters.rules().size_floor;
+    record.push_str(&format!("floor={floor}\n"));
+    if matches!(tool, "read_file" | "search_file_content") {
+        record.push_str(&crate::tools::read_window::digest_re_fetch_line(floor));
+        record.push('\n');
+    }
     record
 }
 

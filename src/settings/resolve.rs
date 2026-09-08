@@ -51,6 +51,7 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
         max_turn_output.value,
     )
     .map_err(SettingsError::Invalid)?;
+    let digest_size_floor = resolved_digest_floor(&layers, max_tool_output.value)?;
     let raw_time = pick_optional(&layers, |x| &x.budgets.turn_time);
     let turn_time = Resolved {
         value: raw_time
@@ -80,6 +81,7 @@ pub fn resolve(mut layers: SettingsLayers) -> Result<Settings, SettingsError> {
             max_shell_output,
             max_tool_output,
             max_turn_output,
+            digest_size_floor,
             turn_time,
             request_timeout,
         },
@@ -158,4 +160,29 @@ fn pick_optional<T: Clone>(
         value: None,
         source: Source::Default,
     })
+}
+
+/// The resolved digest admission floor (issue 125), validated as a whole.
+fn resolved_digest_floor(
+    layers: &SettingsLayers,
+    max_tool_output: u64,
+) -> Result<Resolved<u64>, SettingsError> {
+    let floor = pick(crate::settings::baseline_floor_u64(), layers, |x| {
+        &x.budgets.digest_size_floor
+    });
+    validate_digest_size_floor(floor.value).map_err(SettingsError::Invalid)?;
+    // Cross-validation (issue 125): an explicitly configured floor above the per-result
+    // output cap leaves `RuleVerdict::Digest` unreachable — no tool result could ever
+    // reach the floor — so that combination is refused with both values named. At the
+    // DEFAULT floor the same inequality is coherent pre-feature behavior (no result is
+    // ever digested) and must keep resolving: refusing it would make every sub-floor
+    // `--max-tool-output` configuration unresolvable with an error naming a flag the
+    // user never set (issue 125 cycle 2).
+    if floor.value > max_tool_output && !matches!(floor.source, Source::Default) {
+        return Err(SettingsError::Invalid(format!(
+            "digest-size-floor ({}) is above the per-result output cap --max-tool-output ({}): nothing could ever be admitted as a digest",
+            floor.value, max_tool_output
+        )));
+    }
+    Ok(floor)
 }
