@@ -123,9 +123,11 @@ pub struct CodingAgent {
     pub prompt_notes: Option<String>,
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
+    emitter: std::sync::Mutex<crate::transcript::Emitter>,
     profiler: Option<crate::memory_profile::Profiler>,
 }
 
+mod emission;
 mod error;
 pub use error::AgentError;
 mod helpers;
@@ -191,6 +193,7 @@ impl CodingAgent {
             secrets: config.secret_values(),
             prompt_notes: None,
             context_limit: config.context_limit,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -220,6 +223,7 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -245,22 +249,9 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         }
-    }
-
-    /// Override the agent's conservative per-request context budget (tests drive budget
-    /// enforcement with an explicit token budget instead of a profile).
-    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
-        self.context_limit = context_limit;
-        self
-    }
-
-    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// budgets instead of the uncapped default).
-    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
-        self.max_rounds = max_rounds;
-        self
     }
 
     /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
@@ -293,15 +284,6 @@ impl CodingAgent {
         self
     }
 
-    /// Attach the optional process-memory event sink.
-    pub fn with_profiler(
-        mut self,
-        profiler: Option<crate::memory_profile::Profiler>,
-    ) -> CodingAgent {
-        self.profiler = profiler;
-        self
-    }
-
     /// Attach explicit secret values this agent must scrub from provider error text before
     /// any CLI output, stderr, or session persistence. The values live only on this agent; there
     /// is no process-global secret state, so nothing can leak across requests or tests.
@@ -323,6 +305,10 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        self.emitter
+            .lock()
+            .expect("transcript mutex poisoned")
+            .reset();
         let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
@@ -423,6 +409,7 @@ impl CodingAgent {
             total_calls: 0,
         };
         self.enforce_usage(store, reserved, &[], &usage)?;
+        self.emit_response(store, reserved, &[], &current)?;
         Ok(AttemptState {
             requests,
             rounds: Vec::new(),
@@ -544,7 +531,8 @@ impl CodingAgent {
             .args_bytes
             .saturating_add(turn_args_bytes(&attempt.current));
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)
+        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &attempt.current)
     }
 
     fn check_request_budget(
@@ -681,6 +669,7 @@ impl CodingAgent {
             .saturating_add(forced.text.len());
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         self.check_round_limit(store, reserved, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &forced)?;
         Ok(forced.text)
     }
 

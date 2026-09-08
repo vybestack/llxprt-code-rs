@@ -17,6 +17,7 @@ pub(crate) struct ResponsesBackend {
     model: ResponsesModel,
     model_settings: ModelSettings,
     runtime: tokio::runtime::Runtime,
+    secrets: Vec<String>,
     calls: AtomicUsize,
 }
 
@@ -44,8 +45,14 @@ impl ResponsesBackend {
             model,
             model_settings,
             runtime,
+            secrets: Vec::new(),
             calls: AtomicUsize::new(0),
         })
+    }
+
+    pub(crate) fn with_secrets(mut self, secrets: Vec<String>) -> Self {
+        self.secrets = secrets;
+        self
     }
 
     async fn request_async(
@@ -80,11 +87,17 @@ impl ResponsesBackend {
                 },
             }
         })?;
-        Ok(LlmResult::from(&response))
+        Ok(LlmResult::from_response(&response, &self.secrets))
     }
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn tool_error_prefix(&self) -> &'static str {
+        match &self.model {
+            ResponsesModel::Codex(_) => "tool error: ",
+            ResponsesModel::OpenAi(_) => "Error: ",
+        }
+    }
     fn request(
         &self,
         requests: &[ModelRequest],
@@ -226,7 +239,13 @@ mod tests {
             ])
         };
         let first_history = vec![turn("first codex turn")];
-        let second_history = vec![turn("first codex turn"), turn("second codex turn")];
+        let mut second_history = vec![turn("first codex turn"), turn("second codex turn")];
+        second_history.push(crate::adapter::tool_return_request(
+            "read_file",
+            "failed",
+            false,
+            "fixture failure",
+        ));
         let first = backend
             .request(&first_history, &[])
             .expect("first codex turn");
@@ -237,6 +256,7 @@ mod tests {
 
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
         assert_codex_wire_contract(&bodies);
+        assert_codex_error_prefix(&bodies[1], backend.tool_error_prefix());
         assert!(
             first.text.contains("codex turn one"),
             "folded output missing: {first:?}"
@@ -245,6 +265,8 @@ mod tests {
             second.text.contains("codex turn two"),
             "folded output missing: {second:?}"
         );
+        assert_eq!(first.thinking, "codex reasoning one");
+        assert_eq!(second.thinking, "codex reasoning two");
         assert_eq!(backend.request_calls(), 2);
     }
 
@@ -331,8 +353,9 @@ mod tests {
                 content: Vec::new(),
             },
         };
+        let reasoning = codex_reasoning_sse(turn);
         let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
-            sequence_number: 4,
+            sequence_number: 7,
             response: object,
         };
         let sse = |event: &serdes_ai_responses::types::StreamEvent| {
@@ -355,11 +378,32 @@ mod tests {
             sse(&item_added),
             keepalive("[1,2,3]"),
             sse(&text_delta),
-            sse(&item_done),
+            format_args!("{}{reasoning}", sse(&item_done)),
             sse(&completed),
             keepalive("\"after\""),
             done,
         )
+    }
+
+    fn assert_codex_error_prefix(body: &serde_json::Value, prefix: &str) {
+        let wire_result = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call_output")
+            .unwrap();
+        assert_eq!(wire_result["output"], format!("{prefix}fixture failure"));
+    }
+
+    fn codex_reasoning_sse(turn: &str) -> String {
+        [
+            serde_json::json!({"type":"response.output_item.added","sequence_number":4,"output_index":1,
+                "item":{"type":"reasoning","id":"reason","summary":[]}}),
+            serde_json::json!({"type":"response.reasoning_summary_text.delta","sequence_number":5,
+                "item_id":"reason","output_index":1,"summary_index":0,"delta":format!("codex reasoning {turn}")}),
+            serde_json::json!({"type":"response.output_item.done","sequence_number":6,"output_index":1,
+                "item":{"type":"reasoning","id":"reason","summary":[]}}),
+        ].iter().map(|event| format!("data: {event}\n\n")).collect()
     }
 
     /// Pins the codex wire shape every turn must keep: `store: false`,

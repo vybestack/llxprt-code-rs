@@ -87,19 +87,19 @@ pub(crate) struct RuntimeDependencies {
 }
 
 #[cfg(target_os = "macos")]
-fn production_credential_source() -> Arc<dyn CredentialSource> {
-    Arc::new(super::macos_keychain::MacOsCredentialSource)
+fn production_credential_source(transcript: bool) -> Arc<dyn CredentialSource> {
+    Arc::new(super::macos_keychain::MacOsCredentialSource { transcript })
 }
 
 #[cfg(not(target_os = "macos"))]
-fn production_credential_source() -> Arc<dyn CredentialSource> {
+fn production_credential_source(_transcript: bool) -> Arc<dyn CredentialSource> {
     Arc::new(super::credentials::UnsupportedCredentialSource)
 }
 
 impl RuntimeDependencies {
-    pub(crate) fn production() -> Result<Self, String> {
+    pub(crate) fn production(transcript: bool) -> Result<Self, String> {
         Ok(Self {
-            credential_source: production_credential_source(),
+            credential_source: production_credential_source(transcript),
             clock: Arc::new(super::credentials::SystemClock),
             config_home: ConfigHomeRoot::discover()?,
             registrations: PRODUCTION_REGISTRATIONS,
