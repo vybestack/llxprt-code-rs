@@ -16,10 +16,10 @@ Every completion report carries all fourteen fields. A field with no value is wr
 | `invariant` | The one property the change must preserve, phrased so a violation is visible in output bytes, a typed error, or an exit status. |
 | `production caller` | Path and symbol of the non-test caller that reaches the changed code, with the call line quoted. `none` is a valid answer and caps the claim at `primitive implemented`. |
 | `lifetime/recovered state` | What survives process exit, which store, spine, or log holds it, and what a fresh process reads on restart. `none` is a valid answer. |
-| `observed effect/terminal` | The terminal record that shows the effect, named by its field, with the value observed. For this CLI that is the final JSON object on stdout or a typed error object. |
+| `observed effect/terminal` | The terminal record that shows the effect, named by its field, with the value observed. For this CLI that is the final JSON object on stdout or a typed error object, and the field is `terminal_outcome`. |
 | `negative/positive evidence` | The failing-then-passing pair for the invariant, each with its own command and exit status. A red without a nonzero status is not red. |
 | `exact commands/statuses` | Every command the report relies on, copied verbatim, each with its exit status. Paraphrased commands are rejected. |
-| `binary hash/dirty delta/instrumentation` | SHA-256 of the binary actually executed, `git status --porcelain` output before and after the run, and every instrumentation change the worker added (counters, prints, env vars, fixture edits) with its removal recorded. |
+| `binary hash/dirty delta/instrumentation` | SHA-256 of the binary actually executed, computed with `shasum -a 256 <file>` or `sha256sum <file>` and recorded verbatim, `git status --porcelain` output before and after the run, and every instrumentation change the worker added (counters, prints, env vars, fixture edits) with its removal recorded. `shasum -a 256` is the macOS/perl spelling and `sha256sum` the coreutils one; either is accepted, copied exactly as run. |
 | `limitations` | What the evidence does not show, in one to three sentences. |
 | `dependency handoff` | For each dependency on another delivery: its issue, its head SHA, and the exact symbol or file this delivery consumes. `none` is a valid answer. |
 | `PR base/head` | PR number, base branch and base SHA, head branch and head SHA. |
@@ -27,7 +27,7 @@ Every completion report carries all fourteen fields. A field with no value is wr
 
 ## Evidence levels
 
-Each claim names exactly one level and carries its own artifact path. A level without an artifact is recorded as `unavailable`. No level is inferred from a lower level, and one artifact never serves two claims.
+Each claim is evaluated at all three levels, and every level entry either names exactly one artifact path or records `unavailable` with one sentence saying why. No level is inferred from a lower level, and one artifact never serves two claims.
 
 | Level | Meaning | Required artifact |
 | --- | --- | --- |
@@ -45,9 +45,12 @@ issue/owner/lease:        #171 / branch-2 driver / owns src/session/context_pers
                           scripts/**, .github/**
 base/candidate SHA:       base 0aa49153f28e5951e76b85728281f3e7bde27f57
                           candidate <40-hex candidate SHA>
-shared APIs/exclusions:   reads ContextRuntime::begin_session_window and
-                          ContextRuntime::finish_session_window in src/context_policy/runtime.rs
-                          (unmodified, owned by #74); reads Executor::resuming in
+shared APIs/exclusions:   reads ProposalOnlyController::begin_session_window and
+                          ProposalOnlyController::finish_session_window, both defined on
+                          ProposalOnlyController in src/context_policy/runtime.rs
+                          (unmodified, owned by #74), reached through the field
+                          `pub(crate) policy: ProposalOnlyController` declared at
+                          src/session/context_persist.rs:56; reads Executor::resuming in
                           src/context_txn/executor.rs (unmodified); excludes src/context_policy/**,
                           tests/**, xtask/**, scripts/**, .github/**
 invariant:                an admission the governor refuses produces one JSON error object whose
@@ -55,33 +58,48 @@ invariant:                an admission the governor refuses produces one JSON er
                           src/context_policy/vocabulary.rs) and exit status 1; it never produces
                           status "ok"
 production caller:        src/session/context_persist.rs, sequence_admission, line <N>:
-                          `self.policy.begin_session_window()` and
-                          `self.policy.finish_session_window()` after `commit_fenced` returns.
-                          The function is called from <the session ingress path>, which the
-                          shipped binary reaches on every governed turn
+                          `state.policy.begin_session_window()` and
+                          `state.policy.finish_session_window()` after `commit_fenced` returns.
+                          `sequence_admission` is a free function taking
+                          `state: &mut ContextState`, so the controller is reached through
+                          the state's own `policy` field (src/session/context_persist.rs:335,
+                          src/session/context_persist.rs:56). The function is called from
+                          <the session ingress path>, which the shipped binary reaches on
+                          every governed turn
 lifetime/recovered state: kernel_chain and fencing epoch persist in the session store under
                           <session-dir>/; a fresh process resumes the recorded chain instead of
                           re-minting a sequence number
-observed effect/terminal: stdout JSON object, terminal label "quiesce_rate", "status":"error";
-                          exit status 1
+observed effect/terminal: final stdout JSON object, field `terminal_outcome` with value
+                          "quiesce_rate" and "status":"error"; exit status 1
 negative/positive evidence:
-                          negative: <command> at base SHA, exit status 0 with "status":"ok"
-                          on a payload the governor must refuse
-                          positive: same <command> at candidate SHA, exit status 1 with the
-                          terminal object above
-                          The error code and message text are placeholders too: a real report
-                          names the terminal label the candidate actually emits, not one it
-                          should emit.
+                          negative: grep -c '"terminal_outcome":"quiesce_rate"'
+                            <claim-1/terminal-base.json> at base SHA -> exit 1, grep prints
+                            the count 0, so the refusal terminal is absent from the base
+                            output on a payload the governor must refuse
+                          positive: same grep at candidate SHA -> exit 0, grep prints the
+                            count 1, matching the terminal object in the observed-effect
+                            field. The grep is the red leg because the base binary emits no
+                            refusal terminal at all, so the check that looks for one fails
+                            with its own nonzero status
 exact commands/statuses:  git rev-parse HEAD -> <candidate SHA>, exit 0
-                          git status --porcelain -> empty, exit 0
+                          git status --porcelain -> empty, exit 0   # before the run
+                          shasum -a 256 target/release/llxprt-code-rs
+                            -> "<64-hex>  target/release/llxprt-code-rs", exit 0
+                            (sha256sum target/release/llxprt-code-rs is the coreutils
+                            spelling of the same command and its output is accepted too)
                           cargo test --offline --locked --lib context_policy -> exit 0
                           cargo build --release --offline --locked -> exit 0
                           git -c core.quotePath=false ls-tree -r --name-only HEAD |
                             bash scripts/verify-source-inputs-git.sh "$(pwd -P)" "$(git rev-parse HEAD)"
-                            -> exit 0
+                            -> PIPESTATUS[0] 0 (ls-tree), PIPESTATUS[1] 0 (verifier);
+                            the relative `scripts/` path means the pipeline runs with
+                            the repo root as cwd
                           <invocation of target/release/llxprt-code-rs> -> exit 1
+                          git status --porcelain -> empty, exit 0   # after the run
 binary hash/dirty delta/instrumentation:
-                          binary SHA-256 <64-hex>
+                          binary SHA-256 <64-hex> (shasum -a 256
+                            target/release/llxprt-code-rs, or sha256sum
+                            target/release/llxprt-code-rs)
                           git status --porcelain before run: empty; after run: empty
                           instrumentation added: none
 limitations:              proves the refusal terminal for one governed payload; does not prove
@@ -92,10 +110,14 @@ PR base/head:             PR <N>, base main at 0aa49153f28e5951e76b85728281f3e7b
 review cycle/result:      first full, <result>
 ```
 
+The terminal label and the message text in that block are placeholders. A real report names
+the terminal label the candidate actually emits and quotes the observed bytes, and treats the
+expected label as inadmissible on its own.
+
 Claims and levels for that report:
 
-- Claim 1, refusal terminal. `primitive implemented`: `cargo test --offline --locked --lib context_policy`, exit `0`, artifact `<ABS_EVIDENCE_DIR>/claim-1/test.log`. `production integrated`: caller `src/session/context_persist.rs:sequence_admission`, artifact `<ABS_EVIDENCE_DIR>/claim-1/caller.txt`. `workload demonstrated`: stock binary invocation, exit `1`, terminal object above, artifact `<ABS_EVIDENCE_DIR>/claim-1/terminal.json`.
-- Claim 2, quota evolution across restart. `primitive implemented`: `unavailable`, no focused test exists. `production integrated`: `unavailable`. `workload demonstrated`: `unavailable`, no two-process run was performed. Claim 2 stays closed until each level gains its own artifact.
+- Claim 1, refusal terminal. All three levels are evaluated, and each entry names one artifact of its own, under the evidence root `$EVIDENCE_DIR` (which is `<ABS_EVIDENCE_DIR>/issue<N>`, matching the template): `primitive implemented`: `cargo test --offline --locked --lib context_policy`, exit `0`, artifact `$EVIDENCE_DIR/claim-1/test.log`. `production integrated`: caller `src/session/context_persist.rs:sequence_admission`, plus the observed terminal effect `terminal_outcome: "quiesce_rate"`, artifact `$EVIDENCE_DIR/claim-1/caller.txt`. `workload demonstrated`: stock binary invocation, exit `1`, terminal object above, binary SHA-256 from `shasum -a 256` or `sha256sum`, artifact `$EVIDENCE_DIR/claim-1/terminal.json`.
+- Claim 2, quota evolution across restart. `primitive implemented`: `unavailable`, no focused test exists. `production integrated`: `unavailable`, the restart reader is not yet called from a shipped path. `workload demonstrated`: `unavailable`, no two-process run was performed. Claim 2 stays closed until each level gains its own artifact.
 
 ## Negative examples
 
@@ -103,7 +125,7 @@ Each entry is a report fragment that a driver rejects, followed by the evidence 
 
 1. Helper-only tests without callers. Report says "`begin_session_window` is complete, `cargo test --offline --locked --lib context_policy` exits 0." Rejected. Missing: a non-test caller path and symbol, the terminal effect produced through that caller, and a workload run of the stock binary. The claim is at most `primitive implemented`.
 2. Expected red that exits zero. Report says "the pre-change run fails as expected." The recorded command shows exit status `0`. Rejected. Missing: a nonzero exit status, or a typed error object, from the pre-change run at the base SHA. A red with no failure is an unexecuted check.
-3. Unverified worker SHA. Report says "binary SHA-256 `<64-hex>`" and the driver did not rebuild. Rejected. Missing: a driver-side `cargo build --release --offline --locked` at the exact head SHA, the tree-clean check before it, and the driver's own `shasum -a 256` of the binary it ran. A hash the driver did not recompute binds nothing.
+3. Unverified worker SHA. Report says "binary SHA-256 `<64-hex>`" and the driver did not rebuild. Rejected. Missing: a driver-side `cargo build --release --offline --locked` at the exact head SHA, the tree-clean check before it, and the driver's own `shasum -a 256 <file>` or `sha256sum <file>` of the binary it ran. A hash the driver did not recompute binds nothing.
 4. Instrumented-as-stock evidence. Report says the refusal terminal was observed, and the run used a worker-added counter in `src/context_policy/monitor.rs` to force the armed tier. Rejected. Missing: the same terminal object from an uninstrumented build at the candidate SHA, plus the instrumentation list showing every added counter, print, env var, and fixture edit was removed. Instrumentation changes the program under test.
 5. Clean tree read as ownership. Report says "`git status --porcelain` is empty, so the surface is ours." Rejected. Missing: the open-PR and lease check, the base and head SHAs showing which commit the tree is clean at, and the `shared APIs/exclusions` field naming the issue that owns `src/context_policy/**`. A clean tree at someone else's head proves nothing about ownership.
 
