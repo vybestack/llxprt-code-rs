@@ -2,7 +2,7 @@
 
 This is the fill-in prompt a driver assembles for one architecture worker. Every slot below maps to a field in `docs/architecture-evidence-contract.md`, which the driver quotes in the prompt rather than assuming the worker has read it. The driver procedure is `.agents/skills/rs-architecture-delivery/SKILL.md`. Generated evidence stays outside the source tree, under the absolute evidence directory the driver passes on the command line.
 
-One path is substituted once. `$EVIDENCE_DIR` is `<ABS_EVIDENCE_DIR>/issue<N>`, where `<ABS_EVIDENCE_DIR>` is the absolute root the driver chose for all issue evidence. The export line names that root once, and only `$EVIDENCE_DIR` appears after it. All claim artifacts go to `$EVIDENCE_DIR/claim-<k>/`, the worker report to `$EVIDENCE_DIR/worker-report.md`, and driver-side reruns to the same claim directories, so two issues never share a claim root.
+One path is substituted once. `$EVIDENCE_DIR` is `<ABS_EVIDENCE_DIR>/issue<N>`, where `<ABS_EVIDENCE_DIR>` is the absolute root the driver chose for all issue evidence. The export line names that root once, and only `$EVIDENCE_DIR` appears after it. All claim artifacts go to `$EVIDENCE_DIR/claim-<k>/`, the worker report to `$EVIDENCE_DIR/worker-report.md` (written only by the dispatch pipeline's `tee`), and driver-side reruns to the same claim directories, so two issues never share a claim root.
 
 ## Worker prompt slots
 
@@ -84,24 +84,33 @@ Dependency SHAs: <issue <N>> <40-hex head SHA> supplies <symbol or file>
 Rules:
 1. One direction. Formats move forward and old formats are deleted in the same change.
    No migration path, no migration tool, no backward-compatibility shim, no legacy format
-   reader, and no LLM-compat fallback.
-2. Exactly one compactor. A second compactor, a parallel summarizer, or a fallback compactor
-   is out of scope; different compaction behavior changes the existing compactor.
+   reader, and no LLM-compat fallback enters any delivery. A reader for an old shape is new
+   code that keeps two shapes alive, so it is out of scope until an issue explicitly
+   authorizes it.
+2. One compactor. Exactly one compaction implementation owns compaction for this repository.
+   A second compactor, a parallel summarizer, or a fallback compactor is a new architecture
+   decision and requires its own issue with its own evidence contract. A delivery that needs
+   different compaction behavior changes the existing compactor.
 3. Truthful internal failures. An internal failure surfaces as a typed error with its own
-   exit status, and is never reported as success, a skipped check as passed, or a partial
-   run as complete.
-4. Review ceiling. One full review plus at most one findings-only follow-up; a third cycle
-   is not run.
+   exit status. A report never describes a swallowed error as success, a skipped check as
+   passed, or a partial run as complete. Where a check did not run, the report says it did
+   not run.
+4. Review ceiling. A delivery receives one full final review plus at most one findings-only
+   follow-up. A third cycle is not run. The delivery returns to its issue with the findings
+   recorded, and the `review cycle/result` field carries that outcome.
 Read docs/architecture-evidence-contract.md and report all fourteen fields.
-Write every artifact under $EVIDENCE_DIR/claim-<k>/ and the report itself to
-$EVIDENCE_DIR/worker-report.md.
+Write every artifact under $EVIDENCE_DIR/claim-<k>/. Your final stdout message is the
+report; the dispatch pipeline's tee writes it to $EVIDENCE_DIR/worker-report.md, so write
+that file nowhere else.
 PROMPT
 )" | tee "$EVIDENCE_DIR/worker-report.md"
 ```
 
 The heredoc delimiter is unquoted so `$EVIDENCE_DIR` expands inside the prompt the worker
 receives; nothing else in the prompt is a shell variable, so no other text is at risk of
-unexpected expansion.
+unexpected expansion. The same unquoted delimiter also expands command substitutions,
+backticks, arithmetic expansion, and backslash escapes, so filled placeholder text must
+avoid those characters or escape them.
 
 In bash, read the CLI's own status from `${PIPESTATUS[0]}` after the pipeline; `$?` alone is `tee`'s status. `--allow-shell` grants the worker real code execution and appears only when the lease needs it, and `--max-tool-calls 64` bounds it. `--allow-insecure-http` is added only when the resolved profile is a plaintext `http://` base URL on a host that is not loopback; HTTPS on any host and `http://` on `localhost`, `127.0.0.1`, or `::1` stay allowed without it, as `README.md`'s insecure-HTTP gate requires. The worker is told the contract path by name because nothing in this repository discovers a skill on the worker's behalf.
 

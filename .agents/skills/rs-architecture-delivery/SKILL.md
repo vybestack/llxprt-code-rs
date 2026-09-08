@@ -14,7 +14,7 @@ This skill is the operating procedure for a TypeScript driver orchestrating one 
 
 Before assembling any prompt:
 
-1. Enumerate the open PRs with `gh pr list --state open --json number,headRefName,baseRefName --limit 200`. That listing carries no file paths, so fetch the files per PR and record every open PR touching the paths this delivery needs: `gh pr view <n> --json files --jq '.files[].path'`, or `gh pr diff <n> --name-only`.
+1. Enumerate the open PRs with `gh pr list --state open --json number,headRefName,baseRefName --limit 200`. That listing carries no file paths, so fetch the files per PR and record every open PR touching the paths this delivery needs: `gh pr view <n> --json files --jq '.files[].path'`, or `gh pr diff <n> --name-only`. A page that returns exactly the number of rows the limit asked for may be truncated, so re-run with a higher `--limit` or page with `--json` plus `endCursor` pagination until a page returns fewer rows than the cap, and only then treat the enumeration as complete.
 2. Read the issue and its lease. If the lease names an owning issue for a path, that path is out of scope even when the tree is clean. In the lease as of 2026-09-08, `src/context_policy/**` belongs to issue #74; that is a current-lease example, not a durable fact, and the refresh in the previous item is the source of truth for what is owned today.
 3. Record the base SHA with `git rev-parse HEAD`. If the head moved since the lease was written, stop and re-confirm scope before continuing.
 
