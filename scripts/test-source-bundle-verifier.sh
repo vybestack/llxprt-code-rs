@@ -24,6 +24,8 @@ source_newline="$root/tests/"$'.bundle-verifier-newline\n'"$$"
 source_fifo="$root/tests/.bundle-verifier-fifo-$$"
 source_scratch_dir="$root/tests/.bundle-verifier-scratch-$$"
 source_scratch="$source_scratch_dir/.cargo-ok"
+ignored_scratch_dir="$root/tmp/.bundle-verifier-ignored-scratch-$$"
+ignored_scratch="$ignored_scratch_dir/.rustc_info.json"
 source_output_dir="$root/scripts/.bundle-verifier-output-dir-$$"
 source_tree_output="$root/scripts/.bundle-verifier-output-$$.tar.gz"
 cross_filesystem_output="$root/dist/.bundle-verifier-cross-filesystem-$$"
@@ -36,7 +38,7 @@ fi
 
 cleanup() {
   rm -rf "$tmp" "$marker" "$source_link" "$source_fifo" "$source_newline" \
-    "$source_scratch_dir" "$source_output_dir" "$source_tree_output" \
+    "$source_scratch_dir" "$ignored_scratch_dir" "$source_output_dir" "$source_tree_output" \
     "$cross_filesystem_output"
 }
 trap cleanup EXIT
@@ -1331,6 +1333,28 @@ if bash "$build" "$tmp/scratch-source.tar.gz" >"$tmp/stdout" 2>"$tmp/stderr"; th
   exit 1
 fi
 rm -rf "$source_scratch_dir"
+
+# Ignored scratch outside every tracked top-level source root is not a source input. In
+# particular, keeping local evidence under the ignored tmp/ root must neither poison a
+# release nor add an archive member. The rejection above remains the guard for scratch
+# found inside an actual source root.
+mkdir -p "$ignored_scratch_dir"
+touch "$ignored_scratch"
+if ! git -C "$root" check-ignore -q -- "$ignored_scratch"; then
+  echo "source-bundle ignored-scratch fixture is not ignored" >&2
+  exit 1
+fi
+ignored_scratch_archive="$tmp/ignored-scratch-source.tar.gz"
+if ! bash "$build" "$ignored_scratch_archive" >"$tmp/stdout" 2>"$tmp/stderr"; then
+  cat "$tmp/stderr" >&2
+  echo "source-bundle builder rejected ignored scratch outside source roots" >&2
+  exit 1
+fi
+if tar -tzf "$ignored_scratch_archive" | grep -Fq "/tmp/.bundle-verifier-ignored-scratch-$$/"; then
+  echo "source-bundle builder archived ignored scratch" >&2
+  exit 1
+fi
+rm -rf "$ignored_scratch_dir"
 
 # Output containment compares physical paths component-by-component, even when the repository or
 # requested output is reached through a symlink or an OS path alias such as /tmp -> /private/tmp.
