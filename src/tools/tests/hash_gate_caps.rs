@@ -20,6 +20,7 @@ fn replace_with_budget(
         ws,
         max_output_bytes: tool_cap,
         shell: crate::tools::ShellConfig {
+            default_shell_timeout: std::time::Duration::from_secs(60),
             max_shell_output: 64 * 1024,
             max_shell_timeout: std::time::Duration::from_secs(60),
             allow_shell: false,
