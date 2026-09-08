@@ -42,6 +42,50 @@ pub(crate) const JOURNAL_RELOAD_MAX: usize = 8 << 20;
 /// Read bound for reloaded durable checkpoint lines.
 pub(crate) const CHECKPOINT_RELOAD_MAX: usize = 8 << 20;
 
+/// The two projections of one bulk tool result, both derived from the SAME
+/// successful ingress record (#66).
+///
+/// `live` is the sanitized admitted content the provider request carries and the
+/// turn budget charges; `persisted` is the existing filter representation the
+/// transcript, the checkpoint and the context store keep. Below the bulk
+/// threshold the two are identical, so that behavior is unchanged.
+///
+/// `live` is released only by a successful `compact_tool_result` call, after the
+/// ingress record was both admitted and published. A failure on that path
+/// returns `Err` and constructs no projection at all, so this type never
+/// substitutes a bounded placeholder for the live bytes. `DropBulk` is a
+/// distinct filter verdict rather than a failure: it succeeds and yields the
+/// same `CTXDROP v1` stub in both fields.
+pub struct ToolResultProjection {
+    /// Sanitized admitted content sent to the provider (the drop stub when the
+    /// filter verdict is DropBulk, which stays a stub on both projections).
+    pub live: String,
+    /// Existing filter representation/digest recorded into the round.
+    pub persisted: String,
+}
+
+impl ToolResultProjection {
+    /// Below-threshold behavior: one string, both projections identical.
+    fn verbatim(text: String) -> Self {
+        Self {
+            live: text.clone(),
+            persisted: text,
+        }
+    }
+}
+
+/// Content-free by design: the live projection is exactly the payload the
+/// persisted representation exists to keep out of logs and panics, so `Debug`
+/// reports only the two lengths (#66).
+impl std::fmt::Debug for ToolResultProjection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolResultProjection")
+            .field("live", &self.live.len())
+            .field("persisted", &self.persisted.len())
+            .finish()
+    }
+}
+
 /// Lazily opened phase-2 context store with its filter registry and quiesce state.
 pub(crate) struct ContextState {
     pub(crate) store: crate::context_store::store::ContextStore,
@@ -452,13 +496,19 @@ fn content_digest_handle(bytes: &[u8]) -> String {
     format!("content-{:016x}", digest(bytes))
 }
 
-/// Builds the compact CTXDIGEST record for one bulk tool result, moving the full bytes
-/// through the fail-closed ingress transaction into the spine and the vault.
+/// Admits one bulk tool result, moving the full bytes through the fail-closed
+/// ingress transaction into the spine and the vault, and returns the live and
+/// persisted projections of that one record.
 ///
-/// The record is a pure function of `(tool name, result bytes)`: the handle is a content
-/// digest, never a vault slot handle, so a later re-derivation of the same call produces
-/// byte-identical records and replay comparisons stay exact.
-fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<String, String> {
+/// The persisted projection is a pure function of `(tool name, result bytes)`: the
+/// handle is a content digest, never a vault slot handle, so a later
+/// re-derivation of the same call produces byte-identical records and replay
+/// comparisons stay exact.
+fn ingest_bulk(
+    state: &mut ContextState,
+    tool: &str,
+    bytes: &[u8],
+) -> Result<ToolResultProjection, String> {
     let started = Instant::now();
     let pressure = normalized_pressure(bytes.len());
     let proposal = state.policy.propose_bulk(tool, bytes.len(), pressure);
@@ -470,11 +520,14 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
     match result {
         Ok(record) => {
             let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
+            // `complete_bulk` is compact-byte accounting, so it is charged the
+            // PERSISTED projection: the compact record the store keeps, never the
+            // larger live bytes the provider request carries.
             state.policy.complete_bulk(
                 proposal,
                 bytes,
-                record.len(),
-                normalized_pressure(record.len()),
+                record.persisted.len(),
+                normalized_pressure(record.persisted.len()),
                 elapsed,
             );
             Ok(record)
@@ -487,8 +540,8 @@ fn ingest_bulk(state: &mut ContextState, tool: &str, bytes: &[u8]) -> Result<Str
 }
 
 /// Runs one bulk-result ingestion through the store and renders the caller's
-/// record for it: the admitted payload, the filter verdict that rules what the
-/// caller receives, and the digested or verbatim bytes.
+/// projections for it: the admitted payload, the filter verdict that rules the
+/// persisted representation, and the sanitized bytes the live projection carries.
 ///
 /// Every failure here is returned, never swallowed; the caller decides whether
 /// the admission aborts the bulk proposal.
@@ -496,7 +549,7 @@ fn ingest_bulk_committed(
     state: &mut ContextState,
     tool: &str,
     bytes: &[u8],
-) -> Result<String, String> {
+) -> Result<ToolResultProjection, String> {
     use crate::context_ingress::capture::CaptureSource;
     use crate::context_ingress::ingress::IngressTxn;
     state
@@ -572,19 +625,51 @@ fn ingest_bulk_committed(
         bytes: record.sanitized.clone(),
         segments: record.segments.clone(),
     };
-    // The verdict rules what the caller receives: PassVerbatim returns the
-    // sanitized bytes themselves, DropBulk a drop stub, and only Digest
-    // yields the CTXDIGEST substitution (issue 128).
+    // The verdict rules the persisted representation exactly as before (issue
+    // 128): PassVerbatim keeps the sanitized bytes, DropBulk a drop stub, and
+    // only Digest yields the CTXDIGEST substitution. The live projection is
+    // the sanitized admitted content of that SAME record, so the provider sees
+    // the evidence the spine now holds instead of only its handle (#66).
+    Ok(verdict_projection(state, tool, &payload, &handle))
+}
+
+/// Renders the caller's two projections from the ONE committed ingress record
+/// the payload carries, on the filter verdict that record was admitted under.
+///
+/// The verdict rules the persisted representation exactly as before (issue 128):
+/// PassVerbatim keeps the sanitized bytes, DropBulk a drop stub, Digest the
+/// CTXDIGEST substitution. The live projection is the sanitized admitted
+/// content of that SAME record, so the provider sees the evidence the spine
+/// now holds instead of only its handle - except DropBulk, whose stub stays a
+/// stub on both projections (#66).
+fn verdict_projection(
+    state: &mut ContextState,
+    tool: &str,
+    payload: &IngressPayload,
+    handle: &str,
+) -> ToolResultProjection {
     match state
         .filters
         .verdict(tool, &payload.segments, payload.bytes.len())
     {
-        RuleVerdict::PassVerbatim => Ok(String::from_utf8_lossy(&payload.bytes).into_owned()),
-        RuleVerdict::DropBulk => Ok(format!(
-            "CTXDROP v1 tool={tool} bytes={} handle={}\n",
-            payload.bytes.len(),
-            payload.handle
-        )),
+        RuleVerdict::PassVerbatim => {
+            let verbatim = String::from_utf8_lossy(&payload.bytes).into_owned();
+            ToolResultProjection {
+                live: verbatim.clone(),
+                persisted: verbatim,
+            }
+        }
+        RuleVerdict::DropBulk => {
+            let stub = format!(
+                "CTXDROP v1 tool={tool} bytes={} handle={}\n",
+                payload.bytes.len(),
+                payload.handle
+            );
+            ToolResultProjection {
+                live: stub.clone(),
+                persisted: stub,
+            }
+        }
         RuleVerdict::Digest => {
             let digest = state.filters.digest(
                 tool,
@@ -593,7 +678,11 @@ fn ingest_bulk_committed(
                 &payload.bytes,
                 &payload.segments,
             );
-            Ok(digest_record(state, tool, &payload, &handle, &digest))
+            let record = digest_record(state, tool, payload, handle, &digest);
+            ToolResultProjection {
+                live: String::from_utf8_lossy(&payload.bytes).into_owned(),
+                persisted: record,
+            }
         }
     }
 }
@@ -706,11 +795,23 @@ fn digest_record(
     record
 }
 
-/// Replaces every bulk tool result with a deterministic digest record after moving the
-/// full bytes through the fail-closed ingress transaction into the spine and the vault.
+/// Drops the transient provider projection from a store-side transcript clone.
+/// Replacing rather than clearing each `String` releases the payload allocation.
+fn release_live_payloads(rounds: &mut [RoundRecord]) {
+    for call in rounds.iter_mut().flat_map(|round| round.calls.iter_mut()) {
+        call.result_live = String::new();
+    }
+}
+
+/// Replaces every bulk tool result's PERSISTED projection with a deterministic
+/// compact record after moving the full bytes through the fail-closed ingress
+/// transaction into the spine and the vault.
 ///
-/// Results already compacted pre-entry are strictly below the bulk threshold and are
-/// skipped, so the checkpoint seam never digests the same bytes twice (119).
+/// Results already compacted pre-entry are strictly below the bulk threshold and
+/// are skipped, so the checkpoint seam never digests the same bytes twice (119).
+/// The live projection is left untouched: it is what the provider already saw,
+/// and the checkpoint digest is derived from the persisted representation only
+/// (#66).
 fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> Result<(), String> {
     // Strictly below the threshold skips the seam: a result of exactly
     // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so it must be
@@ -724,7 +825,8 @@ fn digest_bulk_results(state: &mut ContextState, rounds: &mut [RoundRecord]) -> 
             if bytes.len() < BULK_RESULT_BYTES {
                 continue;
             }
-            call.result = ingest_bulk(state, &call.name, bytes)?;
+            let projection = ingest_bulk(state, &call.name, bytes)?;
+            call.result = projection.persisted;
         }
     }
     trim_preserved(state);
@@ -833,6 +935,13 @@ pub(crate) fn context_exchange(
         // entered the store, so the session must not advance (issue #106).
         return Err(StoreError::Invalid(reason));
     }
+    // This clone is exclusively the store-side transcript.  The agent retains
+    // `rounds` and its live projections for the next provider request and
+    // forced-summary charging, but no resident SessionState may retain those
+    // payload allocations.  Do this for every call, not only calls the digest
+    // pass changed: pre-compacted and below-threshold calls also carry a live
+    // projection that must not survive checkpoint/finalize/fail publication.
+    release_live_payloads(&mut transformed);
     if let Err(reason) = persist_context(store, state) {
         state.quiesce = Some("quiesce_unwritable".to_string());
         state.detail = Some(reason.clone());
@@ -844,19 +953,35 @@ pub(crate) fn context_exchange(
     Ok(transformed)
 }
 
-/// Compacts one tool result before it is recorded into the round.
+/// Compacts one tool result before it is recorded into the round, returning the
+/// live and persisted projections of the SAME ingress record (#66).
 ///
-/// Bulk results are digested before entering the request list. In a genuinely
-/// store-free (`Unavailable`) context-store mode, compaction remains in memory;
-/// otherwise ingress, recovery, locking, and artifact-persistence failures are
-/// returned so the caller fails the turn rather than recording an undurable result.
+/// Bulk results are admitted here, ahead of the request list, so the full bytes
+/// move into the spine and the vault before anything is sent. Results strictly
+/// below the bulk threshold are returned unchanged in both projections and touch
+/// no store state; a result exactly at the threshold is bulk evidence and is
+/// admitted (119).
+///
+/// In a genuinely store-free (`Unavailable`) context-store mode, compaction
+/// remains in memory; otherwise ingress, recovery, locking, and
+/// artifact-persistence failures are returned so the caller fails the turn
+/// rather than recording an undurable result. A failed turn never releases the
+/// live bytes: every failure arm returns `Err` and no projection escapes.
 pub fn compact_tool_result(
     store: &SessionStore,
     tool: &str,
     result: &str,
-) -> Result<String, StoreError> {
+) -> Result<ToolResultProjection, StoreError> {
+    // Strictly below the threshold skips the seam: a result of exactly
+    // `BULK_RESULT_BYTES` is bulk evidence at-or-above, so the pre-entry seam
+    // digests it like any other bulk result. What the request list then carries
+    // is the admitted sanitized live projection of that record, not unsanitized
+    // bulk bytes; the bounded digest record is the durable representation the
+    // transcript retains. This is the same at-or-above comparison the filter
+    // verdict uses (`total >= rules.size_floor`) and the checkpoint seam, so all
+    // three agree on the boundary (119).
     if result.len() < BULK_RESULT_BYTES {
-        return Ok(result.to_string());
+        return Ok(ToolResultProjection::verbatim(result.to_string()));
     }
     let mut guard = store
         .context
@@ -875,7 +1000,13 @@ pub fn compact_tool_result(
             state.store.mode(),
             crate::context_store::store::StoreMode::Unavailable
         ) {
-            return Ok(memory_digest(state, tool, result.as_bytes()));
+            // Store-free mode has nothing to publish, so the in-memory record is
+            // the same bounded content in both projections (#66).
+            return Ok(ToolResultProjection::verbatim(memory_digest(
+                state,
+                tool,
+                result.as_bytes(),
+            )));
         }
         return Err(StoreError::Invalid(format!(
             "context store mode {} refused the turn",

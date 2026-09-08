@@ -78,6 +78,44 @@ impl ChatBackend for MockBackend {
 
 static SHARED_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+/// A scripted backend modeled on [`MockBackend`] that additionally clones every incoming
+/// model request (per backend call) into a shared collection, so a test can assert
+/// exactly what the next provider request carried (#66 live-bytes evidence).
+struct CapturingBackend {
+    inner: MockBackend,
+    captured: std::sync::Arc<Mutex<Vec<Vec<serdes_ai::core::ModelRequest>>>>,
+}
+
+impl CapturingBackend {
+    fn new(replies: Vec<LlmResult>) -> Self {
+        CapturingBackend {
+            inner: MockBackend::new(replies),
+            captured: std::sync::Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// A clone of the shared capture handle, taken before the backend is moved into the
+    /// agent so the test can read every request the agent sent after the run.
+    fn captured_handle(&self) -> std::sync::Arc<Mutex<Vec<Vec<serdes_ai::core::ModelRequest>>>> {
+        self.captured.clone()
+    }
+}
+
+impl ChatBackend for CapturingBackend {
+    fn request(
+        &self,
+        requests: &[serdes_ai::core::ModelRequest],
+        _tools: &[ToolSpec],
+    ) -> Result<LlmResult, String> {
+        self.captured.lock().unwrap().push(requests.to_vec());
+        self.inner.request(requests, _tools)
+    }
+
+    fn request_calls(&self) -> usize {
+        self.inner.request_calls()
+    }
+}
+
 #[cfg(unix)]
 extern "C" fn cleanup_shared_root() {
     if let Some(root) = SHARED_ROOT.get().and_then(|path| path.parent()) {
@@ -260,6 +298,13 @@ fn same_prompt_replay_does_no_network() {
     let backend = MockBackend::new(Vec::new());
     let r = reserved(&st, Some(1), None, "P1", &cwd).unwrap();
     assert!(r.replay, "same completed prompt must replay");
+    assert!(
+        r.rounds
+            .iter()
+            .flat_map(|round| &round.calls)
+            .all(|call| call.result_live.is_empty()),
+        "replay materializes only the compact resident transcript"
+    );
     let a = agent(Box::new(backend), &cwd);
     let out = a.run(&st, &r).expect("replay");
     assert_eq!(out.status, "ok", "replayed run reports ok");
@@ -727,6 +772,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let calls: Vec<LlmResult> = (0..2)
         .map(|i| LlmResult {
+            usage: LlmUsage::default(),
             text: String::new(),
             calls: vec![ToolCall {
                 id: format!("c{i}"),
@@ -734,15 +780,14 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
                 args_json: format!(r#"{{"path":"n{i}.txt","content":"x"}}"#),
             }],
             finish_reason: Some(FinishReason::ToolCall),
-            usage: LlmUsage::default(),
         })
         .collect();
     let mut replies = calls;
     replies.push(LlmResult {
+        usage: LlmUsage::default(),
         text: "all done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
-        usage: LlmUsage::default(),
     });
     let a = agent(Box::new(MockBackend::new(replies)), &cwd).with_max_tool_calls(Some(2));
     let run = a.run(&st, &r).expect("capped run completes");
@@ -761,6 +806,7 @@ fn natural_wrapup_below_cap_reports_budget_available() {
     let st = store("s15c");
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let call = LlmResult {
+        usage: LlmUsage::default(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c0".into(),
@@ -768,13 +814,12 @@ fn natural_wrapup_below_cap_reports_budget_available() {
             args_json: r#"{"path":"one.txt","content":"x"}"#.into(),
         }],
         finish_reason: Some(FinishReason::ToolCall),
-        usage: LlmUsage::default(),
     };
     let done = LlmResult {
+        usage: LlmUsage::default(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
-        usage: LlmUsage::default(),
     };
     let a =
         agent(Box::new(MockBackend::new(vec![call, done])), &cwd).with_max_tool_calls(Some(256));
@@ -827,21 +872,25 @@ fn first_turn_tiny_context_makes_zero_model_calls() {
     assert_eq!(snap.branches[0].lifecycle, Lifecycle::Failed);
 }
 
-/// A later round whose raw tool output would blow the context budget no longer stops the
-/// attempt: bulk results are digested pre-entry, so the replayed request carries a compact
-/// CTXDIGEST record instead of the payload, and the full bytes move to the spine and vault.
+/// A later round whose LIVE tool output would blow the context budget must fail the attempt
+/// before the second model call: #66 releases the sanitized admitted content to the next
+/// provider request, so the replayed request carries the ~1 MiB framed read and the
+/// conservative pre-send guard refuses it (context-limit) instead of sending it. The
+/// persisted side still behaves: the round's retained record is one bounded CTXDIGEST v1
+/// record whose handle is a content digest, and the payload lives in the sanitized spine.
+/// Ingress quarantine is optional, so this test asserts the sanitized spine and never
+/// requires a vault copy.
 #[test]
 fn later_round_context_overflow_stops_before_next_call() {
     let cwd = new_cwd();
     let st = store("sctx2");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
-    // The first request (system + prompt + tool schemas) fits a 600 KiB budget; its
-    // read_file round would materialize ~1 MiB of raw tool output into the next request.
-    // Compacting that result pre-entry keeps the next request inside the budget, so the
-    // attempt completes instead of being refused by the context limit.
+    // The first request (system + prompt + tool schemas) fits a 200_000-token budget
+    // (600_000-byte heuristic guard); its read_file round would materialize ~1 MiB of
+    // LIVE tool output into the next request, which the guard must refuse up front.
     let payload_len = 1024 * 1024;
     // read_file frames the window as "[0..N of N bytes]\n" before the content, so the
-    // digested result is the payload plus that header; the digest reports the framed size.
+    // released result is the payload plus that header; the digest reports the framed size.
     let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
     std::fs::write(cwd.join("big.txt"), "y".repeat(payload_len)).unwrap();
     let round = LlmResult {
@@ -859,19 +908,47 @@ fn later_round_context_overflow_stops_before_next_call() {
         &cwd,
     )
     .with_context_limit(Some(200_000));
-    let run = a.run(&st, &r).expect("the digested replay fits the budget");
-    assert_eq!(run.status, "ok", "the attempt completes");
-    assert_eq!(run.tool_count, 1);
-    assert!(!run.budget_exhausted, "nothing was cut short");
-    assert_eq!(a.model_calls(), 2, "the follow-up request is still sent");
-
-    // The bulk content was contained rather than replayed raw.
+    // The live bytes ride the next request, so that request is over the conservative
+    // budget and the attempt dies with the context-limit refusal BEFORE any second
+    // model call is made.
+    let e = a
+        .run(&st, &r)
+        .expect_err("the live-byte replay must be refused by the context limit");
+    assert_eq!(e.key, "context-limit", "{e:?}");
+    assert_eq!(
+        e.terminal_outcome, None,
+        "a context-limit refusal declares no agent terminal outcome"
+    );
+    assert!(
+        e.message.contains("after one compaction attempt, still"),
+        "the refusal records #82's single pre-send compaction attempt: {e:?}"
+    );
+    assert_eq!(
+        a.model_calls(),
+        1,
+        "the over-budget second request is never sent"
+    );
     let snapshot = st.snapshot().unwrap();
     let branch = snapshot
         .branches
         .iter()
         .find(|branch| branch.branch_id == r.branch_id)
         .unwrap();
+    assert_eq!(
+        branch.lifecycle,
+        Lifecycle::Failed,
+        "the refused attempt is terminal, not pending"
+    );
+    assert!(
+        branch
+            .rounds
+            .iter()
+            .flat_map(|round| &round.calls)
+            .all(|call| call.result_live.is_empty()),
+        "the failed resident branch retains no live provider payloads"
+    );
+
+    // The bulk content was contained rather than replayed raw.
     let retained = &branch.rounds[0].calls[0].result;
     assert!(
         retained.starts_with("CTXDIGEST v1 tool=read_file "),
@@ -894,10 +971,6 @@ fn later_round_context_overflow_stops_before_next_call() {
         context_artifact(&st, "sanitized").len() >= payload_len,
         "the sanitized spine holds the payload bytes"
     );
-    assert!(
-        context_artifact(&st, "vault").len() >= payload_len,
-        "the vault holds the full payload bytes"
-    );
     let first = st
         .context_read_page(0..64, 64)
         .expect("bounded context read-back");
@@ -915,13 +988,44 @@ fn later_round_context_overflow_stops_before_next_call() {
         !raw_present,
         "raw bulk evidence never reaches the transcript"
     );
+    // Save the committed artifact through the test's context-artifact API.
+    // The fresh store below consumes and validates these exact durable bytes
+    // before the test parses their terminal field.
+    let manifest_bytes = context_artifact(&st, "manifest.json");
+
+    // A fresh store must consume that durable manifest through normal context
+    // recovery before admitting its next record.  This is deliberately a real
+    // admission rather than a helper-level parser test.
+    let sid = SessionId::parse("sctx2").unwrap();
+    let recovered = SessionStore::load(&sid).expect("authenticated session reopen");
+    let recovered_projection = recovered
+        .compact_tool_result("read_file", &"r".repeat(1024))
+        .expect("recovery consumes and authenticates the published manifest before admission");
+    assert!(
+        recovered_projection
+            .persisted
+            .starts_with("CTXDIGEST v1 tool=read_file "),
+        "the recovered store admits and compacts the next bulk result"
+    );
+
+    // Parse the artifact that authenticated recovery just consumed. A
+    // context-limit refusal is not a context-policy terminal; quarantine
+    // remains optional and is intentionally not asserted here.
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)
+        .expect("authenticated published context manifest is valid JSON");
+    let terminal_outcome = manifest
+        .get("terminal_outcome")
+        .expect("the authenticated manifest durably records terminal_outcome");
+    assert_eq!(
+        terminal_outcome,
+        &serde_json::Value::Null,
+        "a pre-send context-limit refusal has no context-policy terminal outcome: {manifest}"
+    );
+
     let journal = context_artifact(&st, "rewrite-journal.log");
     assert!(!journal.is_empty(), "policy rewrite accounting is durable");
     assert!(!context_artifact(&st, "events.log").is_empty());
     assert!(!context_artifact(&st, "checkpoints").is_empty());
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&context_artifact(&st, "manifest.json")).unwrap();
-    assert_eq!(manifest["terminal_outcome"], "wrap_up");
 }
 
 /// Two rounds each under the per-turn assistant cap are still bounded together: the total
@@ -994,27 +1098,34 @@ fn aggregate_args_across_rounds_rejected() {
     assert!(!cwd.join("args-b.txt").exists());
 }
 
-/// Tool outputs consume one shared turn budget. Later calls receive only the remaining bytes,
-/// so neither the next model request nor the persisted round can contain an oversized
-/// aggregate. Bulk results are then compacted pre-entry: the persisted round holds one
-/// bounded CTXDIGEST record per call while the full bytes live in the vault.
+/// Tool outputs consume one shared turn budget, and #66 charges that budget in LIVE
+/// bytes: the sanitized admitted content the next provider request carries. Later calls
+/// receive only the remaining bytes, so every retained record is still one bounded
+/// CTXDIGEST digest, the first fifteen report the full framed size and the last reports
+/// the smaller clipped size the budget had left, and the aggregate never exceeds
+/// the resolved turn cap. The payload itself lives in the sanitized spine; a vault copy is
+/// present only when ingress quarantine requires one.
 #[test]
 fn multiple_tool_calls_share_remaining_output_budget() {
-    use llxprt_code_rs::agent::MAX_TURN_OUTPUT_BYTES;
+    use llxprt_code_rs::agent::OutputCaps;
 
     let cwd = new_cwd();
-    let payload_len = 1024 * 1024;
+    let payload_len = 4096;
     // read_file frames the window as "[0..N of N bytes]\n" before the content, so the
-    // digested result is the payload plus that header; the digest reports the framed size.
-    let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
-    std::fs::write(cwd.join("megabyte.txt"), "z".repeat(payload_len)).unwrap();
+    // released result is the payload plus that header; the digest reports the framed size.
+    let frame_header = format!("[0..{payload_len} of {payload_len} bytes]\n");
+    let framed_len = payload_len + frame_header.len();
+    // A small per-test cap exercises the exact same shared LIVE-byte boundary without
+    // repeatedly publishing multi-megabyte evidence during this focused unit test.
+    let turn_budget = 16 * framed_len - 1;
+    std::fs::write(cwd.join("four-kib.txt"), "z".repeat(payload_len)).unwrap();
     let st = store("sagg-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let calls = (0..16)
         .map(|index| ToolCall {
             id: format!("read-{index}"),
             name: "read_file".into(),
-            args_json: r#"{"path":"megabyte.txt"}"#.into(),
+            args_json: r#"{"path":"four-kib.txt"}"#.into(),
         })
         .collect();
     let tool_round = LlmResult {
@@ -1023,10 +1134,18 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         calls,
         finish_reason: Some(FinishReason::ToolCall),
     };
+    // The turn budget is the subject here, not the context limit.  A per-test
+    // cap makes sixteen framed bulk reads fit in one request while preserving the
+    // production bulk threshold and the exact shared-LIVE-byte boundary.
     let agent = agent(
         Box::new(MockBackend::new(vec![tool_round, result("done")])),
         &cwd,
-    );
+    )
+    .with_context_limit(Some(turn_budget as u64))
+    .with_output_caps(OutputCaps {
+        turn: turn_budget,
+        ..OutputCaps::default()
+    });
 
     agent.run(&st, &reserved).expect("bounded turn succeeds");
     let snapshot = st.snapshot().unwrap();
@@ -1036,7 +1155,11 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         .find(|branch| branch.branch_id == reserved.branch_id)
         .unwrap();
     let retained_calls = &branch.rounds[0].calls;
-    assert_eq!(retained_calls.len(), 16, "every call is retained");
+    assert_eq!(
+        retained_calls.len(),
+        16,
+        "every call executes and is retained"
+    );
     for call in retained_calls {
         assert!(
             call.result.starts_with("CTXDIGEST v1 tool=read_file "),
@@ -1044,27 +1167,62 @@ fn multiple_tool_calls_share_remaining_output_budget() {
             call.result
         );
     }
+
+    // The first fifteen reads fit the remaining budget whole, so their digests report
+    // the full framed size; the sixteenth is the last of the round, clipped to the
+    // remaining budget (the drain-bounded read caps at the leftover bytes). This test
+    // sets no tool-call budget, so the round carries no budget notice and nothing reserves
+    // notice bytes: the clipped live result is exactly the leftover, and the digest reports
+    // exactly that size.
+    let expected_clipped = turn_budget - 15 * framed_len;
     assert!(
-        retained_calls[0]
-            .result
-            .contains(&format!("bytes={framed_len}")),
-        "the record reports the payload the shared budget left for one call: {}",
-        retained_calls[0].result
+        expected_clipped < framed_len,
+        "the fixture must leave a clipped tail: remainder {expected_clipped} framed {framed_len}"
+    );
+    for call in &retained_calls[..15] {
+        assert!(
+            call.result.contains(&format!("bytes={framed_len}")),
+            "the first fifteen reads keep their full framed size: {}",
+            call.result
+        );
+    }
+    let last = retained_calls[15].result.clone();
+    assert!(
+        last.contains(&format!("bytes={expected_clipped}")),
+        "the last read is clipped to the remaining budget: {last}"
+    );
+    assert_ne!(
+        last, retained_calls[0].result,
+        "the clipped tail renders a different digest record than a whole read"
+    );
+
+    // The charged live bytes are exactly the sum the digest records report, and they
+    // never exceed the shared output budget.
+    let charged: usize = retained_calls
+        .iter()
+        .map(|call| {
+            let header = call.result.lines().next().unwrap_or("");
+            header
+                .split("bytes=")
+                .nth(1)
+                .and_then(|rest| rest.split(' ').next())
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("digest record reports bytes=: {call:?}"))
+        })
+        .sum();
+    assert_eq!(
+        charged,
+        15 * framed_len + expected_clipped,
+        "the charged live bytes are exactly the sizes the records report"
     );
     assert!(
-        retained_calls
-            .iter()
-            .all(|call| call.result == retained_calls[0].result),
-        "identical clipped outputs render identical digest records"
+        charged <= turn_budget,
+        "the live aggregate stays inside the shared output budget: {charged}"
     );
     let output_bytes: usize = retained_calls.iter().map(|call| call.result.len()).sum();
-    assert_eq!(
-        output_bytes, 1616,
-        "16 bounded digest records are retained, not 16 MiB of raw output"
-    );
     assert!(
-        output_bytes < MAX_TURN_OUTPUT_BYTES,
-        "the retained aggregate stays inside the shared output budget"
+        output_bytes < 16 * 1024,
+        "16 bounded digest records retain compact records rather than the 16 full 4,096-byte payloads: {output_bytes}"
     );
     let handle = digest_handle(&retained_calls[0].result);
     assert!(
@@ -1075,9 +1233,515 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         context_artifact(&st, "sanitized").len() >= payload_len,
         "the sanitized spine holds the payload bytes"
     );
+}
+
+/// The end-to-end #66 path the unit test `tool_call_record_durable_form_omits_result_live`
+/// (src/session/tests.rs) summarizes: a bulk read's admitted sanitized bytes ride the
+/// NEXT provider request as the live projection, while the session's durable transcript/state
+/// records carry only the one bounded CTXDIGEST digest and never the raw fixture bytes.
+///
+/// The capturing backend records every model request the agent actually sends. After the run the
+/// second call's final request (the tool-return message) must carry the framed read window
+/// `[0..N of N bytes]\n` plus both fixture sentinels, and no `CTXDIGEST` anywhere in
+/// it. A re-open through the authenticated `SessionStore::load` (never a hand-parse)
+/// then shows the persisted call as one CTXDIGEST v1 record whose `bytes=` matches the
+/// fingerprint of the very string the request carried, whose `content-…` handle is the
+/// production basis (`context_kernel::canonical::digest`) over those same admitted bytes,
+/// and whose `result_live` reloads empty (`#[serde(default, skip_serializing)]`). Only
+/// after that authenticated reopen succeeds do we scan the durable session-dir records for the
+/// `result_live` key and the raw fixture bytes, skipping the `context/` artifacts where the
+/// admitted bytes legitimately live.
+#[test]
+fn admitted_live_bytes_are_digest_only_after_authenticated_reopen() {
+    let cwd = new_cwd();
+    let interior_sentinel = "interior_sentinel_9f3c7";
+    let final_sentinel = "final_sentinel_c84d2";
+    let body_line = "fn helper() -> u32 { 41 + 1 }\n";
+    let mut fixture = String::from(
+        "// digest-only live-bytes fixture\n// module: admitted_live_bytes_are_digest_only\n",
+    );
+    fixture.push_str(body_line);
+    fixture.push_str(interior_sentinel);
+    fixture.push('\n');
+    // Pad a modest ordinary source file past the bulk threshold (BULK_RESULT_BYTES = 1024)
+    // while staying far under the 1 MiB read bound, so the whole file is one read window.
+    while fixture.len() < 2048 {
+        fixture.push_str(body_line);
+    }
+    fixture.push_str(final_sentinel);
+    fixture.push('\n');
+    let file_len = fixture.len();
     assert!(
-        context_artifact(&st, "vault").len() >= payload_len,
-        "the vault holds the full payload bytes"
+        file_len >= 1024,
+        "the fixture must cross the bulk threshold: {file_len}"
+    );
+    // read_file frames the whole window as "[0..N of N bytes]\n" before the content, so
+    // the admitted payload is the fixture plus that header; the digest reports the framed size.
+    let frame_header = format!("[0..{file_len} of {file_len} bytes]\n");
+    let framed_len = file_len + frame_header.len();
+    std::fs::write(cwd.join("digest-live-fixture.rs"), &fixture).unwrap();
+
+    let st = store("sauthreopen");
+    let r = reserved(&st, None, None, "P1", &cwd).unwrap();
+    let round = LlmResult {
+        usage: LlmUsage::default(),
+        text: "reading".to_string(),
+        calls: vec![ToolCall {
+            id: "live-read".into(),
+            name: "read_file".into(),
+            args_json: r#"{"path":"digest-live-fixture.rs"}"#.into(),
+        }],
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let backend = CapturingBackend::new(vec![round, result("done")]);
+    let captured = backend.captured_handle();
+    let a = agent(Box::new(backend), &cwd);
+    a.run(&st, &r).expect("the bounded turn succeeds");
+    drop(a);
+
+    // The first call carries the opening request list; the second carries the round's
+    // assistant message followed by the tool-return message with the admitted live bytes.
+    let batches = captured.lock().unwrap();
+    assert_eq!(batches.len(), 2, "one opening call and one post-round call");
+    let second = batches
+        .last()
+        .expect("the second backend call was captured");
+    assert_eq!(second.len(), 4, "system, prompt, assistant, tool-return");
+    let tool_return = second
+        .last()
+        .expect("the tool-return message is the final request");
+    let live = tool_return
+        .parts
+        .iter()
+        .find_map(|part| match part {
+            serdes_ai::core::ModelRequestPart::ToolReturn(tr) => {
+                Some(tr.content.to_string_content())
+            }
+            _ => None,
+        })
+        .expect("the final request carries a tool-return part");
+    assert_eq!(
+        live,
+        format!("{frame_header}{fixture}"),
+        "the admitted live bytes are exactly the framed read window"
+    );
+    assert!(
+        live.starts_with(&frame_header),
+        "the tool-return carries the read_file window framing"
+    );
+    assert!(
+        live.contains(interior_sentinel),
+        "the interior sentinel rides the live projection"
+    );
+    assert!(
+        live.contains(final_sentinel),
+        "the final sentinel rides the live projection"
+    );
+    let serialized = serde_json::to_string(tool_return).unwrap();
+    assert!(
+        !serialized.contains("CTXDIGEST"),
+        "the request list carries live bytes, never the digest record"
+    );
+    assert_eq!(
+        live.len(),
+        framed_len,
+        "bytes= counts the framed admitted payload"
+    );
+    drop(batches);
+
+    // Publication stores only the compact transcript clone.  The agent's own
+    // rounds above remained live long enough to send the second provider request,
+    // but this resident state has released every provider payload allocation.
+    let resident = st.snapshot().expect("published state is readable");
+    let resident_call = &resident
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == r.branch_id)
+        .expect("published branch")
+        .rounds[0]
+        .calls[0];
+    assert!(
+        resident_call.result_live.is_empty(),
+        "the resident transcript retains no admitted live bytes"
+    );
+
+    // The durable side is the ONE bounded CTXDIGEST record. Reopen ONLY through the
+    // authenticated loader (the digest-chained session log and state slots are validated
+    // there; we never hand-parse unauthenticated JSON as authentication evidence).
+    drop(st);
+    let sid = SessionId::parse("sauthreopen").unwrap();
+    let st2 = SessionStore::load(&sid).expect("authenticated reopen succeeds");
+    let snap = st2.snapshot().unwrap();
+    let branch = snap
+        .branches
+        .iter()
+        .find(|b| b.branch_id == r.branch_id)
+        .unwrap();
+    assert_eq!(branch.lifecycle, Lifecycle::Completed);
+    let call = &branch.rounds[0].calls[0];
+    assert!(
+        call.result.starts_with("CTXDIGEST v1 tool=read_file "),
+        "the bulk result is retained as a digest record: {}",
+        call.result
+    );
+    assert!(
+        call.result.contains(&format!("bytes={framed_len}")),
+        "the header reports the framed admitted payload size: {}",
+        call.result
+    );
+    let handle = digest_handle(&call.result);
+    assert!(
+        handle.starts_with("content-") && handle.len() == "content-".len() + 16,
+        "the record carries a content digest handle, not a vault slot: {handle}"
+    );
+    // Tie the header's handle to the captured live bytes through the PRODUCTION basis
+    // (context_kernel::canonical::digest, the same content_digest_handle source),
+    // never a second invented digest.
+    let production = format!(
+        "content-{:016x}",
+        llxprt_code_rs::context_kernel::canonical::digest(live.as_bytes())
+    );
+    assert_eq!(
+        handle, production,
+        "the authenticated record's handle is the production content digest of the admitted bytes"
+    );
+    assert_eq!(
+        call.result_live, "",
+        "result_live is transient and reloads empty (skip_serializing)"
+    );
+
+    // Only after the authenticated reopen succeeds: the durable transcript/state records
+    // (NOT the context/ artifacts, which legitimately retain the admitted bytes) must never
+    // carry the result_live key nor the raw fixture bytes.
+    let mut durable = Vec::new();
+    for entry in std::fs::read_dir(&st2.session_dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if !entry.file_type().unwrap().is_file() {
+            continue;
+        }
+        durable.extend(std::fs::read(&path).unwrap());
+    }
+    let durable_text = String::from_utf8_lossy(&durable);
+    assert!(
+        !durable_text.contains("result_live"),
+        "the durable state never serializes the transient live projection"
+    );
+    assert!(
+        !durable_text.contains(interior_sentinel),
+        "the raw fixture interior never reaches the durable transcript"
+    );
+    assert!(
+        !durable_text.contains(final_sentinel),
+        "the raw fixture tail never reaches the durable transcript"
+    );
+}
+
+/// The exhaustion boundary of the shared output budget: once the LIVE bytes charged so
+/// far reach this test's resolved `OutputCaps::turn`, the next call fails BEFORE it executes with the
+/// output-cap refusal (AgentError key "limit"). The steps are sized so the budget is
+/// exhausted exactly, so the boundary itself - not an overshoot - is what refuses.
+///
+/// The refusal persists only the prior COMPLETED rounds of the turn; the one round
+/// carrying the failing call is dropped together with its already-executed records (the
+/// `dead` path is a pre-checkpoint failure, so its local round never commits). Dropping
+/// the records does NOT undo the executed filesystem writes: a checkpoint failure is not
+/// a rollback, so the granted write's file survives on disk with exactly the bytes the
+/// tool wrote, while the refused call never executed and its file stays absent. The
+/// positive control below replays the same granted prefix through the tail read, so it
+/// verifies the same charged-byte sum the refusal asserts - the whole cap - while
+/// committing its round and its own written file. The agent is never asked for a next
+/// model reply, because the refusal fires mid-round.
+#[test]
+fn output_budget_exhaustion_fails_the_next_call_before_execution() {
+    use llxprt_code_rs::agent::OutputCaps;
+
+    let cwd = new_cwd();
+    // read_file frames its window as "[0..N of N bytes]\n" ahead of the content, so the
+    // released bytes are the payload plus that header; the digest reports the framed size.
+    let payload_len = 1024;
+    let frame_header = format!("[0..{payload_len} of {payload_len} bytes]\n");
+    let framed_len = payload_len + frame_header.len();
+    // Keep the exact exhaustion proof small: the production threshold remains 1024
+    // bytes, while this test's explicitly resolved turn cap is sixteen framed reads.
+    let turn_budget = 16 * framed_len;
+    std::fs::write(cwd.join("one-kib.txt"), "a".repeat(payload_len)).unwrap();
+    // One granted write that MUST execute, and then the one that must NOT. Nothing is
+    // pre-created: both write targets are absent before the turn, so the files below are
+    // written by the tool calls themselves (or not at all). The grant of that one write and
+    // the one tail read below are derived so the three steps land exactly on the boundary:
+    // fifteen whole framed reads, plus that exact grant, plus a file whose clipped framed
+    // read fills precisely the leftover, leave the FINAL call at remaining == 0.
+    let granted_text = "nine bytes";
+    let granted_bytes = granted_text.as_bytes();
+    let granted_path = "granted.txt";
+    // The write tool's result is exactly "wrote {content-len} bytes to {path}" (src/tools.rs
+    // `write_file_tool`), where the path is the leaf-name `PathBuf` `atomic_write` returns,
+    // so the grant is derived from that spelling - 10 content bytes render "wrote 10 bytes
+    // to granted.txt" - rather than from a hand-counted length.
+    let granted = format!(
+        "wrote {} bytes to {}",
+        granted_bytes.len(),
+        Path::new(granted_path).display()
+    );
+    assert_eq!(
+        granted_bytes.len(),
+        10,
+        "the fixture's written payload size"
+    );
+    let budget_after_fifteen = turn_budget - 15 * framed_len;
+    // The grant charges exactly the leftover minus the tail read's clipped size; the tail
+    // file is written so its framed read - capped to the remaining budget - charges the
+    // last byte.
+    let budget_for_tail = budget_after_fifteen - granted.len();
+    std::fs::write(
+        cwd.join("tail.txt"),
+        "t".repeat(budget_for_tail.saturating_sub(1)),
+    )
+    .unwrap();
+    assert_eq!(
+        granted.len() + budget_for_tail,
+        budget_after_fifteen,
+        "the fixture must leave exactly zero live budget for the final call"
+    );
+    assert!(
+        !cwd.join(granted_path).exists() && !cwd.join("refused-evidence.txt").exists(),
+        "both write targets start absent, so any file below is this turn's own doing"
+    );
+
+    let st = store("sagg-output-exhausted");
+    let request = reserved(&st, None, None, "P1", &cwd).unwrap();
+    let reads = (0..15).map(|index| ToolCall {
+        id: format!("read-{index}"),
+        name: "read_file".into(),
+        args_json: r#"{"path":"one-kib.txt"}"#.into(),
+    });
+    let write_ok = ToolCall {
+        id: "write-evidenced".into(),
+        name: "write_file".into(),
+        args_json: format!(r#"{{"path":"{granted_path}","content":"{granted_text}"}}"#),
+    };
+    let tail = ToolCall {
+        id: "read-tail".into(),
+        name: "read_file".into(),
+        args_json: r#"{"path":"tail.txt"}"#.into(),
+    };
+    // This last call must be refused BEFORE execution: its file must therefore never appear.
+    let refused = ToolCall {
+        id: "refused-evidence".into(),
+        name: "write_file".into(),
+        args_json: r#"{"path":"refused-evidence.txt","content":"must not run"}"#.into(),
+    };
+    let calls: Vec<ToolCall> = reads
+        .clone()
+        .chain([write_ok.clone(), tail.clone(), refused])
+        .collect();
+    let tool_round = LlmResult {
+        usage: LlmUsage::default(),
+        text: "reading".into(),
+        calls,
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    // The turn budget is the subject here, not the context limit: the FIFTEEN frames that
+    // ride the one post-round request are 15,720 bytes (~15.4 KiB) of LIVE bytes, so this
+    // context leaves enough room under the 3-bytes-per-token heuristic guard. A smaller
+    // expression would trip the pre-send context gate BEFORE the shared output budget ever
+    // binds, exactly as the completed sibling test documents.
+    // (Bound to `refusing` so the positive control below can still reach the `agent`
+    // helper instead of this value.)
+    let refusing = agent(
+        Box::new(MockBackend::new(vec![tool_round, result("done")])),
+        &cwd,
+    )
+    .with_context_limit(Some(turn_budget as u64))
+    .with_output_caps(OutputCaps {
+        turn: turn_budget,
+        ..OutputCaps::default()
+    });
+
+    let error = refusing
+        .run(&st, &request)
+        .expect_err("the exhausted budget must refuse the next call");
+    assert_eq!(error.key, "limit", "{error:?}");
+    assert!(
+        error
+            .message
+            .contains(&format!("reached the {turn_budget} byte cap")),
+        "the refusal names the output cap: {error:?}"
+    );
+    // Direct execution evidence: the granted write RAN, and the refused write did NOT. The
+    // grant executed before the budget ran out, and a session checkpoint failure never rolls
+    // back an already-executed filesystem write: granted.txt is on disk with exactly the
+    // bytes the tool wrote. The refused call never executed, so its file is absent. The
+    // refusal fires on the turn's first local round, so its records never complete/commit
+    // and the model made exactly one call.
+    assert_eq!(
+        refusing.model_calls(),
+        1,
+        "the refusal happens before the next model request"
+    );
+    assert_eq!(
+        std::fs::read(cwd.join(granted_path)).unwrap_or_default(),
+        granted_bytes,
+        "the executed write survived the refusal: its file carries exactly the tool-written bytes"
+    );
+    assert!(
+        !cwd.join("refused-evidence.txt").exists(),
+        "the refused call never executed: the side-effecting write left no file"
+    );
+
+    // The failed local round never committed, so the persisted branch is terminal and EMPTY: the
+    // `dead` refusal carries the COMPLETED-round list, which is none here, because the
+    // exhaustion happened inside the round that was still executing. The on-disk
+    // side-effect assertions above - not a round count - are what prove what ran.
+    let snapshot = st.snapshot().unwrap();
+    let branch = snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == request.branch_id)
+        .unwrap();
+    assert_eq!(branch.lifecycle, Lifecycle::Failed);
+    assert!(
+        branch.rounds.is_empty(),
+        "no completed round is persisted: the refusing round is the turn's first and failed local"
+    );
+
+    // Independent positive pass over the SAME live-byte derivation: a run that replays the
+    // granted prefix THROUGH the tail read - only the final refused write short of the
+    // boundary - charges the whole cap and completes, proving the derivation above is
+    // exactly where the refusal must (and does) land. It runs in its own freshly seeded
+    // workspace whose granted.txt starts absent, so its committed file is that run's own
+    // executed-write proof rather than an inherited artifact of the refused run.
+    let ok_st = store("sagg-output-exhausted-ok");
+    let ok_cwd = new_cwd();
+    std::fs::write(ok_cwd.join("one-kib.txt"), "a".repeat(payload_len)).unwrap();
+    std::fs::write(
+        ok_cwd.join("tail.txt"),
+        "t".repeat(budget_for_tail.saturating_sub(1)),
+    )
+    .unwrap();
+    assert!(
+        !ok_cwd.join(granted_path).exists(),
+        "the positive control's write target starts absent"
+    );
+    let ok_reserved = reserved(&ok_st, None, None, "P1", &ok_cwd).unwrap();
+    let below: Vec<ToolCall> = reads.chain([write_ok, tail]).collect();
+    let below_round = LlmResult {
+        usage: LlmUsage::default(),
+        text: "reading".into(),
+        calls: below,
+        finish_reason: Some(FinishReason::ToolCall),
+    };
+    let ok_backend = CapturingBackend::new(vec![below_round, result("done")]);
+    let ok_captured = ok_backend.captured_handle();
+    let ok_agent = agent(Box::new(ok_backend), &ok_cwd)
+        .with_context_limit(Some(turn_budget as u64))
+        .with_output_caps(OutputCaps {
+            turn: turn_budget,
+            ..OutputCaps::default()
+        });
+    ok_agent
+        .run(&ok_st, &ok_reserved)
+        .expect("under budget succeeds");
+    let ok_snapshot = ok_st.snapshot().unwrap();
+    let ok_branch = ok_snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == ok_reserved.branch_id)
+        .unwrap();
+    assert_eq!(ok_branch.lifecycle, Lifecycle::Completed);
+    assert_eq!(
+        ok_branch.rounds.len(),
+        2,
+        "the tool round and the final assistant round both persist"
+    );
+    assert_eq!(ok_branch.rounds[0].calls.len(), 17);
+    assert_eq!(ok_branch.rounds[1].assistant, "done");
+    assert!(
+        ok_branch.rounds[0].calls.iter().all(|call| !call.refused),
+        "an under-budget round never refuses a call"
+    );
+    // Measure the actual post-tool provider request, rather than reconstructing
+    // its charge from fixture constants or from the store-side clone. Bulk reads
+    // are compact only in the resident transcript; the provider sees all fifteen
+    // framed results. The below-threshold clipped tail is verbatim, not CTXDIGEST.
+    let batches = ok_captured.lock().unwrap();
+    assert_eq!(batches.len(), 2, "opening and post-tool provider requests");
+    let sent_results: Vec<String> = batches[1]
+        .iter()
+        .flat_map(|request| request.parts.iter())
+        .filter_map(|part| match part {
+            serdes_ai::core::ModelRequestPart::ToolReturn(tool_return) => {
+                Some(tool_return.content.to_string_content())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent_results.len(),
+        17,
+        "the post-tool request carries every executed tool result"
+    );
+    for (index, sent) in sent_results[..15].iter().enumerate() {
+        assert_eq!(
+            sent.len(),
+            framed_len,
+            "provider result {index} carries the complete framed read"
+        );
+    }
+    assert_eq!(
+        sent_results[15], granted,
+        "the provider receives the granted write response verbatim"
+    );
+    assert_eq!(
+        sent_results[16].len(),
+        budget_for_tail,
+        "the provider receives the tail at the clipped remaining size"
+    );
+    assert!(
+        sent_results[16].len() < framed_len,
+        "the tail is clipped rather than a full framed read"
+    );
+    let charged: usize = sent_results.iter().map(String::len).sum();
+    assert_eq!(
+        charged, turn_budget,
+        "the actual sent tool results fill the resolved turn cap"
+    );
+    drop(batches);
+
+    // The resident store-side transcript has released every live projection;
+    // its compact records retain the durable, bounded representation instead.
+    let witnessed = &ok_branch.rounds[0].calls;
+    assert!(
+        witnessed.iter().all(|call| call.result_live.is_empty()),
+        "a resident SessionState never retains provider live payloads"
+    );
+    for call in &witnessed[..15] {
+        assert!(
+            call.result.contains(&format!("bytes={framed_len}")),
+            "each whole framed read records its full charged size: {}",
+            call.result
+        );
+    }
+    assert_eq!(
+        witnessed[15].result, granted,
+        "the granted write's persisted result remains verbatim"
+    );
+    assert_eq!(
+        witnessed[16].result.len(),
+        budget_for_tail,
+        "the below-threshold tail remains verbatim at its clipped live size"
+    );
+    assert_eq!(
+        std::fs::read(ok_cwd.join(granted_path))
+            .expect("the committed round keeps the executed write"),
+        granted_bytes,
+        "the write's file carries exactly the bytes the call wrote"
+    );
+    let charged = 15 * framed_len + granted.len() + budget_for_tail;
+    assert_eq!(
+        charged, turn_budget,
+        "the persisted records' witnessed quantities fill the resolved turn cap"
     );
 }
 
@@ -1197,8 +1861,17 @@ fn checkpoint_extends_lease() {
             ok: true,
             refused: false,
             result: "checkpoint result".into(),
+            result_live: "checkpoint result".into(),
         }],
     }];
+    st.checkpoint(&r, &rounds).unwrap();
+    assert_eq!(
+        rounds[0].calls[0].result_live, "checkpoint result",
+        "checkpoint publication must not clear the agent-owned live projection"
+    );
+    // Re-submitting the agent-owned rounds (which still carry their live
+    // projection) normalizes them again and finds an empty persisted suffix.
+    // This keeps checkpoint retry/idempotency independent of live storage.
     st.checkpoint(&r, &rounds).unwrap();
     let after = on_disk_lease(&st, &r);
     assert!(
@@ -1213,7 +1886,101 @@ fn checkpoint_extends_lease() {
         .unwrap();
     assert_eq!(b.lifecycle, Lifecycle::Pending, "checkpoint leaves pending");
     assert_eq!(b.rounds.len(), 1);
+    assert!(
+        b.rounds[0].calls[0].result_live.is_empty(),
+        "checkpoint's resident transcript releases live payloads"
+    );
     assert_eq!(b.owner, r.owner);
+}
+
+/// The publication seam clones the agent-owned transcript before releasing live
+/// provider bytes.  Exercise all terminal publication paths directly: this is
+/// deliberately not a clone/helper test, because checkpoint, completion, and
+/// failure each append a real session event and publish context state.
+#[test]
+fn store_publication_releases_resident_live_bytes_without_mutating_agent_rounds() {
+    let cwd = new_cwd();
+    let checkpoint_store = store("live-publication-completed");
+    let checkpoint_reservation = reserved(&checkpoint_store, None, None, "P1", &cwd).unwrap();
+    let rounds = vec![
+        RoundRecord {
+            assistant: "working".into(),
+            calls: vec![ToolCallRecord {
+                id: "live-completed".into(),
+                name: "read_file".into(),
+                args: r#"{"path":"fixture.txt"}"#.into(),
+                ok: true,
+                refused: false,
+                result: "persisted tool result".into(),
+                result_live: "provider-only live result".into(),
+            }],
+        },
+        RoundRecord {
+            assistant: "done".into(),
+            calls: Vec::new(),
+        },
+    ];
+
+    checkpoint_store
+        .checkpoint(&checkpoint_reservation, &rounds[..1])
+        .expect("checkpoint publishes its resident transcript");
+    assert_eq!(
+        rounds[0].calls[0].result_live, "provider-only live result",
+        "checkpoint must not mutate the agent-owned provider projection"
+    );
+    checkpoint_store
+        .finalize(&checkpoint_reservation, "done", &rounds)
+        .expect("completion publishes its resident transcript");
+    assert_eq!(
+        rounds[0].calls[0].result_live, "provider-only live result",
+        "completion must not mutate the agent-owned provider projection"
+    );
+    let completed = checkpoint_store
+        .snapshot()
+        .expect("completed state is readable");
+    let completed_branch = completed
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == checkpoint_reservation.branch_id)
+        .expect("completed branch");
+    assert_eq!(completed_branch.lifecycle, Lifecycle::Completed);
+    assert!(
+        completed_branch.rounds[0].calls[0].result_live.is_empty(),
+        "completed resident state releases the live provider allocation"
+    );
+
+    let failed_store = store("live-publication-failed");
+    let failed_reservation = reserved(&failed_store, None, None, "P1", &cwd).unwrap();
+    let failed_rounds = vec![RoundRecord {
+        assistant: "working".into(),
+        calls: vec![ToolCallRecord {
+            id: "live-failed".into(),
+            name: "read_file".into(),
+            args: r#"{"path":"fixture.txt"}"#.into(),
+            ok: true,
+            refused: false,
+            result: "persisted failure-prefix result".into(),
+            result_live: "provider-only failed live result".into(),
+        }],
+    }];
+    failed_store
+        .fail(&failed_reservation, "intentional failure", &failed_rounds)
+        .expect("failure publishes its resident transcript");
+    assert_eq!(
+        failed_rounds[0].calls[0].result_live, "provider-only failed live result",
+        "failure must not mutate the agent-owned provider projection"
+    );
+    let failed = failed_store.snapshot().expect("failed state is readable");
+    let failed_branch = failed
+        .branches
+        .iter()
+        .find(|branch| branch.branch_id == failed_reservation.branch_id)
+        .expect("failed branch");
+    assert_eq!(failed_branch.lifecycle, Lifecycle::Failed);
+    assert!(
+        failed_branch.rounds[0].calls[0].result_live.is_empty(),
+        "failed resident state releases the live provider allocation"
+    );
 }
 
 #[test]

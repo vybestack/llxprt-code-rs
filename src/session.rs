@@ -43,6 +43,7 @@ pub(crate) mod context_persist;
 pub(crate) mod context_publish;
 pub(crate) mod context_recover;
 pub(crate) mod records;
+pub use context_persist::ToolResultProjection;
 pub use records::{BranchRecord, Lifecycle, RoundRecord, SessionState, ToolCallRecord};
 mod log;
 mod replay;
@@ -722,8 +723,13 @@ impl SessionStore {
         context_persist::context_exchange(self, rounds)
     }
 
-    /// Compacts one tool result before it is recorded into the round.
-    pub fn compact_tool_result(&self, tool: &str, result: &str) -> Result<String, StoreError> {
+    /// Compacts one tool result before it is recorded into the round, returning
+    /// the live and persisted projections of the same ingress record (#66).
+    pub fn compact_tool_result(
+        &self,
+        tool: &str,
+        result: &str,
+    ) -> Result<ToolResultProjection, StoreError> {
         context_persist::compact_tool_result(self, tool, result)
     }
 
