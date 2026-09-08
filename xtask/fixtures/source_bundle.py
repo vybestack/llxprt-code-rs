@@ -34,8 +34,9 @@ def init(root):
     git(root, 'init', '-q')
     git(root, 'config', 'user.name', 'Bundle Test')
     git(root, 'config', 'user.email', 'bundle-test@example.invalid')
-    git(root, 'add', '.')
-    git(root, 'add', '-f', 'registry-vendor') if (root / 'registry-vendor').exists() else None
+    # The materialized commit can contain tracked files under ignored directories.
+    # Capture every supplied byte, including tmp/ and registry-vendor/.
+    git(root, 'add', '-f', '.')
     git(root, 'commit', '-qm', 'snapshot')
 
 
@@ -236,7 +237,7 @@ if not moved.exists():
 
 def main():
     with tempfile.TemporaryDirectory(prefix='llxprt-bundle-verifier.') as temporary:
-        tmp = Path(temporary)
+        tmp = Path(temporary).resolve()
         marker = tmp / 'outside-marker'
         malformed(tmp, marker)
         for name, message in [('concatenated-gzip-expansion', 'expanded tar-stream'), ('unsorted-manifest', 'manifest entries are not byte-sorted')]:
