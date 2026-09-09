@@ -104,16 +104,22 @@ impl ChatBackend for ResponsesBackend {
 mod tests {
     use super::*;
 
+    /// One current-thread executor per test, mirroring the single runtime a
+    /// `Turn` owns in production (src/agent/deadline.rs).
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
     #[test]
     fn failed_requests_are_counted_without_exposing_transport_details() {
         let backend = ResponsesBackend::new(
             OpenResponsesModel::new("test-model", "not-a-url"),
             ModelSettings::default(),
         );
-        let error = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        let error = test_runtime()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("invalid test endpoint must fail");
 
@@ -148,10 +154,7 @@ mod tests {
         );
 
         let started = std::time::Instant::now();
-        let error = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        let error = test_runtime()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("silent server must trip the backend timeout");
         assert!(
@@ -220,16 +223,13 @@ mod tests {
         };
         let first_history = vec![turn("first codex turn")];
         let second_history = vec![turn("first codex turn"), turn("second codex turn")];
-        let first = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        // Both rounds share one executor, mirroring the single per-turn
+        // runtime in src/agent/deadline.rs.
+        let rt = test_runtime();
+        let first = rt
             .block_on(backend.request(&first_history, &[]))
             .expect("first codex turn");
-        let second = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        let second = rt
             .block_on(backend.request(&second_history, &[]))
             .expect("second codex turn");
         server.join().expect("server thread");
@@ -434,10 +434,7 @@ Connection: close
         )
         .codex_http();
         let backend = ResponsesBackend::new(model, ModelSettings::default());
-        let error = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
+        let error = test_runtime()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("JSON body cannot fold into a codex turn");
         assert!(error.contains("sse stream"), "unexpected error: {error}");
