@@ -114,6 +114,9 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+    /// Digest admission floor handed to every read so a re-fetch recipe can name a
+    /// window that stays under it (issue 125).
+    digest_size_floor: usize,
 
     /// Outbound model-request timeout. `None` (the default) means the backend's
     /// own default applies.
@@ -186,6 +189,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -215,6 +219,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -240,6 +245,7 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -488,27 +494,31 @@ impl Turn<'_> {
             return Err(ToolCallFailure::OutputCap);
         }
         let parsed = parse_object_args(call).map_err(ToolCallFailure::Invalid)?;
-        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-            &self.cwd,
-            &call.name,
-            parsed,
-            config,
-            remaining_output,
-        );
-        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
-        attempt.usage.total_calls += 1;
+        // The notice must survive truncation, so reserve its bytes (plus the blank
+        // line that carries it) first; with no notice there is nothing to reserve.
+        // The reservation happens before the tool runs so the inner, registered
+        // renderer also sees the exact bytes the model will get: a digest cut by the
+        // inner cap and then cut again here would re-create the abbreviated-hash
+        // retry loop this boundary owns.
         let notice = if index + 1 == total {
-            budget_notice(self.max_tool_calls, attempt.usage.total_calls)
+            budget_notice(self.max_tool_calls, attempt.usage.total_calls + 1)
         } else {
             String::new()
         };
-        // The notice must survive truncation, so reserve its bytes (plus the blank
-        // line that carries it) first; with no notice there is nothing to reserve.
         let body_budget = if notice.is_empty() {
             remaining_output
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
+        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
+            &self.cwd,
+            &call.name,
+            parsed,
+            config,
+            body_budget,
+        );
+        let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
+        attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
         let text = if notice.is_empty() {
             text
@@ -920,15 +930,7 @@ impl Turn<'_> {
     }
 
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
-        Ok(crate::tools::ToolConfig {
-            ws: self.workspace.try_clone()?,
-            max_output_bytes: self.output_caps.tool,
-            shell: crate::tools::ShellConfig {
-                max_shell_output: self.output_caps.shell,
-                max_shell_timeout: std::time::Duration::from_secs(120),
-                allow_shell: shell_on,
-            },
-        })
+        helpers::tool_config_with_floor(self, shell_on)
     }
 }
 

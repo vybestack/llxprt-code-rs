@@ -43,6 +43,13 @@ the process in cached mode and must not contain project or secret information. T
 `default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends
 neither that key nor a session header.
 
+Host task timeout ownership: `task-default-timeout-seconds` and
+`task-max-timeout-seconds` belong to the llxprt host task runner. This Rust runtime has
+no task executor, so numeric values are accepted as typed inert host settings and never
+become shell-command, provider-request, or turn deadlines. Omission is valid; when present,
+the persisted registry type requires a JSON number. Strings, booleans, null, arrays, and
+objects are malformed and reject at profile load.
+
 ## Persistable-key inventory
 
 - Total persistable entries: 124

@@ -273,6 +273,7 @@ fn file_tools_execute_through_retained_capability() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(60),
@@ -312,6 +313,7 @@ fn renamed_workspace_keeps_file_and_shell_tools_on_retained_directory() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(60),
@@ -665,6 +667,18 @@ fn replace_expected_sha256_optimistic_gate() {
     assert!(
         msg.contains("expected_sha256"),
         "the failure must name the digest gate: {msg}"
+    );
+    assert!(
+        msg.contains("stale"),
+        "a full stale digest is a mismatch refusal, not a syntax error: {msg}"
+    );
+    assert!(
+        !msg.contains("expected_sha256 is invalid"),
+        "a well-formed stale digest must not be called invalid: {msg}"
+    );
+    assert!(
+        msg.contains(&digest_hex(b"one two three")),
+        "the refusal must report the full current digest: {msg}"
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),

@@ -609,6 +609,7 @@ fn normalized_empty_object_cannot_execute() {
     let cfg = llxprt_code_rs::tools::ToolConfig {
         ws: llxprt_code_rs::tools::WorkspaceCap::open(&cwd).unwrap(),
         max_output_bytes: 4096,
+        digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: llxprt_code_rs::tools::ShellConfig {
             max_shell_output: 4096,
             max_shell_timeout: std::time::Duration::from_secs(5),
@@ -1061,7 +1062,7 @@ fn multiple_tool_calls_share_remaining_output_budget() {
     );
     let output_bytes: usize = retained_calls.iter().map(|call| call.result.len()).sum();
     assert_eq!(
-        output_bytes, 1616,
+        output_bytes, 3424,
         "16 bounded digest records are retained, not 16 MiB of raw output"
     );
     assert!(
@@ -1132,7 +1133,7 @@ fn oversized_search_output_is_bounded_before_retention() {
     );
     assert_eq!(
         retained.len(),
-        112,
+        225,
         "one bounded digest record is retained: {retained}"
     );
     assert!(retained.len() < MAX_TURN_OUTPUT_BYTES);

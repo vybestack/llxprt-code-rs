@@ -6,6 +6,8 @@ use serdes_ai::core::FinishReason;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+mod issue243_digest_budget;
+
 /// A scripted backend for the forced-summary accounting tests: each call pops the
 /// next canned reply, repeating the last when exhausted.
 pub(super) struct MockBackend {

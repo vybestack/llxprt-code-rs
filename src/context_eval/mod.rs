@@ -25,6 +25,8 @@ mod ts_drive;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_etxtbsy;
+#[cfg(test)]
 mod tests_gate;
 #[cfg(test)]
 mod tests_inject;

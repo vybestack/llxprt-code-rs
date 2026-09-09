@@ -1,7 +1,0 @@
-# Maintainer-owned allowlist for compat-allow(#N) markers (issue #234).
-# One issue number per line. Blank lines and lines starting with # are ignored.
-# An empty list means zero exceptions are permitted.
-# 234 carries rustc's own deprecated-attribute literal in src/grade/flow/methods.rs;
-# Andrew's explicit confirmation is requested in issue #234. Delete the number to
-# veto: the gate then fails and the site must be reworded or removed.
-234

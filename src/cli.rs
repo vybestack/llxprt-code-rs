@@ -79,7 +79,7 @@ pub struct Args {
     /// Per-prompt tool-call budget: `1..=512`, or `-1` for unlimited. Overrides the
     /// profile's `maxToolCallsPerPrompt`; when omitted, the profile field applies.
     /// The built-in default is 256 (half the ceiling).
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", allow_hyphen_values = true)]
     pub max_tool_calls: Option<i64>,
 
     /// Wall-clock budget per prompt like `90s`, `30m`, `2h`; `0` disables.
@@ -100,6 +100,12 @@ pub struct Args {
     #[arg(long, value_name = "BYTES")]
     pub max_turn_output: Option<u64>,
 
+    /// Digest admission floor in bytes (default 1024): tool results at or above this
+    /// size are digested into a bounded handle before they reach the model. Values
+    /// below the baseline floor are refused; raises are in-session relaxations.
+    #[arg(long, value_name = "BYTES")]
+    pub digest_size_floor: Option<u64>,
+
     /// How `modelParams` keys this build does not itself type are handled:
     /// `loose` (default) forwards them verbatim on the provider wire,
     /// `known-model` checks them against the checked-in model registry at load,
@@ -116,6 +122,29 @@ pub struct Args {
     /// Print the resolved layered settings JSON and exit without constructing a backend.
     #[arg(long)]
     pub print_config: bool,
+}
+
+/// Validate CLI-provided limits without resolving a profile or any other settings layer.
+///
+/// The settings resolver performs the same validation for every source.  It cannot be
+/// the first validation point, though: resolving settings reads profile/config layers,
+/// whereas the CLI contract requires malformed command-line limits to fail before even
+/// consuming stdin. Call this at the common CLI boundary before dispatching runtime
+/// or `--print-config`.
+pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if let Some(value) = args.max_tool_calls {
+        crate::settings::validate_max_tool_calls(value)
+            .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;
+    }
+    if let Some(value) = args.digest_size_floor {
+        crate::settings::validate_digest_size_floor(value)
+            .map_err(|message| AppError::new(Code::Usage, "digest-size-floor", message))?;
+    }
+    if let Some(raw) = args.turn_time.as_deref() {
+        crate::settings::parse_turn_time(raw)
+            .map_err(|message| AppError::new(Code::Usage, "turn-time", message))?;
+    }
+    Ok(())
 }
 
 /// Resolve the actual configuration layers used both by runtime and `--print-config`.
@@ -147,6 +176,7 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
             max_shell_output: args.max_shell_output,
             max_tool_output: args.max_tool_output,
             max_turn_output: args.max_turn_output,
+            digest_size_floor: args.digest_size_floor,
             request_timeout: args.request_timeout.clone(),
         },
         ..Default::default()
@@ -429,15 +459,68 @@ pub fn parse_args_fallback(session_hint: &str) -> Args {
                 let _ = e.print();
                 std::process::exit(0);
             }
-            let _ = e;
+            let message = sanitized_clap_diagnostic(&e);
             print!(
                 "{}",
-                String::from_utf8_lossy(
-                    &Envelope::error(session_hint, "usage", "invalid arguments").to_line()
-                )
+                String::from_utf8_lossy(&Envelope::error(session_hint, "usage", message).to_line())
             );
             std::process::exit(2);
         }
+    }
+}
+
+/// Return a stable parsing diagnostic without rendering Clap's user-controlled context.
+///
+/// Clap's normal rendered error contains supplied values, suggestions, and usage text.  The JSON
+/// protocol must not reflect those values (which can be prompts, paths, or credentials), so this
+/// deliberately uses only the structured error class and a whitelist of our option names.
+fn sanitized_clap_diagnostic(error: &clap::Error) -> String {
+    use clap::error::{ContextKind, ErrorKind};
+
+    let class = match error.kind() {
+        ErrorKind::UnknownArgument => "unknown argument",
+        ErrorKind::InvalidSubcommand => "invalid subcommand",
+        ErrorKind::InvalidValue | ErrorKind::ValueValidation => "invalid value",
+        ErrorKind::NoEquals => "option requires equals syntax",
+        ErrorKind::TooManyValues | ErrorKind::TooFewValues | ErrorKind::WrongNumberOfValues => {
+            "wrong number of values"
+        }
+        ErrorKind::ArgumentConflict => "conflicting options",
+        ErrorKind::MissingRequiredArgument => "missing required argument",
+        ErrorKind::MissingSubcommand => "missing subcommand",
+        ErrorKind::InvalidUtf8 => "invalid UTF-8 argument",
+        ErrorKind::Io => "argument I/O error",
+        ErrorKind::Format => "argument format error",
+        ErrorKind::DisplayHelp
+        | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        | ErrorKind::DisplayVersion => "invalid arguments",
+        _ => "invalid arguments",
+    };
+    let option = error
+        .context()
+        .filter(|(kind, _)| matches!(kind, ContextKind::InvalidArg | ContextKind::PriorArg))
+        .find_map(|(_, value)| known_option_name(&value.to_string()));
+    match option {
+        Some(option) => format!("{class} for {option}"),
+        None => class.to_string(),
+    }
+}
+
+/// Map only parser-owned option spelling to a fixed string; never return Clap context verbatim.
+fn known_option_name(context: &str) -> Option<&'static str> {
+    let name = context.split_whitespace().next()?;
+    match name {
+        "--session" => Some("--session"),
+        "--turn" => Some("--turn"),
+        "--branch" => Some("--branch"),
+        "--profile" => Some("--profile"),
+        "--profile-load" => Some("--profile-load"),
+        "--cwd" => Some("--cwd"),
+        "--prompt" | "-p" => Some("--prompt"),
+        "--mem-profile" => Some("--mem-profile"),
+        "--max-tool-calls" => Some("--max-tool-calls"),
+        "--turn-time" => Some("--turn-time"),
+        _ => None,
     }
 }
 
@@ -673,5 +756,29 @@ mod tests {
             args.print_config,
             "main dispatches this flag before profiler/backend setup"
         );
+    }
+    #[test]
+    fn max_tool_calls_accepts_unlimited_with_or_without_equals() {
+        for (arguments, expected) in [
+            (vec!["llxprt-code-rs", "--max-tool-calls", "-1"], -1),
+            (vec!["llxprt-code-rs", "--max-tool-calls=-1"], -1),
+            (vec!["llxprt-code-rs", "--max-tool-calls", "17"], 17),
+            (vec!["llxprt-code-rs", "--max-tool-calls=17"], 17),
+        ] {
+            let args = Args::try_parse_from(arguments).unwrap();
+            assert_eq!(args.max_tool_calls, Some(expected));
+        }
+    }
+
+    #[test]
+    fn print_config_parses_the_digest_size_floor_flag() {
+        let args = Args::try_parse_from([
+            "llxprt-code-rs",
+            "--print-config",
+            "--digest-size-floor",
+            "4096",
+        ])
+        .unwrap();
+        assert_eq!(args.digest_size_floor, Some(4096));
     }
 }
