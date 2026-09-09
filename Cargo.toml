@@ -78,6 +78,7 @@ sha2 = "0.10"
 
 # These crates are used only by the crate's own tests (no runtime code path).
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 jsonschema = { version = "=0.33.0", default-features = false }
 

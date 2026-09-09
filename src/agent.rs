@@ -23,6 +23,8 @@ use crate::model::ModelConfig;
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 use serde_json::Value as JsonValue;
 
+mod deadline;
+use deadline::Turn;
 mod finish;
 mod in_flight;
 mod over_limit;
@@ -154,7 +156,6 @@ struct AttemptState {
     current: LlmResult,
     ids: std::collections::HashSet<String>,
     usage: TurnUsage,
-    started: std::time::Instant,
     budget_exhausted: bool,
 }
 
@@ -321,47 +322,25 @@ impl CodingAgent {
         self.backend.request_calls()
     }
 
-    /// Drive the reserved branch and persist the final result. A `replay` reservation
-    /// never talks to the backend. A `retry` reservation re-runs a previously failed
-    /// prompt as a fresh attempt; it never reports ok on its own.
-    pub fn run(
+    fn materialize_requests(
         &self,
-        store: &SessionStore,
         reserved: &ReservedRequest,
-    ) -> Result<CompletedRun, AgentError> {
-        let mut reserved = reserved.clone();
-        store
-            .verify_workspace_identity(self.workspace.identity())
-            .map_err(AgentError::from_store)?;
-        self.profile_store(store, "session_read", 0, None)?;
-        if reserved.replay {
-            self.profile(
-                "replay_resolved",
-                crate::memory_profile::EventData {
-                    branch_count: Some(1),
-                    round_count: Some(reserved.rounds.len() as u64),
-                    ..Default::default()
-                },
-            )?;
-            return Ok(self.replayed_run(&reserved));
+    ) -> Vec<serdes_ai::core::ModelRequest> {
+        let note = self.prompt_notes.as_deref().unwrap_or("");
+        let mut requests = vec![system_request(&coding_system_prompt(
+            &self.cwd,
+            note,
+            self.allow_shell,
+            self.max_tool_calls,
+        ))];
+        for history in &reserved.history {
+            requests.push(user_request(&history.prompt));
+            for round in &history.rounds {
+                requests.extend(persisted_round_requests(round));
+            }
         }
-        let requests = self.preflight_recovery(store, &mut reserved)?;
-        self.profile(
-            "requests_materialized",
-            crate::memory_profile::EventData {
-                branch_count: Some(1),
-                round_count: Some(0),
-                ..Default::default()
-            },
-        )?;
-        let tools = crate::tools::tool_specs(self.allow_shell);
-        let config = self
-            .tools_config(self.allow_shell)
-            .map_err(|error| self.dead(store, &reserved, "workspace", &error, &[]))?;
-        let mut attempt = self.begin_attempt(store, &mut reserved, requests, &tools)?;
-        self.run_tool_rounds(store, &mut reserved, &tools, &config, &mut attempt)?;
-        let summary = self.resolve_summary(store, &reserved, &tools, &mut attempt)?;
-        self.complete_attempt(store, &reserved, summary, attempt)
+        requests.push(user_request(&reserved.prompt));
+        requests
     }
 
     fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
@@ -387,25 +366,101 @@ impl CodingAgent {
         }
     }
 
-    fn materialize_requests(
+    /// Drive the reserved branch and persist the final result. A `replay` reservation
+    /// never talks to the backend. A `retry` reservation re-runs a previously failed
+    /// prompt as a fresh attempt; it never reports ok on its own.
+    pub fn run(
         &self,
+        store: &SessionStore,
         reserved: &ReservedRequest,
-    ) -> Vec<serdes_ai::core::ModelRequest> {
-        let note = self.prompt_notes.as_deref().unwrap_or("");
-        let mut requests = vec![system_request(&coding_system_prompt(
-            &self.cwd,
-            note,
-            self.allow_shell,
-            self.max_tool_calls,
-        ))];
-        for history in &reserved.history {
-            requests.push(user_request(&history.prompt));
-            for round in &history.rounds {
-                requests.extend(persisted_round_requests(round));
-            }
+    ) -> Result<CompletedRun, AgentError> {
+        let mut reserved = reserved.clone();
+        store
+            .verify_workspace_identity(self.workspace.identity())
+            .map_err(AgentError::from_store)?;
+        self.profile_store(store, "session_read", 0, None)?;
+        if reserved.replay {
+            self.profile(
+                "replay_resolved",
+                crate::memory_profile::EventData {
+                    branch_count: Some(1),
+                    round_count: Some(reserved.rounds.len() as u64),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(self.replayed_run(&reserved));
         }
-        requests.push(user_request(&reserved.prompt));
-        requests
+        match Turn::new(self) {
+            Ok(turn) => turn.run_reserved(store, &mut reserved),
+            Err(error) => Err(self.dead(
+                store,
+                &reserved,
+                "runtime",
+                &format!("turn runtime failed: {error}"),
+                &[],
+            )),
+        }
+    }
+
+    /// Persist a terminal failure and surface it as an [`AgentError`]. The message is
+    /// scrubbed first (every accepted secret and credential path), then bounded to
+    /// [`crate::redact::MAX_ERROR_TEXT_BYTES`] at a UTF-8 boundary with the
+    /// explicit `[truncated]` marker; that bounded scrubbed text is what the
+    /// session fail and the CLI JSON both receive, so a huge provider body must leave a
+    /// terminal failed lifecycle and retain the model exit code, never become
+    /// session-persist. A persistence failure is never discarded: it becomes a
+    /// session error that still carries the original scrubbed bounded message.
+    fn dead(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        key: &'static str,
+        message: &str,
+        rounds: &[RoundRecord],
+    ) -> AgentError {
+        let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
+        match store.fail(reserved, &bounded, rounds) {
+            Ok(()) => {
+                let profile = self.profile_store(store, "session_written", rounds.len(), None);
+                match profile {
+                    Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
+                    Err(profile_error) => profile_error,
+                }
+            }
+            Err(pe) => AgentError::new(
+                crate::envelope::Code::Session,
+                "session-persist",
+                format!(
+                    "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
+                ),
+            ),
+        }
+    }
+}
+impl Turn<'_> {
+    pub(super) fn run_reserved(
+        &self,
+        store: &SessionStore,
+        reserved: &mut ReservedRequest,
+    ) -> Result<CompletedRun, AgentError> {
+        let requests = self.preflight_recovery(store, reserved)?;
+        self.profile(
+            "requests_materialized",
+            crate::memory_profile::EventData {
+                branch_count: Some(1),
+                round_count: Some(0),
+                ..Default::default()
+            },
+        )?;
+        let tools = crate::tools::tool_specs(self.allow_shell);
+        let config = self
+            .tools_config(self.allow_shell)
+            .map_err(|error| self.dead(store, reserved, "workspace", &error, &[]))?;
+        let mut attempt = self.begin_attempt(store, reserved, requests, &tools)?;
+        self.run_tool_rounds(store, reserved, &tools, &config, &mut attempt)?;
+        self.check_time_limit(store, reserved, &attempt.rounds)?;
+        let summary = self.resolve_summary(store, reserved, &tools, &mut attempt)?;
+        self.complete_attempt(store, reserved, summary, attempt)
     }
 
     fn begin_attempt(
@@ -435,7 +490,6 @@ impl CodingAgent {
             current,
             ids: std::collections::HashSet::new(),
             usage,
-            started: std::time::Instant::now(),
             budget_exhausted: false,
         })
     }
@@ -599,22 +653,12 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
         rounds: &[RoundRecord],
-        elapsed: std::time::Duration,
     ) -> Result<(), AgentError> {
-        let Some(budget) = self.turn_time_budget else {
-            return Ok(());
-        };
-        if elapsed >= budget {
-            return Err(self.dead(
-                store,
-                reserved,
-                "turn-time-exhausted",
-                &format!(
-                    "turn time budget ({}s) exceeded; raise --turn-time or pass 0 to disable",
-                    budget.as_secs()
-                ),
-                rounds,
-            ));
+        if self
+            .deadline
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err(self.time_exhausted(store, reserved, rounds));
         }
         Ok(())
     }
@@ -742,6 +786,7 @@ impl CodingAgent {
         summary: String,
         mut attempt: AttemptState,
     ) -> Result<CompletedRun, AgentError> {
+        self.check_time_limit(store, reserved, &attempt.rounds)?;
         attempt.rounds.push(RoundRecord {
             assistant: summary.clone(),
             calls: Vec::new(),
@@ -754,7 +799,7 @@ impl CodingAgent {
             store,
             "session_written",
             attempt.rounds.len(),
-            Some(attempt.started.elapsed()),
+            Some(self.started.elapsed()),
         )?;
         Ok(CompletedRun {
             turn: reserved.turn,
@@ -795,41 +840,6 @@ impl CodingAgent {
         match finish_check(result) {
             Ok(()) => Ok(()),
             Err(e) => Err(self.dead(store, reserved, "finish-reason", &e, rounds)),
-        }
-    }
-
-    /// Persist a terminal failure and surface it as an [`AgentError`]. The message is
-    /// scrubbed first (every accepted secret and credential path), then bounded to
-    /// [`crate::redact::MAX_ERROR_TEXT_BYTES`] at a UTF-8 boundary with the
-    /// explicit `[truncated]` marker; that bounded scrubbed text is what the
-    /// session fail and the CLI JSON both receive, so a huge provider body must leave a
-    /// terminal failed lifecycle and retain the model exit code, never become
-    /// session-persist. A persistence failure is never discarded: it becomes a
-    /// session error that still carries the original scrubbed bounded message.
-    fn dead(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        key: &'static str,
-        message: &str,
-        rounds: &[RoundRecord],
-    ) -> AgentError {
-        let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
-        match store.fail(reserved, &bounded, rounds) {
-            Ok(()) => {
-                let profile = self.profile_store(store, "session_written", rounds.len(), None);
-                match profile {
-                    Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
-                    Err(profile_error) => profile_error,
-                }
-            }
-            Err(pe) => AgentError::new(
-                crate::envelope::Code::Session,
-                "session-persist",
-                format!(
-                    "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
-                ),
-            ),
         }
     }
 
@@ -927,25 +937,6 @@ impl CodingAgent {
         Ok(r)
     }
 
-    fn round(
-        &self,
-        requests: &[serdes_ai::core::ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, RoundFailure> {
-        // A single oversized model reply is bounded before it is any round: a reply over
-        // [`MAX_RESPONSE_BYTES`] is a typed model failure here, so an unbounded
-        // provider body can never be accumulated (or double-counted) into the aggregate
-        // assistant bytes or become session-persist. The error carries the round's own
-        // size, which stays bounded by the reply cap.
-        let result = self.backend.request(requests, tools).map_err(|message| {
-            match TransportFailure::from_message(&message) {
-                Some(failure) => RoundFailure::ModelTransport(failure),
-                None => RoundFailure::Model(message),
-            }
-        })?;
-        validate_provider_result(&result, &self.secrets).map_err(RoundFailure::Model)?;
-        Ok(result)
-    }
     fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
         helpers::tool_config_with_floor(self, shell_on)
     }
@@ -965,6 +956,7 @@ enum ToolCallFailure {
 }
 
 enum RoundFailure {
+    TurnTime,
     Model(String),
     ModelTransport(TransportFailure),
     Profiling(AgentError),
