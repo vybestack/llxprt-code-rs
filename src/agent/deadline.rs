@@ -35,14 +35,26 @@ impl<'a> Turn<'a> {
                     format!("runtime: {error}"),
                 )
             })?;
+        let deadline = match agent.turn_time_budget {
+            Some(budget) => match started.checked_add(budget) {
+                Some(deadline) => Some(deadline),
+                None => {
+                    return Err(AgentError::new(
+                        crate::envelope::Code::Usage,
+                        "turn-time",
+                        format!(
+                            "--turn-time ({}s) is too large to represent as a turn deadline",
+                            budget.as_secs()
+                        ),
+                    ))
+                }
+            },
+            None => None,
+        };
         Ok(Self {
             agent,
             started,
-            deadline: agent.turn_time_budget.map(|budget| {
-                started
-                    .checked_add(budget)
-                    .expect("turn deadline must be representable")
-            }),
+            deadline,
             runtime,
         })
     }

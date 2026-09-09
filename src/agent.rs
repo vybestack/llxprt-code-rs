@@ -390,10 +390,53 @@ impl CodingAgent {
             )?;
             return Ok(self.replayed_run(&reserved));
         }
-        Turn::new(self)?.run_reserved(store, &mut reserved)
+        match Turn::new(self) {
+            Ok(turn) => turn.run_reserved(store, &mut reserved),
+            Err(error) => Err(self.dead(
+                store,
+                &reserved,
+                "runtime",
+                &format!("turn runtime failed: {error}"),
+                &[],
+            )),
+        }
+    }
+
+    /// Persist a terminal failure and surface it as an [`AgentError`]. The message is
+    /// scrubbed first (every accepted secret and credential path), then bounded to
+    /// [`crate::redact::MAX_ERROR_TEXT_BYTES`] at a UTF-8 boundary with the
+    /// explicit `[truncated]` marker; that bounded scrubbed text is what the
+    /// session fail and the CLI JSON both receive, so a huge provider body must leave a
+    /// terminal failed lifecycle and retain the model exit code, never become
+    /// session-persist. A persistence failure is never discarded: it becomes a
+    /// session error that still carries the original scrubbed bounded message.
+    fn dead(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        key: &'static str,
+        message: &str,
+        rounds: &[RoundRecord],
+    ) -> AgentError {
+        let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
+        match store.fail(reserved, &bounded, rounds) {
+            Ok(()) => {
+                let profile = self.profile_store(store, "session_written", rounds.len(), None);
+                match profile {
+                    Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
+                    Err(profile_error) => profile_error,
+                }
+            }
+            Err(pe) => AgentError::new(
+                crate::envelope::Code::Session,
+                "session-persist",
+                format!(
+                    "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
+                ),
+            ),
+        }
     }
 }
-
 impl Turn<'_> {
     pub(super) fn run_reserved(
         &self,
@@ -797,41 +840,6 @@ impl Turn<'_> {
         match finish_check(result) {
             Ok(()) => Ok(()),
             Err(e) => Err(self.dead(store, reserved, "finish-reason", &e, rounds)),
-        }
-    }
-
-    /// Persist a terminal failure and surface it as an [`AgentError`]. The message is
-    /// scrubbed first (every accepted secret and credential path), then bounded to
-    /// [`crate::redact::MAX_ERROR_TEXT_BYTES`] at a UTF-8 boundary with the
-    /// explicit `[truncated]` marker; that bounded scrubbed text is what the
-    /// session fail and the CLI JSON both receive, so a huge provider body must leave a
-    /// terminal failed lifecycle and retain the model exit code, never become
-    /// session-persist. A persistence failure is never discarded: it becomes a
-    /// session error that still carries the original scrubbed bounded message.
-    fn dead(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        key: &'static str,
-        message: &str,
-        rounds: &[RoundRecord],
-    ) -> AgentError {
-        let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
-        match store.fail(reserved, &bounded, rounds) {
-            Ok(()) => {
-                let profile = self.profile_store(store, "session_written", rounds.len(), None);
-                match profile {
-                    Ok(()) => AgentError::new(crate::envelope::Code::Model, key, bounded),
-                    Err(profile_error) => profile_error,
-                }
-            }
-            Err(pe) => AgentError::new(
-                crate::envelope::Code::Session,
-                "session-persist",
-                format!(
-                    "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
-                ),
-            ),
         }
     }
 
