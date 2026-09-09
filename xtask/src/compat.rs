@@ -433,6 +433,8 @@ mod tests {
         );
         let result = run(&root);
         assert!(result.is_ok(), "clean sources need no authorization file");
+        assert!(!root.join("compat-ledger.md").exists());
+        assert!(!root.join("xtask").join("compat-allowlist").exists());
         fs::remove_dir_all(&root).unwrap();
     }
 
