@@ -214,7 +214,9 @@ fn shell_clamp_disclosure_survives_capped_large_output() {
         for (ending, expected_ok, diagnostic) in [
             ("exit 0", true, ""),
             ("exit 7", false, "command exited with 7"),
-            ("kill -TERM $$", false, "command was killed by a signal"),
+            // SIGKILL (not SIGTERM): SIGKILL cannot be caught, blocked, or ignored, so this
+            // signal-death cell stays Err even when the harness environment ignores SIGTERM.
+            ("kill -KILL $$", false, "command was killed by a signal"),
         ] {
             let command = format!("cat capped-output; {ending}");
             let (ok, output) = execute_tool(
