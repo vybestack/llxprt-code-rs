@@ -33,15 +33,15 @@ pub(crate) struct AnthropicSettingsDraft {
 pub(crate) struct CodexResponsesSettingsDraft {
     model: String,
     endpoint: CodexEndpointIdentity,
-    reasoning_enabled: bool,
+    reasoning_effort: Option<String>,
 }
 
 impl CodexResponsesSettingsDraft {
-    pub(crate) fn new(model: String, reasoning_enabled: bool) -> Self {
+    pub(crate) fn new(model: String, reasoning_effort: Option<String>) -> Self {
         Self {
             model,
             endpoint: CodexEndpointIdentity::Production,
-            reasoning_enabled,
+            reasoning_effort,
         }
     }
 
@@ -54,10 +54,12 @@ impl CodexResponsesSettingsDraft {
     }
 
     pub(crate) fn responses_reasoning(&self) -> Option<ReasoningSettings> {
-        self.reasoning_enabled.then(|| ReasoningSettings {
-            effort: Some("high".to_string()),
-            summary: Some(serde_json::Value::String("auto".to_string())),
-        })
+        self.reasoning_effort
+            .as_ref()
+            .map(|effort| ReasoningSettings {
+                effort: Some(effort.clone()),
+                summary: Some(serde_json::Value::String("auto".to_string())),
+            })
     }
 }
 

@@ -43,6 +43,26 @@ the process in cached mode and must not contain project or secret information. T
 `default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends
 neither that key nor a session header.
 
+## Codex configured budgets and reasoning (issue 274)
+
+Codex `context-limit` is a positive JSON integer, preserved as the agent's configured
+context budget rather than constrained to a single model window. Zero and other types
+reject. Enabled reasoning accepts `low`, `medium`, or `high` (the existing Responses
+effort levels); the configured value is projected onto the Codex HTTP request with
+summary `auto`. Disabled reasoning still requires effort and summary to be omitted.
+
+The current `astramedium` shape also includes host image-resize and shell settings.
+`image-resize.maxLongEdge`, `image-resize.maxShortEdge`, `image-resize.maxPixels`,
+`shell-default-timeout-seconds`, and `shell-max-timeout-seconds` accept the registry's
+JSON number type as inert host data. This runtime has no image resizing pipeline or
+host shell executor. Its own `run_shell_command` uses the runtime shell cap and the
+bounded per-call `timeout_seconds`; these host settings do not override either.
+Non-numeric values reject. `stream-first-response-timeout-ms` accepts only the
+integer `-1` disabled sentinel (or omission): there is no separate first-response
+phase timer. Active values reject rather than being reassigned to the provider
+request timeout. The existing disabled idle-timeout constraint remains unchanged.
+No alternate profile reader, migration, fallback, or new alias is introduced.
+
 Host task timeout ownership: `task-default-timeout-seconds` and
 `task-max-timeout-seconds` belong to the llxprt host task runner. This Rust runtime has
 no task executor, so numeric values are accepted as typed inert host settings and never

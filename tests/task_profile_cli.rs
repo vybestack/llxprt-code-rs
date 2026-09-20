@@ -61,14 +61,25 @@ fn printed_config(config_home: &std::path::Path, profile: Option<&str>) -> Value
 
 #[test]
 fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
+    assert_named_profile(
+        "astra-headless",
+        include_str!("fixtures/task-profile/astra-headless.json"),
+    );
+}
+
+#[test]
+fn named_astramedium_loads_without_reassigning_deadlines() {
+    assert_named_profile(
+        "astramedium",
+        include_str!("fixtures/task-profile/astramedium.json"),
+    );
+}
+
+fn assert_named_profile(name: &str, fixture: &str) {
     let config = tempfile::tempdir().unwrap();
     let profiles = config.path().join("profiles");
     std::fs::create_dir(&profiles).unwrap();
-    std::fs::write(
-        profiles.join("astra-headless.json"),
-        include_str!("fixtures/task-profile/astra-headless.json"),
-    )
-    .unwrap();
+    std::fs::write(profiles.join(format!("{name}.json")), fixture).unwrap();
 
     std::fs::write(
         profiles.join("dsflash-mi300x.json"),
@@ -83,7 +94,7 @@ fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
     )
     .unwrap();
 
-    let settings = printed_config(config.path(), Some("astra-headless"));
+    let settings = printed_config(config.path(), Some(name));
     let without_profile = printed_config(config.path(), None);
     let fixture_base_url = serde_json::json!({
         "value": "https://chatgpt.com/backend-api/codex",
