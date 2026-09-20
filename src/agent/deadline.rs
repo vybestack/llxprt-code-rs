@@ -4,14 +4,21 @@
 use super::*;
 use tokio::time::Instant;
 
+/// Longest teardown waits for spawned work after a turn ends. Blocking-pool jobs
+/// that cannot be cancelled (OS DNS resolution inside the transport) finish
+/// detached past this bound instead of delaying the terminal envelope.
+const RUNTIME_SHUTDOWN_BOUND: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// A replay never constructs this state. Dropping a timed-out request cancels its
 /// transport before the caller persists failure. Teardown also cancels any reader
-/// tasks spawned by the transport on this executor; no request thread is detached.
+/// tasks spawned by the transport on this executor; shutdown is bounded, so
+/// blocking-pool work that cannot be cancelled (an OS DNS lookup) finishes
+/// detached instead of delaying the terminal envelope.
 pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
     pub(super) started: Instant,
     pub(super) deadline: Option<Instant>,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl std::ops::Deref for Turn<'_> {
@@ -19,6 +26,14 @@ impl std::ops::Deref for Turn<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.agent
+    }
+}
+
+impl Drop for Turn<'_> {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_timeout(RUNTIME_SHUTDOWN_BOUND);
+        }
     }
 }
 
@@ -55,7 +70,7 @@ impl<'a> Turn<'a> {
             agent,
             started,
             deadline,
-            runtime,
+            runtime: Some(runtime),
         })
     }
 
@@ -86,6 +101,8 @@ impl<'a> Turn<'a> {
     ) -> Result<LlmResult, RoundFailure> {
         let result = self
             .runtime
+            .as_ref()
+            .expect("the turn runtime outlives every provider round")
             .block_on(async {
                 let request = self.backend.request(requests, tools);
                 match self.deadline {

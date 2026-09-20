@@ -224,3 +224,76 @@ fn timed_out_turn_teardown_cancels_spawned_transport_work() {
     );
     receiver.recv_timeout(Duration::from_secs(1)).unwrap();
 }
+
+#[test]
+fn timed_out_turn_returns_before_blocking_worker_finishes() {
+    // hyper-util resolves DNS through tokio::task::spawn_blocking; the OS lookup
+    // cannot be cancelled, but teardown must stay bounded so the envelope is not
+    // delayed by work the deadline already abandoned.
+    use llxprt_code_rs::adapter::{ChatBackend, ModelFuture};
+    use llxprt_code_rs::agent::CodingAgent;
+    struct BlockingResolver;
+    impl ChatBackend for BlockingResolver {
+        fn request<'a>(
+            &'a self,
+            _: &'a [serdes_ai::core::ModelRequest],
+            _: &'a [llxprt_code_rs::tools::ToolSpec],
+        ) -> ModelFuture<'a> {
+            Box::pin(async move {
+                // The job enters the blocking pool on the first poll, long before
+                // the 100ms deadline tears the runtime down.
+                tokio::task::spawn_blocking(|| {
+                    std::thread::sleep(Duration::from_secs(2));
+                });
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Err("outer request completed instead of being cancelled".into())
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let agent = CodingAgent::with_backend(Box::new(BlockingResolver), root.path().into(), false)
+        .with_turn_time(Some(Duration::from_millis(100)));
+    let store = SessionStore::load_at(&SessionId::parse("blocking-resolver").unwrap(), root.path())
+        .unwrap();
+    let reserved = store.start_request(None, None, "P", root.path()).unwrap();
+    let began = std::time::Instant::now();
+    assert_eq!(
+        agent.run(&store, &reserved).unwrap_err().key,
+        "turn-time-exhausted"
+    );
+    assert!(
+        began.elapsed() < Duration::from_secs(1),
+        "teardown outlived the deadline: {:?}",
+        began.elapsed()
+    );
+}
+
+#[test]
+fn unrepresentable_turn_time_keeps_its_usage_classification() {
+    use llxprt_code_rs::agent::CodingAgent;
+    struct Unused;
+    impl llxprt_code_rs::adapter::ChatBackend for Unused {
+        fn request<'a>(
+            &'a self,
+            _: &'a [serdes_ai::core::ModelRequest],
+            _: &'a [llxprt_code_rs::tools::ToolSpec],
+        ) -> llxprt_code_rs::adapter::ModelFuture<'a> {
+            Box::pin(async { Err("the overflow must fail before any provider request".into()) })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let agent = CodingAgent::with_backend(Box::new(Unused), root.path().into(), false)
+        .with_turn_time(Some(Duration::from_secs(u64::MAX)));
+    let store = SessionStore::load_at(
+        &SessionId::parse("turn-time-overflow").unwrap(),
+        root.path(),
+    )
+    .unwrap();
+    let reserved = store.start_request(None, None, "P", root.path()).unwrap();
+    let error = agent.run(&store, &reserved).unwrap_err();
+    assert_eq!(error.key, "turn-time");
+    assert_eq!(error.code, llxprt_code_rs::envelope::Code::Usage);
+    assert!(error.message.contains(
+        "--turn-time (18446744073709551615s) is too large to represent as a turn deadline"
+    ));
+}

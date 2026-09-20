@@ -112,8 +112,12 @@ impl Fixture {
     fn run(&mut self) -> Result<CompletedRun, AgentError> {
         let turn = Turn::new(&self.agent).unwrap();
         // Auto-advance a single turn's executor, not a fresh clock per request.
-        turn.runtime.block_on(async { tokio::time::pause() });
-        let _entered = turn.runtime.enter();
+        let runtime = turn
+            .runtime
+            .as_ref()
+            .expect("the turn runtime outlives every provider round");
+        runtime.block_on(async { tokio::time::pause() });
+        let _entered = runtime.enter();
         let result = turn.run_reserved(&self.store, &mut self.reserved);
         if let Some(budget) = self.agent.turn_time_budget {
             assert!(
