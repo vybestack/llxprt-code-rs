@@ -129,12 +129,12 @@ mod tests {
     struct NoopBackend;
 
     impl ChatBackend for NoopBackend {
-        fn request(
-            &self,
-            _requests: &[serdes_ai::core::ModelRequest],
-            _tools: &[crate::tools::ToolSpec],
-        ) -> Result<LlmResult, String> {
-            unreachable!("request-budget fixtures never call the backend")
+        fn request<'a>(
+            &'a self,
+            _requests: &'a [serdes_ai::core::ModelRequest],
+            _tools: &'a [crate::tools::ToolSpec],
+        ) -> crate::adapter::ModelFuture<'a> {
+            Box::pin(async move { unreachable!("request-budget fixtures never call the backend") })
         }
     }
 
