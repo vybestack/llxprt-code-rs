@@ -1,3 +1,4 @@
+use super::CodingAgent;
 use crate::adapter::ToolCall;
 use crate::session::ToolCallRecord;
 
@@ -176,5 +177,31 @@ pub(super) fn refuse_over_budget(
             &call.name, &call.id, false, &text,
         ));
         round.calls.push(refused_call_record(call, text));
+    }
+}
+
+impl CodingAgent {
+    /// Sets the digest admission floor (issue 125) the session resolved.
+    ///
+    /// Validated exactly like the settings layer: a floor below the version-1 baseline
+    /// would tighten the filter registry (refused in-session) and break `safe_window`'s
+    /// strictly-under invariant, so it is a typed `Config` error here rather than a value
+    /// that silently never digests.
+    pub fn with_digest_size_floor(
+        mut self,
+        floor: usize,
+    ) -> Result<CodingAgent, crate::agent::AgentError> {
+        if floor < crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR {
+            return Err(crate::agent::AgentError::new(
+                crate::envelope::Code::Config,
+                "digest-size-floor",
+                format!(
+                    "digest-size-floor ({floor}) must be at least the baseline floor ({})",
+                    crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR
+                ),
+            ));
+        }
+        self.digest_size_floor = floor;
+        Ok(self)
     }
 }

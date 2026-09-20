@@ -9,6 +9,7 @@ fn shell_timeout_defaults_clamps_and_reports_effective_value() {
     let config = ToolConfig {
         ws: WorkspaceCap::open(d.path()).unwrap(),
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             default_shell_timeout: Duration::from_secs(2),
             max_shell_output: 64 * 1024,
@@ -70,6 +71,7 @@ fn shell_nonzero_and_signal_return_ok_false() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             default_shell_timeout: Duration::from_secs(60),
             max_shell_output: 64 * 1024,
@@ -111,6 +113,7 @@ fn shell_unlimited_timeout_uses_the_maximum_and_rejects_other_nonpositive_values
     let config = ToolConfig {
         ws: WorkspaceCap::open(d.path()).unwrap(),
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             default_shell_timeout: Duration::from_secs(1),
             max_shell_output: 64 * 1024,
@@ -159,6 +162,7 @@ fn shell_omitted_timeout_enforces_default_and_cleans_up_group() {
     let config = ToolConfig {
         ws: WorkspaceCap::open(d.path()).unwrap(),
         max_output_bytes: 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             default_shell_timeout: Duration::from_secs(1),
             max_shell_timeout: Duration::from_secs(4),
@@ -196,6 +200,7 @@ fn shell_clamp_disclosure_survives_capped_large_output() {
     let config = ToolConfig {
         ws: WorkspaceCap::open(d.path()).unwrap(),
         max_output_bytes: 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             default_shell_timeout: Duration::from_secs(2),
             max_shell_timeout: Duration::from_secs(3),

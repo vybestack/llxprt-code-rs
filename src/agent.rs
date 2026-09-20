@@ -116,6 +116,9 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+    /// Digest admission floor handed to every read so a re-fetch recipe can name a
+    /// window that stays under it (issue 125).
+    digest_size_floor: usize,
 
     /// Outbound model-request timeout. `None` (the default) means the backend's
     /// own default applies.
@@ -195,6 +198,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -230,6 +234,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,
@@ -261,6 +266,7 @@ impl CodingAgent {
                 crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
             ),
             output_caps: OutputCaps::default(),
+            digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
             allow_shell,

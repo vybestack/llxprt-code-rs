@@ -92,6 +92,7 @@ impl super::CodingAgent {
         Ok(crate::tools::ToolConfig {
             ws: self.workspace.try_clone()?,
             max_output_bytes: self.output_caps.tool,
+            digest_size_floor: self.digest_size_floor,
             shell: crate::tools::ShellConfig {
                 max_shell_output: self.output_caps.shell,
                 default_shell_timeout: self.shell_default_timeout,
