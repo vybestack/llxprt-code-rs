@@ -652,6 +652,7 @@ fn normalized_empty_object_cannot_execute() {
     let cfg = llxprt_code_rs::tools::ToolConfig {
         ws: llxprt_code_rs::tools::WorkspaceCap::open(&cwd).unwrap(),
         max_output_bytes: 4096,
+        digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: llxprt_code_rs::tools::ShellConfig {
             max_shell_output: 4096,
             max_shell_timeout: std::time::Duration::from_secs(5),
@@ -1170,11 +1171,12 @@ fn multiple_tool_calls_share_remaining_output_budget() {
 
     // The first fifteen reads fit the remaining budget whole, so their digests report
     // the full framed size; the sixteenth is the last of the round, clipped to the
-    // remaining budget (the drain-bounded read caps at the leftover bytes). This test
+    // remaining budget (the recovery frame can leave unused bytes). This test
     // sets no tool-call budget, so the round carries no budget notice and nothing reserves
-    // notice bytes: the clipped live result is exactly the leftover, and the digest reports
-    // exactly that size.
-    let expected_clipped = turn_budget - 15 * framed_len;
+    // notice bytes. The pagination renderer reserves its longest header, then renders
+    // the actual header and next offset; this fixture leaves two bytes unused. The
+    // digest and accounting must report actual delivered bytes, not reserved room.
+    let expected_clipped = turn_budget - 15 * framed_len - 2;
     assert!(
         expected_clipped < framed_len,
         "the fixture must leave a clipped tail: remainder {expected_clipped} framed {framed_len}"
@@ -1220,6 +1222,10 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         "the live aggregate stays inside the shared output budget: {charged}"
     );
     let output_bytes: usize = retained_calls.iter().map(|call| call.result.len()).sum();
+    assert_eq!(
+        output_bytes, 3376,
+        "16 bounded recovery digest records are retained, not the raw payloads"
+    );
     assert!(
         output_bytes < 16 * 1024,
         "16 bounded digest records retain compact records rather than the 16 full 4,096-byte payloads: {output_bytes}"
@@ -1490,9 +1496,9 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         "the fixture's written payload size"
     );
     let budget_after_fifteen = turn_budget - 15 * framed_len;
-    // The grant charges exactly the leftover minus the tail read's clipped size; the tail
-    // file is written so its framed read - capped to the remaining budget - charges the
-    // last byte.
+    // The grant leaves room for a clipped tail read. Recovery framing may leave
+    // slack rather than padding the response; a final successful write below
+    // consumes that slack before the refused call.
     let budget_for_tail = budget_after_fifteen - granted.len();
     std::fs::write(
         cwd.join("tail.txt"),
@@ -1526,6 +1532,14 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         name: "read_file".into(),
         args_json: r#"{"path":"tail.txt"}"#.into(),
     };
+    // Recovery framing leaves three bytes unused in this fixture. A successful
+    // write consumes that final room with its bounded result; the next write must
+    // still be refused BEFORE execution, rather than charging persisted digests.
+    let drain = ToolCall {
+        id: "drain-recovery-slack".into(),
+        name: "write_file".into(),
+        args_json: r#"{"path":"drain.txt","content":"drained"}"#.into(),
+    };
     // This last call must be refused BEFORE execution: its file must therefore never appear.
     let refused = ToolCall {
         id: "refused-evidence".into(),
@@ -1534,7 +1548,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     };
     let calls: Vec<ToolCall> = reads
         .clone()
-        .chain([write_ok.clone(), tail.clone(), refused])
+        .chain([write_ok.clone(), tail.clone(), drain.clone(), refused])
         .collect();
     let tool_round = LlmResult {
         usage: LlmUsage::default(),
@@ -1585,6 +1599,11 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         granted_bytes,
         "the executed write survived the refusal: its file carries exactly the tool-written bytes"
     );
+    assert_eq!(
+        std::fs::read(cwd.join("drain.txt")).unwrap(),
+        b"drained",
+        "the recovery framing slack is consumed before the final refusal"
+    );
     assert!(
         !cwd.join("refused-evidence.txt").exists(),
         "the refused call never executed: the side-effecting write left no file"
@@ -1607,7 +1626,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     );
 
     // Independent positive pass over the SAME live-byte derivation: a run that replays the
-    // granted prefix THROUGH the tail read - only the final refused write short of the
+    // granted prefix THROUGH the slack-draining write - only the final refused write short of the
     // boundary - charges the whole cap and completes, proving the derivation above is
     // exactly where the refusal must (and does) land. It runs in its own freshly seeded
     // workspace whose granted.txt starts absent, so its committed file is that run's own
@@ -1625,7 +1644,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         "the positive control's write target starts absent"
     );
     let ok_reserved = reserved(&ok_st, None, None, "P1", &ok_cwd).unwrap();
-    let below: Vec<ToolCall> = reads.chain([write_ok, tail]).collect();
+    let below: Vec<ToolCall> = reads.chain([write_ok, tail, drain]).collect();
     let below_round = LlmResult {
         usage: LlmUsage::default(),
         text: "reading".into(),
@@ -1655,7 +1674,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         2,
         "the tool round and the final assistant round both persist"
     );
-    assert_eq!(ok_branch.rounds[0].calls.len(), 17);
+    assert_eq!(ok_branch.rounds[0].calls.len(), 18);
     assert_eq!(ok_branch.rounds[1].assistant, "done");
     assert!(
         ok_branch.rounds[0].calls.iter().all(|call| !call.refused),
@@ -1679,7 +1698,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         .collect();
     assert_eq!(
         sent_results.len(),
-        17,
+        18,
         "the post-tool request carries every executed tool result"
     );
     for (index, sent) in sent_results[..15].iter().enumerate() {
@@ -1695,12 +1714,17 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     );
     assert_eq!(
         sent_results[16].len(),
-        budget_for_tail,
+        budget_for_tail - 3,
         "the provider receives the tail at the clipped remaining size"
     );
     assert!(
         sent_results[16].len() < framed_len,
         "the tail is clipped rather than a full framed read"
+    );
+    assert_eq!(
+        sent_results[17].len(),
+        3,
+        "the final write fills the recovery slack"
     );
     let charged: usize = sent_results.iter().map(String::len).sum();
     assert_eq!(
@@ -1729,7 +1753,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     );
     assert_eq!(
         witnessed[16].result.len(),
-        budget_for_tail,
+        budget_for_tail - 3,
         "the below-threshold tail remains verbatim at its clipped live size"
     );
     assert_eq!(
@@ -1738,7 +1762,12 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         granted_bytes,
         "the write's file carries exactly the bytes the call wrote"
     );
-    let charged = 15 * framed_len + granted.len() + budget_for_tail;
+    assert_eq!(
+        witnessed[17].result.len(),
+        3,
+        "the drain consumes the recovery slack"
+    );
+    let charged = 15 * framed_len + granted.len() + (budget_for_tail - 3) + 3;
     assert_eq!(
         charged, turn_budget,
         "the persisted records' witnessed quantities fill the resolved turn cap"
@@ -1746,9 +1775,8 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
 }
 
 /// A single search that could render more than the whole turn budget is clipped to that
-/// budget and then compacted to one bounded CTXDIGEST record before it reaches the next
-/// model request or the persisted session record; the clipped bytes go to the spine and
-/// vault.
+/// budget, admitted to the spine, and delivered live to the next model request;
+/// the persisted session keeps one bounded CTXDIGEST recovery record.
 #[test]
 fn oversized_search_output_is_bounded_before_retention() {
     use llxprt_code_rs::agent::MAX_TURN_OUTPUT_BYTES;
@@ -1794,7 +1822,7 @@ fn oversized_search_output_is_bounded_before_retention() {
     );
     assert_eq!(
         retained.len(),
-        112,
+        225,
         "one bounded digest record is retained: {retained}"
     );
     assert!(retained.len() < MAX_TURN_OUTPUT_BYTES);

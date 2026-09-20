@@ -273,6 +273,7 @@ fn file_tools_execute_through_retained_capability() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(60),
@@ -312,6 +313,7 @@ fn renamed_workspace_keeps_file_and_shell_tools_on_retained_directory() {
     let c = ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(60),
