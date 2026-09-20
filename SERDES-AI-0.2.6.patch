@@ -7256,10 +7256,18 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..b370ae9 100644
+index 0d35170..c71f81f 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
-@@ -18,10 +18,11 @@ use serdes_ai_core::{
+@@ -7,7 +7,6 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
+ use crate::profile::{anthropic_claude_profile, ModelProfile};
+ use async_trait::async_trait;
+ use base64::Engine;
+-use reqwest::header::HeaderMap;
+ use reqwest::Client;
+ use serdes_ai_core::messages::{
+     DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
+@@ -18,10 +17,11 @@ use serdes_ai_core::{
      RequestUsage,
  };
  use serdes_ai_tools::ToolDefinition;
@@ -7272,7 +7280,7 @@ index 0d35170..b370ae9 100644
  pub struct AnthropicModel {
      model_name: String,
      client: Client,
-@@ -37,6 +38,19 @@ pub struct AnthropicModel {
+@@ -37,6 +37,19 @@ pub struct AnthropicModel {
      enable_caching: bool,
      /// Anthropic API version.
      api_version: String,
@@ -7292,7 +7300,7 @@ index 0d35170..b370ae9 100644
  }
  
  impl AnthropicModel {
-@@ -47,7 +61,7 @@ impl AnthropicModel {
+@@ -47,7 +60,7 @@ impl AnthropicModel {
  
          Self {
              model_name,
@@ -7301,7 +7309,7 @@ index 0d35170..b370ae9 100644
              api_key: api_key.into(),
              base_url: "https://api.anthropic.com".to_string(),
              profile,
-@@ -56,6 +70,7 @@ impl AnthropicModel {
+@@ -56,6 +69,7 @@ impl AnthropicModel {
              thinking_budget: None,
              enable_caching: false,
              api_version: "2023-06-01".to_string(),
@@ -7309,7 +7317,7 @@ index 0d35170..b370ae9 100644
          }
      }
  
-@@ -73,13 +88,6 @@ impl AnthropicModel {
+@@ -73,13 +87,6 @@ impl AnthropicModel {
          self
      }
  
@@ -7323,7 +7331,7 @@ index 0d35170..b370ae9 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -119,6 +127,13 @@ impl AnthropicModel {
+@@ -119,6 +126,13 @@ impl AnthropicModel {
          self
      }
  
@@ -7337,7 +7345,7 @@ index 0d35170..b370ae9 100644
      /// Get the appropriate profile for a model name.
      fn profile_for_model(model: &str) -> ModelProfile {
          let mut profile = anthropic_claude_profile();
-@@ -475,6 +490,7 @@ impl AnthropicModel {
+@@ -475,6 +489,7 @@ impl AnthropicModel {
              metadata: None,
              stream: if stream { Some(true) } else { None },
              thinking,
@@ -7345,7 +7353,7 @@ index 0d35170..b370ae9 100644
          }
      }
  
-@@ -512,12 +528,16 @@ impl AnthropicModel {
+@@ -512,12 +527,16 @@ impl AnthropicModel {
              }
          }
  
@@ -7368,10 +7376,20 @@ index 0d35170..b370ae9 100644
          });
  
          let usage = RequestUsage {
-@@ -550,36 +570,8 @@ impl AnthropicModel {
+@@ -540,47 +559,6 @@ impl AnthropicModel {
+             kind: "response".to_string(),
+         })
      }
- 
-     /// Handle API error response.
+-
+-    fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+-        headers
+-            .get("retry-after")
+-            .and_then(|value| value.to_str().ok())
+-            .and_then(|value| value.parse::<u64>().ok())
+-            .map(Duration::from_secs)
+-    }
+-
+-    /// Handle API error response.
 -    fn handle_error_response(&self, status: u16, body: &str, headers: &HeaderMap) -> ModelError {
 -        if let Ok(err) = serde_json::from_str::<AnthropicError>(body) {
 -            let code = err.error.error_type.clone();
@@ -7402,18 +7420,24 @@ index 0d35170..b370ae9 100644
 -        }
 -
 -        ModelError::http(status, body)
-+    fn handle_error_response(&self, status: u16, _body: &str, headers: &HeaderMap) -> ModelError {
-+        crate::response::status_error(status, Self::parse_retry_after(headers))
-     }
+-    }
  }
  
-@@ -630,14 +622,11 @@ impl Model for AnthropicModel {
-         let status = response.status().as_u16();
+ #[async_trait]
+@@ -627,17 +605,15 @@ impl Model for AnthropicModel {
+ 
+         let response = request.json(&body).send().await?;
+ 
+-        let status = response.status().as_u16();
          if !response.status().is_success() {
-             let headers = response.headers().clone();
+-            let headers = response.headers().clone();
 -            let body = response.text().await.unwrap_or_default();
-+            let body = crate::response::error_text(response).await?;
-             return Err(self.handle_error_response(status, &body, &headers));
+-            return Err(self.handle_error_response(status, &body, &headers));
++            // The bounded body stays out of the public diagnostic: it is carried as a
++            // typed, bounded prefix so the host can classify (throttle versus quota
++            // exhaustion versus 5xx) and render on its own scrubbed path.
++            let detail = crate::response::transport_detail(response).await;
++            return Err(crate::response::status_transport_error(detail));
          }
  
 -        let resp: MessagesResponse = response
@@ -7424,13 +7448,20 @@ index 0d35170..b370ae9 100644
  
          self.parse_response(resp)
      }
-@@ -673,11 +662,11 @@ impl Model for AnthropicModel {
-         let status = response.status().as_u16();
+@@ -670,14 +646,15 @@ impl Model for AnthropicModel {
+ 
+         let response = request.json(&body).send().await?;
+ 
+-        let status = response.status().as_u16();
          if !response.status().is_success() {
-             let headers = response.headers().clone();
+-            let headers = response.headers().clone();
 -            let body = response.text().await.unwrap_or_default();
-+            let body = crate::response::error_text(response).await?;
-             return Err(self.handle_error_response(status, &body, &headers));
+-            return Err(self.handle_error_response(status, &body, &headers));
++            // The bounded body stays out of the public diagnostic: it is carried as a
++            // typed, bounded prefix so the host can classify (throttle versus quota
++            // exhaustion versus 5xx) and render on its own scrubbed path.
++            let detail = crate::response::transport_detail(response).await;
++            return Err(crate::response::status_transport_error(detail));
          }
  
 -        let byte_stream = response.bytes_stream();
@@ -7438,7 +7469,7 @@ index 0d35170..b370ae9 100644
          let parser = AnthropicStreamParser::new(byte_stream);
  
          Ok(Box::pin(parser))
-@@ -767,6 +756,29 @@ mod tests {
+@@ -767,6 +744,29 @@ mod tests {
          assert_eq!(request.messages.len(), 1);
          assert_eq!(request.temperature, Some(0.7));
          assert!(request.stream.is_none());
@@ -12389,10 +12420,10 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..0143f41 100644
+index 58b6fc1..20cbdf9 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
-@@ -2,13 +2,228 @@
+@@ -2,13 +2,236 @@
  
  use std::collections::HashMap;
  use std::time::Duration;
@@ -12606,6 +12637,14 @@ index 58b6fc1..0143f41 100644
 +
 +/// Whether a bounded provider body reads as a quota or billing hard stop.
 +fn quota_body(body: &str) -> bool {
++    // Anthropic billing refusals use a structured error type, not message wording.
++    if serde_json::from_str::<serde_json::Value>(body)
++        .ok()
++        .and_then(|value| value.get("error")?.get("type")?.as_str().map(str::to_owned))
++        .is_some_and(|kind| kind == "billing_error")
++    {
++        return true;
++    }
 +    const MARKERS: [&str; 6] = [
 +        "insufficient_quota",
 +        "usage limit",
@@ -12625,7 +12664,7 @@ index 58b6fc1..0143f41 100644
      Http {
          /// HTTP status code.
          status: u16,
-@@ -19,7 +234,6 @@ pub enum ModelError {
+@@ -19,7 +242,6 @@ pub enum ModelError {
      },
  
      /// API-level error.
@@ -12633,7 +12672,7 @@ index 58b6fc1..0143f41 100644
      Api {
          /// Error message.
          message: String,
-@@ -27,69 +241,130 @@ pub enum ModelError {
+@@ -27,69 +249,130 @@ pub enum ModelError {
          code: Option<String>,
      },
  
@@ -12793,7 +12832,7 @@ index 58b6fc1..0143f41 100644
  }
  
  impl ModelError {
-@@ -97,14 +372,34 @@ impl ModelError {
+@@ -97,14 +380,34 @@ impl ModelError {
      #[must_use]
      pub fn is_retryable(&self) -> bool {
          match self {
@@ -12829,7 +12868,7 @@ index 58b6fc1..0143f41 100644
      /// Get the retry-after duration if applicable.
      #[must_use]
      pub fn retry_after(&self) -> Option<Duration> {
-@@ -199,18 +494,23 @@ impl ModelError {
+@@ -199,18 +502,23 @@ impl ModelError {
  
  impl From<reqwest::Error> for ModelError {
      fn from(err: reqwest::Error) -> Self {
@@ -12857,7 +12896,7 @@ index 58b6fc1..0143f41 100644
          }
      }
  }
-@@ -224,7 +524,7 @@ mod tests {
+@@ -224,7 +532,7 @@ mod tests {
  
      #[test]
      fn test_is_retryable() {
@@ -12866,7 +12905,7 @@ index 58b6fc1..0143f41 100644
          assert!(ModelError::rate_limited(None).is_retryable());
          assert!(ModelError::Connection("failed".into()).is_retryable());
          assert!(ModelError::http(500, "Server error").is_retryable());
-@@ -244,16 +544,248 @@ mod tests {
+@@ -244,16 +552,248 @@ mod tests {
          let err = ModelError::rate_limited(None);
          assert_eq!(err.retry_after(), None);
  
@@ -12893,7 +12932,10 @@ index 58b6fc1..0143f41 100644
 +        assert!(!display.contains("retry after None"), "display: {display}");
 +    }
 +
-+    #[test]
+     #[test]
+-    fn test_error_display() {
+-        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
+-        assert!(err.to_string().contains("Something went wrong"));
 +    fn public_formatting_hides_external_text_for_every_variant() {
 +        let marker = "provider-secret-marker";
 +        let mut headers = HashMap::new();
@@ -13014,10 +13056,7 @@ index 58b6fc1..0143f41 100644
 +
 +    /// Every retained status classifies: quota and billing wording wins over the status,
 +    /// 429 is a throttle, 408 and 5xx are retryable, and every other 4xx is permanent.
-     #[test]
--    fn test_error_display() {
--        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
--        assert!(err.to_string().contains("Something went wrong"));
++    #[test]
 +    fn status_classification_covers_retryability_families() {
 +        let cases = [
 +            (429u16, TransportClass::RateLimit),
@@ -14749,7 +14788,7 @@ index 97d1a2d..1e6fe0e 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..d04c7e2 100644
+index 9471b5b..547b87b 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -15036,7 +15075,7 @@ index 9471b5b..d04c7e2 100644
 +            // The bounded body stays out of the public diagnostic: it is carried as a
 +            // typed, bounded prefix so the host can classify (429 throttle versus
 +            // quota exhaustion versus 5xx) and render on its own scrubbed path.
-+            let detail = crate::response::transport_detail(response).await?;
++            let detail = crate::response::transport_detail(response).await;
 +            return Err(self.handle_error_response(status, detail));
          }
  
@@ -15078,7 +15117,7 @@ index 9471b5b..d04c7e2 100644
 +            // The bounded body stays out of the public diagnostic: it is carried as a
 +            // typed, bounded prefix so the host can classify (429 throttle versus
 +            // quota exhaustion versus 5xx) and render on its own scrubbed path.
-+            let detail = crate::response::transport_detail(response).await?;
++            let detail = crate::response::transport_detail(response).await;
 +            return Err(self.handle_error_response(status, detail));
          }
  
@@ -15305,7 +15344,7 @@ index c1e00c9..34b9981 100644
  
  /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..4d41228 100644
+index 9384750..48ce0d7 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -18,8 +18,7 @@ use reqwest::Client;
@@ -15889,10 +15928,13 @@ index 9384750..4d41228 100644
          };
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -1078,29 +1189,24 @@ impl OpenAIResponsesModel {
+@@ -1076,31 +1187,21 @@ impl OpenAIResponsesModel {
+             kind: "response".to_string(),
+         })
      }
++}
  
-     /// Handle API error response.
+-    /// Handle API error response.
 -    fn handle_error_response(&self, status: u16, body: &str) -> ModelError {
 -        // Try to parse as OpenAI error
 -        if let Ok(err) = serde_json::from_str::<super::types::OpenAIError>(body) {
@@ -15907,11 +15949,7 @@ index 9384750..4d41228 100644
 -            if status == 404 {
 -                return ModelError::NotFound(err.error.message);
 -            }
-+    fn handle_error_response(&self, status: u16, _body: &str) -> ModelError {
-+        crate::response::status_error(status, None)
-+    }
-+}
- 
+-
 -            return ModelError::Api {
 -                message: err.error.message,
 -                code,
@@ -15934,7 +15972,7 @@ index 9384750..4d41228 100644
  }
  
  #[async_trait]
-@@ -1123,7 +1229,7 @@ impl Model for OpenAIResponsesModel {
+@@ -1123,7 +1224,7 @@ impl Model for OpenAIResponsesModel {
          settings: &ModelSettings,
          params: &ModelRequestParameters,
      ) -> Result<ModelResponse, ModelError> {
@@ -15943,13 +15981,19 @@ index 9384750..4d41228 100644
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
-@@ -1145,14 +1251,11 @@ impl Model for OpenAIResponsesModel {
+@@ -1143,16 +1244,15 @@ impl Model for OpenAIResponsesModel {
  
-         let status = response.status().as_u16();
+         let response = request.json(&body).send().await?;
+ 
+-        let status = response.status().as_u16();
          if !response.status().is_success() {
 -            let body = response.text().await.unwrap_or_default();
-+            let body = crate::response::error_text(response).await?;
-             return Err(self.handle_error_response(status, &body));
+-            return Err(self.handle_error_response(status, &body));
++            // The bounded body stays out of the public diagnostic: it is carried as a
++            // typed, bounded prefix so the host can classify (throttle versus quota
++            // exhaustion versus 5xx) and render on its own scrubbed path.
++            let detail = crate::response::transport_detail(response).await;
++            return Err(crate::response::status_transport_error(detail));
          }
  
 -        let resp: ResponsesApiResponse = response
@@ -15960,7 +16004,7 @@ index 9384750..4d41228 100644
  
          self.process_response(resp)
      }
-@@ -1266,22 +1369,178 @@ mod tests {
+@@ -1266,22 +1366,178 @@ mod tests {
  
      #[test]
      fn test_response_input_serialization() {
@@ -16543,17 +16587,17 @@ index 5a4761d..e8950e4 100644
  }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..922fc9c
+index 0000000..7b5e529
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,519 @@
+@@ -0,0 +1,638 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
 +use crate::error::{ModelError, ModelResult};
-+// Only the OpenAI chat path reads a failed response as a structured transport detail.
-+// The helper set below is compiled solely for that feature so no other retained feature
-+// combination sees dead code.
-+#[cfg(feature = "openai")]
++// The OpenAI chat, OpenAI Responses, and Anthropic Messages paths read a failed
++// response as a structured transport detail. The helper set below is compiled solely
++// for those features so no other retained feature combination sees dead code.
++#[cfg(any(feature = "openai", feature = "anthropic"))]
 +use crate::error::{TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
 +#[cfg(any(
 +    feature = "antigravity",
@@ -16566,7 +16610,7 @@ index 0000000..922fc9c
 +    feature = "openai"
 +))]
 +use serde::de::DeserializeOwned;
-+#[cfg(feature = "openai")]
++#[cfg(any(feature = "openai", feature = "anthropic"))]
 +use std::time::Duration;
 +
 +/// Maximum successful JSON response body accepted from a provider.
@@ -16744,6 +16788,18 @@ index 0000000..922fc9c
 +}
 +
 +/// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
++#[cfg(any(
++    test,
++    feature = "antigravity",
++    feature = "chatgpt-oauth",
++    feature = "claude-code-oauth",
++    feature = "cohere",
++    feature = "google",
++    feature = "huggingface",
++    feature = "mistral",
++    feature = "ollama",
++    feature = "openrouter"
++))]
 +pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<String> {
 +    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
 +    std::str::from_utf8(&bytes)
@@ -16754,13 +16810,20 @@ index 0000000..922fc9c
 +/// Consume a bounded error response and return the structured transport facts the host
 +/// needs to classify it: the status, a bounded body prefix with the total byte length,
 +/// and the provider's `Retry-After`. No unbounded body is retained and the prefix is a
-+/// typed field the public formatting never renders. Compiled only for the OpenAI chat
-+/// path, which is the single retained consumer.
-+#[cfg(feature = "openai")]
-+pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult<TransportDetail> {
++/// typed field the public formatting never renders. Compiled for the OpenAI chat and
++/// Responses and the Anthropic Messages paths, the retained consumers.
++#[cfg(any(feature = "openai", feature = "anthropic"))]
++pub(crate) async fn transport_detail(response: reqwest::Response) -> TransportDetail {
 +    let status = response.status().as_u16();
 +    let retry_after = parse_retry_after(response.headers());
-+    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
++    // The status and hint are authoritative and already in hand. A failed or oversized
++    // bounded body read must not demote a definitive refusal to a retryable transport
++    // failure, so the body is simply absent in that case and the status still governs
++    // the classification.
++    let bytes = match read_bounded(response, MAX_ERROR_BODY_BYTES).await {
++        Ok(bytes) => bytes,
++        Err(_) => return TransportDetail::from_status(status, None, 0, retry_after),
++    };
 +    let body_bytes = bytes.len();
 +    let text = String::from_utf8_lossy(&bytes);
 +    let prefix = if text.is_empty() {
@@ -16768,18 +16831,13 @@ index 0000000..922fc9c
 +    } else {
 +        Some(bounded_body_prefix(&text))
 +    };
-+    Ok(TransportDetail::from_status(
-+        status,
-+        prefix,
-+        body_bytes,
-+        retry_after,
-+    ))
++    TransportDetail::from_status(status, prefix, body_bytes, retry_after)
 +}
 +
 +/// Bound a decoded body to a fixed prefix. The total byte length is kept separately so a
 +/// truncated prefix still states how much was read, and the truncation is at a safe
 +/// UTF-8 boundary.
-+#[cfg(feature = "openai")]
++#[cfg(any(feature = "openai", feature = "anthropic"))]
 +pub(crate) fn bounded_body_prefix(text: &str) -> String {
 +    if text.len() <= MAX_TRANSPORT_BODY_PREFIX_BYTES {
 +        return text.to_string();
@@ -16792,7 +16850,7 @@ index 0000000..922fc9c
 +}
 +
 +/// Read the provider's `Retry-After` hint, when one is sent.
-+#[cfg(feature = "openai")]
++#[cfg(any(feature = "openai", feature = "anthropic"))]
 +pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
 +    headers
 +        .get("retry-after")
@@ -16802,6 +16860,18 @@ index 0000000..922fc9c
 +}
 +
 +/// Convert a provider status to a typed, value-free diagnostic.
++#[cfg(any(
++    test,
++    feature = "antigravity",
++    feature = "chatgpt-oauth",
++    feature = "claude-code-oauth",
++    feature = "cohere",
++    feature = "google",
++    feature = "huggingface",
++    feature = "mistral",
++    feature = "ollama",
++    feature = "openrouter"
++))]
 +pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
 +    match status {
 +        401 | 403 => ModelError::auth("provider authentication failed"),
@@ -16814,7 +16884,7 @@ index 0000000..922fc9c
 +/// The structured transport failure for a provider status response whose body was read
 +/// bounded. The classification derives from the status plus the bounded body, so a
 +/// weekly usage limit riding on a 429 or a 403 is a quota exhaustion, not a throttle.
-+#[cfg(feature = "openai")]
++#[cfg(any(feature = "openai", feature = "anthropic"))]
 +pub(crate) fn status_transport_error(detail: TransportDetail) -> ModelError {
 +    ModelError::Transport(detail)
 +}
@@ -17064,6 +17134,99 @@ index 0000000..922fc9c
 +                })
 +            ));
 +        }
++    }
++}
++
++#[cfg(all(test, any(feature = "openai", feature = "anthropic")))]
++mod typed_refusal_tests {
++    use super::*;
++    use crate::error::{TransportClass, TransportOrigin};
++    use std::io::{Read, Write};
++    use std::net::TcpListener;
++    use std::time::Duration;
++
++    async fn refusal(status: u16, body: &[u8], declared_length: usize) -> TransportDetail {
++        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
++        let body = body.to_vec();
++        let server = std::thread::spawn(move || {
++            let (mut stream, _) = listener.accept().unwrap();
++            stream
++                .set_read_timeout(Some(Duration::from_secs(5)))
++                .unwrap();
++            let mut request = [0; 4096];
++            stream.read(&mut request).unwrap();
++            write!(stream, "HTTP/1.1 {status} Error\r\nContent-Length: {declared_length}\r\nRetry-After: 7\r\nConnection: close\r\n\r\n").unwrap();
++            // Oversized readers can close the connection before all bytes are sent.
++            let _ = stream.write_all(&body);
++        });
++        let response = reqwest::Client::builder()
++            .no_proxy()
++            .timeout(Duration::from_secs(5))
++            .build()
++            .unwrap()
++            .get(format!("http://{address}"))
++            .send()
++            .await
++            .unwrap();
++        let detail = transport_detail(response).await;
++        server.join().unwrap();
++        assert_eq!(detail.origin, TransportOrigin::Status(status));
++        assert_eq!(detail.retry_after, Some(Duration::from_secs(7)));
++        detail
++    }
++
++    #[tokio::test]
++    async fn status_body_and_hint_survive_for_retry_classification() {
++        for (status, body, class) in [
++            (
++                429,
++                r#"{"error":{"code":"insufficient_quota"}}"#,
++                TransportClass::QuotaExhausted,
++            ),
++            (
++                400,
++                r#"{"error":{"type":"billing_error"}}"#,
++                TransportClass::QuotaExhausted,
++            ),
++            (
++                400,
++                r#"{"error":{"type":"invalid_request_error","message":"billing_error credit exhausted"}}"#,
++                TransportClass::Permanent,
++            ),
++            (
++                429,
++                r#"{"error":{"type":"rate_limit_error"}}"#,
++                TransportClass::RateLimit,
++            ),
++            (503, "unavailable", TransportClass::TransientServer),
++        ] {
++            let detail = refusal(status, body.as_bytes(), body.len()).await;
++            assert_eq!(detail.classify(), class);
++            assert_eq!(detail.body_bytes, body.len());
++            assert_eq!(detail.body_prefix.as_deref(), Some(body));
++        }
++    }
++
++    #[tokio::test]
++    async fn broken_and_oversized_bodies_preserve_authoritative_status() {
++        for (body, length) in [(vec![b'x'; 70_000], 70_000), (b"partial".to_vec(), 100)] {
++            let detail = refusal(401, &body, length).await;
++            assert_eq!(detail.classify(), TransportClass::Permanent);
++            assert_eq!(detail.body_prefix, None);
++            assert_eq!(detail.body_bytes, 0);
++        }
++    }
++
++    #[tokio::test]
++    async fn prefix_is_utf8_bounded_and_byte_count_is_not_prefix_length() {
++        let body = "€".repeat(3000);
++        let detail = refusal(403, body.as_bytes(), body.len()).await;
++        let prefix = detail.body_prefix.unwrap();
++        assert!(prefix.len() <= crate::error::MAX_TRANSPORT_BODY_PREFIX_BYTES);
++        assert!(body.starts_with(&prefix));
++        assert_eq!(detail.body_bytes, body.len());
++        assert!(detail.body_bytes > prefix.len());
 +    }
 +}
 diff --git a/vendor/serdes-ai-output/Cargo.lock b/vendor/serdes-ai-output/Cargo.lock
@@ -25797,18 +25960,20 @@ index 9993fc0..78de8d4 100644
  }
  
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..86e53d5 100644
+index f90cc22..ff81b11 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
-@@ -16,7 +16,6 @@ use async_trait::async_trait;
+@@ -16,8 +16,8 @@ use async_trait::async_trait;
  use serde::Serialize;
  use serdes_ai_core::messages::{ModelRequest, ModelRequestPart, ModelResponseStreamEvent};
  use serdes_ai_core::FinishReason;
 -use serdes_ai_core::ModelFailureKind;
  use serdes_ai_core::{ModelResponse, ModelSettings, RequestUsage};
++use serdes_ai_models::error::TransportDetail;
  use serdes_ai_models::model::{Model, ModelRequestParameters, StreamedResponse};
  use serdes_ai_models::profile::{openai_gpt4o_profile, ModelProfile};
-@@ -88,6 +87,7 @@ struct Inner {
+ use serdes_ai_models::ModelError;
+@@ -88,6 +88,7 @@ struct Inner {
      model_name: String,
      endpoint: String,
      transport: Transport,
@@ -25816,7 +25981,7 @@ index f90cc22..86e53d5 100644
      headers: Vec<(String, String)>,
      reasoning: Option<ReasoningSettings>,
      http: reqwest::Client,
-@@ -168,6 +168,7 @@ impl OpenResponsesModel {
+@@ -168,6 +169,7 @@ impl OpenResponsesModel {
                  model_name,
                  endpoint,
                  transport,
@@ -25824,7 +25989,7 @@ index f90cc22..86e53d5 100644
                  headers: Vec::new(),
                  reasoning: None,
                  http: reqwest::Client::new(),
-@@ -193,6 +194,19 @@ impl OpenResponsesModel {
+@@ -193,6 +195,19 @@ impl OpenResponsesModel {
          self
      }
  
@@ -25844,7 +26009,7 @@ index f90cc22..86e53d5 100644
      /// Authenticate with a bearer token (HTTP `Authorization` header, or the
      /// same header on the websocket handshake).
      #[must_use]
-@@ -472,6 +486,9 @@ fn build_request(
+@@ -472,6 +487,9 @@ fn build_request(
      previous_response_id: Option<String>,
      store: bool,
  ) -> Result<CreateResponseRequest, ModelError> {
@@ -25854,7 +26019,7 @@ index f90cc22..86e53d5 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +501,19 @@ fn build_request(
+@@ -484,11 +502,19 @@ fn build_request(
                  .collect(),
          )
      };
@@ -25875,7 +26040,7 @@ index f90cc22..86e53d5 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +521,7 @@ fn build_request(
+@@ -496,7 +522,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -25884,7 +26049,7 @@ index f90cc22..86e53d5 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -512,35 +537,23 @@ fn build_request(
+@@ -512,36 +538,73 @@ fn build_request(
      })
  }
  
@@ -25927,10 +26092,60 @@ index f90cc22..86e53d5 100644
 +            ModelError::NotFound(message)
 +        }
 +        _ => ModelError::api_with_code(message, code),
++    }
++}
++
++/// Read a failed HTTP refusal as structured, value-free transport facts: the status,
++/// a bounded body prefix, and any `Retry-After`. The bounded body stays out of the
++/// public diagnostic; the host classifies (throttle versus quota exhaustion versus
++/// 5xx) and renders on its own scrubbed path.
++async fn refusal_detail(mut response: reqwest::Response) -> TransportDetail {
++    let status = response.status().as_u16();
++    let headers = response.headers().clone();
++    let retry_after = parse_retry_after(&headers);
++    const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
++    let mut bytes = Vec::new();
++    loop {
++        match response.chunk().await {
++            Ok(Some(chunk)) if chunk.len() <= MAX_ERROR_BODY_BYTES - bytes.len() => {
++                bytes.extend_from_slice(&chunk);
++            }
++            Ok(None) => break,
++            // Preserve an authoritative HTTP refusal even when its body cannot be read.
++            _ => return TransportDetail::from_status(status, None, 0, retry_after),
++        }
++    }
++    let prefix = bounded_body_prefix(&String::from_utf8_lossy(&bytes));
++    TransportDetail::from_status(status, prefix, bytes.len(), retry_after)
++}
++
++/// Read the provider's `Retry-After` hint, when one is sent.
++fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
++    headers
++        .get("retry-after")
++        .and_then(|value| value.to_str().ok())
++        .and_then(|value| value.parse::<u64>().ok())
++        .map(std::time::Duration::from_secs)
++}
++
++/// Bound a decoded refusal body to a fixed prefix at a safe UTF-8 boundary.
++fn bounded_body_prefix(text: &str) -> Option<String> {
++    const MAX: usize = serdes_ai_models::error::MAX_TRANSPORT_BODY_PREFIX_BYTES;
++    if text.is_empty() {
++        return None;
++    }
++    if text.len() <= MAX {
++        return Some(text.to_string());
++    }
++    let mut end = MAX;
++    while end > 0 && !text.is_char_boundary(end) {
++        end -= 1;
      }
++    Some(text[..end].to_string())
  }
  
-@@ -571,6 +584,9 @@ impl Model for OpenResponsesModel {
+ #[async_trait]
+@@ -571,6 +634,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -25940,7 +26155,7 @@ index f90cc22..86e53d5 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -620,7 +636,7 @@ fn response_from_events(
+@@ -620,7 +686,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -25949,7 +26164,7 @@ index f90cc22..86e53d5 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -665,6 +681,18 @@ fn response_from_events(
+@@ -665,6 +731,18 @@ fn response_from_events(
          }
      }
  
@@ -25968,7 +26183,7 @@ index f90cc22..86e53d5 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +706,40 @@ fn response_from_events(
+@@ -678,7 +756,40 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -26010,7 +26225,34 @@ index f90cc22..86e53d5 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -759,7 +820,22 @@ impl OpenResponsesModel {
+@@ -710,10 +821,13 @@ impl OpenResponsesModel {
+                 .map_err(|e| ModelError::Connection(e.to_string()))?;
+ 
+             if !response.status().is_success() {
+-                let status = response.status().as_u16();
+-                let body = response.text().await.unwrap_or_default();
+-                let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
+-                    .ok()
++                let detail = refusal_detail(response).await;
++                let code = detail
++                    .body_prefix
++                    .as_deref()
++                    .and_then(|prefix| {
++                        serde_json::from_str::<crate::error::HttpErrorEnvelope>(prefix).ok()
++                    })
+                     .map(|envelope| envelope.error.code)
+                     .unwrap_or_default();
+                 if code == codes::PREVIOUS_RESPONSE_NOT_FOUND && chained {
+@@ -721,7 +835,7 @@ impl OpenResponsesModel {
+                     session.sent_requests = 0;
+                     continue;
+                 }
+-                return Err(ModelError::http(status, format!("{code}: {body}")));
++                return Err(ModelError::Transport(detail));
+             }
+ 
+             let object: ResponseObject = response
+@@ -759,7 +873,22 @@ impl OpenResponsesModel {
      }
  }
  
@@ -26034,7 +26276,7 @@ index f90cc22..86e53d5 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,7 +848,7 @@ async fn run_http_stream(
+@@ -772,7 +901,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -26043,7 +26285,29 @@ index f90cc22..86e53d5 100644
      use futures::StreamExt;
  
      let mut session = inner.session.lock().await;
-@@ -815,6 +891,7 @@ async fn run_http_stream(
+@@ -799,10 +928,11 @@ async fn run_http_stream(
+         if response.status().is_success() {
+             break response;
+         }
+-        let status = response.status().as_u16();
+-        let body = response.text().await.unwrap_or_default();
+-        let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
+-            .ok()
++        let detail = refusal_detail(response).await;
++        let code = detail
++            .body_prefix
++            .as_deref()
++            .and_then(|prefix| serde_json::from_str::<crate::error::HttpErrorEnvelope>(prefix).ok())
+             .map(|envelope| envelope.error.code)
+             .unwrap_or_default();
+         if code == codes::PREVIOUS_RESPONSE_NOT_FOUND && chained {
+@@ -810,11 +940,12 @@ async fn run_http_stream(
+             session.sent_requests = 0;
+             continue;
+         }
+-        return Err(ModelError::http(status, format!("{code}: {body}")));
++        return Err(ModelError::Transport(detail));
+     };
  
      let mut byte_stream = response.bytes_stream();
      let mut buffer = String::new();
@@ -26051,7 +26315,7 @@ index f90cc22..86e53d5 100644
      while let Some(chunk) = byte_stream.next().await {
          let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
          buffer.push_str(&String::from_utf8_lossy(&chunk));
-@@ -825,15 +902,21 @@ async fn run_http_stream(
+@@ -825,15 +956,21 @@ async fn run_http_stream(
                  continue;
              };
              if payload == "[DONE]" {
@@ -26078,7 +26342,7 @@ index f90cc22..86e53d5 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,14 +929,41 @@ async fn run_http_stream(
+@@ -846,14 +983,134 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -26122,6 +26386,99 @@ index f90cc22..86e53d5 100644
 +        let error = parse_sse_response_event(r#"{"type":"response.not_a_real_event"}"#)
 +            .expect_err("unknown semantic response events must remain rejected");
 +        assert!(error.to_string().contains("unknown variant"));
++    }
++}
++
++#[cfg(test)]
++mod typed_refusal_tests {
++    use super::*;
++    use serdes_ai_models::error::{TransportClass, TransportOrigin};
++    use std::io::{Read, Write};
++    use std::net::TcpListener;
++    use std::time::Duration;
++
++    async fn refusal(status: u16, body: &[u8], declared_length: usize) -> TransportDetail {
++        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
++        let body = body.to_vec();
++        let server = std::thread::spawn(move || {
++            let (mut stream, _) = listener.accept().unwrap();
++            stream
++                .set_read_timeout(Some(Duration::from_secs(5)))
++                .unwrap();
++            let mut request = [0; 4096];
++            stream.read(&mut request).unwrap();
++            write!(stream, "HTTP/1.1 {status} Error\r\nContent-Length: {declared_length}\r\nRetry-After: 7\r\nConnection: close\r\n\r\n").unwrap();
++            // Oversized readers can close the connection before all bytes are sent.
++            let _ = stream.write_all(&body);
++        });
++        let response = reqwest::Client::builder()
++            .no_proxy()
++            .timeout(Duration::from_secs(5))
++            .build()
++            .unwrap()
++            .get(format!("http://{address}"))
++            .send()
++            .await
++            .unwrap();
++        let detail = refusal_detail(response).await;
++        server.join().unwrap();
++        assert_eq!(detail.origin, TransportOrigin::Status(status));
++        assert_eq!(detail.retry_after, Some(Duration::from_secs(7)));
++        detail
++    }
++
++    #[tokio::test]
++    async fn status_body_and_hint_survive_for_retry_classification() {
++        for (status, body, class) in [
++            (
++                429,
++                r#"{"error":{"code":"insufficient_quota"}}"#,
++                TransportClass::QuotaExhausted,
++            ),
++            (
++                400,
++                r#"{"error":{"type":"billing_error"}}"#,
++                TransportClass::QuotaExhausted,
++            ),
++            (
++                400,
++                r#"{"error":{"type":"invalid_request_error","message":"billing_error credit exhausted"}}"#,
++                TransportClass::Permanent,
++            ),
++            (
++                429,
++                r#"{"error":{"type":"rate_limit_error"}}"#,
++                TransportClass::RateLimit,
++            ),
++            (503, "unavailable", TransportClass::TransientServer),
++        ] {
++            let detail = refusal(status, body.as_bytes(), body.len()).await;
++            assert_eq!(detail.classify(), class);
++            assert_eq!(detail.body_bytes, body.len());
++            assert_eq!(detail.body_prefix.as_deref(), Some(body));
++        }
++    }
++
++    #[tokio::test]
++    async fn broken_and_oversized_bodies_preserve_authoritative_status() {
++        for (body, length) in [(vec![b'x'; 70_000], 70_000), (b"partial".to_vec(), 100)] {
++            let detail = refusal(401, &body, length).await;
++            assert_eq!(detail.classify(), TransportClass::Permanent);
++            assert_eq!(detail.body_prefix, None);
++            assert_eq!(detail.body_bytes, 0);
++        }
++    }
++
++    #[tokio::test]
++    async fn prefix_is_utf8_bounded_and_byte_count_is_not_prefix_length() {
++        let body = "€".repeat(3000);
++        let detail = refusal(403, body.as_bytes(), body.len()).await;
++        let prefix = detail.body_prefix.unwrap();
++        assert!(prefix.len() <= serdes_ai_models::error::MAX_TRANSPORT_BODY_PREFIX_BYTES);
++        assert!(body.starts_with(&prefix));
++        assert_eq!(detail.body_bytes, body.len());
++        assert!(detail.body_bytes > prefix.len());
 +    }
  }
 diff --git a/vendor/serdes-ai-responses/src/engine.rs b/vendor/serdes-ai-responses/src/engine.rs

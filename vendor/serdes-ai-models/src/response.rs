@@ -1,10 +1,10 @@
 //! Bounded HTTP response-body handling shared by provider models.
 
 use crate::error::{ModelError, ModelResult};
-// Only the OpenAI chat path reads a failed response as a structured transport detail.
-// The helper set below is compiled solely for that feature so no other retained feature
-// combination sees dead code.
-#[cfg(feature = "openai")]
+// The OpenAI chat, OpenAI Responses, and Anthropic Messages paths read a failed
+// response as a structured transport detail. The helper set below is compiled solely
+// for those features so no other retained feature combination sees dead code.
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 use crate::error::{TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
 #[cfg(any(
     feature = "antigravity",
@@ -17,7 +17,7 @@ use crate::error::{TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
     feature = "openai"
 ))]
 use serde::de::DeserializeOwned;
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 use std::time::Duration;
 
 /// Maximum successful JSON response body accepted from a provider.
@@ -195,6 +195,18 @@ pub(crate) async fn json<T: DeserializeOwned>(response: reqwest::Response) -> Mo
 }
 
 /// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<String> {
     let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
     std::str::from_utf8(&bytes)
@@ -205,13 +217,20 @@ pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<Strin
 /// Consume a bounded error response and return the structured transport facts the host
 /// needs to classify it: the status, a bounded body prefix with the total byte length,
 /// and the provider's `Retry-After`. No unbounded body is retained and the prefix is a
-/// typed field the public formatting never renders. Compiled only for the OpenAI chat
-/// path, which is the single retained consumer.
-#[cfg(feature = "openai")]
-pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult<TransportDetail> {
+/// typed field the public formatting never renders. Compiled for the OpenAI chat and
+/// Responses and the Anthropic Messages paths, the retained consumers.
+#[cfg(any(feature = "openai", feature = "anthropic"))]
+pub(crate) async fn transport_detail(response: reqwest::Response) -> TransportDetail {
     let status = response.status().as_u16();
     let retry_after = parse_retry_after(response.headers());
-    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
+    // The status and hint are authoritative and already in hand. A failed or oversized
+    // bounded body read must not demote a definitive refusal to a retryable transport
+    // failure, so the body is simply absent in that case and the status still governs
+    // the classification.
+    let bytes = match read_bounded(response, MAX_ERROR_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => return TransportDetail::from_status(status, None, 0, retry_after),
+    };
     let body_bytes = bytes.len();
     let text = String::from_utf8_lossy(&bytes);
     let prefix = if text.is_empty() {
@@ -219,18 +238,13 @@ pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult
     } else {
         Some(bounded_body_prefix(&text))
     };
-    Ok(TransportDetail::from_status(
-        status,
-        prefix,
-        body_bytes,
-        retry_after,
-    ))
+    TransportDetail::from_status(status, prefix, body_bytes, retry_after)
 }
 
 /// Bound a decoded body to a fixed prefix. The total byte length is kept separately so a
 /// truncated prefix still states how much was read, and the truncation is at a safe
 /// UTF-8 boundary.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn bounded_body_prefix(text: &str) -> String {
     if text.len() <= MAX_TRANSPORT_BODY_PREFIX_BYTES {
         return text.to_string();
@@ -243,7 +257,7 @@ pub(crate) fn bounded_body_prefix(text: &str) -> String {
 }
 
 /// Read the provider's `Retry-After` hint, when one is sent.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     headers
         .get("retry-after")
@@ -253,6 +267,18 @@ pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<
 }
 
 /// Convert a provider status to a typed, value-free diagnostic.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
     match status {
         401 | 403 => ModelError::auth("provider authentication failed"),
@@ -265,7 +291,7 @@ pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>
 /// The structured transport failure for a provider status response whose body was read
 /// bounded. The classification derives from the status plus the bounded body, so a
 /// weekly usage limit riding on a 429 or a 403 is a quota exhaustion, not a throttle.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn status_transport_error(detail: TransportDetail) -> ModelError {
     ModelError::Transport(detail)
 }
@@ -515,5 +541,98 @@ mod tests {
                 })
             ));
         }
+    }
+}
+
+#[cfg(all(test, any(feature = "openai", feature = "anthropic")))]
+mod typed_refusal_tests {
+    use super::*;
+    use crate::error::{TransportClass, TransportOrigin};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    async fn refusal(status: u16, body: &[u8], declared_length: usize) -> TransportDetail {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = body.to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            write!(stream, "HTTP/1.1 {status} Error\r\nContent-Length: {declared_length}\r\nRetry-After: 7\r\nConnection: close\r\n\r\n").unwrap();
+            // Oversized readers can close the connection before all bytes are sent.
+            let _ = stream.write_all(&body);
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        let detail = transport_detail(response).await;
+        server.join().unwrap();
+        assert_eq!(detail.origin, TransportOrigin::Status(status));
+        assert_eq!(detail.retry_after, Some(Duration::from_secs(7)));
+        detail
+    }
+
+    #[tokio::test]
+    async fn status_body_and_hint_survive_for_retry_classification() {
+        for (status, body, class) in [
+            (
+                429,
+                r#"{"error":{"code":"insufficient_quota"}}"#,
+                TransportClass::QuotaExhausted,
+            ),
+            (
+                400,
+                r#"{"error":{"type":"billing_error"}}"#,
+                TransportClass::QuotaExhausted,
+            ),
+            (
+                400,
+                r#"{"error":{"type":"invalid_request_error","message":"billing_error credit exhausted"}}"#,
+                TransportClass::Permanent,
+            ),
+            (
+                429,
+                r#"{"error":{"type":"rate_limit_error"}}"#,
+                TransportClass::RateLimit,
+            ),
+            (503, "unavailable", TransportClass::TransientServer),
+        ] {
+            let detail = refusal(status, body.as_bytes(), body.len()).await;
+            assert_eq!(detail.classify(), class);
+            assert_eq!(detail.body_bytes, body.len());
+            assert_eq!(detail.body_prefix.as_deref(), Some(body));
+        }
+    }
+
+    #[tokio::test]
+    async fn broken_and_oversized_bodies_preserve_authoritative_status() {
+        for (body, length) in [(vec![b'x'; 70_000], 70_000), (b"partial".to_vec(), 100)] {
+            let detail = refusal(401, &body, length).await;
+            assert_eq!(detail.classify(), TransportClass::Permanent);
+            assert_eq!(detail.body_prefix, None);
+            assert_eq!(detail.body_bytes, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn prefix_is_utf8_bounded_and_byte_count_is_not_prefix_length() {
+        let body = "€".repeat(3000);
+        let detail = refusal(403, body.as_bytes(), body.len()).await;
+        let prefix = detail.body_prefix.unwrap();
+        assert!(prefix.len() <= crate::error::MAX_TRANSPORT_BODY_PREFIX_BYTES);
+        assert!(body.starts_with(&prefix));
+        assert_eq!(detail.body_bytes, body.len());
+        assert!(detail.body_bytes > prefix.len());
     }
 }

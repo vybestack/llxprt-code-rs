@@ -576,7 +576,7 @@ impl Model for OpenAIChatModel {
             // The bounded body stays out of the public diagnostic: it is carried as a
             // typed, bounded prefix so the host can classify (429 throttle versus
             // quota exhaustion versus 5xx) and render on its own scrubbed path.
-            let detail = crate::response::transport_detail(response).await?;
+            let detail = crate::response::transport_detail(response).await;
             return Err(self.handle_error_response(status, detail));
         }
 
@@ -617,7 +617,7 @@ impl Model for OpenAIChatModel {
             // The bounded body stays out of the public diagnostic: it is carried as a
             // typed, bounded prefix so the host can classify (429 throttle versus
             // quota exhaustion versus 5xx) and render on its own scrubbed path.
-            let detail = crate::response::transport_detail(response).await?;
+            let detail = crate::response::transport_detail(response).await;
             return Err(self.handle_error_response(status, detail));
         }
 

@@ -209,6 +209,14 @@ pub fn classify_status(status: u16, body: &str) -> TransportClass {
 
 /// Whether a bounded provider body reads as a quota or billing hard stop.
 fn quota_body(body: &str) -> bool {
+    // Anthropic billing refusals use a structured error type, not message wording.
+    if serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("error")?.get("type")?.as_str().map(str::to_owned))
+        .is_some_and(|kind| kind == "billing_error")
+    {
+        return true;
+    }
     const MARKERS: [&str; 6] = [
         "insufficient_quota",
         "usage limit",

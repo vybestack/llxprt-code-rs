@@ -1187,11 +1187,6 @@ impl OpenAIResponsesModel {
             kind: "response".to_string(),
         })
     }
-
-    /// Handle API error response.
-    fn handle_error_response(&self, status: u16, _body: &str) -> ModelError {
-        crate::response::status_error(status, None)
-    }
 }
 
 fn required_call_id(call_id: Option<&str>) -> Result<&str, ModelError> {
@@ -1249,10 +1244,12 @@ impl Model for OpenAIResponsesModel {
 
         let response = request.json(&body).send().await?;
 
-        let status = response.status().as_u16();
         if !response.status().is_success() {
-            let body = crate::response::error_text(response).await?;
-            return Err(self.handle_error_response(status, &body));
+            // The bounded body stays out of the public diagnostic: it is carried as a
+            // typed, bounded prefix so the host can classify (throttle versus quota
+            // exhaustion versus 5xx) and render on its own scrubbed path.
+            let detail = crate::response::transport_detail(response).await;
+            return Err(crate::response::status_transport_error(detail));
         }
 
         let resp: ResponsesApiResponse = crate::response::json(response).await?;

@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `0144b4e99ac63adf0daf17985a6e3fdb53d6c59f08c36c03b06308d519c3f660`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `d3c0cbbc7de9394e59cc076a99ea91811a85268c6e500cce0096b089bf459c11`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -270,6 +270,26 @@ separate field, and a forwarded key colliding with a typed wire key cannot reach
 recognized names into typed fields, not the map. Direct model tests pin the flattened serialized shape (including
 nested objects), the absence of an `extra` shell key when the map is empty, and the absence of the map for a
 default-constructed model.
+
+## Patch 14 - typed HTTP refusals across bounded retry paths
+
+OpenAI chat, OpenAI Responses, Anthropic Messages, and the client-only Responses
+HTTP transport retain the HTTP status, bounded body prefix, actual bounded body
+byte count, and numeric `Retry-After` as `TransportDetail`. Failed and oversized
+error-body reads preserve the authoritative status and hint, rather than turning
+an HTTP refusal into an ambiguous connectivity failure. Both body readers cap
+error bodies at 64 KiB before decoding; prefixes remain UTF-8-safe and bounded by
+`MAX_TRANSPORT_BODY_PREFIX_BYTES`. Public diagnostics never render the body.
+Anthropic's structured `error.type = "billing_error"` is a terminal quota refusal;
+that token in message text alone does not change the classification.
+
+The host retries only typed retryable failures, with at most four attempts and
+bounded equal-jitter backoff under the original turn deadline. `Retry-After` is a
+minimum, not a jitter ceiling. Responses stream failures remain terminal unless
+they carry an actual provider HTTP status; incomplete streams are never replayed.
+Loopback tests exercise both Responses paths, Anthropic retry/terminal behavior,
+body-read failure and size limits, and status/body/hint retention. The host's
+paused-time deadline suite pins retry counts and the shared request/sleep budget.
 
 ## Tests
 

@@ -17,6 +17,7 @@ use serde::Serialize;
 use serdes_ai_core::messages::{ModelRequest, ModelRequestPart, ModelResponseStreamEvent};
 use serdes_ai_core::FinishReason;
 use serdes_ai_core::{ModelResponse, ModelSettings, RequestUsage};
+use serdes_ai_models::error::TransportDetail;
 use serdes_ai_models::model::{Model, ModelRequestParameters, StreamedResponse};
 use serdes_ai_models::profile::{openai_gpt4o_profile, ModelProfile};
 use serdes_ai_models::ModelError;
@@ -557,6 +558,55 @@ pub(super) fn response_error(code: &str, message: String) -> ModelError {
     }
 }
 
+/// Read a failed HTTP refusal as structured, value-free transport facts: the status,
+/// a bounded body prefix, and any `Retry-After`. The bounded body stays out of the
+/// public diagnostic; the host classifies (throttle versus quota exhaustion versus
+/// 5xx) and renders on its own scrubbed path.
+async fn refusal_detail(mut response: reqwest::Response) -> TransportDetail {
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let retry_after = parse_retry_after(&headers);
+    const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if chunk.len() <= MAX_ERROR_BODY_BYTES - bytes.len() => {
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            // Preserve an authoritative HTTP refusal even when its body cannot be read.
+            _ => return TransportDetail::from_status(status, None, 0, retry_after),
+        }
+    }
+    let prefix = bounded_body_prefix(&String::from_utf8_lossy(&bytes));
+    TransportDetail::from_status(status, prefix, bytes.len(), retry_after)
+}
+
+/// Read the provider's `Retry-After` hint, when one is sent.
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    headers
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+}
+
+/// Bound a decoded refusal body to a fixed prefix at a safe UTF-8 boundary.
+fn bounded_body_prefix(text: &str) -> Option<String> {
+    const MAX: usize = serdes_ai_models::error::MAX_TRANSPORT_BODY_PREFIX_BYTES;
+    if text.is_empty() {
+        return None;
+    }
+    if text.len() <= MAX {
+        return Some(text.to_string());
+    }
+    let mut end = MAX;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(text[..end].to_string())
+}
+
 #[async_trait]
 impl Model for OpenResponsesModel {
     fn name(&self) -> &str {
@@ -771,10 +821,13 @@ impl OpenResponsesModel {
                 .map_err(|e| ModelError::Connection(e.to_string()))?;
 
             if !response.status().is_success() {
-                let status = response.status().as_u16();
-                let body = response.text().await.unwrap_or_default();
-                let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
-                    .ok()
+                let detail = refusal_detail(response).await;
+                let code = detail
+                    .body_prefix
+                    .as_deref()
+                    .and_then(|prefix| {
+                        serde_json::from_str::<crate::error::HttpErrorEnvelope>(prefix).ok()
+                    })
                     .map(|envelope| envelope.error.code)
                     .unwrap_or_default();
                 if code == codes::PREVIOUS_RESPONSE_NOT_FOUND && chained {
@@ -782,7 +835,7 @@ impl OpenResponsesModel {
                     session.sent_requests = 0;
                     continue;
                 }
-                return Err(ModelError::http(status, format!("{code}: {body}")));
+                return Err(ModelError::Transport(detail));
             }
 
             let object: ResponseObject = response
@@ -875,10 +928,11 @@ async fn run_http_stream(
         if response.status().is_success() {
             break response;
         }
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
-            .ok()
+        let detail = refusal_detail(response).await;
+        let code = detail
+            .body_prefix
+            .as_deref()
+            .and_then(|prefix| serde_json::from_str::<crate::error::HttpErrorEnvelope>(prefix).ok())
             .map(|envelope| envelope.error.code)
             .unwrap_or_default();
         if code == codes::PREVIOUS_RESPONSE_NOT_FOUND && chained {
@@ -886,7 +940,7 @@ async fn run_http_stream(
             session.sent_requests = 0;
             continue;
         }
-        return Err(ModelError::http(status, format!("{code}: {body}")));
+        return Err(ModelError::Transport(detail));
     };
 
     let mut byte_stream = response.bytes_stream();
@@ -965,5 +1019,98 @@ mod tests {
         let error = parse_sse_response_event(r#"{"type":"response.not_a_real_event"}"#)
             .expect_err("unknown semantic response events must remain rejected");
         assert!(error.to_string().contains("unknown variant"));
+    }
+}
+
+#[cfg(test)]
+mod typed_refusal_tests {
+    use super::*;
+    use serdes_ai_models::error::{TransportClass, TransportOrigin};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    async fn refusal(status: u16, body: &[u8], declared_length: usize) -> TransportDetail {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = body.to_vec();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            write!(stream, "HTTP/1.1 {status} Error\r\nContent-Length: {declared_length}\r\nRetry-After: 7\r\nConnection: close\r\n\r\n").unwrap();
+            // Oversized readers can close the connection before all bytes are sent.
+            let _ = stream.write_all(&body);
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap();
+        let detail = refusal_detail(response).await;
+        server.join().unwrap();
+        assert_eq!(detail.origin, TransportOrigin::Status(status));
+        assert_eq!(detail.retry_after, Some(Duration::from_secs(7)));
+        detail
+    }
+
+    #[tokio::test]
+    async fn status_body_and_hint_survive_for_retry_classification() {
+        for (status, body, class) in [
+            (
+                429,
+                r#"{"error":{"code":"insufficient_quota"}}"#,
+                TransportClass::QuotaExhausted,
+            ),
+            (
+                400,
+                r#"{"error":{"type":"billing_error"}}"#,
+                TransportClass::QuotaExhausted,
+            ),
+            (
+                400,
+                r#"{"error":{"type":"invalid_request_error","message":"billing_error credit exhausted"}}"#,
+                TransportClass::Permanent,
+            ),
+            (
+                429,
+                r#"{"error":{"type":"rate_limit_error"}}"#,
+                TransportClass::RateLimit,
+            ),
+            (503, "unavailable", TransportClass::TransientServer),
+        ] {
+            let detail = refusal(status, body.as_bytes(), body.len()).await;
+            assert_eq!(detail.classify(), class);
+            assert_eq!(detail.body_bytes, body.len());
+            assert_eq!(detail.body_prefix.as_deref(), Some(body));
+        }
+    }
+
+    #[tokio::test]
+    async fn broken_and_oversized_bodies_preserve_authoritative_status() {
+        for (body, length) in [(vec![b'x'; 70_000], 70_000), (b"partial".to_vec(), 100)] {
+            let detail = refusal(401, &body, length).await;
+            assert_eq!(detail.classify(), TransportClass::Permanent);
+            assert_eq!(detail.body_prefix, None);
+            assert_eq!(detail.body_bytes, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn prefix_is_utf8_bounded_and_byte_count_is_not_prefix_length() {
+        let body = "€".repeat(3000);
+        let detail = refusal(403, body.as_bytes(), body.len()).await;
+        let prefix = detail.body_prefix.unwrap();
+        assert!(prefix.len() <= serdes_ai_models::error::MAX_TRANSPORT_BODY_PREFIX_BYTES);
+        assert!(body.starts_with(&prefix));
+        assert_eq!(detail.body_bytes, body.len());
+        assert!(detail.body_bytes > prefix.len());
     }
 }

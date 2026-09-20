@@ -64,9 +64,19 @@ impl ResponsesBackend {
 
 // Responses may have consumed stream frames and, for WebSocket, mutated session
 // continuation state. No typed progress marker crosses this transport boundary, so
-// only retry typed HTTP refusals, never ambiguous stream failures.
+// only retry typed pre-response HTTP refusals, never ambiguous stream failures. A
+// refusal is typed only when the backend reports the provider's status itself, either
+// as a structured transport detail or a status-bearing HTTP error; origin classes that
+// merely report a failed transfer stay terminal.
 fn stream_failure(error: serdes_ai::models::ModelError) -> ModelFailure {
-    let http_refusal = matches!(error, serdes_ai::models::ModelError::Http { .. });
+    use serdes_ai::models::error::TransportOrigin;
+    let http_refusal = match &error {
+        serdes_ai::models::ModelError::Transport(detail) => {
+            matches!(detail.origin, TransportOrigin::Status(_))
+        }
+        serdes_ai::models::ModelError::Http { .. } => true,
+        _ => false,
+    };
     match ModelFailure::from_model_error(error) {
         ModelFailure::Transport(failure) if !http_refusal => ModelFailure::Incomplete(failure),
         other => other,
@@ -101,6 +111,66 @@ impl ChatBackend for ResponsesBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_refusals_from_both_responses_paths_keep_status_body_and_hint() {
+        use std::io::Write;
+        use std::time::Duration;
+        for codex in [false, true] {
+            for (status, body, retryable) in [
+                (429, r#"{"error":{"code":"rate_limit_exceeded"}}"#, true),
+                (429, r#"{"error":{"code":"insufficient_quota"}}"#, false),
+                (503, "unavailable", true),
+                (401, "unauthorized", false),
+            ] {
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = std::thread::spawn(move || {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    read_codex_request(&mut stream);
+                    write!(stream, "HTTP/1.1 {status} Error\r\nContent-Length: {}\r\nRetry-After: 7\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                });
+                let settings = ModelSettings {
+                    timeout: Some(Duration::from_secs(5)),
+                    ..Default::default()
+                };
+                let backend = if codex {
+                    ResponsesBackend::new(
+                        OpenResponsesModel::new("loopback", format!("http://{address}/responses"))
+                            .codex_http()
+                            .bearer("loopback-key"),
+                        settings,
+                    )
+                } else {
+                    ResponsesBackend::new_openai(
+                        serdes_ai::models::openai::OpenAIResponsesModel::new(
+                            "loopback",
+                            "loopback-key",
+                        )
+                        .with_base_url(format!("http://{address}")),
+                        settings,
+                    )
+                };
+                let error = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(backend.request(&[ModelRequest::default()], &[]))
+                    .unwrap_err();
+                server.join().unwrap();
+                match error {
+                    ModelFailure::Transport(failure) => {
+                        assert_eq!(failure.kind.is_retryable(), retryable);
+                        assert_eq!(failure.retry_after, Some(Duration::from_secs(7)));
+                    }
+                    _ => panic!("HTTP refusal lost its typed classification"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn failed_requests_are_counted_without_exposing_transport_details() {
@@ -459,6 +529,26 @@ mod retry_mapping_tests {
         ] {
             assert!(matches!(stream_failure(error), ModelFailure::Incomplete(_)));
         }
+        use serdes_ai::models::error::{TransportDetail, TransportOrigin};
+        let detail = TransportDetail::from_status(
+            429,
+            Some(r#"{"error":{"code":"insufficient_quota"}}"#.into()),
+            39,
+            Some(std::time::Duration::from_secs(7)),
+        );
+        match stream_failure(ModelError::Transport(detail.clone())) {
+            ModelFailure::Transport(failure) => {
+                assert!(!failure.kind.is_retryable());
+                assert_eq!(failure.retry_after, Some(std::time::Duration::from_secs(7)));
+            }
+            _ => panic!("HTTP refusal must retain its typed transport classification"),
+        }
+        let mut disconnected = detail;
+        disconnected.origin = TransportOrigin::Timeout;
+        assert!(matches!(
+            stream_failure(ModelError::Transport(disconnected)),
+            ModelFailure::Incomplete(_)
+        ));
         assert!(matches!(
             stream_failure(ModelError::http(503, "unavailable")),
             ModelFailure::Transport(_)
