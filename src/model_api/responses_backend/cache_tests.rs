@@ -51,12 +51,20 @@ fn codex_exact_http_head_rounds_turns_off_and_missing_cache_usage() {
                     timeout: Some(std::time::Duration::from_secs(10)),
                     ..Default::default()
                 },
-            )
-            .unwrap();
+            );
             for round in 0..2 {
-                let reply = backend.request(&[history.clone()], &tools).unwrap();
+                let reply = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(backend.request(&[history.clone()], &tools))
+                    .unwrap();
                 let expected = (turn != 0 || round != 0).then_some(6);
                 assert_eq!(reply.usage.cache_read_tokens, expected);
+                history.parts.push(ModelRequestPart::ToolReturn(
+                    serdes_ai::core::ToolReturnPart::new("read_file", "stable fixture contents")
+                        .with_tool_call_id(format!("fixture-{turn}-{round}")),
+                ));
                 history.parts.push(ModelRequestPart::UserPrompt(
                     serdes_ai::core::messages::UserPromptPart::new(format!(
                         "appended {turn}/{round}"

@@ -5,7 +5,7 @@
 //! reporting a complete input denominator and cached-read count, weighted by tokens.
 use std::cell::RefCell;
 
-use crate::adapter::{ChatBackend, LlmResult, LlmUsage};
+use crate::adapter::{ChatBackend, LlmUsage};
 use crate::tools::ToolSpec;
 use serde::Serialize;
 use serdes_ai::core::ModelRequest;
@@ -123,20 +123,26 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
-    fn request(&self, requests: &[ModelRequest], tools: &[ToolSpec]) -> Result<LlmResult, String> {
-        let result = self.inner.request(requests, tools)?;
-        let mut run = self.run.borrow_mut();
-        let observation = run.record(self.accounting, &result.usage);
-        // Stderr is deliberately separate from the exactly-one-object stdout contract.
-        eprintln!(
-            "{}",
-            serde_json::to_string(&observation).expect("cache observation serialization")
-        );
-        eprintln!(
-            "{}",
-            serde_json::json!({"event": "prompt_cache_run", "usage": &*run})
-        );
-        Ok(result)
+    fn request<'a>(
+        &'a self,
+        requests: &'a [ModelRequest],
+        tools: &'a [ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            let result = self.inner.request(requests, tools).await?;
+            let mut run = self.run.borrow_mut();
+            let observation = run.record(self.accounting, &result.usage);
+            // Stderr is deliberately separate from the exactly-one-object stdout contract.
+            eprintln!(
+                "{}",
+                serde_json::to_string(&observation).expect("cache observation serialization")
+            );
+            eprintln!(
+                "{}",
+                serde_json::json!({"event": "prompt_cache_run", "usage": &*run})
+            );
+            Ok(result)
+        })
     }
 
     fn request_calls(&self) -> usize {
@@ -176,14 +182,14 @@ mod tests {
             InputAccounting::Anthropic,
             &LlmUsage {
                 request_tokens: Some(20),
-                cache_creation_tokens: Some(30),
+                cache_creation_tokens: Some(130),
                 cache_read_tokens: Some(50),
                 ..Default::default()
             },
         );
-        assert_eq!(second.total_input_tokens, Some(100));
-        assert_eq!(second.uncached_input_tokens, Some(50));
-        assert_eq!(run.hit_ratio, Some(0.55));
+        assert_eq!(second.total_input_tokens, Some(200));
+        assert_eq!(second.uncached_input_tokens, Some(150));
+        assert_eq!(run.hit_ratio, Some(110.0 / 300.0));
         assert_eq!(run.calls, 4);
         assert_eq!(run.measured_calls, 3);
         let missing = run.record(

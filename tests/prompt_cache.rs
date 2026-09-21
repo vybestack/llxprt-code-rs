@@ -45,6 +45,7 @@ fn exact_wire_round_and_turn_prefixes_and_cache_accounting() {
 
 fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    std::fs::create_dir_all(root.join("tmp")).unwrap();
     let work = tempfile::tempdir_in(root.join("tmp")).unwrap();
     std::fs::create_dir(work.path().join("profiles")).unwrap();
     std::fs::write(work.path().join("fixture.txt"), "stable evidence").unwrap();
