@@ -144,6 +144,17 @@ fn build_agent(
         .with_max_rounds(constructed.max_rounds)
         .with_max_tool_calls(max_tool_calls)
         .with_turn_time(turn_time)
+        .with_shell_timeouts(
+            std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_default_timeout_seconds
+                    .unwrap_or(120),
+            ),
+            std::time::Duration::from_secs(
+                profile.ephemeral.shell_max_timeout_seconds.unwrap_or(120),
+            ),
+        )
         .with_output_caps(resolved_output_caps(settings))
         .with_request_timeout(Some(settings.budgets.request_timeout.value))
         .with_profiler(profiler);
