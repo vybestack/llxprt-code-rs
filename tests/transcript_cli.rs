@@ -285,13 +285,13 @@ fn budget_and_unknown_refusals_match_wire_in_execution_order() {
     assert_eq!(results[0]["refused"], false);
     assert_eq!(results[1]["refused"], true);
     assert_eq!(results[2]["refused"], true);
-    // The tool's framed read uses its existing byte-count truncation marker.
+    // The integrated read-window contract exposes truncation and a replayable recipe.
     assert!(results[0]["result"]
         .as_str()
         .unwrap()
-        .contains("[truncated "));
+        .contains("**truncated**"));
     assert!(results[0]["result"].as_str().unwrap().len() < 700);
-    assert!(results[0]["result"].as_str().unwrap().contains("budget:"));
+    assert!(results[0]["result"].as_str().unwrap().contains("re-fetch:"));
 }
 
 #[test]
