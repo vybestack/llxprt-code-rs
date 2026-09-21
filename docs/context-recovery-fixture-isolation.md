@@ -85,9 +85,20 @@ CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$PWD/target" TMPDIR="$PWD/tmp" \
   cargo +1.88.0 test --offline --locked --test context_recovery -- --nocapture
 ```
 
-This command is for the recovery binary only. Full-suite Cargo scratch must have
-legitimate physical topology outside Cargo ancestry while shared #252 is open;
-that precaution does not repair its malformed parity fixture or weak assertions.
+This command is for the recovery binary only. The integrated branch includes
+shared #252 at `1c09827828ccfb0eef7e215f4ca9134bc41c480f` via draft #290.
+Its parity fixture uses legitimate isolated Cargo topology; do not create fake
+Cargo ancestors or relax assertions. Its process ownership implementation covers
+managed nested lifetimes using retained pipes and a group guardian, not universal
+hostile daemon containment. Independent dependency review remains outstanding.
+Current main removed the compatibility ledger and allowlist via #254; historical
+compat gate records below are evidence, not a request to restore those surfaces.
+
+Integrated verification and source pins are retained under
+`evalwork/results/pr-completion-20260920/issue194-integrated/`. Completed
+supplied-candidate evidence remains under the sibling `issue194/` directory,
+including `completion.md` and `independent-crosscheck.json`. The supplied candidate
+is a reconstruction, not the unavailable original incident patch.
 
 ## Evidence and acceptance limits
 
