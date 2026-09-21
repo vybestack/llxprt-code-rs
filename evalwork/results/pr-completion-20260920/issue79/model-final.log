@@ -1,0 +1,76 @@
+   Compiling llxprt-code-rs v0.1.0 (/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.27s
+     Running unittests src/lib.rs (target/issue79-completion/debug/deps/llxprt_code_rs-68b4d971c74354ca)
+
+running 68 tests
+test model_api::cache_observation::tests::absent_zero_and_mixed_usage_preserve_denominators ... ok
+test model_api::credentials::tests::private_wrapper_debug_is_always_redacted ... ok
+test model_api::cache_observation::tests::inconsistent_external_counters_do_not_panic_or_pollute_ratio ... ok
+test model_api::dependencies::tests::config_home_rejects_relative_and_empty_paths ... ok
+test model_api::credentials::tests::invalid_utf8_maps_to_the_fixed_diagnostic ... ok
+test model_api::credentials::tests::malformed_top_level_duplicate_and_trailing_data_share_fixed_error ... ok
+test model_api::credentials::tests::in_memory_source_uses_injected_clock_and_exact_parser ... ok
+test model_api::credentials::tests::expiry_requires_checked_strict_skew ... ok
+test model_api::credentials::tests::expiry_number_must_be_finite_integral_and_in_range ... ok
+test model_api::credentials::tests::token_type_is_ascii_case_insensitive_without_trimming ... ok
+test model_api::credentials::tests::header_validation_rejects_controls_and_del ... ok
+test model_api::credentials::tests::required_fields_and_types_are_enforced ... ok
+test model_api::credentials::tests::total_encoded_size_accepts_exact_cap_and_rejects_plus_one ... ok
+test model_api::credentials::tests::field_count_accepts_32_and_rejects_33 ... ok
+test model_api::macos_keychain::tests::lifecycle_line_precedes_lookup ... ok
+test model_api::credentials::tests::known_optional_fields_follow_exact_scalar_rules_and_are_dropped ... ok
+test model_api::macos_keychain::tests::fixed_and_parameterized_helpers_compile_without_native_access ... ok
+test model_api::credentials::tests::parses_exact_required_shape_and_redacts_debug ... ok
+test model_api::credentials::tests::required_string_byte_bounds_are_exact ... ok
+test model_api::model_registry::tests::typed_keys_are_known_everywhere ... ok
+test model_api::model_registry::tests::overrides_are_provider_specific ... ok
+test model_api::model_registry::tests::unrelated_names_are_not_known ... ok
+test model_api::dependencies::tests::test_constructor_injects_all_dependencies_and_one_root ... ok
+test model_api::registry::tests::codex_transport_identity_is_fixed ... ok
+test model_api::credentials::tests::unknown_scalars_are_accepted_and_containers_rejected ... ok
+test model_api::macos_keychain::tests::bounded_read_passes_through_success ... ok
+test model_api::macos_keychain::tests::bounded_read_passes_through_error ... ok
+test model_api::dependencies::tests::production_registration_slice_is_exact_and_typed ... ok
+test model_api::registry::tests::request_timeout_at_lease_margin_still_fails_validation ... ok
+test model_api::credentials::tests::optional_string_caps_are_exact ... ok
+test model_api::registry::tests::anthropic_settings_forward_profile_top_k ... ok
+test model_api::registry::tests::codex_settings_forward_the_profile_output_bound ... ok
+test model_api::registry::tests::request_timeout_resolved_policy_defaults_to_900s_for_every_provider_path ... ok
+test model_api::registry::tests::request_timeout_codex_consumes_provider_timeout_data ... ok
+test model_api::registry::tests::issue286_codex_negative_first_response_budget_uses_native_request_bound ... ok
+test model_api::registry::tests::max_turns_per_prompt_resolves_the_documented_sentinels ... ok
+test model_api::registry::tests::responses_endpoint_routes_normalize_to_one_suffix ... ok
+test model_api::registry::tests::loose_mode_forwards_unknown_keys_and_warns_for_unsupported ... ok
+test model_api::registry::tests::responses_endpoint_rejection_precedes_credential_io ... ok
+test model_api::responses_backend::cache_tests::codex_cache_child_turn ... ok
+test model_api::registry::tests::strict_mode_refuses_unowned_keys_at_load ... ok
+test model_api::registry::tests::known_model_mode_accepts_registry_keys_and_refuses_unknown ... ok
+test model_api::settings::tests::disabled_reasoning_omits_responses_reasoning ... ok
+test model_api::settings::tests::enabled_reasoning_maps_to_tested_responses_shape ... ok
+test model_api::settings::tests::openai_responses_cache_settings_are_session_bound_and_stateless ... ok
+test model_api::settings::tests::codex_profile_effort_reaches_serialized_reasoning ... ok
+test model_api::settings::tests::production_endpoint_identity_is_exact ... ok
+test model_api::tests::selection::api_selector_selects_the_api_surface ... ok
+test model_api::tests::selection::explicit_api_selector_values_are_validated ... ok
+test model_api::tests::selection::model_names_do_not_select_an_api_and_transport_is_not_profile_selectable ... ok
+test model_api::registry::tests::zai_anthropic_backend_constructs_offline_without_native_credentials ... ok
+test model_api::registry::tests::chat_registry_construction_does_not_load_native_credentials ... ok
+test model_api::registry::tests::codex_registry_construction_loads_native_credentials_once ... ok
+test model_api::tests::selection::provider_spellings_are_exact ... ok
+test model_api::tests::selection::removed_api_selector_spellings_are_inert ... ok
+test model_api::tests::selection::response_metadata_does_not_select_an_api ... ok
+test model_api::tests::selection::provider_defaults_and_api_surfaces_are_typed ... ok
+test model_api::registry::tests::zai_anthropic_backend_constructs_from_a_named_provider_key ... ok
+test model_api::registry::tests::chat_named_provider_key_resolves_from_the_env_selector ... ok
+test model_api::registry::tests::both_public_responses_targets_construct_without_native_credentials ... ok
+test model_api::responses_backend::tests::failed_requests_are_counted_without_exposing_transport_details ... ok
+test model_api::responses_backend::tests::codex_http_rejects_non_sse_success_body ... ok
+test model_api::registry::tests::anthropic_messages_wire_uses_expected_route_and_headers ... ok
+test model_api::responses_backend::tests::codex_http_wire_contract_streams_without_store_or_cap_and_replays_input ... ok
+test model_api::registry::tests::zai_named_provider_key_unresolved_reports_the_fixed_refusal ... ok
+test model_api::responses_backend::cache_tests::codex_exact_http_head_rounds_turns_off_and_missing_cache_usage ... ok
+test model_api::macos_keychain::tests::bounded_read_times_out_with_actionable_message ... ok
+test model_api::responses_backend::tests::codex_turn_is_bounded_by_the_configured_timeout ... ok
+
+test result: ok. 68 passed; 0 failed; 0 ignored; 0 measured; 733 filtered out; finished in 1.01s
+

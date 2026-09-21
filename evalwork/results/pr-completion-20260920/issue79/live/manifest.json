@@ -1,0 +1,227 @@
+{
+  "head": "daaf8604d20059b44f79e4545fe6f9d05c9d65de",
+  "tree": "45e258822ed2b04fc46d17a23bb6e34498210914",
+  "binary": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+  "binary_sha256": "7d9d8ced6813937f08de4790efd254e7d6d18bb82869237869073a776a5ba2c7",
+  "profile_reference": "/Users/acoliver/projects/llxprt/agent/branch-4/llxprt-code-rs/tmp/branch4-orchestrator/astra-headless.json",
+  "profile_sha256": "891795efb06ec8fab463b17e7e5a4a5451de5a93e53cf0baaf2e71666de59102",
+  "provider": "codex",
+  "model": "gpt-6-astra",
+  "config_home": "/Users/acoliver/projects/llxprt/agent/branch-4/llxprt-code-rs/tmp/branch4-orchestrator/rs-config-home",
+  "prompt_sha256": "dd6212de01ecc1ceeb1059bf8a236101a08f4c8a9ccac47a232da59b00b687ee",
+  "prompt_bytes": 14746,
+  "turns_per_arm": 3,
+  "request_timeout_seconds": 90,
+  "max_tool_calls": 1,
+  "timing": "wall includes native authentication, startup and generation; TTFT not measured",
+  "environment": {
+    "LLXPRT_CONFIG_HOME": "/Users/acoliver/projects/llxprt/agent/branch-4/llxprt-code-rs/tmp/branch4-orchestrator/rs-config-home",
+    "platform": "Darwin",
+    "machine": "arm64"
+  },
+  "runs": [
+    {
+      "mode": "off",
+      "turn": 0,
+      "command": [
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+        "--profile-load",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-profile.json",
+        "--session",
+        "issue79-completion-daaf8604-off",
+        "--cwd",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79",
+        "--request-timeout",
+        "90s",
+        "--max-tool-calls",
+        "1",
+        "--mem-profile",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-0-rss.jsonl"
+      ],
+      "stdin_file": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/prompt.txt",
+      "status": 0,
+      "wall_seconds": 8.726045707939193,
+      "raw_cache_records": [
+        {
+          "event": "prompt_cache_call",
+          "call": 1,
+          "reported_input_tokens": 2941,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 2941,
+          "cache_creation_input_tokens": null,
+          "total_input_tokens": 2941,
+          "input_accounting": "input_includes_cache_reads"
+        },
+        {
+          "event": "prompt_cache_run",
+          "usage": {
+            "calls": 1,
+            "hit_ratio": 0.0,
+            "measured_cached_tokens": 0,
+            "measured_calls": 1,
+            "measured_input_tokens": 2941
+          }
+        }
+      ]
+    },
+    {
+      "mode": "enabled",
+      "turn": 0,
+      "command": [
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+        "--profile-load",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/enabled-profile.json",
+        "--session",
+        "issue79-completion-daaf8604-enabled",
+        "--cwd",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79",
+        "--request-timeout",
+        "90s",
+        "--max-tool-calls",
+        "1",
+        "--mem-profile",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/enabled-0-rss.jsonl"
+      ],
+      "stdin_file": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/prompt.txt",
+      "status": 0,
+      "wall_seconds": 2.1715333750471473,
+      "raw_cache_records": [
+        {
+          "event": "prompt_cache_call",
+          "call": 1,
+          "reported_input_tokens": 2941,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 2941,
+          "cache_creation_input_tokens": null,
+          "total_input_tokens": 2941,
+          "input_accounting": "input_includes_cache_reads"
+        },
+        {
+          "event": "prompt_cache_run",
+          "usage": {
+            "calls": 1,
+            "hit_ratio": 0.0,
+            "measured_cached_tokens": 0,
+            "measured_calls": 1,
+            "measured_input_tokens": 2941
+          }
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "turn": 1,
+      "command": [
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+        "--profile-load",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-profile.json",
+        "--session",
+        "issue79-completion-daaf8604-off",
+        "--cwd",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79",
+        "--request-timeout",
+        "90s",
+        "--max-tool-calls",
+        "1",
+        "--mem-profile",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-1-rss.jsonl"
+      ],
+      "stdin_file": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/prompt.txt",
+      "status": 0,
+      "wall_seconds": 2.1776001669932157,
+      "raw_cache_records": [
+        {
+          "event": "prompt_cache_call",
+          "call": 1,
+          "reported_input_tokens": 5309,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5309,
+          "cache_creation_input_tokens": null,
+          "total_input_tokens": 5309,
+          "input_accounting": "input_includes_cache_reads"
+        },
+        {
+          "event": "prompt_cache_run",
+          "usage": {
+            "calls": 1,
+            "hit_ratio": 0.0,
+            "measured_cached_tokens": 0,
+            "measured_calls": 1,
+            "measured_input_tokens": 5309
+          }
+        }
+      ]
+    },
+    {
+      "mode": "enabled",
+      "turn": 1,
+      "command": [
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+        "--profile-load",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/enabled-profile.json",
+        "--session",
+        "issue79-completion-daaf8604-enabled",
+        "--cwd",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79",
+        "--request-timeout",
+        "90s",
+        "--max-tool-calls",
+        "1",
+        "--mem-profile",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/enabled-1-rss.jsonl"
+      ],
+      "stdin_file": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/prompt.txt",
+      "status": 0,
+      "wall_seconds": 2.485458540963009,
+      "raw_cache_records": [
+        {
+          "event": "prompt_cache_call",
+          "call": 1,
+          "reported_input_tokens": 5309,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5309,
+          "cache_creation_input_tokens": null,
+          "total_input_tokens": 5309,
+          "input_accounting": "input_includes_cache_reads"
+        },
+        {
+          "event": "prompt_cache_run",
+          "usage": {
+            "calls": 1,
+            "hit_ratio": 0.0,
+            "measured_cached_tokens": 0,
+            "measured_calls": 1,
+            "measured_input_tokens": 5309
+          }
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "turn": 2,
+      "command": [
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/target/issue79-completion/debug/llxprt-code-rs",
+        "--profile-load",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-profile.json",
+        "--session",
+        "issue79-completion-daaf8604-off",
+        "--cwd",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79",
+        "--request-timeout",
+        "90s",
+        "--max-tool-calls",
+        "1",
+        "--mem-profile",
+        "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/off-2-rss.jsonl"
+      ],
+      "stdin_file": "/Users/acoliver/projects/llxprt/agent/branch-4/worktrees/issue79/evalwork/results/pr-completion-20260920/issue79/live/prompt.txt",
+      "status": 5,
+      "wall_seconds": 0.5475615829927847,
+      "raw_cache_records": []
+    }
+  ],
+  "selected_profile_sha256": {
+    "off": "81424c9e4df2ef073878734bae1321a3ce713076a942e1e3babcc8a7c182ad84",
+    "enabled": "dc1823c4800896dc4fa69d3f818f99199590a4de2c91a10156678a4d921d6bd6"
+  }
+}
