@@ -6,6 +6,8 @@ use serdes_ai::core::FinishReason;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+mod issue243_digest_budget;
+
 /// A scripted backend for the forced-summary accounting tests: each call pops the
 /// next canned reply, repeating the last when exhausted.
 pub(super) struct MockBackend {
@@ -23,23 +25,25 @@ impl MockBackend {
 }
 
 impl ChatBackend for MockBackend {
-    fn request(
-        &self,
-        _requests: &[serdes_ai::core::ModelRequest],
-        _tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        *self.calls.lock().unwrap() += 1;
-        let mut q = self.replies.lock().unwrap();
-        Ok(if let Some(r) = q.pop_front() {
-            r
-        } else {
-            LlmResult {
-                text: String::new(),
-                calls: Vec::new(),
-                finish_reason: Some(FinishReason::Stop),
+    fn request<'a>(
+        &'a self,
+        _requests: &'a [serdes_ai::core::ModelRequest],
+        _tools: &'a [ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            *self.calls.lock().unwrap() += 1;
+            let mut q = self.replies.lock().unwrap();
+            Ok(if let Some(r) = q.pop_front() {
+                r
+            } else {
+                LlmResult {
+                    text: String::new(),
+                    calls: Vec::new(),
+                    finish_reason: Some(FinishReason::Stop),
 
-                usage: LlmUsage::default(),
-            }
+                    usage: LlmUsage::default(),
+                }
+            })
         })
     }
 

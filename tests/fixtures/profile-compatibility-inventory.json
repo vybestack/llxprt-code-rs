@@ -4389,15 +4389,15 @@
     },
     {
       "key": "task-default-timeout-seconds",
-      "classification": "exact-compatibility-metadata",
-      "owner": "common",
-      "note": "exact 3600 metadata"
+      "classification": "host-applied",
+      "owner": "llxprt-host-task-runner",
+      "note": "JSON number owned by the host task runner; typed but inert in Rust"
     },
     {
       "key": "task-max-timeout-seconds",
-      "classification": "exact-compatibility-metadata",
-      "owner": "common",
-      "note": "exact 7200 metadata"
+      "classification": "host-applied",
+      "owner": "llxprt-host-task-runner",
+      "note": "JSON number owned by the host task runner; typed but inert in Rust"
     },
     {
       "key": "task-max-async",

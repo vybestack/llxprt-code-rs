@@ -10,6 +10,11 @@ fn main() {
         println!("{}", cli::json(&outcome, &session_hint));
         std::process::exit(cli::Code::Usage as i32);
     }
+    if let Err(error) = cli::validate_cli_limits(&args) {
+        let outcome = Err(error);
+        println!("{}", cli::json(&outcome, &session_hint));
+        std::process::exit(cli::exit_code(&outcome));
+    }
     if args.print_config {
         match cli::print_config(&args) {
             Ok(settings) => println!("{settings}"),

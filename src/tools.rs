@@ -35,7 +35,7 @@
 use serde_json::json;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 mod publication;
 mod replace;
 mod search;
@@ -339,7 +339,7 @@ pub(crate) fn open_regular_os_at(
     Ok(file)
 }
 
-fn open_regular_at(parent: &openat::Dir, name: &str) -> Result<std::fs::File, String> {
+pub(crate) fn open_regular_at(parent: &openat::Dir, name: &str) -> Result<std::fs::File, String> {
     open_regular_os_at(parent, std::ffi::OsStr::new(name))
 }
 
@@ -353,6 +353,10 @@ pub struct ToolConfig {
     /// The retained descriptor that confines every file-tool path for the turn.
     pub ws: WorkspaceCap,
     pub max_output_bytes: usize,
+    /// Digest admission floor (issue 125): a truncated read's re-fetch recipe names a
+    /// window that stays strictly under it, so the re-fetch comes back verbatim instead
+    /// of being digested on the way back in.
+    pub digest_size_floor: usize,
     /// Per-tool shell bounds, kept separate from the retained file capability.
     pub shell: ShellConfig,
 }
@@ -475,6 +479,7 @@ const MAX_SEARCH_RESULT_BYTES: usize = MAX_SEARCH_RESULTS * MAX_LINE_BYTES;
 const MAX_SEARCH_NOTE_BYTES: usize = 128;
 const MAX_SEARCH_DATA_BYTES: usize = MAX_SEARCH_RESULT_BYTES - MAX_SEARCH_NOTE_BYTES;
 pub(crate) mod output_limits;
+pub(crate) mod read_window;
 
 /// The single tool-name catalogue for the crate.
 pub(crate) const TOOL_CATALOGUE: &[&str] = &[
@@ -502,6 +507,8 @@ pub(crate) fn is_known_tool_name(name: &str) -> bool {
 }
 
 pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
+    let sha_len = crate::redact::SHA256_HEX_LEN as u64;
+    let sha_pattern = format!("^[0-9a-f]{{{sha_len}}}$");
     let mut specs = vec![
         ToolSpec {
             name: "read_file".into(),
@@ -527,13 +534,17 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "replace".into(),
-            description: "Replace a string in a file. Rejected unless the old string occurs exactly once (or the expected count is given). Concurrency: cooperating write_file and replace calls are serialized by an advisory lock on the retained workspace directory. After deriving the new bytes, replace also re-opens the target no-follow just before publishing and verifies the pathname still names the same unchanged content. If the inode, size, or a SHA-256 digest of the bytes it read differs, the replace fails with a conflict. `expected_sha256` (an independently computed lowercase hex SHA-256 of the complete current content) makes that same check an up-front requirement. The verify is not an atomic compare-and-swap: the re-open and rename are separate syscalls, and unrelated programs that do not honor the advisory lock can still change the name between them.".into(),
+            description: "Replace a string in a file. Rejected unless the old string occurs exactly once (or the expected count is given). Concurrency: cooperating write_file and replace calls are serialized by an advisory lock on the retained workspace directory. After deriving the new bytes, replace also re-opens the target no-follow just before publishing and verifies the pathname still names the same unchanged content. If the inode, size, or a SHA-256 digest of the bytes it read differs, the replace fails with a conflict. `expected_sha256` (an independently computed full 64-character lowercase hex SHA-256 of the complete current content; an abbreviation or prefix is refused as invalid) makes that same check an up-front requirement, and a stale digest is refused with the current full digest. Before retrying, use read_file to recheck the current content and confirm that old_string and new_string still express the intended edit. The verify is not an atomic compare-and-swap: the re-open and rename are separate syscalls, and unrelated programs that do not honor the advisory lock can still change the name between them.".into(),
             properties: vec![
                 ("path".into(), json!({"type": "string"}), true),
                 ("old_string".into(), json!({"type": "string"}), true),
                 ("new_string".into(), json!({"type": "string"}), true),
                 ("expected".into(), json!({"type": "integer"}), false),
-                ("expected_sha256".into(), json!({"type": "string"}), false),
+                (
+                    "expected_sha256".into(),
+                    json!({"type": "string", "minLength": sha_len, "maxLength": sha_len, "pattern": sha_pattern}),
+                    false,
+                ),
             ],
         },
         ToolSpec {
@@ -568,7 +579,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
     specs
 }
 
-fn ws_root(ws: &WorkspaceCap) -> Result<&openat::Dir, String> {
+pub(crate) fn ws_root(ws: &WorkspaceCap) -> Result<&openat::Dir, String> {
     let (dev, ino) = fd_identity(&ws.root)?;
     if ws.dev != dev || ws.ino != ino {
         return Err("workspace identity changed: the workspace the capability was pinned to is gone (directory was renamed away, unmounted, or recreated)".to_string());
@@ -579,7 +590,7 @@ fn ws_root(ws: &WorkspaceCap) -> Result<&openat::Dir, String> {
 /// Validate `rel` lexically: absolute paths, `..`/root components and `..` escapes are
 /// rejected up front. Each existing component is lstat'ed via `openat` (never following a
 /// symlink) so a symlink at any component is rejected.
-fn resolve_comps(rel: &str) -> Result<Vec<String>, String> {
+pub(crate) fn resolve_comps(rel: &str) -> Result<Vec<String>, String> {
     let p = Path::new(rel);
     if p.is_absolute() {
         return Err(format!("absolute path rejected: {rel}"));
@@ -628,7 +639,10 @@ fn ensure_parent_dir(root: &openat::Dir, comps: &[String]) -> Result<openat::Dir
 
 /// Open the deepest existing directory among `comps` (all `openat` with no-follow), never
 /// creating anything for a read path.
-fn ensure_parent_dir_read(root: &openat::Dir, comps: &[String]) -> Result<openat::Dir, String> {
+pub(crate) fn ensure_parent_dir_read(
+    root: &openat::Dir,
+    comps: &[String],
+) -> Result<openat::Dir, String> {
     let mut cur = root
         .try_clone()
         .map_err(|e| format!("clone root dir: {e}"))?;
@@ -641,7 +655,7 @@ fn ensure_parent_dir_read(root: &openat::Dir, comps: &[String]) -> Result<openat
 /// Truncate a string on a char boundary and never exceed `max` bytes **total including**
 /// the marker; the marker's own bytes are reserved inside the budget, so no multi-byte
 /// codepoint is split and the result stays within `max`.
-fn truncate(s: &str, max: usize) -> String {
+pub(crate) fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
@@ -655,6 +669,9 @@ fn truncate(s: &str, max: usize) -> String {
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
+        // A cut inside a digest token would advertise an abbreviation: back off to the run's
+        // start so the whole token is omitted instead (issue 243).
+        let end = crate::redact::avoid_partial_hex_run(s, end);
         let mut out: String = s[..end].to_string();
         out.push_str(&marker);
         out
@@ -662,7 +679,10 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Reject unknown argument names.
-fn reject_unknown(args: &BTreeMap<String, JsonValue>, known: &[&str]) -> Result<(), String> {
+pub(super) fn reject_unknown(
+    args: &BTreeMap<String, JsonValue>,
+    known: &[&str],
+) -> Result<(), String> {
     for k in args.keys() {
         if !known.contains(&k.as_str()) {
             return Err(format!("unknown argument '{k}' for this tool"));
@@ -672,7 +692,7 @@ fn reject_unknown(args: &BTreeMap<String, JsonValue>, known: &[&str]) -> Result<
 }
 
 /// Typed string arg; a missing required or a cached non-string is an error.
-fn arg_str<'a>(
+pub(super) fn arg_str<'a>(
     args: &'a BTreeMap<String, JsonValue>,
     key: &str,
     required: bool,
@@ -691,7 +711,10 @@ fn arg_str<'a>(
 }
 
 /// Typed non-negative integer arg.
-fn arg_u64(args: &BTreeMap<String, JsonValue>, key: &str) -> Result<Option<u64>, String> {
+pub(super) fn arg_u64(
+    args: &BTreeMap<String, JsonValue>,
+    key: &str,
+) -> Result<Option<u64>, String> {
     match args.get(key) {
         None => Ok(None),
         Some(JsonValue::Number(n)) => n
@@ -707,90 +730,10 @@ fn bounded(v: Option<u64>, default: usize, ceiling: usize) -> usize {
     v.map(|x| x.min(ceiling as u64) as usize).unwrap_or(default)
 }
 
-fn read_file_tool(
-    cap: &WorkspaceCap,
-    args: &BTreeMap<String, JsonValue>,
-    max_output: usize,
-) -> Result<String, String> {
-    reject_unknown(args, &["path", "offset", "limit", "max_output_bytes"])?;
-    let rel = arg_str(args, "path", true)?.unwrap();
-    let offset = arg_u64(args, "offset")?;
-    let limit = arg_u64(args, "limit")?;
-    let comps = resolve_comps(rel)?;
-    if comps.is_empty() {
-        return Err("path must name a file".into());
-    }
-    let (leaf_last, parent_comps) = comps.split_last().unwrap();
-    let dir = ws_root(cap)?;
-    let parent = ensure_parent_dir_read(dir, parent_comps)?;
-    // The final entry is opened nonblocking/no-follow and its descriptor metadata is
-    // checked: a regular file reads, everything else (FIFO, socket, device, directory)
-    // is a typed error. A FIFO is opened with `O_NONBLOCK` and we return a typed
-    // error without ever reading it (no blocking, no helper writer needed).
-    let file = open_regular_at(&parent, leaf_last).map_err(|e| format!("open {leaf_last}: {e}"))?;
-    let meta = file
-        .metadata()
-        .map_err(|e| format!("fstat {leaf_last}: {e}"))?;
-    if !meta.is_file() {
-        return Err(format!("{leaf_last} is not a regular file"));
-    }
-    let fd_len = meta.len();
-    let offset = offset.unwrap_or(0);
-    let fd_len_usize = usize::try_from(fd_len).unwrap_or(usize::MAX);
-    if offset > fd_len {
-        return Err(format!("offset {offset} is beyond the {fd_len} byte file"));
-    }
-    let offset = offset as usize;
-    let mut file = file;
-    if offset > 0 {
-        file.seek(SeekFrom::Start(offset as u64))
-            .map_err(|e| format!("seek {leaf_last}: {e}"))?;
-    }
-    // Read `cap + 1` when a limit is given so an exact-window request that reached the
-    // end is never mistaken for a truncated read; the read stays bounded by the file size,
-    // MAX_FILE_BYTES, and max_output.
-    let max_window = usize::try_from(fd_len)
-        .unwrap_or(usize::MAX)
-        .min(MAX_FILE_BYTES)
-        .min(max_output);
-    let cap = match limit {
-        Some(n) => usize::try_from(n)
-            .unwrap_or(usize::MAX)
-            .saturating_add(1)
-            .min(max_window),
-        None => max_window,
-    };
-    let data = drain_bytes(file, cap).map_err(|error| format!("read {rel}: {error}"))?;
-    let shown = match limit {
-        Some(n) => usize::try_from(n).unwrap_or(usize::MAX).min(data.len()),
-        None => data.len(),
-    };
-    let end = offset + shown;
-    let at_eof = offset + shown >= fd_len_usize;
-    // The framed read is truncated as one value so the **total** model-visible string
-    // (window header plus body) is at most `max_output`; a window that splits a
-    // multi-byte codepoint is decoded lossily (still one valid String).
-    let framed = if at_eof {
-        format!(
-            "[{offset}..{end} of {fd_len} bytes]\n{}",
-            String::from_utf8_lossy(&data[..shown])
-        )
-    } else {
-        // The file continues past the window: an exact `limit` window that stopped at
-        // `limit` without reaching EOF is a truncated read, never a claim that the file
-        // ends there.
-        format!(
-            "[{offset}..{end} of {fd_len} bytes **truncated**]\n{}",
-            String::from_utf8_lossy(&data[..shown])
-        )
-    };
-    Ok(truncate(&framed, max_output))
-}
-
 /// Read a reader's bytes up to `cap`: each read asks for no more than the remaining cap and
 /// the loop never reads or retains more than `cap` bytes total. An I/O failure is never
 /// confused with a successful EOF.
-fn drain_bytes(mut reader: impl Read, cap: usize) -> std::io::Result<Vec<u8>> {
+pub(crate) fn drain_bytes(mut reader: impl Read, cap: usize) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::with_capacity(cap.min(65536));
     let mut chunk = [0u8; 4096];
     while bytes.len() < cap {
@@ -1023,12 +966,31 @@ pub(crate) fn execute_tool_with_limit(
     } else {
         output_limit
     };
+    // The aggregate turn budget is the only clamp the per-result cap cannot explain: a
+    // caller's own `max_output_bytes` is a request, not a clamp (issue 125).
+    let requested = arg_u64(&map, "max_output_bytes").ok().flatten();
+    // Only the search path needs the clamp flag: the read path derives its header cause
+    // from `body_cut` and the requested window, so the flag is not passed on (issue 125
+    // cycle 2).
+    let budget_clamped = output_limit < config.max_output_bytes
+        && requested
+            .is_none_or(|value| usize::try_from(value).unwrap_or(usize::MAX) > output_limit);
     let result = match name {
-        "read_file" => read_file_tool(&config.ws, &map, output_limit),
+        "read_file" => read_window::read_file_tool(
+            &config.ws,
+            &map,
+            output_limit,
+            config.digest_size_floor,
+            config.max_output_bytes,
+        ),
         "write_file" => with_workspace_write_lock(&config.ws, || write_file_tool(&config.ws, &map)),
         "replace" => with_workspace_write_lock(&config.ws, || replace_tool(&config.ws, &map)),
         "list_directory" => list_directory_tool(&config.ws, &map, output_limit),
-        "search_file_content" => search_file_content_tool(&config.ws, &map, output_limit),
+        "search_file_content" => search_file_content_tool(
+            &config.ws,
+            &map,
+            read_window::search_limit(output_limit, budget_clamped),
+        ),
         "run_shell_command" => {
             if !config.shell.allow_shell {
                 Err("run_shell_command is disabled; enable it with --allow-shell".into())
@@ -1042,6 +1004,20 @@ pub(crate) fn execute_tool_with_limit(
             }
         }
         _ => Err(format!("unknown tool {name}")),
+    };
+    let result = match result {
+        Ok(text) => {
+            if name == "search_file_content" {
+                Ok(read_window::append_search_clamp(
+                    text,
+                    output_limit,
+                    budget_clamped,
+                ))
+            } else {
+                Ok(text)
+            }
+        }
+        Err(text) => Err(text),
     };
     match result {
         Ok(s) => (true, truncate(&s, output_limit)),
