@@ -71,8 +71,18 @@ impl super::Turn<'_> {
             let outcome =
                 self.execute_one_call(config, store, attempt, round, call, (index, calls.len()));
             in_flight::clear(store);
-            outcome
-                .map_err(|failure| self.tool_failure(store, reserved, failure, &attempt.rounds))?;
+            if let Err(failure) = outcome {
+                // Calls enter the round only after execution and result admission.
+                // Publish that prefix on failure too, never the unexecuted suffix.
+                // SessionStore::fail strips live projections from its durable copy.
+                if !round.calls.is_empty() {
+                    attempt.rounds.push(RoundRecord {
+                        assistant: std::mem::take(&mut round.assistant),
+                        calls: std::mem::take(&mut round.calls),
+                    });
+                }
+                return Err(self.tool_failure(store, reserved, failure, &attempt.rounds));
+            }
             self.update_profile_usage(&attempt.usage);
             // `output_bytes` is charged in LIVE bytes (#66), so the persisted
             // telemetry reads the size of the record the round actually kept.
@@ -133,5 +143,105 @@ pub fn parse_object_args(call: &ToolCall) -> Result<JsonValue, String> {
             "tool call {}: invalid argument JSON: {e}",
             call.name
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn later_invalid_call_preserves_executed_prefix() {
+        let _home = crate::agent::tests::shared_config_home();
+        let cwd = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::load(&crate::session::SessionId::parse("later-invalid-prefix").unwrap())
+                .unwrap();
+        let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
+        let agent = CodingAgent::with_backend(
+            Box::new(crate::agent::tests::MockBackend::new(vec![])),
+            cwd.path().to_path_buf(),
+            false,
+        );
+        let turn = Turn::new(&agent).unwrap();
+        let config = turn.tools_config(false).unwrap();
+        let write = ToolCall {
+            id: "write-prefix".into(),
+            name: "write_file".into(),
+            args_json: r#"{"path":"written.txt","content":"evidence"}"#.into(),
+        };
+        // Exercise the executor's Invalid failure arm directly: normal provider
+        // validation rejects malformed batches before any tool is executed.
+        let invalid = ToolCall {
+            id: "invalid".into(),
+            name: "write_file".into(),
+            args_json: "[".into(),
+        };
+        let mut attempt = AttemptState {
+            requests: Vec::new(),
+            rounds: Vec::new(),
+            current: LlmResult {
+                text: "working".into(),
+                calls: vec![],
+                finish_reason: None,
+                usage: Default::default(),
+            },
+            ids: Default::default(),
+            usage: TurnUsage {
+                assistant_bytes: 0,
+                args_bytes: 0,
+                output_bytes: 0,
+                total_calls: 0,
+            },
+            budget_exhausted: false,
+        };
+        let mut round = RoundRecord {
+            assistant: "working".into(),
+            calls: Vec::new(),
+        };
+        let error = turn
+            .execute_calls(
+                &config,
+                &mut attempt,
+                &mut round,
+                &[write.clone(), invalid, write.clone()],
+                &store,
+                &reserved,
+            )
+            .unwrap_err();
+        assert_eq!(error.key, "invalid-tool-call");
+        assert_eq!(
+            std::fs::read(cwd.path().join("written.txt")).unwrap(),
+            b"evidence"
+        );
+        assert_eq!(attempt.usage.total_calls, 1);
+        let snapshot = store.snapshot().unwrap();
+        let branch = snapshot
+            .branches
+            .iter()
+            .find(|b| b.branch_id == reserved.branch_id)
+            .unwrap();
+        assert_written_prefix(branch, &write);
+        let reopened =
+            SessionStore::load(&crate::session::SessionId::parse("later-invalid-prefix").unwrap())
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.snapshot().unwrap().branches).unwrap(),
+            serde_json::to_value(snapshot.branches).unwrap()
+        );
+    }
+
+    fn assert_written_prefix(branch: &crate::session::BranchRecord, write: &ToolCall) {
+        assert_eq!(branch.lifecycle, crate::session::Lifecycle::Failed);
+        assert_eq!(branch.rounds.len(), 1);
+        assert_eq!(branch.rounds[0].calls.len(), 1);
+        let record = &branch.rounds[0].calls[0];
+        assert_eq!(record.id, write.id);
+        assert_eq!(record.args, write.args_json);
+        assert_eq!(record.name, write.name);
+        assert!(record.ok);
+        assert!(!record.refused);
+        assert_eq!(record.result, "wrote 8 bytes to written.txt");
+        assert!(record.result_live.is_empty());
     }
 }

@@ -1589,8 +1589,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     // grant executed before the budget ran out, and a session checkpoint failure never rolls
     // back an already-executed filesystem write: granted.txt is on disk with exactly the
     // bytes the tool wrote. The refused call never executed, so its file is absent. The
-    // refusal fires on the turn's first local round, so its records never complete/commit
-    // and the model made exactly one call.
+    // refusal fires on the first local round, before another model request.
     assert_eq!(
         refusing.model_calls(),
         1,
@@ -1611,21 +1610,52 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         "the refused call never executed: the side-effecting write left no file"
     );
 
-    // The failed local round never committed, so the persisted branch is terminal and EMPTY: the
-    // `dead` refusal carries the COMPLETED-round list, which is none here, because the
-    // exhaustion happened inside the round that was still executing. The on-disk
-    // side-effect assertions above - not a round count - are what prove what ran.
+    let expected: Vec<_> = reads
+        .clone()
+        .chain([write_ok.clone(), tail.clone(), drain.clone()])
+        .collect();
     let snapshot = st.snapshot().unwrap();
     let branch = snapshot
         .branches
         .iter()
-        .find(|branch| branch.branch_id == request.branch_id)
+        .find(|b| b.branch_id == request.branch_id)
         .unwrap();
     assert_eq!(branch.lifecycle, Lifecycle::Failed);
-    assert!(
-        branch.rounds.is_empty(),
-        "no completed round is persisted: the refusing round is the turn's first and failed local"
+    assert_eq!(branch.rounds.len(), 1);
+    assert_eq!(branch.rounds[0].assistant, "reading");
+    assert_eq!(branch.rounds[0].calls.len(), expected.len());
+    for (record, call) in branch.rounds[0].calls.iter().zip(&expected) {
+        assert_eq!(record.id, call.id);
+        assert_eq!(record.name, call.name);
+        assert_eq!(record.args, call.args_json);
+        assert!(record.ok);
+        assert!(!record.refused);
+        assert!(!record.result.is_empty());
+        assert!(record.result.len() < payload_len);
+        assert!(record.result_live.is_empty());
+    }
+    assert_eq!(branch.rounds[0].calls[15].result, granted);
+    assert_eq!(branch.rounds[0].calls[17].result, "...");
+    let durable = serde_json::to_value(&branch.rounds).unwrap();
+    let serialized = serde_json::to_string(&durable).unwrap();
+    assert!(!serialized.contains("result_live"));
+    assert!(!serialized.contains(&"a".repeat(payload_len)));
+    let reopened = store("sagg-output-exhausted");
+    let recovered = reopened.snapshot().expect("authenticated reopen");
+    let recovered_branch = recovered
+        .branches
+        .iter()
+        .find(|b| b.branch_id == request.branch_id)
+        .unwrap();
+    assert_eq!(recovered_branch.lifecycle, Lifecycle::Failed);
+    assert_eq!(
+        serde_json::to_value(&recovered_branch.rounds).unwrap(),
+        durable
     );
+    assert!(recovered_branch.rounds[0]
+        .calls
+        .iter()
+        .all(|c| c.result_live.is_empty()));
 
     // Independent positive pass over the SAME live-byte derivation: a run that replays the
     // granted prefix THROUGH the slack-draining write - only the final refused write short of the
@@ -1677,6 +1707,10 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         "the tool round and the final assistant round both persist"
     );
     assert_eq!(ok_branch.rounds[0].calls.len(), 18);
+    assert_eq!(
+        serde_json::to_value(&ok_branch.rounds[0]).unwrap(),
+        durable[0]
+    );
     assert_eq!(ok_branch.rounds[1].assistant, "done");
     assert!(
         ok_branch.rounds[0].calls.iter().all(|call| !call.refused),
