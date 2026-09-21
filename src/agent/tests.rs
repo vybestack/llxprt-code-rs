@@ -780,7 +780,7 @@ fn issue286_shell_budgets_reach_per_turn_tool_configuration() {
     let root = tempfile::tempdir().unwrap();
     let profile = crate::profile::parse_profile_value(
         &serde_json::from_str(include_str!(
-            "../../tests/fixtures/profiles/astramedium-native.json"
+            "../../tests/fixtures/host-profiles/astramedium-native.json"
         ))
         .unwrap(),
         "astramedium",
