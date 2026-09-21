@@ -870,23 +870,4 @@ fn deterministic_swap_write_then_read_is_consistent() {
     }
 }
 
-#[test]
-fn issue286_shell_default_and_maximum_have_distinct_runtime_effects() {
-    let d = tempfile::tempdir().unwrap();
-    let mut config = cfg(d.path());
-    config.shell.allow_shell = true;
-    config.shell.default_shell_timeout = Duration::from_secs(1);
-    config.shell.max_shell_timeout = Duration::from_secs(3);
-    let execute = |args| execute_tool(d.path(), "run_shell_command", args, &config);
-    // Omitted timeout uses the default, not the maximum.
-    assert!(!execute(json!({"command":"sleep 2"})).0);
-    // Explicit timeout may exceed the default, up to the cap.
-    assert!(execute(json!({"command":"sleep 2", "timeout_seconds":3})).0);
-    // A model cannot escape the maximum by asking for a larger value.
-    let started = std::time::Instant::now();
-    assert!(!execute(json!({"command":"sleep 10", "timeout_seconds":30})).0);
-    assert!(started.elapsed() < Duration::from_secs(8));
-    for bad in [json!(0), json!(-1), json!(1.5), json!("2"), json!(null)] {
-        assert!(!execute(json!({"command":"true", "timeout_seconds":bad})).0);
-    }
-}
+mod shell_timeout;

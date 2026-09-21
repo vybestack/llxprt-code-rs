@@ -48,85 +48,7 @@ fn nested_native_cleanup() {
         "cancellation",
         "owner_sigkill",
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let pidfile = dir.path().join("leaf.pid");
-        let spec = native_spec(
-            vec![
-                "--exact".into(),
-                "process::ownership_tests::outer_native_worker".into(),
-                "--nocapture".into(),
-            ],
-            vec![
-                ("OWNERSHIP_PIDFILE".into(), pidfile.display().to_string()),
-                ("OWNERSHIP_MODE".into(), mode.into()),
-            ],
-            Duration::from_secs(10),
-        );
-        let mut command = Command::new(&spec.program);
-        command
-            .args(&spec.args)
-            .envs(spec.env_add)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let mut worker = command.spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !pidfile.exists() {
-            assert!(Instant::now() < deadline, "{mode}: leaf not ready");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let pid: i32 = std::fs::read_to_string(&pidfile)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        if mode == "cancellation" || mode == "owner_sigkill" {
-            unsafe {
-                libc::kill(
-                    worker.id() as i32,
-                    if mode == "owner_sigkill" {
-                        libc::SIGKILL
-                    } else {
-                        libc::SIGTERM
-                    },
-                );
-            }
-        }
-        while worker.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "{mode}: worker stuck");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if mode != "cancellation" && mode != "owner_sigkill" {
-            assert!(
-                worker.wait().unwrap().success(),
-                "{mode}: native worker failed"
-            );
-        }
-        let native_pid: i32 = std::fs::read_to_string(format!("{}.native", pidfile.display()))
-            .unwrap()
-            .parse()
-            .unwrap();
-        for pid in [pid, native_pid] {
-            loop {
-                let alive = unsafe { libc::kill(pid, 0) } == 0;
-                if !alive {
-                    break;
-                }
-                // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
-                #[cfg(target_os = "linux")]
-                if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
-                    s.split(')')
-                        .nth(1)
-                        .is_some_and(|s| s.trim_start().starts_with('Z'))
-                }) {
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "{mode}: owned leaf {pid} survived"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
+        assert_nested_cleanup(mode);
     }
     assert!(
         peer.try_wait().unwrap().is_none(),
@@ -168,5 +90,87 @@ fn outer_native_worker() {
     }
     if mode == "failure" {
         assert_eq!(outcome.status, Some(7));
+    }
+}
+
+fn assert_nested_cleanup(mode: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("leaf.pid");
+    let spec = native_spec(
+        vec![
+            "--exact".into(),
+            "process::ownership_tests::outer_native_worker".into(),
+            "--nocapture".into(),
+        ],
+        vec![
+            ("OWNERSHIP_PIDFILE".into(), pidfile.display().to_string()),
+            ("OWNERSHIP_MODE".into(), mode.into()),
+        ],
+        Duration::from_secs(10),
+    );
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .envs(spec.env_add)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut worker = command.spawn().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !pidfile.exists() {
+        assert!(Instant::now() < deadline, "{mode}: leaf not ready");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    if mode == "cancellation" || mode == "owner_sigkill" {
+        unsafe {
+            libc::kill(
+                worker.id() as i32,
+                if mode == "owner_sigkill" {
+                    libc::SIGKILL
+                } else {
+                    libc::SIGTERM
+                },
+            );
+        }
+    }
+    while worker.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "{mode}: worker stuck");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if mode != "cancellation" && mode != "owner_sigkill" {
+        assert!(
+            worker.wait().unwrap().success(),
+            "{mode}: native worker failed"
+        );
+    }
+    let native_pid: i32 = std::fs::read_to_string(format!("{}.native", pidfile.display()))
+        .unwrap()
+        .parse()
+        .unwrap();
+    for pid in [pid, native_pid] {
+        loop {
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
+            #[cfg(target_os = "linux")]
+            if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
+                s.split(')')
+                    .nth(1)
+                    .is_some_and(|s| s.trim_start().starts_with('Z'))
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: owned leaf {pid} survived"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
