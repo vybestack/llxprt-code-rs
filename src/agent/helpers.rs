@@ -191,7 +191,8 @@ pub(super) fn tool_config_with_floor(
         digest_size_floor: agent.digest_size_floor,
         shell: crate::tools::ShellConfig {
             max_shell_output: agent.output_caps.shell,
-            max_shell_timeout: std::time::Duration::from_secs(120),
+            default_shell_timeout: agent.shell_timeouts.0,
+            max_shell_timeout: agent.shell_timeouts.1,
             allow_shell: shell_on,
         },
     })

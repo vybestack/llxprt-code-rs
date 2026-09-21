@@ -368,6 +368,7 @@ pub struct ShellConfig {
     pub max_shell_output: usize,
     /// Ceiling for any single shell command, independent of what the model asks for.
     pub max_shell_timeout: std::time::Duration,
+    pub default_shell_timeout: std::time::Duration,
     /// Whether `run_shell_command` is registered (`--allow-shell` gate).
     pub allow_shell: bool,
 }
@@ -862,6 +863,7 @@ fn list_directory_tool(
 fn shell_tool(
     fd: i32,
     args: &BTreeMap<String, JsonValue>,
+    default_timeout: std::time::Duration,
     max_timeout: std::time::Duration,
     max_output: usize,
 ) -> Result<String, String> {
@@ -870,14 +872,13 @@ fn shell_tool(
     if command.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let timeout = bounded(
-        arg_u64(args, "timeout_seconds")?,
-        max_timeout.as_secs() as usize,
-        max_timeout.as_secs() as usize,
-    );
-    let timeout = std::time::Duration::from_secs(u64::from(
-        u32::try_from(timeout.max(1)).unwrap_or(u32::MAX),
-    ));
+    // Default/cap separation adapted from origin/b3-issue-190 src/tools/shell.rs.
+    // Keep this runtime bounded: -1 is not an unlimited escape hatch.
+    let seconds = arg_u64(args, "timeout_seconds")?.unwrap_or(default_timeout.as_secs());
+    if seconds == 0 {
+        return Err("timeout_seconds must be a positive integer".into());
+    }
+    let timeout = std::time::Duration::from_secs(seconds.min(max_timeout.as_secs()));
     let o = crate::process::run_cmd(crate::process::CmdSpec {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), command.to_string()],
@@ -998,6 +999,7 @@ pub(crate) fn execute_tool_with_limit(
                 shell_tool(
                     crate::tools::shell_cwd_fd(&config.ws),
                     &map,
+                    config.shell.default_shell_timeout,
                     config.shell.max_shell_timeout,
                     config.shell.max_shell_output.min(output_limit),
                 )

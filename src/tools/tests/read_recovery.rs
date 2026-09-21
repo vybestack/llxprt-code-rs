@@ -16,6 +16,7 @@ fn cfg_floor(root: &std::path::Path, floor: usize) -> ToolConfig {
         digest_size_floor: floor,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(60),
             max_shell_timeout: Duration::from_secs(60),
             allow_shell: false,
         },
@@ -338,6 +339,7 @@ fn read_file_total_is_bounded_including_frame() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(30),
             max_shell_timeout: Duration::from_secs(30),
             allow_shell: false,
         },

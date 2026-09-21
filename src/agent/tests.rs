@@ -772,3 +772,29 @@ fn with_request_timeout_emits_resolved_value() {
     .with_request_timeout(Some(timeout));
     assert_eq!(agent.request_timeout, Some(timeout));
 }
+
+#[test]
+fn issue286_shell_budgets_reach_per_turn_tool_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/astramedium-native.json"
+        ))
+        .unwrap(),
+        "astramedium",
+    )
+    .unwrap();
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(Vec::new())),
+        root.path().to_path_buf(),
+        false,
+    )
+    .with_shell_timeouts(
+        std::time::Duration::from_secs(profile.ephemeral.shell_default_timeout_seconds.unwrap()),
+        std::time::Duration::from_secs(profile.ephemeral.shell_max_timeout_seconds.unwrap()),
+    );
+    let config = super::helpers::tool_config_with_floor(&agent, true).unwrap();
+    assert_eq!(config.shell.default_shell_timeout.as_secs(), 2700);
+    assert_eq!(config.shell.max_shell_timeout.as_secs(), u32::MAX as u64);
+    assert!(config.shell.allow_shell);
+}

@@ -610,6 +610,7 @@ fn normalized_empty_object_cannot_execute() {
         digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: llxprt_code_rs::tools::ShellConfig {
             max_shell_output: 4096,
+            default_shell_timeout: std::time::Duration::from_secs(5),
             max_shell_timeout: std::time::Duration::from_secs(5),
             allow_shell: false,
         },
