@@ -91,6 +91,10 @@ Its parity fixture uses legitimate isolated Cargo topology; do not create fake
 Cargo ancestors or relax assertions. Its process ownership implementation covers
 managed nested lifetimes using retained pipes and a group guardian, not universal
 hostile daemon containment. Independent dependency review remains outstanding.
+Named-profile verification additionally requires bootstrap stack #286 at
+`fe32a8fbc9899940c5f365e1645490cbbd0e6178`: without it the unchanged
+`--profile astramedium` fails Codex context-limit validation. Both stacks are
+explicit dependencies; neither is represented as already included in main.
 Current main removed the compatibility ledger and allowlist via #254; historical
 compat gate records below are evidence, not a request to restore those surfaces.
 
