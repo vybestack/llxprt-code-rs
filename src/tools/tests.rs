@@ -906,7 +906,7 @@ fn issue286_shell_default_and_maximum_have_distinct_runtime_effects() {
     let (ok, output) = execute_tool(
         d.path(),
         "run_shell_command",
-        json!({"command":"sleep 2; printf completed", "timeout_seconds":3}),
+        json!({"command":"sleep 4; printf completed", "timeout_seconds":5}),
         &config,
     );
     assert!(ok, "{output}");
