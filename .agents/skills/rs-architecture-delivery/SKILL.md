@@ -14,7 +14,7 @@ This skill is the operating procedure for a TypeScript driver orchestrating one 
 
 Before assembling any prompt:
 
-1. Enumerate the open PRs with `gh pr list --state open --json number,headRefName,baseRefName --limit 200`. That listing carries no file paths, so fetch the files per PR and record every open PR touching the paths this delivery needs: `gh pr view <n> --json files --jq '.files[].path'`, or `gh pr diff <n> --name-only`. A page that returns exactly the number of rows the limit asked for may be truncated, so re-run with a higher `--limit` or page with `--json` plus `endCursor` pagination until a page returns fewer rows than the cap, and only then treat the enumeration as complete.
+1. Enumerate the open PRs with `gh pr list --state open --json number,headRefName,baseRefName --limit 200`. That listing carries no file paths, so fetch the files per PR and record every open PR touching the paths this delivery needs: `gh pr view <n> --json files --jq '.files[].path'`, or `gh pr diff <n> --name-only`. A page that returns exactly the number of rows the limit asked for may be truncated, so re-run with a higher `--limit` until the returned collection has fewer rows than the requested limit. `gh pr list --json` returns a collection with no `endCursor`. For cursor pagination use an appropriate `gh api graphql` query and follow `pageInfo.endCursor` while `pageInfo.hasNextPage` is true. Preserve the enumeration and any pagination failures; an incomplete listing cannot establish ownership.
 2. Read the issue and its lease. If the lease names an owning issue for a path, that path is out of scope even when the tree is clean. In the lease as of 2026-09-08, `src/context_policy/**` belongs to issue #74; that is a current-lease example, not a durable fact, and the refresh in the previous item is the source of truth for what is owned today.
 3. Record the base SHA with `git rev-parse HEAD`. If the head moved since the lease was written, stop and re-confirm scope before continuing.
 
@@ -29,7 +29,7 @@ contract, or the template. Pass each input as an explicit argument:
 - the issue number, the lease boundary, and the paths the worker must not touch;
 - the requirements, written as the invariant the driver will verify;
 - the absolute evidence directory, for example
-  `/tmp/llxprt-evidence/issue<N>/claim-<k>/`, created before the invocation. In the
+  `/tmp/llxprt-evidence/issue<N>/`, created before the invocation. In the
   template's terms this is `$EVIDENCE_DIR`, which is `<ABS_EVIDENCE_DIR>/issue<N>`, with
   each claim under `$EVIDENCE_DIR/claim-<k>/`;
 - every dependency SHA, one per dependency, with the symbol or file each one supplies;
@@ -60,10 +60,16 @@ contract, or the template. Pass each input as an explicit argument:
    relative. A gate the driver did not run counts as not run.
 5. Run the stock binary for every `workload demonstrated` claim with no worker-added
    instrumentation, using the driver-side invocation in
-   `docs/architecture-evidence-handoff-template.md`: a fresh `--session` id, and the CLI's
-   own status read from `${PIPESTATUS[0]}` after the `tee` pipeline rather than `$?`.
-   Confirm the instrumentation list in the report is empty or fully reverted, then confirm
-   the tree is clean again.
+   `docs/architecture-evidence-handoff-template.md`: a fresh unused `--session` id plus a
+   separately prepared workload workspace from the retained initial inputs. Record and
+   reproduce required external or persisted starting state independently of session identity.
+   Match the claim's production permissions, budgets and resolved settings, with explicit
+   authorization for shell or insecure HTTP access. Remove actual instrumentation and the
+   orchestration prompt. Preserve worker and driver raw stdout/stderr, CLI status, commands,
+   hashes, inputs and settings in distinct newly reserved attempt directories, including
+   unsuccessful attempts. The template records status with direct redirection; no pipeline
+   status is involved. Keep raw dispatch JSON separate from extracted Markdown. Confirm
+   instrumentation removal and source-tree cleanliness again.
 
 ## 4. Classify the evidence
 
@@ -76,8 +82,8 @@ Reject these five reports, each with the missing evidence named:
 
 1. helper-only tests with no production caller, missing the caller path, the terminal effect,
    and the stock-binary run;
-2. an expected red whose recorded exit status is `0`, missing a nonzero status or typed error
-   at the base SHA;
+2. an expected red whose invariant check exits `0` or was not run, missing a nonzero
+   invariant-check status at the base SHA and separate producer output/status;
 3. a worker-reported binary hash the driver did not rebuild and rehash, missing the driver-side
    build and the driver's own `shasum -a 256 <file>` or `sha256sum <file>`;
 4. instrumentation presented as stock behavior, missing the same terminal object from an

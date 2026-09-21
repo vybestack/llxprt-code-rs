@@ -1,6 +1,6 @@
 # Issue 170 architecture evidence contract
 
-This document defines what an architecture worker's completion report must contain before a driver treats a claim as stock behavior. It exists because component-level evidence has been accepted as production evidence. At commit `b1af0dfa`, `src/context_policy/runtime.rs` exposes `begin_session_window` and `finish_session_window` and the only callers are in `src/context_policy/tests.rs`. In the same tree, `src/session/context_persist.rs` builds each admission executor through `admission_executor(epoch, state.kernel_chain, 0, 0)`, so the executor is bound over zero governed units and zero tool declarations while the surrounding lifetime requirements describe the bound as session-owned. A hash a worker reports describes that worker's tree. Instrumentation a worker adds describes that worker's binary. Only a caller in a production path plus an effect observed at a terminal boundary describe the shipped program.
+This document defines what an architecture worker's completion report must contain before a driver treats a claim as stock behavior. It exists because component-level evidence has been accepted as production evidence. At commit `b1af0dfa`, `src/context_policy/runtime.rs` exposes `begin_session_window` and `finish_session_window` and the only callers are in `src/context_policy/tests.rs`. In the same tree, `src/session/context_persist.rs` builds each admission executor through `admission_executor(epoch, 0, 0)`, so the executor is bound over zero governed units and zero tool declarations while the surrounding lifetime requirements describe the bound as session-owned. A hash a worker reports describes that worker's tree. Instrumentation a worker adds describes that worker's binary. Only a caller in a production path plus an effect observed at a terminal boundary describe the shipped program.
 
 Adjacent issues keep their implementation surfaces. Issue #67, issue #74, and issue #46 own the runtime changes this contract would otherwise tempt a worker to make. This document supplies the evidence handoff between a driver and a worker. It adds no framework, no runtime code, and no native skill support.
 
@@ -17,7 +17,7 @@ Every completion report carries all fourteen fields. A field with no value is wr
 | `production caller` | Path and symbol of the non-test caller that reaches the changed code, with the call line quoted. `none` is a valid answer and caps the claim at `primitive implemented`. |
 | `lifetime/recovered state` | What survives process exit, which store, spine, or log holds it, and what a fresh process reads on restart. `none` is a valid answer. |
 | `observed effect/terminal` | The terminal record that shows the effect, named by its field, with the value observed. For this CLI that is the final JSON object on stdout or a typed error object, and the field is `terminal_outcome`. |
-| `negative/positive evidence` | The failing-then-passing pair for the invariant, each with its own command and exit status. A red without a nonzero status is not red. |
+| `negative/positive evidence` | The failing-then-passing pair for the invariant, each with its own command and exit status. Record producer and invariant-check statuses separately. The negative invariant check must exit nonzero; a producer may exit zero while emitting the wrong output. A typed error alone does not substitute for the check status. |
 | `exact commands/statuses` | Every command the report relies on, copied verbatim, each with its exit status. Paraphrased commands are rejected. |
 | `binary hash/dirty delta/instrumentation` | SHA-256 of the binary actually executed, computed with `shasum -a 256 <file>` or `sha256sum <file>` and recorded verbatim, `git status --porcelain` output before and after the run, and every instrumentation change the worker added (counters, prints, env vars, fixture edits) with its removal recorded. `shasum -a 256` is the macOS/perl spelling and `sha256sum` the coreutils one; either is accepted, copied exactly as run. |
 | `limitations` | What the evidence does not show, in one to three sentences. |
@@ -33,7 +33,9 @@ Each claim is evaluated at all three levels, and every level entry either names 
 | --- | --- | --- |
 | `primitive implemented` | The code exists at the candidate SHA and its focused tests pass there. | Source path plus test command with exit status `0`. |
 | `production integrated` | A non-test caller in a path the shipped binary reaches invokes the code, and that caller needs no worker-added instrumentation. | Caller path and symbol, plus the observed terminal effect. |
-| `workload demonstrated` | The stock binary, rebuilt from the candidate SHA with a clean tree and no instrumentation, shows the effect under a real workload. | Invocation, exit status, terminal record, binary SHA-256. |
+| `workload demonstrated` | The stock binary, rebuilt from the candidate SHA with a clean tree and no instrumentation, shows the effect under a real workload. | Attempt directory containing invocation, CLI and invariant-check statuses, raw stdout/stderr, terminal record, binary SHA-256, recorded initial inputs and resolved workload settings. |
+
+For workload evidence, follow the attempt procedure in `docs/architecture-evidence-handoff-template.md`. A fresh session does not prepare a workspace. Preserve separate worker and driver attempts from matching recorded initial state, including stateful inputs. Retain production workload permissions and budgets while removing actual instrumentation. Put input preparation, resolved settings and attempt paths in `exact commands/statuses`; put recovered starting state in `lifetime/recovered state` and instrumentation removal in `binary hash/dirty delta/instrumentation`. These remain parts of the fourteen fields. Dispatch stdout is raw JSON; the separately extracted `summary` is the Markdown report.
 
 ## Worked example
 
@@ -73,10 +75,10 @@ observed effect/terminal: final stdout JSON object, field `terminal_outcome` wit
                           "quiesce_rate" and "status":"error"; exit status 1
 negative/positive evidence:
                           negative: grep -c '"terminal_outcome":"quiesce_rate"'
-                            <claim-1/terminal-base.json> at base SHA -> exit 1, grep prints
+                            <claim-1/worker.<base-attempt>/stdout.json> at base SHA -> exit 1, grep prints
                             the count 0, so the refusal terminal is absent from the base
                             output on a payload the governor must refuse
-                          positive: same grep at candidate SHA -> exit 0, grep prints the
+                          positive: same grep on the candidate attempt stdout.json at candidate SHA -> exit 0, grep prints the
                             count 1, matching the terminal object in the observed-effect
                             field. The grep is the red leg because the base binary emits no
                             refusal terminal at all, so the check that looks for one fails
@@ -116,7 +118,7 @@ expected label as inadmissible on its own.
 
 Claims and levels for that report:
 
-- Claim 1, refusal terminal. All three levels are evaluated, and each entry names one artifact of its own, under the evidence root `$EVIDENCE_DIR` (which is `<ABS_EVIDENCE_DIR>/issue<N>`, matching the template): `primitive implemented`: `cargo test --offline --locked --lib context_policy`, exit `0`, artifact `$EVIDENCE_DIR/claim-1/test.log`. `production integrated`: caller `src/session/context_persist.rs:sequence_admission`, plus the observed terminal effect `terminal_outcome: "quiesce_rate"`, artifact `$EVIDENCE_DIR/claim-1/caller.txt`. `workload demonstrated`: stock binary invocation, exit `1`, terminal object above, binary SHA-256 from `shasum -a 256` or `sha256sum`, artifact `$EVIDENCE_DIR/claim-1/terminal.json`.
+- Claim 1, refusal terminal. All three levels are evaluated, and each entry names one artifact of its own, under the evidence root `$EVIDENCE_DIR` (which is `<ABS_EVIDENCE_DIR>/issue<N>`, matching the template): `primitive implemented`: `cargo test --offline --locked --lib context_policy`, exit `0`, artifact `$EVIDENCE_DIR/claim-1/test.log`. `production integrated`: caller `src/session/context_persist.rs:sequence_admission`, plus the observed terminal effect `terminal_outcome: "quiesce_rate"`, artifact `$EVIDENCE_DIR/claim-1/caller.txt`. `workload demonstrated`: stock binary invocation, exit `1`, terminal object above, binary SHA-256 from `shasum -a 256` or `sha256sum`, artifact `$EVIDENCE_DIR/claim-1/worker.<attempt>/`.
 - Claim 2, quota evolution across restart. `primitive implemented`: `unavailable`, no focused test exists. `production integrated`: `unavailable`, the restart reader is not yet called from a shipped path. `workload demonstrated`: `unavailable`, no two-process run was performed. Claim 2 stays closed until each level gains its own artifact.
 
 ## Negative examples
@@ -124,7 +126,7 @@ Claims and levels for that report:
 Each entry is a report fragment that a driver rejects, followed by the evidence that is missing.
 
 1. Helper-only tests without callers. Report says "`begin_session_window` is complete, `cargo test --offline --locked --lib context_policy` exits 0." Rejected. Missing: a non-test caller path and symbol, the terminal effect produced through that caller, and a workload run of the stock binary. The claim is at most `primitive implemented`.
-2. Expected red that exits zero. Report says "the pre-change run fails as expected." The recorded command shows exit status `0`. Rejected. Missing: a nonzero exit status, or a typed error object, from the pre-change run at the base SHA. A red with no failure is an unexecuted check.
+2. Expected red check that exits zero. Report says "the pre-change invariant check fails as expected." The recorded check shows exit status `0`. Rejected. Missing: a failing invariant check at the base SHA with its own nonzero status and preserved producer output/status. A typed error object requires a check of its contents; the producer status alone does not establish the invariant. An absent check is unexecuted, and a check that exits zero is passing.
 3. Unverified worker SHA. Report says "binary SHA-256 `<64-hex>`" and the driver did not rebuild. Rejected. Missing: a driver-side `cargo build --release --offline --locked` at the exact head SHA, the tree-clean check before it, and the driver's own `shasum -a 256 <file>` or `sha256sum <file>` of the binary it ran. A hash the driver did not recompute binds nothing.
 4. Instrumented-as-stock evidence. Report says the refusal terminal was observed, and the run used a worker-added counter in `src/context_policy/monitor.rs` to force the armed tier. Rejected. Missing: the same terminal object from an uninstrumented build at the candidate SHA, plus the instrumentation list showing every added counter, print, env var, and fixture edit was removed. Instrumentation changes the program under test.
 5. Clean tree read as ownership. Report says "`git status --porcelain` is empty, so the surface is ours." Rejected. Missing: the open-PR and lease check, the base and head SHAs showing which commit the tree is clean at, and the `shared APIs/exclusions` field naming the issue that owns `src/context_policy/**`. A clean tree at someone else's head proves nothing about ownership.
