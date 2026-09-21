@@ -19,6 +19,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
 
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
+    settings.shell_timeouts = parse_shell_timeouts(&ephemeral, name)?;
     let reasoning_effort = parse_reasoning(&ephemeral, name)?;
     validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
@@ -230,14 +231,44 @@ fn parse_allowed_tools(map: &Map<String, Value>, name: &str) -> Result<(), Strin
     Ok(())
 }
 
-// This runtime has no image resizing or host shell/task executor. Rust shell
-// limits remain owned by its runtime configuration, not these host settings.
+// Shell timers belong to this runtime, independently of provider/turn deadlines.
+fn parse_shell_timeouts(
+    map: &Map<String, Value>,
+    name: &str,
+) -> Result<crate::tools::ShellTimeoutPolicy, String> {
+    fn read(
+        map: &Map<String, Value>,
+        key: &str,
+        name: &str,
+    ) -> Result<Option<std::time::Duration>, String> {
+        match map.get(key) {
+            None => Ok(Some(std::time::Duration::from_secs(120))),
+            Some(value) if value.as_i64() == Some(-1) => Ok(None),
+            Some(value) => {
+                let seconds = value
+                    .as_u64()
+                    .filter(|seconds| *seconds > 0 && *seconds <= u64::from(u32::MAX))
+                    .ok_or_else(|| {
+                        format!(
+                            "profile {name}: {key} must be -1 or an integer from 1 through {}",
+                            u32::MAX
+                        )
+                    })?;
+                Ok(Some(std::time::Duration::from_secs(seconds)))
+            }
+        }
+    }
+    Ok(crate::tools::ShellTimeoutPolicy {
+        default: read(map, "shell-default-timeout-seconds", name)?,
+        maximum: read(map, "shell-max-timeout-seconds", name)?,
+    })
+}
+
+// Image resizing and external task execution belong to the host, not this runtime.
 fn validate_inert_settings(map: &Map<String, Value>, name: &str) -> Result<(), String> {
     for key in [
         "task-default-timeout-seconds",
         "task-max-timeout-seconds",
-        "shell-default-timeout-seconds",
-        "shell-max-timeout-seconds",
         "image-resize.maxLongEdge",
         "image-resize.maxShortEdge",
         "image-resize.maxPixels",

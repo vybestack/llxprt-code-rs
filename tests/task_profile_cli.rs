@@ -125,3 +125,37 @@ fn assert_named_profile(name: &str, fixture: &str) {
     assert!(!settings.to_string().contains("task-default-timeout"));
     assert!(!settings.to_string().contains("task-max-timeout"));
 }
+
+#[test]
+fn named_shell_policy_values_validate_before_config_print() {
+    let config = tempfile::tempdir().unwrap();
+    let profiles = config.path().join("profiles");
+    std::fs::create_dir(&profiles).unwrap();
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/task-profile/astramedium.json")).unwrap();
+    for (default, maximum, valid) in [(1, 2, true), (-1, -1, true), (0, 1, false), (1, -2, false)] {
+        let mut profile = fixture.clone();
+        profile["ephemeralSettings"]["shell-default-timeout-seconds"] = serde_json::json!(default);
+        profile["ephemeralSettings"]["shell-max-timeout-seconds"] = serde_json::json!(maximum);
+        std::fs::write(profiles.join("shell-policy.json"), profile.to_string()).unwrap();
+        let output = bin()
+            .env("LLXPRT_CONFIG_HOME", config.path())
+            .args(["--profile", "shell-policy", "--print-config"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            valid,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if !valid {
+            let diagnostic = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(diagnostic.contains("shell-"), "{diagnostic}");
+        }
+    }
+}

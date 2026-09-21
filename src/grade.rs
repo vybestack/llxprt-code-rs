@@ -663,7 +663,7 @@ fn run_removal_command(program: &str, base: &Path) -> RemovalProbe {
         cwd: Some(base.to_path_buf()),
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: CONSUMER_TIMEOUT,
+        timeout: Some(CONSUMER_TIMEOUT),
         max_output: PROBE_MAX_OUTPUT,
     });
     match outcome {
@@ -732,7 +732,7 @@ fn build_and_test_consumer(base: &std::path::Path, ws: &std::path::Path, name: &
         cwd: Some(base.to_path_buf()),
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: CONSUMER_TIMEOUT,
+        timeout: Some(CONSUMER_TIMEOUT),
         max_output: CONSUMER_MAX_OUTPUT,
     }) {
         Ok(o) => o,
@@ -789,7 +789,7 @@ fn run_verification(
         cwd: None,
         cwd_fd: Some(workspace_fd(workspace)),
         env_add,
-        timeout: std::time::Duration::from_secs(300),
+        timeout: Some(std::time::Duration::from_secs(300)),
         max_output: 64 * 1024,
     }) {
         Ok(o) => o,

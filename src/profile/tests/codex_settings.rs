@@ -87,8 +87,6 @@ fn astramedium_host_settings_are_typed_inert_values() {
         "image-resize.maxLongEdge",
         "image-resize.maxShortEdge",
         "image-resize.maxPixels",
-        "shell-default-timeout-seconds",
-        "shell-max-timeout-seconds",
         "stream-first-response-timeout-ms",
     ] {
         without_host["ephemeralSettings"]
@@ -127,4 +125,55 @@ fn astramedium_host_settings_are_typed_inert_values() {
             .unwrap_err()
             .contains("must be -1"));
     }
+}
+
+#[test]
+fn astramedium_shell_policy_is_preserved_and_validated() {
+    use std::time::Duration;
+    let value = astra();
+    let profile = parse_profile_value(&value, "astramedium").unwrap();
+    assert_eq!(
+        profile.ephemeral.shell_timeouts.default,
+        Some(Duration::from_secs(2700))
+    );
+    assert_eq!(profile.ephemeral.shell_timeouts.maximum, None);
+    assert_eq!(profile.ephemeral.timeout_ms, None);
+    for key in ["shell-default-timeout-seconds", "shell-max-timeout-seconds"] {
+        for invalid in [
+            json!(0),
+            json!(-2),
+            json!(1.5),
+            json!("1"),
+            json!(null),
+            json!(false),
+            json!([]),
+            json!({}),
+            json!(4294967296u64),
+        ] {
+            let mut malformed = value.clone();
+            malformed["ephemeralSettings"][key] = invalid;
+            assert!(parse_profile_value(&malformed, "astramedium")
+                .unwrap_err()
+                .contains(key));
+        }
+        for valid in [json!(1), json!(-1), json!(4294967295u64)] {
+            let mut changed = value.clone();
+            changed["ephemeralSettings"][key] = valid;
+            assert!(parse_profile_value(&changed, "astramedium").is_ok());
+        }
+    }
+    let mut omitted = value.clone();
+    for key in ["shell-default-timeout-seconds", "shell-max-timeout-seconds"] {
+        omitted["ephemeralSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove(key);
+    }
+    assert_eq!(
+        parse_profile_value(&omitted, "astramedium")
+            .unwrap()
+            .ephemeral
+            .shell_timeouts,
+        crate::tools::ShellTimeoutPolicy::default()
+    );
 }

@@ -4420,14 +4420,14 @@
     {
       "key": "shell-default-timeout-seconds",
       "classification": "host-applied",
-      "owner": "common",
-      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
+      "owner": "rust-shell-executor",
+      "note": "Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; other APIs reject"
     },
     {
       "key": "shell-max-timeout-seconds",
       "classification": "host-applied",
-      "owner": "common",
-      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
+      "owner": "rust-shell-executor",
+      "note": "Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; other APIs reject"
     },
     {
       "key": "shell-inactivity-timeout-seconds",

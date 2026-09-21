@@ -366,10 +366,35 @@ pub struct ToolConfig {
 #[derive(Debug)]
 pub struct ShellConfig {
     pub max_shell_output: usize,
-    /// Ceiling for any single shell command, independent of what the model asks for.
-    pub max_shell_timeout: std::time::Duration,
+    pub timeouts: ShellTimeoutPolicy,
     /// Whether `run_shell_command` is registered (`--allow-shell` gate).
     pub allow_shell: bool,
+}
+
+/// Shell-only policy. None disables the corresponding timer/ceiling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShellTimeoutPolicy {
+    pub default: Option<std::time::Duration>,
+    pub maximum: Option<std::time::Duration>,
+}
+
+impl Default for ShellTimeoutPolicy {
+    fn default() -> Self {
+        Self {
+            default: Some(std::time::Duration::from_secs(120)),
+            maximum: Some(std::time::Duration::from_secs(120)),
+        }
+    }
+}
+
+impl ShellTimeoutPolicy {
+    fn resolve(self, requested: Option<std::time::Duration>) -> Option<std::time::Duration> {
+        match (requested.or(self.default), self.maximum) {
+            (Some(timeout), Some(maximum)) => Some(timeout.min(maximum)),
+            (timeout, None) => timeout,
+            (None, maximum) => maximum,
+        }
+    }
 }
 
 /// Maximum time a file-writing tool waits for another cooperating process to finish.
@@ -862,7 +887,7 @@ fn list_directory_tool(
 fn shell_tool(
     fd: i32,
     args: &BTreeMap<String, JsonValue>,
-    max_timeout: std::time::Duration,
+    policy: ShellTimeoutPolicy,
     max_output: usize,
 ) -> Result<String, String> {
     reject_unknown(args, &["command", "timeout_seconds"])?;
@@ -870,14 +895,11 @@ fn shell_tool(
     if command.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let timeout = bounded(
-        arg_u64(args, "timeout_seconds")?,
-        max_timeout.as_secs() as usize,
-        max_timeout.as_secs() as usize,
-    );
-    let timeout = std::time::Duration::from_secs(u64::from(
-        u32::try_from(timeout.max(1)).unwrap_or(u32::MAX),
-    ));
+    let requested = arg_u64(args, "timeout_seconds")?;
+    if requested == Some(0) {
+        return Err("timeout_seconds must be a positive integer".into());
+    }
+    let timeout = policy.resolve(requested.map(std::time::Duration::from_secs));
     let o = crate::process::run_cmd(crate::process::CmdSpec {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), command.to_string()],
@@ -895,11 +917,11 @@ fn shell_tool(
     // Every model-visible shell string (success or failure diagnostic) is bounded as one
     // value, framing and combined output included, to `max_output`.
     let s = if o.timed_out {
-        format!(
-            "command timed out after {} ms; output:\n{}",
-            timeout.as_millis(),
-            combined.trim_end()
-        )
+        let reason = match timeout {
+            Some(timeout) => format!("command timed out after {} ms", timeout.as_millis()),
+            None => "command supervision failed".to_string(),
+        };
+        format!("{reason}; output:\n{}", combined.trim_end())
     } else {
         match o.status {
             Some(0) => combined.trim_end().to_string(),
@@ -998,7 +1020,7 @@ pub(crate) fn execute_tool_with_limit(
                 shell_tool(
                     crate::tools::shell_cwd_fd(&config.ws),
                     &map,
-                    config.shell.max_shell_timeout,
+                    config.shell.timeouts,
                     config.shell.max_shell_output.min(output_limit),
                 )
             }

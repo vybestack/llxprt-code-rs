@@ -36,7 +36,7 @@ fn env_add_is_carried_and_credential_env_scrubbed() {
             "LLXPRT_CONFIG_HOME".into(),
             "/tmp/llxprt-rs-isolated-config".into(),
         )],
-        timeout: Duration::from_secs(10),
+        timeout: Some(Duration::from_secs(10)),
         max_output: 64 * 1024,
     })
     .expect("spawn");
@@ -128,7 +128,7 @@ fn concurrent_stdout_stderr_flood_is_capped() {
         cwd: None,
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: Duration::from_secs(15),
+        timeout: Some(Duration::from_secs(15)),
         max_output: 16 * 1024,
     })
     .expect("spawn");
@@ -176,7 +176,7 @@ fn raw_bytes_and_truncated_flags_are_structured() {
         cwd: None,
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: Duration::from_secs(15),
+        timeout: Some(Duration::from_secs(15)),
         max_output: 1024,
     })
     .expect("spawn");
@@ -199,7 +199,7 @@ fn drain_continues_past_capture_cap_no_writer_block() {
         cwd: None,
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: Duration::from_secs(15),
+        timeout: Some(Duration::from_secs(15)),
         max_output: 64,
     })
     .expect("spawn");
@@ -267,7 +267,10 @@ fn crate_tools_shell(cmd: &str) -> (bool, String) {
         digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: llxprt_code_rs::tools::ShellConfig {
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(3),
+            timeouts: llxprt_code_rs::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(3)),
+                maximum: Some(Duration::from_secs(3)),
+            },
             allow_shell: true,
         },
     };
@@ -291,7 +294,7 @@ fn invalid_utf8_is_lossy_but_valid() {
         cwd: None,
         cwd_fd: None,
         env_add: Vec::new(),
-        timeout: Duration::from_secs(5),
+        timeout: Some(Duration::from_secs(5)),
         max_output: 64 * 1024,
     })
     .expect("spawn");
@@ -310,7 +313,7 @@ fn unrepresentable_timeout_is_rejected_before_spawn_without_panicking() {
             cwd: None,
             cwd_fd: None,
             env_add: vec![],
-            timeout: Duration::MAX,
+            timeout: Some(Duration::MAX),
             max_output: 1024,
         })
     });

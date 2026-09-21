@@ -51,13 +51,25 @@ reject. Enabled reasoning accepts `low`, `medium`, or `high` (the existing Respo
 effort levels); the configured value is projected onto the Codex HTTP request with
 summary `auto`. Disabled reasoning still requires effort and summary to be omitted.
 
-The current `astramedium` shape also includes host image-resize and shell settings.
-`image-resize.maxLongEdge`, `image-resize.maxShortEdge`, `image-resize.maxPixels`,
-`shell-default-timeout-seconds`, and `shell-max-timeout-seconds` accept the registry's
-JSON number type as inert host data. This runtime has no image resizing pipeline or
-host shell executor. Its own `run_shell_command` uses the runtime shell cap and the
-bounded per-call `timeout_seconds`; these host settings do not override either.
-Non-numeric values reject. `stream-first-response-timeout-ms` accepts only the
+The current `astramedium` shape includes host image-resize settings.
+`image-resize.maxLongEdge`, `image-resize.maxShortEdge`, and `image-resize.maxPixels`
+accept JSON numbers as inert host data: this runtime has no image-input/resizing
+pipeline. Non-numeric values reject.
+
+`shell-default-timeout-seconds` and `shell-max-timeout-seconds` govern this runtime's
+`run_shell_command` executor (still gated by `--allow-shell`). Each accepts integer
+seconds from 1 through 4294967295, or `-1`; other values reject explicitly. Omission
+uses 120 seconds for each independently. `-1` disables that default timer or maximum
+ceiling, not the other setting. A positive per-call `timeout_seconds` overrides the
+default; the maximum then caps it. A disabled default with a finite maximum therefore
+uses the maximum; both disabled means no shell timer unless a call supplies one.
+A default above the maximum is capped, not rejected. Per-call zero rejects.
+The unchanged astramedium default 2700 and maximum -1 mean a 2700-second default
+with no ceiling on a positive per-call override. Request and turn deadlines remain
+independent; shell settings neither replace nor disable them. Process-group cleanup,
+output bounds and cancellation handling remain in force.
+
+`stream-first-response-timeout-ms` accepts only the
 integer `-1` disabled sentinel (or omission): there is no separate first-response
 phase timer. Active values reject rather than being reassigned to the provider
 request timeout. The existing disabled idle-timeout constraint remains unchanged.
