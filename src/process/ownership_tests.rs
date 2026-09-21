@@ -103,28 +103,7 @@ fn nested_native_cleanup() {
             .unwrap()
             .parse()
             .unwrap();
-        for pid in [pid, native_pid] {
-            loop {
-                let alive = unsafe { libc::kill(pid, 0) } == 0;
-                if !alive {
-                    break;
-                }
-                // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
-                #[cfg(target_os = "linux")]
-                if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
-                    s.split(')')
-                        .nth(1)
-                        .is_some_and(|s| s.trim_start().starts_with('Z'))
-                }) {
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "{mode}: owned leaf {pid} survived"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
+        assert_owned_processes_gone([pid, native_pid], deadline, mode);
     }
     assert!(
         peer.try_wait().unwrap().is_none(),
@@ -132,6 +111,31 @@ fn nested_native_cleanup() {
     );
     peer.kill().unwrap();
     peer.wait().unwrap();
+}
+
+fn assert_owned_processes_gone(pids: [i32; 2], deadline: Instant, mode: &str) {
+    for pid in pids {
+        loop {
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
+            #[cfg(target_os = "linux")]
+            if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
+                s.split(')')
+                    .nth(1)
+                    .is_some_and(|s| s.trim_start().starts_with('Z'))
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: owned leaf {pid} survived"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 
 #[test]
