@@ -5,7 +5,6 @@ use super::provider_settings::CodexResponsesSettings;
 use super::{EphemeralSettings, MaxToolCalls, ModelParams};
 
 const CODEX_PROFILE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex";
-const CODEX_CONTEXT_LIMIT: u64 = 262_144;
 
 pub(super) struct ParsedCodexSettings {
     pub(super) ephemeral: EphemeralSettings,
@@ -65,9 +64,9 @@ fn parse_common(
     settings: &mut EphemeralSettings,
 ) -> Result<(), String> {
     let context_limit = required_u64(map, "context-limit", name)?;
-    if context_limit != CODEX_CONTEXT_LIMIT {
+    if context_limit == 0 {
         return Err(format!(
-            "profile {name:?}: Codex 'context-limit' must be {CODEX_CONTEXT_LIMIT}"
+            "profile {name:?}: 'context-limit' must be a positive integer"
         ));
     }
     settings.context_limit = Some(context_limit);
