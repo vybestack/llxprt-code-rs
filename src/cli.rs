@@ -752,7 +752,7 @@ mod tests {
     fn issue286_named_native_profile_preserves_host_settings() {
         let root = tempfile::tempdir_in("target").unwrap();
         std::fs::create_dir(root.path().join("profiles")).unwrap();
-        let bytes = include_bytes!("../tests/fixtures/profiles/astramedium-native.json");
+        let bytes = include_bytes!("../tests/fixtures/host-profile/astramedium-native.json");
         let path = root.path().join("profiles/astramedium.json");
         std::fs::write(&path, bytes).unwrap();
         let args = Args::try_parse_from(["llxprt-code-rs", "--profile", "astramedium"]).unwrap();

@@ -727,7 +727,7 @@ fn known_model_mode_accepts_registry_keys_and_refuses_unknown() {
 #[test]
 fn issue286_codex_negative_first_response_budget_uses_native_request_bound() {
     let value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/profiles/astramedium-native.json"
+        "../../../tests/fixtures/host-profile/astramedium-native.json"
     ))
     .unwrap();
     let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
