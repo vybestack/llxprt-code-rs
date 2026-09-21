@@ -273,7 +273,7 @@ fn await_leaf(
     // File creation precedes writing its PID. Wait for a complete witness,
     // not merely a directory entry, especially under all-target test load.
     let pid: i32 = loop {
-        if let Ok(contents) = std::fs::read_to_string(&pidfile) {
+        if let Ok(contents) = std::fs::read_to_string(pidfile) {
             if let Ok(pid) = contents.trim().parse::<i32>() {
                 assert!(pid > 0);
                 break pid;
