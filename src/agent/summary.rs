@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl CodingAgent {
+impl Turn<'_> {
     pub(super) fn resolve_summary(
         &self,
         store: &SessionStore,
