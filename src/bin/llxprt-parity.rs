@@ -53,6 +53,10 @@ struct Args {
 }
 
 fn main() {
+    if let Err(error) = llxprt_code_rs::process::install_cancellation_signal_handlers() {
+        eprintln!("could not install cancellation handlers: {error}");
+        std::process::exit(2);
+    }
     let args = Args::parse();
     let out_root = args
         .out

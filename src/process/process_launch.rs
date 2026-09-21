@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::Ordering;
 
 /// Pipe endpoints that make exec contingent on a parent-side publication. The child reports its
-/// post-`setsid` pid then waits for an acknowledgement; the coordinator stores that pid in
+/// scope group ID then waits for an acknowledgement; the coordinator stores that pid in
 /// `ACTIVE_GROUP` before acknowledging. If cancellation exits the worker at any earlier point,
 /// closing the acknowledgement writer makes the child fail its pre-exec hook rather than exec.
 pub(super) struct LaunchHandoff {
@@ -86,7 +86,7 @@ impl LaunchHandoff {
 }
 
 /// The coordinator is intentionally a normal thread, not the signal handler: all it does is
-/// turn the child-provided pid into the published cancellation target and release the child.
+/// turn the child-reported scope group ID into the published cancellation target and release the child.
 /// Process exit closes its acknowledgement fd, which is the cancellation path before publication.
 fn launch_coordinator(ready: OwnedFd, acknowledgement: OwnedFd) {
     let mut pid_bytes = [0_u8; std::mem::size_of::<i32>()];
@@ -137,7 +137,7 @@ pub(super) fn cfg_launch_handoff(cmd: &mut Command, handoff: &LaunchHandoff) {
     // acknowledgement is EOF from a cancelling/exited worker and aborts `spawn` before exec.
     unsafe {
         cmd.pre_exec(move || {
-            let pid = (libc::getpid() as i32).to_ne_bytes();
+            let pid = (libc::getpgrp() as i32).to_ne_bytes();
             if write_all(ready_write, &pid).is_err() {
                 return Err(std::io::Error::from_raw_os_error(libc::EPIPE));
             }
