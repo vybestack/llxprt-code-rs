@@ -128,6 +128,7 @@ pub struct CodingAgent {
     pub prompt_notes: Option<String>,
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
+    pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
     profiler: Option<crate::memory_profile::Profiler>,
 }
 
@@ -195,6 +196,7 @@ impl CodingAgent {
             allow_shell,
             secrets: config.secret_values(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: config.context_limit,
             profiler: None,
         })
@@ -225,6 +227,7 @@ impl CodingAgent {
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
             profiler: None,
         })
@@ -251,6 +254,7 @@ impl CodingAgent {
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
             profiler: None,
         }

@@ -191,7 +191,7 @@ pub(super) fn tool_config_with_floor(
         digest_size_floor: agent.digest_size_floor,
         shell: crate::tools::ShellConfig {
             max_shell_output: agent.output_caps.shell,
-            max_shell_timeout: std::time::Duration::from_secs(120),
+            timeouts: agent.shell_timeouts,
             allow_shell: shell_on,
         },
     })
@@ -279,5 +279,38 @@ impl super::CodingAgent {
                 ),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod shell_policy_tests {
+    use super::*;
+
+    #[test]
+    fn parsed_astramedium_projects_to_agent_executor() {
+        let profile = crate::profile::parse_profile_value(
+            &serde_json::from_str(include_str!(
+                "../../tests/fixtures/task-profile/astramedium.json"
+            ))
+            .unwrap(),
+            "astramedium",
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut agent = CodingAgent::new_with_backend(
+            Box::new(crate::agent::tests::MockBackend::new(vec![])),
+            root.path(),
+            true,
+        )
+        .unwrap();
+        agent.shell_timeouts = profile.ephemeral.shell_timeouts;
+        let config = tool_config_with_floor(&agent, true).unwrap();
+        assert_eq!(
+            config.shell.timeouts.default,
+            Some(std::time::Duration::from_secs(2700))
+        );
+        assert_eq!(config.shell.timeouts.maximum, None);
+        assert!(config.shell.allow_shell);
+        assert_eq!(profile.ephemeral.timeout_ms, None);
     }
 }

@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn production_endpoint_identity_is_exact() {
-    let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), true);
+    let draft =
+        CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), Some("high".to_owned()));
     assert_eq!(
         draft.endpoint().responses_url(),
         "https://chatgpt.com/backend-api/codex/responses"
@@ -12,15 +13,18 @@ fn production_endpoint_identity_is_exact() {
 
 #[test]
 fn enabled_reasoning_maps_to_tested_responses_shape() {
-    let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), true);
-    let reasoning = draft.responses_reasoning().unwrap();
-    assert_eq!(reasoning.effort.as_deref(), Some("high"));
-    assert_eq!(reasoning.summary, Some(serde_json::json!("auto")));
+    for effort in ["low", "medium", "high"] {
+        let draft =
+            CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), Some(effort.to_owned()));
+        let reasoning = draft.responses_reasoning().unwrap();
+        assert_eq!(reasoning.effort.as_deref(), Some(effort));
+        assert_eq!(reasoning.summary, Some(serde_json::json!("auto")));
+    }
 }
 
 #[test]
 fn disabled_reasoning_omits_responses_reasoning() {
-    let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), false);
+    let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), None);
     assert!(draft.responses_reasoning().is_none());
 }
 

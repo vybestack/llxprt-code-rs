@@ -271,7 +271,7 @@ pub fn cli_command(spec: &InvocationSpec) -> Result<CmdOutcome, String> {
         cwd: None,
         cwd_fd: None,
         env_add: config_env_add(),
-        timeout: Duration::from_secs(900),
+        timeout: Some(Duration::from_secs(900)),
         max_output: 32 * 1024 * 1024,
     })
 }

@@ -687,6 +687,30 @@ mod tests {
     use std::ffi::OsString;
 
     #[test]
+    fn runtime_projection_preserves_shell_policy_and_independent_deadlines() {
+        let value = serde_json::from_str(include_str!(
+            "../tests/fixtures/task-profile/astramedium.json"
+        ))
+        .unwrap();
+        let mut profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let settings = crate::settings::resolve(crate::settings::SettingsLayers {
+            config_root: root.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        let shell = profile.ephemeral.shell_timeouts;
+        super::apply_runtime_settings(&mut profile, &settings).unwrap();
+        assert_eq!(profile.ephemeral.shell_timeouts, shell);
+        assert_eq!(
+            profile.ephemeral.timeout_ms,
+            Some(settings.budgets.request_timeout.value.as_millis() as u64)
+        );
+        assert_eq!(shell.default, Some(std::time::Duration::from_secs(2700)));
+        assert_eq!(shell.maximum, None);
+    }
+
+    #[test]
     fn omitted_session_gets_a_fresh_valid_hint() {
         let first = session_hint_from(Vec::<OsString>::new());
         let second = session_hint_from(Vec::<OsString>::new());

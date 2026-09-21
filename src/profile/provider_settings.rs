@@ -66,7 +66,8 @@ pub struct OpenAiResponsesSettings {
 /// The Codex Responses provider-scoped settings carried by a profile.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CodexResponsesSettings {
-    pub reasoning_enabled: bool,
+    /// None means reasoning is disabled; Some carries the validated effort.
+    pub reasoning_effort: Option<String>,
 }
 
 /// The provider-scoped parse outcome for one profile.

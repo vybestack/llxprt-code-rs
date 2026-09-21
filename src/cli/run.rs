@@ -137,6 +137,7 @@ fn build_agent(
     let turn_time = settings.budgets.turn_time.value;
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?;
+    agent.shell_timeouts = profile.ephemeral.shell_timeouts;
     agent = agent
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
