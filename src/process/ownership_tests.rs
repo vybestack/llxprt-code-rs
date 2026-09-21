@@ -1,5 +1,35 @@
 use super::*;
 
+// Retain the Child handle (and therefore its unreaped identity) until cleanup.
+struct TestChild(std::process::Child);
+impl std::ops::Deref for TestChild {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for TestChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl Drop for TestChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        let _ = self.0.kill();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !matches!(self.0.try_wait(), Ok(Some(_))) {
+            if Instant::now() >= deadline {
+                eprintln!("test child {} did not terminate after SIGKILL", self.0.id());
+                std::process::abort();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 fn native_spec(args: Vec<String>, env: Vec<(String, String)>, timeout: Duration) -> CmdSpec {
     CmdSpec {
         program: std::env::current_exe().unwrap().to_str().unwrap().into(),
@@ -21,7 +51,10 @@ fn nested_native_worker() {
     install_cancellation_signal_handlers().unwrap();
     std::fs::write(format!("{path}.native"), std::process::id().to_string()).unwrap();
     let outcome = run_sh(
-        &format!("echo $$ > '{}'; exec sleep 120", path),
+        &format!(
+            "echo $$ > '{}.tmp'; mv '{}.tmp' '{}'; exec sleep 120",
+            path, path, path
+        ),
         None,
         Duration::from_secs(110),
         4096,
@@ -37,13 +70,14 @@ fn nested_native_cleanup() {
     // The outer native process runs run_cmd; its shell backgrounds another native
     // runtime, which creates a second managed scope. Old unconditional setsid
     // orphaned the innermost sleep when the outer command completed/cancelled.
-    let mut peer = Command::new("sleep").arg("120").spawn().unwrap();
+    let mut peer = TestChild(Command::new("sleep").arg("120").spawn().unwrap());
     for mode in [
         "success",
         "failure",
         "timeout",
         "cancellation",
         "owner_sigkill",
+        "assertion_failure",
     ] {
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("leaf.pid");
@@ -65,38 +99,53 @@ fn nested_native_cleanup() {
             .envs(spec.env_add)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let mut worker = command.spawn().unwrap();
+        let mut worker = TestChild(command.spawn().unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !pidfile.exists() {
+        // File creation precedes writing its PID. Wait for a complete witness,
+        // not merely a directory entry, especially under all-target test load.
+        let pid: i32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pidfile) {
+                if let Ok(pid) = contents.trim().parse::<i32>() {
+                    assert!(pid > 0);
+                    break pid;
+                }
+            }
+            assert!(
+                worker.try_wait().unwrap().is_none(),
+                "{mode}: worker exited before readiness"
+            );
             assert!(Instant::now() < deadline, "{mode}: leaf not ready");
             std::thread::sleep(Duration::from_millis(10));
-        }
-        let pid: i32 = std::fs::read_to_string(&pidfile)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        if mode == "cancellation" || mode == "owner_sigkill" {
-            unsafe {
-                libc::kill(
-                    worker.id() as i32,
-                    if mode == "owner_sigkill" {
-                        libc::SIGKILL
-                    } else {
-                        libc::SIGTERM
-                    },
+        };
+        if mode == "assertion_failure" {
+            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _owned_worker = worker;
+                panic!("injected failure with a live nested native tree");
+            }));
+            assert!(failure.is_err());
+        } else {
+            if mode == "cancellation" || mode == "owner_sigkill" {
+                unsafe {
+                    libc::kill(
+                        worker.id() as i32,
+                        if mode == "owner_sigkill" {
+                            libc::SIGKILL
+                        } else {
+                            libc::SIGTERM
+                        },
+                    );
+                }
+            }
+            while worker.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "{mode}: worker stuck");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if mode != "cancellation" && mode != "owner_sigkill" {
+                assert!(
+                    worker.wait().unwrap().success(),
+                    "{mode}: native worker failed"
                 );
             }
-        }
-        while worker.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "{mode}: worker stuck");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if mode != "cancellation" && mode != "owner_sigkill" {
-            assert!(
-                worker.wait().unwrap().success(),
-                "{mode}: native worker failed"
-            );
         }
         let native_pid: i32 = std::fs::read_to_string(format!("{}.native", pidfile.display()))
             .unwrap()
@@ -165,5 +214,63 @@ fn outer_native_worker() {
     }
     if mode == "failure" {
         assert_eq!(outcome.status, Some(7));
+    }
+}
+
+#[test]
+fn raw_child_guard_cleans_up_on_panic() {
+    let mut pid = 0;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let child = TestChild(Command::new("sleep").arg("120").spawn().unwrap());
+        pid = child.id() as i32;
+        panic!("injected assertion failure after spawn");
+    }));
+    assert!(result.is_err());
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "guard left child alive");
+}
+
+#[test]
+fn closed_stdio_worker() {
+    if std::env::var_os("OWNERSHIP_CLOSED_STDIO").is_none() {
+        return;
+    }
+    unsafe {
+        libc::close(0);
+        libc::close(1);
+        libc::close(2);
+    }
+    let output = run_sh(
+        "printf scope-output",
+        None,
+        Duration::from_secs(5),
+        4096,
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(output.status, Some(0));
+    assert_eq!(output.stdout, b"scope-output");
+}
+
+#[test]
+fn ownership_launch_with_closed_stdio() {
+    let mut child = TestChild(
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "process::ownership_tests::closed_stdio_worker",
+                "--nocapture",
+            ])
+            .env("OWNERSHIP_CLOSED_STDIO", "1")
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "closed stdio launch failed: {status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "closed stdio worker stuck");
+        std::thread::sleep(Duration::from_millis(10));
     }
 }

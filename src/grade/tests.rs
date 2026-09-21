@@ -804,6 +804,12 @@ fn cargo_selection_ignores_ancestor_default_member() {
         .unwrap();
     }
     let selected = d.path().join("selected");
+    std::fs::create_dir(selected.join("tests")).unwrap();
+    std::fs::write(
+        selected.join("tests/roundtrip.rs"),
+        "#[test] fn roundtrip() {} ",
+    )
+    .unwrap();
     let (passed, output) = try_verify(&cap(&selected), "cargo test --offline");
     assert!(passed, "intended nested package: {output}");
     assert!(output.contains("intended_library"), "{output}");
@@ -844,4 +850,31 @@ fn failed_cli_does_not_hide_intended_verification_evidence() {
     assert!(ev.structural_pass);
     assert!(!ev.verifications.is_empty());
     assert!(ev.verifications.iter().all(|v| v.passed));
+}
+
+#[test]
+fn cargo_rejects_redirected_or_suppressed_targets() {
+    for suffix in [
+        "[lib]\npath='decoy.rs'\n",
+        "[lib]\ntest=false\n",
+        "[[test]]\nname='roundtrip'\npath='decoy.rs'\n",
+        "[[test]]\nname='roundtrip'\nharness=false\n",
+        "",
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("src")).unwrap();
+        std::fs::create_dir(d.path().join("tests")).unwrap();
+        std::fs::write(d.path().join("Cargo.toml"), format!("[package]\nname='target_probe'\nversion='0.1.0'\nautotests=false\n{suffix}[workspace]\n")).unwrap();
+        for file in ["src/lib.rs", "tests/roundtrip.rs"] {
+            std::fs::write(
+                d.path().join(file),
+                "compile_error!(\"intended target sentinel\");",
+            )
+            .unwrap();
+        }
+        std::fs::write(d.path().join("decoy.rs"), "#[test] fn decoy() {}").unwrap();
+        let (passed, output) = try_verify(&cap(d.path()), "cargo test --offline");
+        assert!(!passed, "{suffix}: {output}");
+        assert!(output.contains("Cargo targets"), "{output}");
+    }
 }

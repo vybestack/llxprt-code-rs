@@ -20,11 +20,15 @@ fn pipe() -> Result<(OwnedFd, OwnedFd), String> {
         if libc::pipe(fds.as_mut_ptr()) != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
-        let pair = (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1]));
-        for fd in fds {
-            if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) < 0 {
+        // Own both originals before any fallible operation. Protocol descriptors
+        // must survive Command replacing descriptors 0..=2 during stdio setup.
+        let mut pair = (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1]));
+        for fd in [&mut pair.0, &mut pair.1] {
+            let duplicate = libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3);
+            if duplicate < 0 {
                 return Err(std::io::Error::last_os_error().to_string());
             }
+            *fd = OwnedFd::from_raw_fd(duplicate);
         }
         Ok(pair)
     }
