@@ -266,7 +266,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           EXPECTED_COMMIT: ${{ github.sha }}
-        run: bash scripts/publish-release.sh --verify-tag-only
+        run: cargo +1.88.0 xtask publish-release --verify-tag-only
       - name: Publish durable digest-addressed source objects
         id: source-oci
         env:
@@ -313,7 +313,7 @@ jobs:
           SOURCE_OCI_SIDECAR_URL: ${{ steps.source-oci.outputs.sidecar-url }}
         run: |
           (cd dist && sha256sum --check "$RELEASE_SIDECAR")
-          bash scripts/publish-release.sh
+          cargo +1.88.0 xtask publish-release
 
   doc:
     name: rustdoc with denied warnings (MSRV)
