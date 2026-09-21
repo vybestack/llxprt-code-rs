@@ -487,6 +487,7 @@ mod tests {
             let printed = findings(&root);
             fs::remove_dir_all(&root).unwrap();
             assert!(error.contains("compat gate failed"), "error: {error}");
+            assert!(error.contains("1 findings"), "error: {error}");
             let report = format!("error: {error}\nfindings: {printed:?}");
             assert_eq!(
                 printed.len(),
@@ -500,6 +501,10 @@ mod tests {
             assert!(
                 printed[0].contains("src/grade/flow/collector.rs"),
                 "the scan output must name the offending file: {report}"
+            );
+            assert!(
+                printed[0].contains("src/grade/flow/collector.rs:3: banned marker 'deprecated'"),
+                "the finding must pin the site and the banned marker the fixture plants: {report}"
             );
         }
     }
