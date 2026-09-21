@@ -27,7 +27,7 @@ authoritative list. The crate's own license is `Apache-2.0` (see `LICENSE`).
 | serde_json                     | 1.0.151  | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | schemars                       | 1.2.1    | runtime       | MIT       | registry (locked in `Cargo.lock`) |
 | regex-lite                     | 0.1.9     | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
-| tokio                         | 1.53.1     | runtime       | MIT              | registry (locked in `Cargo.lock`) |
+| tokio                         | 1.53.1     | runtime + dev-only | MIT              | registry (locked in `Cargo.lock`) |
 | clap                          | 4.6.6      | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
 | fs2                           | 0.4.3      | runtime       | MIT/Apache-2.0 | registry (locked in `Cargo.lock`) |
 | thiserror                     | 2.0.20     | runtime       | MIT OR Apache-2.0 | registry (locked in `Cargo.lock`) |
