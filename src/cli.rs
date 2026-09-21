@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn issue286_named_native_profile_preserves_host_settings() {
-        let root = tempfile::tempdir_in("target").unwrap();
+        let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("profiles")).unwrap();
         let bytes = include_bytes!("../tests/fixtures/host-profiles/astramedium-native.json");
         let path = root.path().join("profiles/astramedium.json");
