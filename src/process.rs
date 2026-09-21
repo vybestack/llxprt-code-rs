@@ -475,6 +475,9 @@ fn supervise(
             passed_deadline = true;
         }
         if exited && closed && !passed_deadline {
+            // The unreaped leader retains the group identity until cleanup. A successful
+            // (or rejected) command must not leave redirected background jobs running.
+            let _ = kill_group(&mut child, libc::SIGKILL);
             return (child.wait().ok().and_then(|status| status.code()), false);
         }
         // A timed-out direct child may exit and close its pipes while a TERM-ignoring descendant
