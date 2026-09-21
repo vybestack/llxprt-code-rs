@@ -1,5 +1,6 @@
+use super::{AgentError, CodingAgent};
 use crate::adapter::ToolCall;
-use crate::session::ToolCallRecord;
+use crate::session::{ReservedRequest, RoundRecord, SessionStore, ToolCallRecord};
 
 pub(super) fn tool_call_record(call: &ToolCall, ok: bool, result: String) -> ToolCallRecord {
     ToolCallRecord {
@@ -176,5 +177,107 @@ pub(super) fn refuse_over_budget(
             &call.name, &call.id, false, &text,
         ));
         round.calls.push(refused_call_record(call, text));
+    }
+}
+
+/// The per-turn tool configuration, including the digest admission floor (issue 125).
+pub(super) fn tool_config_with_floor(
+    agent: &CodingAgent,
+    shell_on: bool,
+) -> Result<crate::tools::ToolConfig, String> {
+    Ok(crate::tools::ToolConfig {
+        ws: agent.workspace.try_clone()?,
+        max_output_bytes: agent.output_caps.tool,
+        digest_size_floor: agent.digest_size_floor,
+        shell: crate::tools::ShellConfig {
+            max_shell_output: agent.output_caps.shell,
+            max_shell_timeout: std::time::Duration::from_secs(120),
+            allow_shell: shell_on,
+        },
+    })
+}
+
+impl CodingAgent {
+    /// Sets the digest admission floor (issue 125) the session resolved.
+    ///
+    /// Validated exactly like the settings layer: a floor below the version-1 baseline
+    /// would tighten the filter registry (refused in-session) and break `safe_window`'s
+    /// strictly-under invariant, so it is a typed `Config` error here rather than a value
+    /// that silently never digests.
+    pub fn with_digest_size_floor(
+        mut self,
+        floor: usize,
+    ) -> Result<CodingAgent, crate::agent::AgentError> {
+        if floor < crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR {
+            return Err(crate::agent::AgentError::new(
+                crate::envelope::Code::Config,
+                "digest-size-floor",
+                format!(
+                    "digest-size-floor ({floor}) must be at least the baseline floor ({})",
+                    crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR
+                ),
+            ));
+        }
+        self.digest_size_floor = floor;
+        Ok(self)
+    }
+}
+
+impl super::CodingAgent {
+    /// Persist a terminal failure and surface it as an [`AgentError`]. The message is
+    /// scrubbed first (every accepted secret and credential path), then bounded to
+    /// [`crate::redact::MAX_ERROR_TEXT_BYTES`] at a UTF-8 boundary with the
+    /// explicit `[truncated]` marker; that bounded scrubbed text is what the
+    /// session fail and the CLI JSON both receive, so a huge provider body must leave a
+    /// terminal failed lifecycle and retain the model exit code, never become
+    /// session-persist. A persistence failure is never discarded: it becomes a
+    /// session error that still carries the original scrubbed bounded message.
+    pub(super) fn dead(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        key: &'static str,
+        message: &str,
+        rounds: &[RoundRecord],
+    ) -> AgentError {
+        self.dead_coded(
+            store,
+            reserved,
+            crate::envelope::Code::Model,
+            key,
+            message,
+            rounds,
+        )
+    }
+
+    /// [`Self::dead`] for failures that already carry their own classification:
+    /// the terminal record keeps the failing error's code and key instead of
+    /// reclassifying every setup failure as a model failure.
+    pub(super) fn dead_coded(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        code: crate::envelope::Code,
+        key: &'static str,
+        message: &str,
+        rounds: &[RoundRecord],
+    ) -> AgentError {
+        let bounded = crate::redact::scrub_and_bound(message, &self.secrets);
+        match store.fail(reserved, &bounded, rounds) {
+            Ok(()) => {
+                let profile = self.profile_store(store, "session_written", rounds.len(), None);
+                match profile {
+                    Ok(()) => AgentError::new(code, key, bounded),
+                    Err(profile_error) => profile_error,
+                }
+            }
+            Err(pe) => AgentError::new(
+                crate::envelope::Code::Session,
+                "session-persist",
+                format!(
+                    "turn failed ({key}: {bounded}); additionally, persisting the failure failed: {pe}"
+                ),
+            ),
+        }
     }
 }

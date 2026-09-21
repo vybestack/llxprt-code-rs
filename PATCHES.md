@@ -66,7 +66,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `a3742061beb6b7917f33bb4a5f1533700ff32d7f46a9db6749033246cf0719de`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `e7d278fa6b9364645b975d794eacb088db1400a96c0c8f751a40a683d8961cdf`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -284,6 +284,17 @@ separate field, and a forwarded key colliding with a typed wire key cannot reach
 recognized names into typed fields, not the map. Direct model tests pin the flattened serialized shape (including
 nested objects), the absence of an `extra` shell key when the map is empty, and the absence of the map for a
 default-constructed model.
+
+## Patch 14 - vendored lockfiles advance rustls to 0.23.45 for RUSTSEC-2026-0285
+(`vendor/serdes-ai/Cargo.lock`, `vendor/serdes-ai-agent/Cargo.lock`, `vendor/serdes-ai-models/Cargo.lock`,
+`vendor/serdes-ai-providers/Cargo.lock`, `vendor/serdes-ai-responses/Cargo.lock`,
+`vendor/serdes-ai-retries/Cargo.lock`, `vendor/serdes-ai-streaming/Cargo.lock`)
+
+The seven vendored lockfiles that pin `rustls` move from 0.23.43 to 0.23.45 in lockstep with the root
+`Cargo.lock`, closing RUSTSEC-2026-0285 in every audited lockfile (the CI audit leg runs
+`cargo audit` against the root, `xtask/Cargo.lock`, and each `vendor/*/Cargo.lock`). No vendored
+source is touched: the patch is lockfile-only, so the vendored crates compile exactly as before against
+the re-vendored `registry-vendor/rustls-0.23.45`.
 
 ## Tests
 

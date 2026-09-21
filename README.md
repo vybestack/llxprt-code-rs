@@ -107,6 +107,14 @@ Key precedence (matches llxprt-code):
 3. `settings.json` → `providerKeyfiles[provider]` (OpenAI and Anthropic; `openaivercel`
    also falls back to `openai`).
 
+`settings.json` is a **shared, multi-tool file**: the TypeScript llxprt-code app writes its
+own top-level keys into it (`ui`, `oauthEnabledProviders`, `providerKeyfiles`, ...), so the
+Rust resolver reads only the sections it owns (`provider`, `budgets`, `paths`) and ignores
+unknown top-level siblings — a shared root never blocks startup. Strictness is unchanged
+*inside* each owned section: a misspelled owned key, a wrong type, a duplicate key, or an
+invalid value is still a `settings-load`/`settings-resolve` config error. The CLI never
+rewrites, migrates, or preserves sibling keys on write.
+
 `ephemeralSettings.auth-key-name` names a provider key, never a keyfile path. It resolves
 through the credential env selector `LLXPRT_PROVIDER_KEY_<NAME>` (the uppercased name with
 `-` and `.` folded to `_`) and then the secure store (service `llxprt-code-provider-keys`,
@@ -324,8 +332,12 @@ replacement bytes, then publishes them atomically with a temporary file and rena
 before the rename it re-opens the final name no-follow and verifies identity (`dev`/`ino`), file
 type, size, and a SHA-256 digest against the bytes from which the replacement was derived. A
 change detected by that check returns a conflict. Callers can also pass `expected_sha256`, an
-independently computed lowercase hex SHA-256 of the complete current content, as an up-front
-precondition.
+independently computed full 64-character lowercase hex SHA-256 of the complete current content,
+as an up-front precondition. An empty, abbreviated, wrong-length, uppercase, or non-hex value is
+refused as invalid syntax before any write; a well-formed but stale value is refused as a
+mismatch that reports the current full digest. Before retrying, use `read_file` to recheck the
+current content and confirm that both the old text and proposed replacement are still intended;
+then use the reported full digest. Prefix matches are never accepted.
 
 The advisory lock only coordinates programs that honor it. The verification is not an atomic
 compare-and-swap because the re-open/verify and rename are separate syscalls. An unrelated process

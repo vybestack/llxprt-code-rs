@@ -1,5 +1,5 @@
 diff --git a/vendor/serdes-ai-agent/Cargo.lock b/vendor/serdes-ai-agent/Cargo.lock
-index bbe9c12..cc9e1d3 100644
+index bbe9c12..061f1cd 100644
 --- a/vendor/serdes-ai-agent/Cargo.lock
 +++ b/vendor/serdes-ai-agent/Cargo.lock
 @@ -4,43 +4,43 @@ version = 3
@@ -975,10 +975,10 @@ index bbe9c12..cc9e1d3 100644
  [[package]]
  name = "rustls"
 -version = "0.23.36"
-+version = "0.23.43"
++version = "0.23.45"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
  dependencies = [
   "once_cell",
   "ring",
@@ -4094,7 +4094,7 @@ index f281a40..4251aaf 100644
   "proc-macro2",
   "quote",
 diff --git a/vendor/serdes-ai-models/Cargo.lock b/vendor/serdes-ai-models/Cargo.lock
-index 534e4a8..f87f5f2 100644
+index 534e4a8..737fb43 100644
 --- a/vendor/serdes-ai-models/Cargo.lock
 +++ b/vendor/serdes-ai-models/Cargo.lock
 @@ -4,33 +4,33 @@ version = 3
@@ -5899,10 +5899,10 @@ index 534e4a8..f87f5f2 100644
 -[[package]]
 -name = "rustls"
 -version = "0.23.36"
-+version = "0.23.43"
++version = "0.23.45"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
  dependencies = [
 - "aws-lc-rs",
   "once_cell",
@@ -19310,7 +19310,7 @@ index 98ac82d..e199140 100644
  [dev-dependencies]
  tokio-test = { workspace = true }
 diff --git a/vendor/serdes-ai-providers/Cargo.lock b/vendor/serdes-ai-providers/Cargo.lock
-index 23e6c72..1bcdaa0 100644
+index 23e6c72..5bde23e 100644
 --- a/vendor/serdes-ai-providers/Cargo.lock
 +++ b/vendor/serdes-ai-providers/Cargo.lock
 @@ -4,37 +4,37 @@ version = 3
@@ -20262,10 +20262,10 @@ index 23e6c72..1bcdaa0 100644
  [[package]]
  name = "rustls"
 -version = "0.23.36"
-+version = "0.23.43"
++version = "0.23.45"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
  dependencies = [
   "once_cell",
   "ring",
@@ -23336,7 +23336,7 @@ index 31c55f7..81061d2 100644
  }
 diff --git a/vendor/serdes-ai-responses/Cargo.lock b/vendor/serdes-ai-responses/Cargo.lock
 new file mode 100644
-index 0000000..539faeb
+index 0000000..7c1e1e3
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/Cargo.lock
 @@ -0,0 +1,2122 @@
@@ -24411,9 +24411,9 @@ index 0000000..539faeb
 +
 +[[package]]
 +name = "rustls"
-+version = "0.23.43"
++version = "0.23.45"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 +dependencies = [
 + "once_cell",
 + "ring",
@@ -29559,7 +29559,7 @@ index e662236..0000000
 -    }
 -}
 diff --git a/vendor/serdes-ai-retries/Cargo.lock b/vendor/serdes-ai-retries/Cargo.lock
-index f00ac17..e4e309e 100644
+index f00ac17..9fa0043 100644
 --- a/vendor/serdes-ai-retries/Cargo.lock
 +++ b/vendor/serdes-ai-retries/Cargo.lock
 @@ -4,28 +4,28 @@ version = 3
@@ -30347,10 +30347,10 @@ index f00ac17..e4e309e 100644
  [[package]]
  name = "rustls"
 -version = "0.23.36"
-+version = "0.23.43"
++version = "0.23.45"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
  dependencies = [
   "once_cell",
   "ring",
@@ -31699,7 +31699,7 @@ index 2f98776..02f9a6e 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-streaming/Cargo.lock b/vendor/serdes-ai-streaming/Cargo.lock
-index ce6da03..45fafb4 100644
+index ce6da03..a0bbf8a 100644
 --- a/vendor/serdes-ai-streaming/Cargo.lock
 +++ b/vendor/serdes-ai-streaming/Cargo.lock
 @@ -4,44 +4,44 @@ version = 3
@@ -32472,9 +32472,9 @@ index ce6da03..45fafb4 100644
  
 +[[package]]
 +name = "rustls"
-+version = "0.23.43"
++version = "0.23.45"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 +dependencies = [
 + "once_cell",
 + "ring",
@@ -38828,7 +38828,7 @@ index 7dbe328..b6e5005 100644
  [dependencies.thiserror]
  version = "1.0"
 diff --git a/vendor/serdes-ai/Cargo.lock b/vendor/serdes-ai/Cargo.lock
-index 3e9d926..81e4907 100644
+index 3e9d926..c982ad9 100644
 --- a/vendor/serdes-ai/Cargo.lock
 +++ b/vendor/serdes-ai/Cargo.lock
 @@ -4,27 +4,27 @@ version = 3
@@ -40660,10 +40660,10 @@ index 3e9d926..81e4907 100644
 -[[package]]
 -name = "rustls"
 -version = "0.23.36"
-+version = "0.23.43"
++version = "0.23.45"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
-+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
++checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
  dependencies = [
 - "aws-lc-rs",
   "once_cell",
