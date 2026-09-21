@@ -11,6 +11,13 @@ use crate::context_ingress::segment::Segment;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
+/// Baseline bulk-evidence admission floor: the default of the `digest-size-floor`
+/// setting and the floor the version-1 rule table is seeded with. A configured floor
+/// at or above this baseline is an in-session *relaxation* of the same table (the
+/// floor is an admission parameter, not a rule-table change, so `rule_version`
+/// semantics stay pinned); a floor below it is a tightening the registry refuses.
+pub const DEFAULT_DIGEST_SIZE_FLOOR: usize = 1024;
+
 /// Filter content class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterClass {
@@ -81,7 +88,7 @@ impl FilterRules {
     pub fn v1() -> Self {
         Self {
             version: 1,
-            size_floor: 1024,
+            size_floor: DEFAULT_DIGEST_SIZE_FLOOR,
             unknown_bound: 64,
             verbatim_tools: Vec::new(),
         }

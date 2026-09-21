@@ -264,6 +264,7 @@ fn crate_tools_shell(cmd: &str) -> (bool, String) {
     let config = llxprt_code_rs::tools::ToolConfig {
         ws,
         max_output_bytes: 16 * 1024,
+        digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: llxprt_code_rs::tools::ShellConfig {
             max_shell_output: 64 * 1024,
             max_shell_timeout: Duration::from_secs(3),

@@ -25,17 +25,19 @@ struct CountingBackend {
 }
 
 impl ChatBackend for CountingBackend {
-    fn request(
-        &self,
-        _requests: &[serdes_ai::core::ModelRequest],
-        _tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        *self.calls.lock().unwrap() += 1;
-        Ok(LlmResult {
-            usage: LlmUsage::default(),
-            text: "done".to_string(),
-            calls: Vec::new(),
-            finish_reason: Some(FinishReason::Stop),
+    fn request<'a>(
+        &'a self,
+        _requests: &'a [serdes_ai::core::ModelRequest],
+        _tools: &'a [ToolSpec],
+    ) -> llxprt_code_rs::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            *self.calls.lock().unwrap() += 1;
+            Ok(LlmResult {
+                usage: LlmUsage::default(),
+                text: "done".to_string(),
+                calls: Vec::new(),
+                finish_reason: Some(FinishReason::Stop),
+            })
         })
     }
     fn request_calls(&self) -> usize {
