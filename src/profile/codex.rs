@@ -19,7 +19,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
 
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
-    let reasoning_enabled = parse_reasoning(&ephemeral, name)?;
+    let reasoning_effort = parse_reasoning(&ephemeral, name)?;
     validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
     let model_params = parse_model_params(&model_params, name, &mut settings)?;
@@ -27,7 +27,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     Ok(ParsedCodexSettings {
         ephemeral: settings,
         model_params,
-        settings: CodexResponsesSettings { reasoning_enabled },
+        settings: CodexResponsesSettings { reasoning_effort },
     })
 }
 
@@ -96,7 +96,7 @@ fn parse_common(
     Ok(())
 }
 
-fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String> {
+fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<Option<String>, String> {
     let enabled = required_bool(map, "reasoning.enabled", name)?;
     if !enabled {
         if map.contains_key("reasoning.effort") || map.contains_key("reasoning.summary") {
@@ -104,11 +104,16 @@ fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String>
                 "profile {name:?}: disabled Codex reasoning must omit effort and summary"
             ));
         }
-        return Ok(false);
+        return Ok(None);
     }
-    require_exact_string(map, "reasoning.effort", "high", name)?;
+    let effort = required_string(map, "reasoning.effort", name)?;
+    if !matches!(effort, "low" | "medium" | "high") {
+        return Err(format!(
+            "profile {name:?}: reasoning effort must be low, medium, or high"
+        ));
+    }
     require_exact_string(map, "reasoning.summary", "auto", name)?;
-    Ok(true)
+    Ok(Some(effort.to_string()))
 }
 
 fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result<(), String> {
