@@ -67,15 +67,17 @@ fn nested_native_cleanup() {
             .stderr(Stdio::null());
         let mut worker = command.spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !pidfile.exists() {
+        // File creation precedes writing its PID. Wait for a complete witness,
+        // not merely a directory entry, especially under all-target test load.
+        let pid: i32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pidfile) {
+                if let Ok(pid) = contents.trim().parse() {
+                    break pid;
+                }
+            }
             assert!(Instant::now() < deadline, "{mode}: leaf not ready");
             std::thread::sleep(Duration::from_millis(10));
-        }
-        let pid: i32 = std::fs::read_to_string(&pidfile)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        };
         if mode == "cancellation" || mode == "owner_sigkill" {
             unsafe {
                 libc::kill(
