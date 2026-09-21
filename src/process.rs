@@ -30,7 +30,6 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-#[path = "process/ownership.rs"]
 mod ownership;
 mod process_launch;
 #[cfg(test)]
@@ -806,5 +805,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "process/ownership_tests.rs"]
 mod ownership_tests;
