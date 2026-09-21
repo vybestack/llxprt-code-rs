@@ -12,6 +12,7 @@ fn block_as_whole_file_write_succeeds_but_destroys_preservation() {
     let config = ToolConfig {
         ws: WorkspaceCap::open(cwd.path()).unwrap(),
         max_output_bytes: 1024 * 1024,
+        digest_size_floor: llxprt_code_rs::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 1024,
             max_shell_timeout: Duration::from_secs(1),
