@@ -38,7 +38,6 @@ impl<'ast> syn::visit::Visit<'ast> for UnsupportedSyntaxCollector {
             || attr.path().is_ident("inline")
             || attr.path().is_ident("cold")
             || attr.path().is_ident("must_use")
-            || attr.path().is_ident("deprecated")  // compat-allow(#234): rustc's own deprecated-attribute name, required by is_ident
             || attr.path().is_ident("track_caller")
             || attr.path().is_ident("repr")
             || attr.path().is_ident("non_exhaustive");

@@ -569,8 +569,18 @@ function buildClassificationTable() {
   add('kimi.experimental-video', rej, common, 'rejected');
   add('mcp.lazy', rej, common, 'rejected');
   add('mcp.eagerServers', rej, common, 'rejected');
-  add('task-default-timeout-seconds', meta, common, 'exact 3600 metadata');
-  add('task-max-timeout-seconds', meta, common, 'exact 7200 metadata');
+  add(
+    'task-default-timeout-seconds',
+    host,
+    'llxprt-host-task-runner',
+    'JSON number owned by the host task runner; typed but inert in Rust',
+  );
+  add(
+    'task-max-timeout-seconds',
+    host,
+    'llxprt-host-task-runner',
+    'JSON number owned by the host task runner; typed but inert in Rust',
+  );
   add('task-max-async', rej, common, 'rejected');
   add('shell-max-background-jobs', rej, common, 'rejected');
   add('shell-background-log-max-bytes', rej, common, 'rejected');
@@ -968,6 +978,13 @@ function renderMarkdown(artifact) {
   push('the process in cached mode and must not contain project or secret information. The literal');
   push('`default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends');
   push('neither that key nor a session header.');
+  push();
+  push('Host task timeout ownership: `task-default-timeout-seconds` and');
+  push('`task-max-timeout-seconds` belong to the llxprt host task runner. This Rust runtime has');
+  push('no task executor, so numeric values are accepted as typed inert host settings and never');
+  push('become shell-command, provider-request, or turn deadlines. Omission is valid; when present,');
+  push('the persisted registry type requires a JSON number. Strings, booleans, null, arrays, and');
+  push('objects are malformed and reject at profile load.');
   push();
   push(`## Persistable-key inventory`);
   push();
