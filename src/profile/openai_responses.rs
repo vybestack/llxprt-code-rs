@@ -52,11 +52,6 @@ pub(super) fn parse(
         ));
     }
     reject_inert_dsflash_settings(&ephemeral, &model_params, name)?;
-    if ephemeral.timeout_ms.is_some() {
-        return Err(format!(
-            "profile {name:?}: timeout settings are unsupported for OpenAI Responses"
-        ));
-    }
     ephemeral.max_output_tokens = max_output_tokens.or(ephemeral.max_output_tokens);
 
     let settings = parse_settings(enabled, effort, summary, verbosity, prompt_caching, name)?;

@@ -112,6 +112,7 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+    shell_timeouts: (std::time::Duration, std::time::Duration),
     /// Digest admission floor handed to every read so a re-fetch recipe can name a
     /// window that stays under it (issue 125).
     digest_size_floor: usize,
@@ -188,6 +189,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -218,6 +223,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -244,6 +253,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -281,8 +294,17 @@ impl CodingAgent {
         self
     }
 
-    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
-    /// aggregate per-turn tool-output bound enforced by the turn loop.
+    /// Set host shell default and maximum budgets (independent of provider requests).
+    pub fn with_shell_timeouts(
+        mut self,
+        default: std::time::Duration,
+        max: std::time::Duration,
+    ) -> Self {
+        self.shell_timeouts = (default.min(max), max);
+        self
+    }
+
+    /// Override per-result and aggregate tool-output caps.
     pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
         self.output_caps = caps;
         self

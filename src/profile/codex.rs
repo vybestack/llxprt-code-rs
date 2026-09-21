@@ -17,6 +17,10 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     let model_params = object_field(obj, "modelParams", name)?;
     let mut settings = EphemeralSettings::default();
 
+    for (key, value) in &ephemeral {
+        super::host::parse(&mut settings, key, value, name)?;
+    }
+    super::host::validate(&settings, name)?;
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
     let reasoning_effort = parse_reasoning(&ephemeral, name)?;
@@ -260,7 +264,7 @@ fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), 
     ];
     if let Some(key) = btree(map)
         .keys()
-        .find(|key| !ALLOWED.contains(&key.as_str()))
+        .find(|key| !ALLOWED.contains(&key.as_str()) && !super::host::KEYS.contains(&key.as_str()))
     {
         return Err(format!(
             "profile {name:?}: unsupported Codex setting '{key}'"
