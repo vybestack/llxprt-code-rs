@@ -805,5 +805,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "process/ownership_tests.rs"]
 mod ownership_tests;
