@@ -101,22 +101,7 @@ fn nested_native_cleanup() {
             .stderr(Stdio::null());
         let mut worker = TestChild(command.spawn().unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
-        // File creation precedes writing its PID. Wait for a complete witness,
-        // not merely a directory entry, especially under all-target test load.
-        let pid: i32 = loop {
-            if let Ok(contents) = std::fs::read_to_string(&pidfile) {
-                if let Ok(pid) = contents.trim().parse::<i32>() {
-                    assert!(pid > 0);
-                    break pid;
-                }
-            }
-            assert!(
-                worker.try_wait().unwrap().is_none(),
-                "{mode}: worker exited before readiness"
-            );
-            assert!(Instant::now() < deadline, "{mode}: leaf not ready");
-            std::thread::sleep(Duration::from_millis(10));
-        };
+        let pid = await_leaf(&mut worker, &pidfile, deadline, mode);
         if mode == "assertion_failure" {
             let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _owned_worker = worker;
@@ -151,28 +136,7 @@ fn nested_native_cleanup() {
             .unwrap()
             .parse()
             .unwrap();
-        for pid in [pid, native_pid] {
-            loop {
-                let alive = unsafe { libc::kill(pid, 0) } == 0;
-                if !alive {
-                    break;
-                }
-                // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
-                #[cfg(target_os = "linux")]
-                if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
-                    s.split(')')
-                        .nth(1)
-                        .is_some_and(|s| s.trim_start().starts_with('Z'))
-                }) {
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "{mode}: owned leaf {pid} survived"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
+        assert_descendants_gone([pid, native_pid], deadline, mode);
     }
     assert!(
         peer.try_wait().unwrap().is_none(),
@@ -273,4 +237,55 @@ fn ownership_launch_with_closed_stdio() {
         assert!(Instant::now() < deadline, "closed stdio worker stuck");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn assert_descendants_gone(pids: [i32; 2], deadline: Instant, mode: &str) {
+    for pid in pids {
+        loop {
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            // Linux init may leave an orphan zombie briefly; it cannot run or own FDs.
+            #[cfg(target_os = "linux")]
+            if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
+                s.split(')')
+                    .nth(1)
+                    .is_some_and(|s| s.trim_start().starts_with('Z'))
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: owned leaf {pid} survived"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+fn await_leaf(
+    worker: &mut TestChild,
+    pidfile: &std::path::Path,
+    deadline: Instant,
+    mode: &str,
+) -> i32 {
+    // File creation precedes writing its PID. Wait for a complete witness,
+    // not merely a directory entry, especially under all-target test load.
+    let pid: i32 = loop {
+        if let Ok(contents) = std::fs::read_to_string(&pidfile) {
+            if let Ok(pid) = contents.trim().parse::<i32>() {
+                assert!(pid > 0);
+                break pid;
+            }
+        }
+        assert!(
+            worker.try_wait().unwrap().is_none(),
+            "{mode}: worker exited before readiness"
+        );
+        assert!(Instant::now() < deadline, "{mode}: leaf not ready");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    pid
 }
