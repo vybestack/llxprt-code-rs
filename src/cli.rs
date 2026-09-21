@@ -83,7 +83,8 @@ pub struct Args {
     pub max_tool_calls: Option<i64>,
 
     /// Wall-clock budget per prompt like `90s`, `30m`, `2h`; `0` disables.
-    /// Omitted means no time limit.
+    /// Includes all provider calls; starts after setup/session reservation.
+    /// Omitted means no time limit. Shell commands keep their separate timeout.
     #[arg(long, value_name = "DURATION")]
     pub turn_time: Option<String>,
 
@@ -98,6 +99,12 @@ pub struct Args {
     /// Cap on the combined tool-result bytes of one turn (default 16777216).
     #[arg(long, value_name = "BYTES")]
     pub max_turn_output: Option<u64>,
+
+    /// Digest admission floor in bytes (default 1024): tool results at or above this
+    /// size are digested into a bounded handle before they reach the model. Values
+    /// below the baseline floor are refused; raises are in-session relaxations.
+    #[arg(long, value_name = "BYTES")]
+    pub digest_size_floor: Option<u64>,
 
     /// How `modelParams` keys this build does not itself type are handled:
     /// `loose` (default) forwards them verbatim on the provider wire,
@@ -128,6 +135,10 @@ pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
     if let Some(value) = args.max_tool_calls {
         crate::settings::validate_max_tool_calls(value)
             .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;
+    }
+    if let Some(value) = args.digest_size_floor {
+        crate::settings::validate_digest_size_floor(value)
+            .map_err(|message| AppError::new(Code::Usage, "digest-size-floor", message))?;
     }
     if let Some(raw) = args.turn_time.as_deref() {
         crate::settings::parse_turn_time(raw)
@@ -165,6 +176,7 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
             max_shell_output: args.max_shell_output,
             max_tool_output: args.max_tool_output,
             max_turn_output: args.max_turn_output,
+            digest_size_floor: args.digest_size_floor,
             request_timeout: args.request_timeout.clone(),
         },
         ..Default::default()
@@ -756,5 +768,17 @@ mod tests {
             let args = Args::try_parse_from(arguments).unwrap();
             assert_eq!(args.max_tool_calls, Some(expected));
         }
+    }
+
+    #[test]
+    fn print_config_parses_the_digest_size_floor_flag() {
+        let args = Args::try_parse_from([
+            "llxprt-code-rs",
+            "--print-config",
+            "--digest-size-floor",
+            "4096",
+        ])
+        .unwrap();
+        assert_eq!(args.digest_size_floor, Some(4096));
     }
 }
