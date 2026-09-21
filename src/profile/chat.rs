@@ -163,6 +163,7 @@ pub(super) fn parse_ephemeral(
             unsupported.push(key.clone());
         }
     }
+    super::host::validate(&settings, name)?;
     settings.unsupported = unsupported;
     Ok(settings)
 }
@@ -181,6 +182,9 @@ fn parse_ephemeral_entry(
             super::provider_settings::PromptCachingSetting::openai_responses(Some(raw))
                 .map_err(|error| format!("profile {name:?}: 'prompt-caching' {error}"))?,
         );
+        return Ok(true);
+    }
+    if super::host::parse(settings, key, value, name)? {
         return Ok(true);
     }
     if parse_ephemeral_primary(settings, key, value, name)? {
@@ -247,7 +251,6 @@ fn parse_ephemeral_primary(
             settings.max_tool_calls_per_prompt = MaxToolCalls::parse(value, name)?;
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
-        "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
         "apiMode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;

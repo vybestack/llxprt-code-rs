@@ -5,7 +5,6 @@ use super::provider_settings::CodexResponsesSettings;
 use super::{EphemeralSettings, MaxToolCalls, ModelParams};
 
 const CODEX_PROFILE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex";
-const CODEX_CONTEXT_LIMIT: u64 = 262_144;
 
 pub(super) struct ParsedCodexSettings {
     pub(super) ephemeral: EphemeralSettings,
@@ -28,9 +27,13 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
         ..Default::default()
     };
 
+    for (key, value) in &ephemeral {
+        super::host::parse(&mut settings, key, value, name)?;
+    }
+    super::host::validate(&settings, name)?;
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
-    let reasoning_enabled = parse_reasoning(&ephemeral, name)?;
+    let reasoning_effort = parse_reasoning(&ephemeral, name)?;
     validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
     let model_params = parse_model_params(&model_params, name, &mut settings)?;
@@ -38,7 +41,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     Ok(ParsedCodexSettings {
         ephemeral: settings,
         model_params,
-        settings: CodexResponsesSettings { reasoning_enabled },
+        settings: CodexResponsesSettings { reasoning_effort },
     })
 }
 
@@ -75,9 +78,9 @@ fn parse_common(
     settings: &mut EphemeralSettings,
 ) -> Result<(), String> {
     let context_limit = required_u64(map, "context-limit", name)?;
-    if context_limit != CODEX_CONTEXT_LIMIT {
+    if context_limit == 0 {
         return Err(format!(
-            "profile {name:?}: Codex 'context-limit' must be {CODEX_CONTEXT_LIMIT}"
+            "profile {name:?}: 'context-limit' must be a positive integer"
         ));
     }
     settings.context_limit = Some(context_limit);
@@ -107,7 +110,7 @@ fn parse_common(
     Ok(())
 }
 
-fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String> {
+fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<Option<String>, String> {
     let enabled = required_bool(map, "reasoning.enabled", name)?;
     if !enabled {
         if map.contains_key("reasoning.effort") || map.contains_key("reasoning.summary") {
@@ -115,11 +118,16 @@ fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String>
                 "profile {name:?}: disabled Codex reasoning must omit effort and summary"
             ));
         }
-        return Ok(false);
+        return Ok(None);
     }
-    require_exact_string(map, "reasoning.effort", "high", name)?;
+    let effort = required_string(map, "reasoning.effort", name)?;
+    if !matches!(effort, "low" | "medium" | "high") {
+        return Err(format!(
+            "profile {name:?}: reasoning effort must be low, medium, or high"
+        ));
+    }
     require_exact_string(map, "reasoning.summary", "auto", name)?;
-    Ok(true)
+    Ok(Some(effort.to_string()))
 }
 
 fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result<(), String> {
@@ -266,7 +274,7 @@ fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), 
     ];
     if let Some(key) = btree(map)
         .keys()
-        .find(|key| !ALLOWED.contains(&key.as_str()))
+        .find(|key| !ALLOWED.contains(&key.as_str()) && !super::host::KEYS.contains(&key.as_str()))
     {
         return Err(format!(
             "profile {name:?}: unsupported Codex setting '{key}'"

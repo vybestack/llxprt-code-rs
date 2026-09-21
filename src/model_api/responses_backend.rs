@@ -148,10 +148,19 @@ mod tests {
         });
 
         let model = OpenResponsesModel::new("test-model", format!("ws://127.0.0.1:{port}"));
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/task-profile/astra-headless.json"
+        ))
+        .unwrap();
+        value["ephemeralSettings"]["stream-first-response-timeout-ms"] = serde_json::json!(1000);
+        let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
         let backend = ResponsesBackend::new(
             model,
             ModelSettings {
-                timeout: Some(std::time::Duration::from_secs(1)),
+                timeout: profile
+                    .ephemeral
+                    .timeout_ms
+                    .map(std::time::Duration::from_millis),
                 ..Default::default()
             },
         );
