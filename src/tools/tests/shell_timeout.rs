@@ -2,6 +2,21 @@ use super::*;
 
 #[test]
 fn issue286_shell_default_and_maximum_have_distinct_runtime_effects() {
+    // Process ownership serializes runs within one runtime. Measure shell deadlines
+    // in a fresh test process, not behind unrelated parallel tests' run lock.
+    if std::env::var_os("ISSUE286_SHELL_TIMEOUT_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tools::tests::shell_timeout::issue286_shell_default_and_maximum_have_distinct_runtime_effects", "--nocapture"])
+            .env("ISSUE286_SHELL_TIMEOUT_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let d = tempfile::tempdir().unwrap();
     let mut config = cfg(d.path());
     config.shell.allow_shell = true;
