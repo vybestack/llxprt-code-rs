@@ -21,7 +21,8 @@ fn nested_native_worker() {
     install_cancellation_signal_handlers().unwrap();
     std::fs::write(format!("{path}.native"), std::process::id().to_string()).unwrap();
     let outcome = run_sh(
-        &format!("echo $$ > '{}'; exec sleep 120", path),
+        // Publish readiness atomically: existence must imply a complete PID.
+        &format!("echo $$ > '{path}.pending'; mv '{path}.pending' '{path}'; exec sleep 120"),
         None,
         Duration::from_secs(110),
         4096,
