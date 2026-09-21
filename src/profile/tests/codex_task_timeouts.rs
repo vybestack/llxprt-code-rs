@@ -78,10 +78,10 @@ fn codex_host_task_timeouts_require_json_numbers_but_not_rust_ranges() {
 #[test]
 fn codex_owned_settings_remain_strict() {
     let mut context = astra_shape();
-    context["ephemeralSettings"]["context-limit"] = json!(262_143);
+    context["ephemeralSettings"]["context-limit"] = json!(0);
     assert_eq!(
         parse_profile_value(&context, "astra-headless").unwrap_err(),
-        "profile \"astra-headless\": Codex 'context-limit' must be 262144"
+        "profile \"astra-headless\": 'context-limit' must be a positive integer"
     );
 
     let mut stream_idle = astra_shape();
