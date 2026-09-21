@@ -156,7 +156,7 @@ fn anthropic_draft(settings: &AnthropicSettings) -> AnthropicSettingsDraft {
 }
 
 fn codex_draft(settings: &CodexResponsesSettings, model: &str) -> CodexResponsesSettingsDraft {
-    CodexResponsesSettingsDraft::new(model.to_string(), settings.reasoning_enabled)
+    CodexResponsesSettingsDraft::new(model.to_string(), settings.reasoning_effort.clone())
 }
 
 fn openai_responses_draft(
