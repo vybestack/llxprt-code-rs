@@ -21,7 +21,10 @@ fn nested_native_worker() {
     install_cancellation_signal_handlers().unwrap();
     std::fs::write(format!("{path}.native"), std::process::id().to_string()).unwrap();
     let outcome = run_sh(
-        &format!("echo $$ > '{}'; exec sleep 120", path),
+        &format!(
+            "echo $$ > '{}.ready'; mv '{}.ready' '{}'; exec sleep 120",
+            path, path, path
+        ),
         None,
         Duration::from_secs(110),
         4096,
