@@ -278,29 +278,108 @@ fn print_config_wire_carries_resolved_output_caps() {
 }
 
 #[test]
-fn foreign_top_level_settings_keys_are_ignored() {
+/// An unknown key **inside** a section the resolver owns is still a settings-load error
+/// (issue 202 moved tolerance to the shared top level only, never inside owned data).
+fn unknown_owned_section_key_is_error() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("settings.json"),
-        r#"{"ui": {"theme": "Green Screen"}, "oauthEnabledProviders": {"codex": true}, "provider": {"model": "test-model"}}"#,
+        r#"{"ui": {"theme": "Green Screen"}, "provider": {"unknown": true}}"#,
+    )
+    .unwrap();
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(error.contains("unknown field `unknown`"), "{error}");
+    assert!(
+        error.contains("expected one of `base_url`, `model`, `profile_path`"),
+        "{error}"
+    );
+}
+
+/// Regression (issue 202): `settings.json` is a shared multi-tool surface. The
+/// TypeScript llxprt-code app legitimately writes its own top-level keys (`ui`,
+/// `oauthEnabledProviders`, `providerKeyfiles`, ...), so an unknown top-level sibling
+/// must be ignored, not fail the load. The same read still applies every owned section
+/// beside the sibling key.
+#[test]
+fn shared_user_file_sibling_keys_are_ignored_but_owned_sections_apply() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"ui": {"theme": "Green Screen"},
+            "oauthEnabledProviders": {"codex": true},
+            "providerKeyfiles": {"openai": "/no/such/keyfile"},
+            "budgets": {"max_tool_calls": 9}}"#,
     )
     .unwrap();
     let layer = load_user_file(temp.path()).unwrap();
-    assert_eq!(layer.provider.model, Some("test-model".into()));
+    assert_eq!(layer.budgets.max_tool_calls, Some(9));
+    assert_eq!(layer.provider.base_url, None, "sibling keys add nothing");
 }
 
+/// Strictness stays inside every section the resolver owns: a misspelled owned key is
+/// still a settings-load failure with the section's field list, so a typo cannot be
+/// silently swallowed by the tolerant root.
 #[test]
-fn unknown_key_inside_owned_namespace_is_error() {
+fn owned_sections_stay_strict_on_misspelled_keys() {
     let temp = tempfile::tempdir().unwrap();
+    for (body, expected_field) in [
+        (r#"{"budgets": {"maxToolCalls": 4}}"#, "maxToolCalls"),
+        (r#"{"paths": {"configRoot": "/tmp"}}"#, "configRoot"),
+    ] {
+        std::fs::write(temp.path().join("settings.json"), body).unwrap();
+        let error = load_user_file(temp.path()).unwrap_err();
+        assert!(
+            error.contains(&format!("unknown field `{expected_field}`")),
+            "expected an unknown-field failure for {body}, got: {error}"
+        );
+    }
+}
+
+/// Strictness stays inside every owned section for wrong types, duplicate keys, and
+/// invalid values: the settings-load (or settings-resolve) classification is unchanged.
+#[test]
+fn owned_sections_stay_strict_on_types_duplicates_and_values() {
+    let temp = tempfile::tempdir().unwrap();
+    // Wrong type inside an owned section.
     std::fs::write(
         temp.path().join("settings.json"),
-        r#"{"provider": {"base-url": "http://x", "bogus": 1}}"#,
+        r#"{"ui": {"theme": "Green Screen"}, "provider": {"model": 7}}"#,
     )
     .unwrap();
-    assert!(load_user_file(temp.path())
-        .unwrap_err()
-        .contains("unknown field"));
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(
+        error.contains("invalid type: integer `7`, expected a string"),
+        "wrong type inside an owned section must fail: {error}"
+    );
+
+    // A duplicate owned key is still rejected, beside an ignored sibling key.
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"oauthEnabledProviders": {"codex": true},
+            "budgets": {"max_tool_calls": 7, "max_tool_calls": 8}}"#,
+    )
+    .unwrap();
+    let error = load_user_file(temp.path()).unwrap_err();
+    assert!(
+        error.contains("duplicate field `max_tool_calls`"),
+        "a duplicate owned key must fail: {error}"
+    );
+
+    // An invalid owned value fails in the resolver, after the load succeeds.
+    std::fs::write(
+        temp.path().join("settings.json"),
+        r#"{"ui": {"theme": "Green Screen"}, "budgets": {"max_tool_calls": 0}}"#,
+    )
+    .unwrap();
+    let mut l = layers();
+    l.user_file = load_user_file(temp.path()).unwrap();
+    let error = resolve(l).unwrap_err().to_string();
+    assert!(
+        error.starts_with("--max-tool-calls must be -1 or an integer from 1 through 512 (got "),
+        "an invalid owned value must fail in the resolver: {error}"
+    );
 }
+
 #[test]
 fn env_max_tool_calls_validated_like_cli() {
     for value in [0, 513] {
@@ -518,4 +597,188 @@ fn settings_serialize_round_trips_through_strict_loader() {
     )
     .unwrap();
     assert_eq!(load_user_file(temp.path()).unwrap(), expected);
+}
+
+/// The digest admission floor defaults to the version-1 rule table's baseline (issue 125).
+#[test]
+fn digest_size_floor_defaults_to_the_filter_baseline() {
+    let got = resolve(layers()).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (
+            u64::try_from(crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR).unwrap(),
+            Source::Default
+        )
+    );
+}
+
+/// At least two layers of the precedence chain move the floor, and `--print-config`
+/// reports the resolved value with the layer that supplied it (issue 125).
+#[test]
+fn digest_size_floor_layers_precedence_and_print_config_visibility() {
+    let floor_layer = |value: u64| SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(value),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    l.env = floor_layer(4096);
+    l.cli = floor_layer(8192);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (8192, Source::Cli)
+    );
+    let wire = serde_json::to_value(&got).unwrap();
+    assert_eq!(
+        wire["budgets"]["digest_size_floor"],
+        serde_json::json!({"value": 8192, "source": "cli"})
+    );
+
+    // Without the CLI layer the environment wins, and without it the user file does.
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    l.env = floor_layer(4096);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (4096, Source::Env)
+    );
+    let mut l = layers();
+    l.user_file = floor_layer(2048);
+    let got = resolve(l).unwrap();
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (2048, Source::UserFile)
+    );
+}
+
+/// A floor below the baseline is a typed error: the floor rides into the versioned
+/// registry as a relaxation, and a tightening is refused (issue 125).
+#[test]
+fn digest_size_floor_below_the_baseline_is_a_typed_error() {
+    let mut l = layers();
+    l.cli = SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(64),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(l).unwrap_err().to_string(),
+        "--digest-size-floor (64) must be at least the baseline floor (1024)"
+    );
+}
+
+/// A floor above the per-result output cap makes digesting unreachable, so the
+/// combination is refused naming both values — from the CLI flag and from a settings
+/// file layer alike (issue 125).
+#[test]
+fn digest_size_floor_above_the_per_result_output_cap_is_refused() {
+    let cap = crate::tools::output_limits::MAX_TOOL_OUTPUT_DEFAULT as u64;
+    let floor_layer = SettingsLayer {
+        budgets: SettingsBudgets {
+            digest_size_floor: Some(cap + 1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let expected = format!(
+        "digest-size-floor ({}) is above the per-result output cap --max-tool-output ({cap}): nothing could ever be admitted as a digest",
+        cap + 1
+    );
+    let mut cli = layers();
+    cli.cli = floor_layer.clone();
+    assert_eq!(resolve(cli).unwrap_err().to_string(), expected);
+    let mut file = layers();
+    file.user_file = floor_layer;
+    assert_eq!(resolve(file).unwrap_err().to_string(), expected);
+}
+
+/// A sub-floor `--max-tool-output` at the DEFAULT floor resolves (issue 125 cycle 2):
+/// the cross-check would otherwise make every cap below 1024 unconfigurable with an
+/// error naming a flag the user never set. The combination is coherent pre-feature
+/// behavior: nothing is ever digested.
+#[test]
+fn a_sub_floor_output_cap_resolves_at_the_default_floor() {
+    let mut l = layers();
+    l.cli = output_caps(2048, 512, 16 * 1024 * 1024);
+    let got = resolve(l).unwrap();
+    assert_eq!(got.budgets.max_tool_output.value, 512);
+    assert_eq!(
+        (
+            got.budgets.digest_size_floor.value,
+            got.budgets.digest_size_floor.source
+        ),
+        (
+            u64::try_from(crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR).unwrap(),
+            Source::Default
+        )
+    );
+}
+
+/// The same sub-floor cap with an EXPLICIT floor above it is still refused naming both
+/// values (issue 125 cycle 2): provenance gates the cross-check, not the check itself.
+#[test]
+fn an_explicit_floor_above_a_sub_floor_cap_is_still_refused() {
+    let mut l = layers();
+    l.cli = SettingsLayer {
+        budgets: SettingsBudgets {
+            max_tool_output: Some(512),
+            digest_size_floor: Some(2048),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(l).unwrap_err().to_string(),
+        "digest-size-floor (2048) is above the per-result output cap --max-tool-output (512): nothing could ever be admitted as a digest"
+    );
+}
+
+/// A raised floor changes the digest verdict for a fixed-size payload, and the override
+/// stays a rule-table relaxation (never a `rule_version` redefinition of version 1).
+#[test]
+fn digest_floor_override_changes_the_digest_verdict_for_a_fixed_payload() {
+    use crate::context_ingress::filter::{FilterRegistry, FilterRules, RuleVerdict};
+    use crate::context_ingress::segment::segment;
+
+    let payload = vec![b'x'; 2048];
+    let segments = segment(&payload);
+    let mut registry = FilterRegistry::new();
+    assert_eq!(
+        registry.verdict("read_file", &segments, payload.len()),
+        RuleVerdict::Digest,
+        "at the baseline floor a 2048-byte payload is bulk evidence"
+    );
+    let mut relaxed = FilterRules::v1();
+    relaxed.version = 2;
+    relaxed.size_floor = 4096;
+    assert_eq!(registry.update_rules(relaxed).unwrap(), 2);
+    assert_eq!(
+        registry.rules_at(1).unwrap().size_floor,
+        FilterRules::v1().size_floor,
+        "version 1 keeps its baseline rules"
+    );
+    assert_ne!(
+        registry.verdict("read_file", &segments, payload.len()),
+        RuleVerdict::Digest,
+        "raising the floor stops the fixed payload being digested"
+    );
 }

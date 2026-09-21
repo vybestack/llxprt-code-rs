@@ -11,7 +11,6 @@ use crate::model::SerdeAiParams;
 pub(crate) struct AnthropicBackend {
     model: serdes_ai::models::anthropic::AnthropicModel,
     model_settings: ModelSettings,
-    runtime: tokio::runtime::Runtime,
     secrets: Vec<String>,
     calls: AtomicUsize,
 }
@@ -20,18 +19,13 @@ impl AnthropicBackend {
     pub(crate) fn new(
         model: serdes_ai::models::anthropic::AnthropicModel,
         model_settings: ModelSettings,
-    ) -> Result<Self, String> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| format!("runtime: {error}"))?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             model,
             model_settings,
-            runtime,
             secrets: Vec::new(),
             calls: AtomicUsize::new(0),
-        })
+        }
     }
 
     pub(crate) fn with_secrets(mut self, secrets: Vec<String>) -> Self {
@@ -73,13 +67,15 @@ impl AnthropicBackend {
 }
 
 impl ChatBackend for AnthropicBackend {
-    fn request(
-        &self,
-        requests: &[ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.runtime.block_on(self.request_async(requests, tools))
+    fn request<'a>(
+        &'a self,
+        requests: &'a [ModelRequest],
+        tools: &'a [crate::tools::ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.request_async(requests, tools).await
+        })
     }
 
     fn request_calls(&self) -> usize {

@@ -100,7 +100,11 @@ fn request_one(cfg: &ModelConfig) -> Result<LlmResult, String> {
     let tools = llxprt_code_rs::tools::tool_specs(false);
     let adapter = make_adapter(cfg).map_err(|e| e.message)?;
     let reqs = vec![llxprt_code_rs::adapter::system_request("s")];
-    adapter.request(&reqs, &tools)
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(adapter.request(&reqs, &tools))
 }
 
 /// Unknown finish reasons remain typed as unknown even when their raw spelling is accepted for a

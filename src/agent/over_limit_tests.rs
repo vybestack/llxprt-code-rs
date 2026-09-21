@@ -22,25 +22,27 @@ impl RecoveryBackend {
     }
 }
 impl ChatBackend for RecoveryBackend {
-    fn request(
-        &self,
-        requests: &[serdes_ai::core::ModelRequest],
-        _: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        self.requests.lock().unwrap().push(requests.to_vec());
-        self.replies.lock().unwrap().pop_front().unwrap()
+    fn request<'a>(
+        &'a self,
+        requests: &'a [serdes_ai::core::ModelRequest],
+        _: &'a [ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            self.requests.lock().unwrap().push(requests.to_vec());
+            self.replies.lock().unwrap().pop_front().unwrap()
+        })
     }
     fn request_calls(&self) -> usize {
         self.requests.lock().unwrap().len()
     }
 }
 impl ChatBackend for std::sync::Arc<RecoveryBackend> {
-    fn request(
-        &self,
-        requests: &[serdes_ai::core::ModelRequest],
-        tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        (**self).request(requests, tools)
+    fn request<'a>(
+        &'a self,
+        requests: &'a [serdes_ai::core::ModelRequest],
+        tools: &'a [ToolSpec],
+    ) -> crate::adapter::ModelFuture<'a> {
+        Box::pin(async move { (**self).request(requests, tools).await })
     }
     fn request_calls(&self) -> usize {
         (**self).request_calls()

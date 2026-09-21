@@ -272,8 +272,7 @@ fn construct_openai_responses(
     let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
         backend: Box::new(
-            ResponsesBackend::new_openai(model, model_settings)?
-                .with_secrets(secret_values.clone()),
+            ResponsesBackend::new_openai(model, model_settings).with_secrets(secret_values.clone()),
         ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
@@ -375,7 +374,7 @@ fn construct_anthropic(
 
     Ok(ConstructedBackend {
         backend: Box::new(
-            AnthropicBackend::new(model, model_settings)?.with_secrets(secret_values.clone()),
+            AnthropicBackend::new(model, model_settings).with_secrets(secret_values.clone()),
         ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
@@ -454,7 +453,7 @@ fn construct_codex(
     crate::limits::validate_timeout(model_settings.timeout)?;
     Ok(ConstructedBackend {
         backend: Box::new(
-            ResponsesBackend::new(model, model_settings)?.with_secrets(secret_values.clone()),
+            ResponsesBackend::new(model, model_settings).with_secrets(secret_values.clone()),
         ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
