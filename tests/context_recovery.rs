@@ -31,14 +31,16 @@ fn result(text: &str) -> LlmResult {
 }
 
 impl ChatBackend for MockBackend {
-    fn request(
-        &self,
-        _requests: &[serdes_ai::core::ModelRequest],
-        _tools: &[ToolSpec],
-    ) -> Result<LlmResult, String> {
-        *self.calls.lock().unwrap() += 1;
-        let mut queue = self.replies.lock().unwrap();
-        Ok(queue.pop_front().unwrap_or_else(|| result("fallback")))
+    fn request<'a>(
+        &'a self,
+        _requests: &'a [serdes_ai::core::ModelRequest],
+        _tools: &'a [ToolSpec],
+    ) -> llxprt_code_rs::adapter::ModelFuture<'a> {
+        Box::pin(async move {
+            *self.calls.lock().unwrap() += 1;
+            let mut queue = self.replies.lock().unwrap();
+            Ok(queue.pop_front().unwrap_or_else(|| result("fallback")))
+        })
     }
 
     fn request_calls(&self) -> usize {
