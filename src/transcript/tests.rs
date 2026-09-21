@@ -6,7 +6,7 @@ fn emission_payload_budgets_are_shared_and_scrubbed() {
     let secret = "reflected-key".to_string();
     let first = bounded(
         &format!("{secret} {}", "界".repeat(100)),
-        &[secret.clone()],
+        std::slice::from_ref(&secret),
         &mut used,
         96,
     );
