@@ -40,37 +40,28 @@ fn codex_exact_http_head_rounds_turns_off_and_missing_cache_usage() {
             Some(8),
         ));
         history.add_user_prompt("first turn");
-        let tools = crate::tools::tool_specs(false);
+        let retained = tempfile::NamedTempFile::new().unwrap();
         for turn in 0..2 {
-            let model = OpenResponsesModel::new("fixture", format!("http://{address}/responses"))
-                .codex_http()
-                .with_prompt_cache_key(enabled.then(|| "session-fixture".to_string()));
-            let backend = ResponsesBackend::new(
-                model,
-                ModelSettings {
-                    timeout: Some(std::time::Duration::from_secs(10)),
-                    ..Default::default()
-                },
+            std::fs::write(retained.path(), serde_json::to_vec(&history).unwrap()).unwrap();
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "model_api::responses_backend::cache_tests::codex_cache_child_turn",
+                    "--nocapture",
+                ])
+                .env("ISSUE79_CHILD_HISTORY", retained.path())
+                .env("ISSUE79_CHILD_ADDRESS", address.to_string())
+                .env("ISSUE79_CHILD_ENABLED", enabled.to_string())
+                .env("ISSUE79_CHILD_TURN", turn.to_string())
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stderr)
             );
-            for round in 0..2 {
-                let reply = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(backend.request(&[history.clone()], &tools))
-                    .unwrap();
-                let expected = (turn != 0 || round != 0).then_some(6);
-                assert_eq!(reply.usage.cache_read_tokens, expected);
-                history.parts.push(ModelRequestPart::ToolReturn(
-                    serdes_ai::core::ToolReturnPart::new("read_file", "stable fixture contents")
-                        .with_tool_call_id(format!("fixture-{turn}-{round}")),
-                ));
-                history.parts.push(ModelRequestPart::UserPrompt(
-                    serdes_ai::core::messages::UserPromptPart::new(format!(
-                        "appended {turn}/{round}"
-                    )),
-                ));
-            }
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            history = serde_json::from_slice(&std::fs::read(retained.path()).unwrap()).unwrap();
         }
         let bodies = server.join().unwrap();
         for (index, body) in bodies.iter().enumerate() {
@@ -96,4 +87,49 @@ fn codex_exact_http_head_rounds_turns_off_and_missing_cache_usage() {
             instructions.replace("You", "Timestamp: 1. You")
         );
     }
+}
+
+// Invoked by the parent fixture as a fresh OS process on each turn. No production
+// endpoint override: the loopback endpoint is restricted to this test executable.
+#[test]
+fn codex_cache_child_turn() {
+    let Ok(path) = std::env::var("ISSUE79_CHILD_HISTORY") else {
+        return;
+    };
+    let mut history: ModelRequest = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let address = std::env::var("ISSUE79_CHILD_ADDRESS").unwrap();
+    let enabled = std::env::var("ISSUE79_CHILD_ENABLED").unwrap() == "true";
+    let turn: usize = std::env::var("ISSUE79_CHILD_TURN")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let tools = crate::tools::tool_specs(false);
+    let model = OpenResponsesModel::new("fixture", format!("http://{address}/responses"))
+        .codex_http()
+        .with_prompt_cache_key(enabled.then(|| "session-fixture".to_string()));
+    let backend = ResponsesBackend::new(
+        model,
+        ModelSettings {
+            timeout: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        },
+    );
+    for round in 0..2 {
+        let reply = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(backend.request(&[history.clone()], &tools))
+            .unwrap();
+        let expected = (turn != 0 || round != 0).then_some(6);
+        assert_eq!(reply.usage.cache_read_tokens, expected);
+        history.parts.push(ModelRequestPart::ToolReturn(
+            serdes_ai::core::ToolReturnPart::new("read_file", "stable fixture contents")
+                .with_tool_call_id(format!("fixture-{turn}-{round}")),
+        ));
+        history.parts.push(ModelRequestPart::UserPrompt(
+            serdes_ai::core::messages::UserPromptPart::new(format!("appended {turn}/{round}")),
+        ));
+    }
+    std::fs::write(path, serde_json::to_vec(&history).unwrap()).unwrap();
 }
