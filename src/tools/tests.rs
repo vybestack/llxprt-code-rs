@@ -19,6 +19,7 @@ fn cfg(root: &std::path::Path) -> ToolConfig {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(60),
             max_shell_timeout: Duration::from_secs(60),
             allow_shell: false,
         },
@@ -114,6 +115,7 @@ fn shell_nonzero_and_signal_return_ok_false() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(30),
             max_shell_timeout: Duration::from_secs(30),
             allow_shell: true,
         },
@@ -334,6 +336,7 @@ fn shell_output_total_is_bounded_for_success_and_error() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 4096,
+            default_shell_timeout: Duration::from_secs(30),
             max_shell_timeout: Duration::from_secs(30),
             allow_shell: true,
         },
@@ -865,4 +868,47 @@ fn deterministic_swap_write_then_read_is_consistent() {
             .any(|e| e.file_name().to_string_lossy().contains(".llxprt-tmp"));
         assert!(!residue);
     }
+}
+
+#[test]
+fn issue286_shell_default_and_maximum_have_distinct_runtime_effects() {
+    let d = tempfile::tempdir().unwrap();
+    let mut config = cfg(d.path());
+    config.shell.allow_shell = true;
+    config.shell.default_shell_timeout = Duration::from_secs(1);
+    config.shell.max_shell_timeout = Duration::from_secs(3);
+    let execute = |args| execute_tool(d.path(), "run_shell_command", args, &config);
+    // Omitted timeout uses the default, not the maximum.
+    let (ok, output) = execute(json!({"command":"sleep 2"}));
+    assert!(!ok);
+    assert!(
+        output.contains("command timed out after 1000 ms"),
+        "{output}"
+    );
+    // Explicit timeout may exceed the default, up to the cap.
+    assert!(execute(json!({"command":"sleep 2", "timeout_seconds":3})).0);
+    // A model cannot escape the maximum by asking for a larger value.
+    // Queue time before the runner acquires its registry lock is not part of
+    // the command budget. Assert the actual timeout and resolved cap instead
+    // of charging other concurrently running tests to an outer stopwatch.
+    let (ok, output) = execute(json!({"command":"sleep 10", "timeout_seconds":30}));
+    assert!(!ok);
+    assert!(
+        output.contains("command timed out after 3000 ms"),
+        "{output}"
+    );
+    for bad in [json!(0), json!(-1), json!(1.5), json!("2"), json!(null)] {
+        assert!(!execute(json!({"command":"true", "timeout_seconds":bad})).0);
+    }
+    // Profile -1 resolves to the representable ceiling, not a tool-call -1.
+    // An explicit budget above the default still permits completion.
+    config.shell.max_shell_timeout = Duration::from_secs(u64::from(u32::MAX));
+    let (ok, output) = execute_tool(
+        d.path(),
+        "run_shell_command",
+        json!({"command":"sleep 4; printf completed", "timeout_seconds":5}),
+        &config,
+    );
+    assert!(ok, "{output}");
+    assert!(output.contains("completed"), "{output}");
 }
