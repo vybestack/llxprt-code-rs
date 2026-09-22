@@ -95,7 +95,7 @@ impl CredentialSource for InMemorySource {
 fn codex_transport_identity_is_fixed() {
     let draft = crate::model_api::settings::CodexResponsesSettingsDraft::new(
         "gpt-5.6-sol".to_string(),
-        true,
+        Some("high".to_string()),
     );
     assert_eq!(
         draft.endpoint().responses_url(),
@@ -468,12 +468,12 @@ fn request_timeout_resolved_policy_defaults_to_900s_for_every_provider_path() {
 fn request_timeout_codex_consumes_provider_timeout_data() {
     // A provider `timeoutMs` is data at the resolver and flows onto the profile, so
     // the codex path honors it now (previously it ignored the field).
-    let value: serde_json::Value = serde_json::from_str(include_str!(
+    let mut value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/profiles/gpt56solhigh.json"
     ))
     .unwrap();
-    let mut profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
-    profile.ephemeral.timeout_ms = Some(120_000);
+    value["ephemeralSettings"]["stream-first-response-timeout-ms"] = serde_json::json!(120_000);
+    let profile = crate::profile::parse_profile_value(&value, "gpt56solhigh").unwrap();
     assert_eq!(
         resolved_timeout(&profile),
         std::time::Duration::from_secs(120)
@@ -728,4 +728,18 @@ fn known_model_mode_accepts_registry_keys_and_refuses_unknown() {
     )
     .unwrap_err();
     assert!(err.contains("definitely_not_a_param"), "{err}");
+}
+
+#[test]
+fn issue286_codex_negative_first_response_budget_uses_native_request_bound() {
+    let value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/host-profiles/astramedium-native.json"
+    ))
+    .unwrap();
+    let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
+    assert_eq!(resolved_timeout(&profile), DEFAULT_REQUEST_TIMEOUT);
+    assert_eq!(
+        codex_model_settings(&profile).timeout,
+        Some(DEFAULT_REQUEST_TIMEOUT)
+    );
 }

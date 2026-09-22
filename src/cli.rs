@@ -750,6 +750,27 @@ mod tests {
     }
 
     #[test]
+    fn issue286_named_native_profile_preserves_host_settings() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("profiles")).unwrap();
+        let bytes = include_bytes!("../tests/fixtures/host-profiles/astramedium-native.json");
+        let path = root.path().join("profiles/astramedium.json");
+        std::fs::write(&path, bytes).unwrap();
+        let args = Args::try_parse_from(["llxprt-code-rs", "--profile", "astramedium"]).unwrap();
+        let profile = super::resolve_profile(&args, root.path()).unwrap();
+        assert_eq!(profile.model, "gpt-6-astra");
+        assert_eq!(profile.ephemeral.context_limit, Some(300000));
+        assert_eq!(profile.ephemeral.timeout_ms, None);
+        assert_eq!(profile.ephemeral.shell_default_timeout_seconds, Some(2700));
+        assert_eq!(
+            profile.ephemeral.shell_max_timeout_seconds,
+            Some(u32::MAX as u64)
+        );
+        assert_eq!(profile.ephemeral.image_resize.max_long_edge, Some(2048));
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
     fn print_config_resolves_and_exits_before_backend() {
         let args = Args::try_parse_from(["llxprt-code-rs", "--print-config"]).unwrap();
         assert!(

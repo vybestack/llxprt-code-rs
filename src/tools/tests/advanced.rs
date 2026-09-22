@@ -276,6 +276,7 @@ fn file_tools_execute_through_retained_capability() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(60),
             max_shell_timeout: Duration::from_secs(60),
             allow_shell: false,
         },
@@ -316,6 +317,7 @@ fn renamed_workspace_keeps_file_and_shell_tools_on_retained_directory() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
+            default_shell_timeout: Duration::from_secs(60),
             max_shell_timeout: Duration::from_secs(60),
             allow_shell: true,
         },

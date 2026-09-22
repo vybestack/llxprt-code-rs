@@ -1,9 +1,9 @@
 //! Bounded subprocess runner shared by the shell tool (`run_shell_command`), the parity
 //! CLI harness, and the grader.
 //!
-//! Every run gets its own process group/session (Unix `setsid`) so a timeout can signal
-//! the whole tree, not just the direct child. The deadline starts the moment the child is
-//! spawned. stdout and stderr are drained concurrently by two reader threads against a single
+//! Every run owns a dedicated process group led by a pipe-backed guardian. Nested
+//! native runtimes own independent scopes whose cleanup cascades on owner death.
+//! stdout and stderr are drained concurrently by two reader threads against a single
 //! mutex-protected combined byte budget, so a flood on either pipe cannot deadlock the run and
 //! the combined captured output is bounded with no underflow. When the capture cap is reached the
 //! readers keep draining by discarding bytes, so a writer never fills its pipe.
@@ -20,7 +20,7 @@
 //! `RUSTUP_TOOLCHAIN`, and the caller's explicit additions are passed through.
 
 #[cfg(not(unix))]
-compile_error!("llxprt-code-rs is Unix-only (macOS/Linux); the process runner relies on Unix setsid/poll/process-group machinery");
+compile_error!("llxprt-code-rs is Unix-only (macOS/Linux); the process runner relies on Unix fork/poll/process-group machinery");
 
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+mod ownership;
 mod process_launch;
 #[cfg(test)]
 use process_launch::cfg_launch_test_barrier;
@@ -83,7 +84,7 @@ const POLL_TICK_MS: i32 = 10;
 ///
 /// Cancellation contract (issue 88): a headless worker cancelled with `SIGINT`/`SIGTERM` must not
 /// leave a running tool behind it. The runner puts every command in its own process group
-/// (`setsid`) precisely so the whole tree can be signalled, so publishing that group here lets the
+/// (a retained scope leader) precisely so the whole tree can be signalled, so publishing that group here lets the
 /// handler installed by [`install_cancellation_signal_handlers`] `SIGKILL` it before the worker
 /// exits: **cancelling the worker kills the active tool's whole process group, so no
 /// repository-mutating command survives cancellation.**
@@ -158,7 +159,7 @@ pub fn kill_active_group(signal: i32) {
 extern "C" fn cancellation_handler(signal: libc::c_int) {
     let pgid = ACTIVE_GROUP.load(Ordering::SeqCst);
     if pgid > 0 {
-        // Safety: `pgid` was published right after a successful `setsid` spawn.
+        // Safety: `pgid` is the retained scope group, published before command exec.
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
     }
     // Safety: `_exit` is async-signal-safe and never returns. 128+signal is the conventional
@@ -233,8 +234,8 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
     let run_lock = active_run_lock();
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args);
-    // Register setsid first, then fchdir. Both hooks run in order after fork and before exec.
-    cfg_setsid(&mut cmd);
+    let scope = ownership::Scope::new()?;
+    scope.configure(&mut cmd);
     if let Some(fd) = spec.cwd_fd {
         cmd_cwd_fd(&mut cmd, fd)?;
     } else if let Some(d) = &spec.cwd {
@@ -272,9 +273,10 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
     // registration through supervision so a cancellation can kill the whole tool tree.
     // The guard clears the registration on every exit path, so a stale group is never signalled
     // after the run that owned it has finished.
-    let _active = ActiveGroupGuard::register(child.id() as i32, run_lock);
+    let _active = ActiveGroupGuard::register(scope.pgid, run_lock);
     Ok(supervise_and_collect(
         child,
+        scope.pgid,
         deadline,
         escalation_deadline,
         spec.max_output,
@@ -284,6 +286,7 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
 /// Reader setup, deadline supervision, and output collection for one already-spawned child.
 fn supervise_and_collect(
     mut child: Child,
+    pgid: i32,
     deadline: Instant,
     escalation_deadline: Instant,
     max_output: usize,
@@ -312,7 +315,7 @@ fn supervise_and_collect(
         ));
     }
 
-    let (status, timed_out) = supervise(child, deadline, escalation_deadline, &done, pipes);
+    let (status, timed_out) = supervise(child, pgid, deadline, escalation_deadline, &done, pipes);
 
     // Abort makes every still-running reader exit at its next poll tick; threads that already saw
     // EOF are finished. Either way joining cannot block long.
@@ -448,8 +451,13 @@ fn drain_thread<R: Read + AsRawFd + Send + 'static>(
 /// is still used as the process-group ID for TERM/KILL. The child is reaped only after no more group
 /// signal can be sent. This prevents an escaped pipe holder from turning PID reuse into a signal to
 /// an unrelated process group.
+fn signal_group(pgid: i32, signal: i32) -> i32 {
+    unsafe { libc::kill(-pgid, signal) }
+}
+
 fn supervise(
     mut child: Child,
+    pgid: i32,
     deadline: Instant,
     escalation_deadline: Instant,
     done: &AtomicUsize,
@@ -464,7 +472,7 @@ fn supervise(
             match child_exited_unreaped(pid) {
                 Ok(observed) => exited = observed,
                 Err(_) => {
-                    let _ = kill_group(&mut child, libc::SIGKILL);
+                    let _ = signal_group(pgid, libc::SIGKILL);
                     return (child.wait().ok().and_then(|status| status.code()), true);
                 }
             }
@@ -475,17 +483,20 @@ fn supervise(
             passed_deadline = true;
         }
         if exited && closed && !passed_deadline {
+            // The unreaped leader retains the group identity until cleanup. A successful
+            // (or rejected) command must not leave redirected background jobs running.
+            let _ = signal_group(pgid, libc::SIGKILL);
             return (child.wait().ok().and_then(|status| status.code()), false);
         }
         // A timed-out direct child may exit and close its pipes while a TERM-ignoring descendant
         // remains in the same process group with redirected stdio. Always complete the group-wide
         // escalation before reaping the retained leader and returning from a timeout.
         if now >= escalation_deadline {
-            let _ = kill_group(&mut child, libc::SIGKILL);
+            let _ = signal_group(pgid, libc::SIGKILL);
             return (child.wait().ok().and_then(|status| status.code()), true);
         }
         if passed_deadline && !term_sent {
-            let _ = kill_group(&mut child, libc::SIGTERM);
+            let _ = signal_group(pgid, libc::SIGTERM);
             term_sent = true;
         }
         std::thread::sleep(Duration::from_millis(2));
@@ -535,6 +546,7 @@ fn allow_key(k: &str) -> bool {
 
 /// Put the child in its own session/process group so its pid is the group id and a
 /// negative-pid kill reaches every descendant.
+#[cfg(test)]
 fn cfg_setsid(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
     // Capture this before fork. The Linux child rechecks it after arming PDEATHSIG to close the
@@ -555,7 +567,7 @@ fn cfg_setsid(cmd: &mut Command) {
 /// Make a Linux child die if its worker dies before the parent publishes its process group.
 /// `PR_SET_PDEATHSIG` covers all later worker exits; the parent identity recheck covers the
 /// `fork`-to-`prctl` setup interval, so the command cannot reach exec unsupervised.
-#[cfg(target_os = "linux")]
+#[cfg(all(test, target_os = "linux"))]
 fn cfg_parent_death_guard(parent_pid: libc::pid_t) -> std::io::Result<()> {
     // Safety: valid Linux `prctl` arguments in the post-fork child. SIGKILL cannot be ignored.
     unsafe {
@@ -570,7 +582,7 @@ fn cfg_parent_death_guard(parent_pid: libc::pid_t) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(test, not(target_os = "linux")))]
 fn cfg_parent_death_guard(_parent_pid: libc::pid_t) -> std::io::Result<()> {
     Ok(())
 }
@@ -597,6 +609,7 @@ fn cmd_cwd_fd(cmd: &mut Command, fd: i32) -> Result<(), String> {
 }
 
 /// Signal the child's whole process group (negative pid). Falls back to killing the direct child.
+#[cfg(test)]
 fn kill_group(child: &mut Child, signum: i32) -> Result<(), String> {
     // Safety: -pid is the new session's process group id (== child pid via `setsid`).
     if unsafe { libc::kill(-(child.id() as i32), signum) } == 0 {
@@ -742,7 +755,14 @@ mod tests {
         let deadline = Instant::now();
         let escalation_deadline = deadline + TERM_GRACE;
         let done = AtomicUsize::new(0);
-        let (status, timed_out) = supervise(child, deadline, escalation_deadline, &done, 0);
+        let (status, timed_out) = supervise(
+            child,
+            child_pid as i32,
+            deadline,
+            escalation_deadline,
+            &done,
+            0,
+        );
         assert!(timed_out);
         assert_eq!(status, Some(0));
 
@@ -783,3 +803,6 @@ mod tests {
         assert_eq!(error, "command termination deadline cannot be represented");
     }
 }
+
+#[cfg(test)]
+mod ownership_tests;
