@@ -325,3 +325,35 @@ fn unrepresentable_timeout_is_rejected_before_spawn_without_panicking() {
         "command must not spawn when its deadline is invalid"
     );
 }
+
+#[test]
+fn completed_command_cleans_redirected_group_members() {
+    for code in [0, 7] {
+        let n = uniq().max(30_000);
+        let out = run_sh(
+            &format!("/bin/sleep {n} >/dev/null 2>&1 & exit {code}"),
+            None,
+            Duration::from_secs(2),
+            4096,
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(!out.timed_out);
+        std::thread::sleep(Duration::from_millis(100));
+        let ps = std::process::Command::new("/bin/ps")
+            .args(["-axo", "args"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&ps.stdout).contains(&format!("sleep {n}")));
+    }
+}
+
+#[test]
+fn grader_rejects_missing_local_manifest_under_real_package() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let d = tempfile::tempdir_in(root).unwrap();
+    let ws = llxprt_code_rs::tools::WorkspaceCap::open(d.path()).unwrap();
+    let (ok, evidence) = llxprt_code_rs::grade::try_verify(&ws, "cargo test --offline");
+    assert!(!ok);
+    assert_eq!(evidence, "missing or invalid local Cargo.toml package");
+}

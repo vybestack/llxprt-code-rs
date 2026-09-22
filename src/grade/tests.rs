@@ -723,3 +723,158 @@ fn verification_cannot_block_hidden_grading_by_substituting_a_fifo() {
     assert!(!result.hidden_graders_pass);
     assert!(!result.passed);
 }
+
+/// An absent local manifest must not borrow a valid ancestor's package.
+#[test]
+fn cargo_selection_rejects_missing_nested_manifest() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("Cargo.toml"),
+        "[package]\nname='ancestor'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::create_dir(d.path().join("src")).unwrap();
+    std::fs::write(
+        d.path().join("src/lib.rs"),
+        "compile_error!(\"ancestor ran\");",
+    )
+    .unwrap();
+    let nested = d.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    let (passed, output) = try_verify(&cap(&nested), "cargo test --offline");
+    assert!(!passed);
+    assert_eq!(output, "missing or invalid local Cargo.toml package");
+}
+
+#[test]
+fn cargo_selection_requires_local_library_before_spawn() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("Cargo.toml"),
+        "[package]\nname='selected'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    let (passed, output) = try_verify(&cap(d.path()), "cargo test --offline");
+    assert!(!passed);
+    assert_eq!(output, "missing local src/lib.rs target");
+    assert!(!d.path().join("target").exists());
+    assert!(!d.path().join("Cargo.lock").exists());
+}
+
+#[test]
+fn encryption_fixture_locked_offline_lifecycle() {
+    let d = tempfile::tempdir().unwrap();
+    write_encryption_good(d.path());
+    let ws = cap(d.path());
+    let (passed, output) = try_verify(&ws, "cargo generate-lockfile --offline");
+    assert!(passed, "lock generation: {output}");
+    let before = std::fs::read(d.path().join("Cargo.lock")).unwrap();
+    let (passed, output) = try_verify(
+        &ws,
+        "cargo test --locked --offline --manifest-path ./Cargo.toml --lib --tests",
+    );
+    assert!(passed, "locked fixture: {output}");
+    assert_eq!(before, std::fs::read(d.path().join("Cargo.lock")).unwrap());
+}
+
+#[test]
+fn cargo_selection_ignores_ancestor_default_member() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("Cargo.toml"),
+        "[workspace]\nmembers=['selected','decoy']\ndefault-members=['decoy']\nresolver='2'\n",
+    )
+    .unwrap();
+    for name in ["selected", "decoy"] {
+        let p = d.path().join(name);
+        std::fs::create_dir_all(p.join("src")).unwrap();
+        std::fs::write(
+            p.join("Cargo.toml"),
+            format!("[package]\nname='{name}'\nversion='0.1.0'\nedition='2021'\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            p.join("src/lib.rs"),
+            if name == "decoy" {
+                "compile_error!(\"wrong package selected\");"
+            } else {
+                "#[test] fn intended_library() { assert_eq!(2 + 2, 4); }"
+            },
+        )
+        .unwrap();
+    }
+    let selected = d.path().join("selected");
+    std::fs::create_dir(selected.join("tests")).unwrap();
+    std::fs::write(
+        selected.join("tests/roundtrip.rs"),
+        "#[test] fn roundtrip() {} ",
+    )
+    .unwrap();
+    let (passed, output) = try_verify(&cap(&selected), "cargo test --offline");
+    assert!(passed, "intended nested package: {output}");
+    assert!(output.contains("intended_library"), "{output}");
+    std::fs::write(
+        selected.join("src/lib.rs"),
+        "#[test] fn intended_failure() { panic!(\"selected target executed\"); }",
+    )
+    .unwrap();
+    let (passed, output) = try_verify(&cap(&selected), "cargo test --offline");
+    assert!(!passed);
+    assert!(output.contains("selected target executed"), "{output}");
+}
+
+#[test]
+fn structural_failure_is_recorded_after_failed_cargo_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let ev = evidence("encryption", d.path(), &ok_n());
+    assert!(!ev.structural_pass);
+    assert!(!ev.build_test_pass);
+    assert!(!ev.passed);
+    assert_eq!(ev.verifications.len(), 1);
+    assert_eq!(
+        ev.verifications[0].tail,
+        "missing or invalid local Cargo.toml package"
+    );
+    assert!(!d.path().join("Cargo.lock").exists());
+    assert!(!d.path().join("target").exists());
+}
+
+#[test]
+fn failed_cli_does_not_hide_intended_verification_evidence() {
+    let d = tempfile::tempdir().unwrap();
+    build_good_starter(d.path());
+    let ev = evidence("starter", d.path(), &[test_result(false)]);
+    assert!(!ev.protocol_pass);
+    assert!(!ev.passed);
+    assert!(ev.build_test_pass);
+    assert!(ev.structural_pass);
+    assert!(!ev.verifications.is_empty());
+    assert!(ev.verifications.iter().all(|v| v.passed));
+}
+
+#[test]
+fn cargo_rejects_redirected_or_suppressed_targets() {
+    for suffix in [
+        "[lib]\npath='decoy.rs'\n",
+        "[lib]\ntest=false\n",
+        "[[test]]\nname='roundtrip'\npath='decoy.rs'\n",
+        "[[test]]\nname='roundtrip'\nharness=false\n",
+        "",
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("src")).unwrap();
+        std::fs::create_dir(d.path().join("tests")).unwrap();
+        std::fs::write(d.path().join("Cargo.toml"), format!("[package]\nname='target_probe'\nversion='0.1.0'\nautotests=false\n{suffix}[workspace]\n")).unwrap();
+        for file in ["src/lib.rs", "tests/roundtrip.rs"] {
+            std::fs::write(
+                d.path().join(file),
+                "compile_error!(\"intended target sentinel\");",
+            )
+            .unwrap();
+        }
+        std::fs::write(d.path().join("decoy.rs"), "#[test] fn decoy() {}").unwrap();
+        let (passed, output) = try_verify(&cap(d.path()), "cargo test --offline");
+        assert!(!passed, "{suffix}: {output}");
+        assert!(output.contains("Cargo targets"), "{output}");
+    }
+}
