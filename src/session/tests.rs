@@ -138,3 +138,52 @@ fn generation_overflow_fails_before_selecting_a_slot() {
     assert!(matches!(error, StoreError::Corrupt(_)));
     assert!(error.to_string().contains("generation overflow"));
 }
+
+#[test]
+fn tool_call_record_durable_form_omits_result_live() {
+    let record = ToolCallRecord {
+        id: "call-1".to_string(),
+        name: "read_file".to_string(),
+        args: "{}".to_string(),
+        ok: true,
+        refused: false,
+        result: "persisted-result".to_string(),
+        result_live: "live-bytes".to_string(),
+    };
+
+    let json = serde_json::to_string(&record).unwrap();
+    assert!(!json.contains("result_live"));
+    assert!(json.contains("persisted-result"));
+
+    let reloaded: ToolCallRecord = serde_json::from_str(&json).unwrap();
+    assert_eq!(reloaded.result, "persisted-result");
+    assert_eq!(reloaded.result_live, "");
+}
+
+#[test]
+fn tool_call_record_debug_omits_live_payload_in_embedded_round() {
+    let live_secret = "live-payload-must-not-appear";
+    let round = RoundRecord {
+        assistant: "assistant".to_string(),
+        calls: vec![ToolCallRecord {
+            id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            args: "{}".to_string(),
+            ok: true,
+            refused: false,
+            result: "CTXDIGEST v1 tool=read_file".to_string(),
+            result_live: live_secret.to_string(),
+        }],
+    };
+
+    let call_debug = format!("{:?}", round.calls[0]);
+    let embedded_debug = format!("{round:?}");
+    for debug in [&call_debug, &embedded_debug] {
+        assert!(
+            !debug.contains(live_secret),
+            "Debug must not expose a live provider payload: {debug}"
+        );
+        assert!(debug.contains("result_live_len"));
+        assert!(debug.contains("CTXDIGEST v1"));
+    }
+}
