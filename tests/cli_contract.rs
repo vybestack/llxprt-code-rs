@@ -617,6 +617,256 @@ fn inherited_higher_precedence_config_home_cannot_redirect_staged_fixture() {
     );
 }
 
+// Only staged startup children discard settings-layer overrides. Cases can still
+// set their intended overrides on the returned Command, after this clean slate.
+fn staged_startup_bin() -> Command {
+    let mut command = bin();
+    for key in [
+        "LLXPRT_BASE_URL",
+        "LLXPRT_MAX_TOOL_CALLS",
+        "LLXPRT_MODEL_PARAMS_MODE",
+        "LLXPRT_TURN_TIME",
+        "LLXPRT_MAX_SHELL_OUTPUT",
+        "LLXPRT_MAX_TOOL_OUTPUT",
+        "LLXPRT_MAX_TURN_OUTPUT",
+        "LLXPRT_REQUEST_TIMEOUT",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        command.env_remove(key);
+    }
+    command.env("NO_PROXY", "127.0.0.1,localhost,::1");
+    command.env("no_proxy", "127.0.0.1,localhost,::1");
+    command
+}
+
+/// Run the actual startup cases in a separate test process with hostile inherited
+/// settings and proxies. Never mutate this parallel test process's environment.
+#[test]
+fn staged_startup_ignores_hostile_parent_environment() {
+    for case in [
+        "shared_settings_root_no_longer_blocks_startup",
+        "shared_settings_root_with_owned_sections_still_applies",
+        "malformed_owned_settings_still_fail_early_and_clearly",
+        "staged_startup_allows_explicit_case_override",
+    ] {
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", case, "--nocapture"])
+            .env("LLXPRT_BASE_URL", "https://hostile.invalid/v1")
+            .env("LLXPRT_MAX_TOOL_CALLS", "12")
+            .env("LLXPRT_MODEL_PARAMS_MODE", "invalid-mode")
+            .env("LLXPRT_TURN_TIME", "invalid-time")
+            .env("LLXPRT_MAX_SHELL_OUTPUT", "invalid-bytes")
+            .env("LLXPRT_MAX_TOOL_OUTPUT", "invalid-bytes")
+            .env("LLXPRT_MAX_TURN_OUTPUT", "invalid-bytes")
+            .env("LLXPRT_REQUEST_TIMEOUT", "invalid-time")
+            .env("HTTP_PROXY", "http://127.0.0.1:2")
+            .env("HTTPS_PROXY", "http://127.0.0.1:2")
+            .env("ALL_PROXY", "http://127.0.0.1:2")
+            .env("http_proxy", "http://127.0.0.1:2")
+            .env("https_proxy", "http://127.0.0.1:2")
+            .env("all_proxy", "http://127.0.0.1:2")
+            .env("NO_PROXY", "")
+            .env("no_proxy", "")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{case}: {stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(stdout.contains("1 passed; 0 failed"), "{case}: {stdout}");
+    }
+}
+
+#[test]
+fn staged_startup_allows_explicit_case_override() {
+    // A refused proxy also yields model-connectivity, so verify direct-loopback
+    // routing independently of that runtime error classification.
+    let command = staged_startup_bin();
+    let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        assert_eq!(environment.get(std::ffi::OsStr::new(key)), Some(&None));
+    }
+    for key in ["NO_PROXY", "no_proxy"] {
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new(key)),
+            Some(&Some(std::ffi::OsStr::new("127.0.0.1,localhost,::1")))
+        );
+    }
+    let dir = shared_root_config(r#"{"max_tool_calls": 9}"#);
+    let settings = dir.path().join("settings.json");
+    let original = std::fs::read(&settings).unwrap();
+    let out = staged_startup_bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .env("LLXPRT_MAX_TOOL_CALLS", "12")
+        .args(["--profile", "issue202-loop", "--print-config"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let resolved = stdout_json(&out);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 12);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["source"], "env");
+    assert_eq!(std::fs::read(settings).unwrap(), original);
+}
+
+/// Regression (issue 202): the user-global `settings.json` root is shared with the
+/// TypeScript llxprt-code app, which legitimately writes its own top-level keys (`ui`,
+/// `oauthEnabledProviders`, ...). A shared root must never block startup, so the staged
+/// fixture reproduces the reported on-disk shape exactly (no secret material) and proves
+/// the run travels **past** the settings load into the refused loopback transport stage.
+///
+/// Both startup paths are covered: `--print-config` resolves every layer (a clean
+/// resolved document is the strongest startup proof), and a real run reaches the
+/// refused loopback model/transport stage instead of dying at `settings-load`.
+#[test]
+fn shared_settings_root_no_longer_blocks_startup() {
+    let dir = shared_root_config("{}");
+    let settings_path = dir.path().join("settings.json");
+    let original_settings = std::fs::read(&settings_path).unwrap();
+
+    let out = staged_startup_bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("--print-config")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "print-config resolves every layer without the shared root blocking it"
+    );
+    let resolved: Value = serde_json::from_slice(&out.stdout).expect("one JSON object");
+    assert_eq!(
+        resolved["paths"]["config_root"]["value"],
+        Value::String(dir.path().display().to_string())
+    );
+    assert_eq!(
+        resolved["provider"]["base_url"]["value"],
+        "http://127.0.0.1:1/v1"
+    );
+    assert_eq!(resolved["provider"]["base_url"]["source"], "profile");
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 256);
+
+    assert_eq!(std::fs::read(&settings_path).unwrap(), original_settings);
+
+    // A real run must read the shared settings before the valid profile reaches the
+    // refused loopback endpoint.
+    let out = staged_startup_bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(llxprt_code_rs::cli::Code::Model as i32)
+    );
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "model-connectivity",
+        "the shared settings root must load before the refused loopback transport boundary"
+    );
+    assert_eq!(
+        std::fs::read(settings_path).unwrap(),
+        original_settings,
+        "reading configuration must not rewrite foreign shared-root data"
+    );
+}
+
+/// The same shared root stays non-blocking when a Rust-owned section is present beside
+/// the sibling keys, and the owned value still applies: `max_tool_calls` from the user
+/// file is reported as the resolved budget source by `--print-config`.
+#[test]
+fn shared_settings_root_with_owned_sections_still_applies() {
+    let dir = shared_root_config(r#"{"max_tool_calls": 9}"#);
+    let settings = dir.path().join("settings.json");
+    let original = std::fs::read(&settings).unwrap();
+    let out = staged_startup_bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("--print-config")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let resolved: Value = serde_json::from_slice(&out.stdout).expect("one JSON object");
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], 9);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["source"], "user_file");
+    assert_eq!(std::fs::read(settings).unwrap(), original);
+}
+
+/// Strictness is unchanged **inside** the Rust-owned sections: a malformed owned
+/// settings file still fails early and clearly with the `settings-load` classification,
+/// exit 3, and exactly one JSON object on stdout.
+#[test]
+fn malformed_owned_settings_still_fail_early_and_clearly() {
+    // A misspelled owned key inside an owned section, beside an ignored sibling key.
+    let dir = shared_root_config(r#"{"maxToolCalls": 4}"#);
+    let out = staged_startup_bin()
+        .env("LLXPRT_CONFIG_DIR", dir.path())
+        .arg("--profile")
+        .arg("issue202-loop")
+        .arg("-p")
+        .arg("hi")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3), "config errors exit 3");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(
+        parsed["error"]["code"], "settings-load",
+        "a malformed owned section must still fail at the settings load"
+    );
+    let message = parsed["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("unknown field `maxToolCalls`"),
+        "the message must name the misspelled owned key: {message}"
+    );
+}
+
+/// Stage an isolated config home carrying the exact shared-root shape reported in
+/// issue 202 plus an optional Rust-owned `budgets` section, and one loopback profile
+/// with no credential material. The loopback base URL makes the profile valid without
+/// any key, and the refused port keeps the run offline.
+fn shared_root_config(budgets: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        format!(
+            r#"{{"ui": {{"theme": "Green Screen"}},
+                "oauthEnabledProviders": {{"codex": true}},
+                "budgets": {budgets}}}"#
+        ),
+    )
+    .unwrap();
+    let profiles = dir.path().join("profiles");
+    std::fs::create_dir(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("issue202-loop.json"),
+        r#"{"provider":"openai","model":"issue202-fixture",
+            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1"}}"#,
+    )
+    .unwrap();
+    dir
+}
+
 /// `--help` is the only stdout exception and exits 0.
 #[test]
 fn help_is_a_protocol_exception() {
@@ -626,6 +876,87 @@ fn help_is_a_protocol_exception() {
     assert!(s.contains("--prompt") || s.contains("-p"));
     assert!(s.contains("--allow-insecure-http"));
     assert!(s.contains("--allow-shell"));
+}
+
+/// Issue 183: a separated hyphen-prefixed unlimited budget must be consumed as the
+/// budget's value, just like the equals form.  Every accepted spelling gets as far as
+/// profile loading; the deliberately nonexistent profile proves no network is involved.
+#[test]
+fn max_tool_calls_forms_parse_before_profile_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls", "-1"],
+        vec!["--max-tool-calls=-1"],
+        vec!["--max-tool-calls", "7"],
+        vec!["--max-tool-calls=7"],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--profile", "issue183-no-such-profile", "--prompt", "hi"])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3));
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["error"]["code"], "profile-missing");
+    }
+}
+
+/// Parsing diagnostics use only Clap's structured class and fixed option spellings:
+/// supplied prompts, paths, profile names, and environment values must never be reflected.
+#[test]
+fn clap_usage_diagnostics_are_sanitized_and_identify_budget_or_error_class() {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--max-tool-calls",
+            "BUDGET_SECRET_SENTINEL",
+        ],
+        vec![
+            "--profile",
+            "PROFILE_SECRET_SENTINEL",
+            "--cwd",
+            "/PATH_SECRET_SENTINEL",
+            "--prompt",
+            "PROMPT_SECRET_SENTINEL",
+            "--UNKNOWN_SECRET_SENTINEL",
+        ],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .env("LLXPRT_API_KEY", "ENV_SECRET_SENTINEL")
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(parsed["error"]["code"], "usage");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--max-tool-calls")
+                || parsed["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unknown argument")
+        );
+        for secret in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "BUDGET_SECRET_SENTINEL",
+            "PATH_SECRET_SENTINEL",
+            "UNKNOWN_SECRET_SENTINEL",
+            "ENV_SECRET_SENTINEL",
+        ] {
+            assert!(!stdout.contains(secret), "usage diagnostic leaked {secret}");
+        }
+    }
 }
 
 /// CLI flag validation ordering (issue 60): an invalid `--max-tool-calls` or
@@ -684,4 +1015,100 @@ fn invalid_turn_time_fails_before_profile_and_credentials() {
         parsed["error"]["message"],
         "--turn-time needs an s/m/h unit (got \"90\"); pass 0 to disable"
     );
+}
+
+/// Print-config must reject semantic CLI limits before the deliberately missing
+/// profile, just like normal startup, and must not expose supplied profile/prompt data.
+fn assert_print_config_rejects_tool_call_limit(value: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    for arguments in [
+        vec!["--max-tool-calls".to_string(), value.to_string()],
+        vec![format!("--max-tool-calls={value}")],
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args([
+                "--print-config",
+                "--profile",
+                "PROFILE_SECRET_SENTINEL",
+                "--prompt",
+                "PROMPT_SECRET_SENTINEL",
+            ])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "invalid limit {value}: {out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["error"]["code"], "max-tool-calls");
+        assert_eq!(
+            parsed["error"]["message"],
+            format!("--max-tool-calls must be -1 or an integer from 1 through 512 (got {value})")
+        );
+        assert!(out.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for forbidden in [
+            "PROFILE_SECRET_SENTINEL",
+            "PROMPT_SECRET_SENTINEL",
+            "profile-missing",
+            "config",
+        ] {
+            assert!(
+                !stdout.contains(forbidden),
+                "unexpected diagnostic: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
+fn print_config_rejects_above_ceiling_before_profile() {
+    assert_print_config_rejects_tool_call_limit("513");
+}
+
+#[test]
+fn print_config_rejects_zero_before_profile() {
+    assert_print_config_rejects_tool_call_limit("0");
+}
+
+#[test]
+fn print_config_rejects_negative_before_profile() {
+    assert_print_config_rejects_tool_call_limit("-2");
+}
+
+#[test]
+fn print_config_preserves_valid_tool_call_limits_without_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile.json");
+    // No credentials: print-config must not construct a backend or consume stdin.
+    std::fs::write(&profile, r#"{"provider":"openai","model":"m"}"#).unwrap();
+    for (arguments, expected, source) in [
+        (vec![], 256, "default"),
+        (vec!["--max-tool-calls", "-1"], -1, "cli"),
+        (vec!["--max-tool-calls=-1"], -1, "cli"),
+        (vec!["--max-tool-calls", "1"], 1, "cli"),
+        (vec!["--max-tool-calls=7"], 7, "cli"),
+        (vec!["--max-tool-calls", "256"], 256, "cli"),
+        (vec!["--max-tool-calls=512"], 512, "cli"),
+    ] {
+        let out = bin()
+            .env_clear()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(["--print-config", "--profile-load"])
+            .arg(&profile)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let parsed = stdout_json(&out);
+        assert_eq!(
+            parsed["budgets"]["max_tool_calls"],
+            serde_json::json!({"value": expected, "source": source})
+        );
+        assert!(
+            parsed.get("status").is_none(),
+            "settings, not a run envelope"
+        );
+        assert!(out.stderr.is_empty());
+    }
 }

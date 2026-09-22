@@ -25,6 +25,31 @@ impl CodingAgent {
         }
     }
 
+    pub(super) fn profile_store(
+        &self,
+        store: &SessionStore,
+        phase: &'static str,
+        round_count: usize,
+        turn_elapsed: Option<std::time::Duration>,
+    ) -> Result<(), AgentError> {
+        let metrics = store.take_profile_metrics();
+        self.profile(
+            phase,
+            crate::memory_profile::EventData {
+                session_slot_input_bytes: Some(metrics.input_bytes),
+                session_slot_output_bytes: Some(metrics.output_bytes),
+                round_count: Some(round_count as u64),
+                request_timeout_ms: self
+                    .request_timeout
+                    .map(|timeout| timeout.as_millis() as u64),
+                turn_elapsed_ms: turn_elapsed.map(|elapsed| elapsed.as_millis() as u64),
+                ..Default::default()
+            },
+        )
+    }
+}
+
+impl super::Turn<'_> {
     pub(super) fn profiled_round(
         &self,
         requests: &[serdes_ai::core::ModelRequest],
@@ -79,30 +104,8 @@ impl CodingAgent {
                 self.dead(store, reserved, "model", &failure.diagnostic(), rounds)
                     .with_envelope_code(key)
             }
+            RoundFailure::TurnTime => self.time_exhausted(store, reserved, rounds),
             RoundFailure::Profiling(error) => error,
         }
-    }
-
-    pub(super) fn profile_store(
-        &self,
-        store: &SessionStore,
-        phase: &'static str,
-        round_count: usize,
-        turn_elapsed: Option<std::time::Duration>,
-    ) -> Result<(), AgentError> {
-        let metrics = store.take_profile_metrics();
-        self.profile(
-            phase,
-            crate::memory_profile::EventData {
-                session_slot_input_bytes: Some(metrics.input_bytes),
-                session_slot_output_bytes: Some(metrics.output_bytes),
-                round_count: Some(round_count as u64),
-                request_timeout_ms: self
-                    .request_timeout
-                    .map(|timeout| timeout.as_millis() as u64),
-                turn_elapsed_ms: turn_elapsed.map(|elapsed| elapsed.as_millis() as u64),
-                ..Default::default()
-            },
-        )
     }
 }

@@ -334,6 +334,21 @@ fn inventory_counts_are_exact() {
 }
 
 #[test]
+fn host_task_timeout_ownership_is_explicit() {
+    let artifact = artifact();
+    for key in ["task-default-timeout-seconds", "task-max-timeout-seconds"] {
+        let row = artifact
+            .classifications
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("missing classification for {key}"));
+        assert_eq!(row.classification, "host-applied");
+        assert_eq!(row.owner, "llxprt-host-task-runner");
+        assert!(row.note.contains("inert in Rust"));
+    }
+}
+
+#[test]
 fn every_inventory_entry_key_is_classified_or_alias() {
     let a = artifact();
     let classified: BTreeSet<&str> = a.classifications.iter().map(|c| c.key.as_str()).collect();

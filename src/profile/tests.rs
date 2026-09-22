@@ -1,5 +1,6 @@
 use super::*;
 
+mod codex_task_timeouts;
 mod codex_tools;
 mod dsflash_effort;
 mod numeric_strings;
@@ -288,6 +289,9 @@ fn ephemeral_and_modelparam_strict_type_table() {
         ("top_p", json!("p")),
         ("topP", json!([])),
         ("seed", json!("s")),
+        ("top_k", json!("s")),
+        ("top_k", json!(-1)),
+        ("top_k", json!(1.5)),
     ] {
         let p = parse_profile_value(
             &json!({"provider":"openai","model":"m",

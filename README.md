@@ -107,6 +107,14 @@ Key precedence (matches llxprt-code):
 3. `settings.json` → `providerKeyfiles[provider]` (OpenAI and Anthropic; `openaivercel`
    also falls back to `openai`).
 
+`settings.json` is a **shared, multi-tool file**: the TypeScript llxprt-code app writes its
+own top-level keys into it (`ui`, `oauthEnabledProviders`, `providerKeyfiles`, ...), so the
+Rust resolver reads only the sections it owns (`provider`, `budgets`, `paths`) and ignores
+unknown top-level siblings — a shared root never blocks startup. Strictness is unchanged
+*inside* each owned section: a misspelled owned key, a wrong type, a duplicate key, or an
+invalid value is still a `settings-load`/`settings-resolve` config error. The CLI never
+rewrites, migrates, or preserves sibling keys on write.
+
 `ephemeralSettings.auth-key-name` names a provider key, never a keyfile path. It resolves
 through the credential env selector `LLXPRT_PROVIDER_KEY_<NAME>` (the uppercased name with
 `-` and `.` folded to `_`) and then the secure store (service `llxprt-code-provider-keys`,
@@ -244,6 +252,20 @@ suffix, or that carries an empty path segment, fails with a fixed
 rejected. The redacted
 `scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
 `top_k` field, so a profile that sets it is rejected instead of being silently dropped.
+Anthropic Messages accepts `top_k` and sends it on the request; it rejects `seed` and
+`chat_template_kwargs`. Chat targets support `seed` and (except OpenAI Vercel)
+`chat_template_kwargs`. Codex and public Responses retain their provider-specific
+parameter restrictions.
+
+`--model-params-mode loose|known-model|strict` (also `LLXPRT_MODEL_PARAMS_MODE`)
+controls untyped `modelParams` keys. The default `loose` mode forwards them verbatim
+on Chat and Messages requests. `known-model` checks the shipped registry, including
+its per-provider acceptance overrides; `strict` refuses untyped keys. In every mode,
+known parameters that cannot be applied fail with a key/provider diagnostic, not a
+warning followed by success. Applicability uses the resolved provider/API: a registry
+entry does not add transport support. Responses transports have no extra-field wire
+channel and reject extras rather than silently discarding them. Parameter values are
+not included in these local refusal messages.
 
 ## JSON output contract
 
@@ -330,8 +352,12 @@ replacement bytes, then publishes them atomically with a temporary file and rena
 before the rename it re-opens the final name no-follow and verifies identity (`dev`/`ino`), file
 type, size, and a SHA-256 digest against the bytes from which the replacement was derived. A
 change detected by that check returns a conflict. Callers can also pass `expected_sha256`, an
-independently computed lowercase hex SHA-256 of the complete current content, as an up-front
-precondition.
+independently computed full 64-character lowercase hex SHA-256 of the complete current content,
+as an up-front precondition. An empty, abbreviated, wrong-length, uppercase, or non-hex value is
+refused as invalid syntax before any write; a well-formed but stale value is refused as a
+mismatch that reports the current full digest. Before retrying, use `read_file` to recheck the
+current content and confirm that both the old text and proposed replacement are still intended;
+then use the reported full digest. Prefix matches are never accepted.
 
 The advisory lock only coordinates programs that honor it. The verification is not an atomic
 compare-and-swap because the re-open/verify and rename are separate syscalls. An unrelated process
