@@ -83,7 +83,8 @@ pub struct Args {
     pub max_tool_calls: Option<i64>,
 
     /// Wall-clock budget per prompt like `90s`, `30m`, `2h`; `0` disables.
-    /// Omitted means no time limit.
+    /// Includes all provider calls; starts after setup/session reservation.
+    /// Omitted means no time limit. Shell commands keep their separate timeout.
     #[arg(long, value_name = "DURATION")]
     pub turn_time: Option<String>,
 

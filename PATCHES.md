@@ -271,6 +271,17 @@ recognized names into typed fields, not the map. Direct model tests pin the flat
 nested objects), the absence of an `extra` shell key when the map is empty, and the absence of the map for a
 default-constructed model.
 
+## Patch 14 - vendored lockfiles advance rustls to 0.23.45 for RUSTSEC-2026-0285
+(`vendor/serdes-ai/Cargo.lock`, `vendor/serdes-ai-agent/Cargo.lock`, `vendor/serdes-ai-models/Cargo.lock`,
+`vendor/serdes-ai-providers/Cargo.lock`, `vendor/serdes-ai-responses/Cargo.lock`,
+`vendor/serdes-ai-retries/Cargo.lock`, `vendor/serdes-ai-streaming/Cargo.lock`)
+
+The seven vendored lockfiles that pin `rustls` move from 0.23.43 to 0.23.45 in lockstep with the root
+`Cargo.lock`, closing RUSTSEC-2026-0285 in every audited lockfile (the CI audit leg runs
+`cargo audit` against the root, `xtask/Cargo.lock`, and each `vendor/*/Cargo.lock`). No vendored
+source is touched: the patch is lockfile-only, so the vendored crates compile exactly as before against
+the re-vendored `registry-vendor/rustls-0.23.45`.
+
 ## Tests
 
 Both the patched behavior and the rest of the transport are exercised by the host tests

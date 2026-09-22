@@ -47,8 +47,8 @@ pub struct Profile {
     pub(crate) chat_missing_discriminator: Option<String>,
 }
 
-/// Model sampling parameters (the fields the transport can honor) plus keys we know we
-/// cannot apply to the openai chat-completions path.
+/// Parsed model parameters. Applicability is checked for the resolved provider/API
+/// before construction; parsing a typed value does not promise every wire supports it.
 #[derive(Debug, Clone, Default)]
 pub struct ModelParams {
     pub temperature: Option<f64>,
@@ -67,8 +67,8 @@ pub struct ModelParams {
     /// they are forwarded on the provider wire, checked against the model registry,
     /// or refused.
     pub forwarded: BTreeMap<String, serde_json::Value>,
-    /// Recognized keys the chat-completions wire cannot serialize (the max-output
-    /// alias family, `top_k`). Recorded, never silently dropped: every name reaches
+    /// Recognized keys this build does not serialize. Recorded, never silently
+    /// dropped: every name reaches
     /// the operator through the acceptance policy on the `model_api` side.
     pub unsupported: Vec<String>,
 }

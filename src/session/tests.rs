@@ -138,3 +138,5 @@ fn generation_overflow_fails_before_selecting_a_slot() {
     assert!(matches!(error, StoreError::Corrupt(_)));
     assert!(error.to_string().contains("generation overflow"));
 }
+
+mod vault_entropy;
