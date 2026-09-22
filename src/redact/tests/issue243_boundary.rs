@@ -148,7 +148,10 @@ fn registered_tool_cut_inside_the_digest_omits_it_whole_every_time() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: crate::tools::ShellConfig {
             max_shell_output: 64 * 1024,
-            max_shell_timeout: std::time::Duration::from_secs(60),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(std::time::Duration::from_secs(60)),
+                maximum: Some(std::time::Duration::from_secs(60)),
+            },
             allow_shell: false,
         },
     };

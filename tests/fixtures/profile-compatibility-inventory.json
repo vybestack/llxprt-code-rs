@@ -3923,7 +3923,7 @@
       "key": "stream-first-response-timeout-ms",
       "classification": "host-applied",
       "owner": "standard-chat",
-      "note": "nonnegative integer; alias streamFirstResponseTimeoutMs"
+      "note": "nonnegative integer in chat; Codex accepts only inert disabled integer -1"
     },
     {
       "key": "streamFirstResponseTimeoutMs",
@@ -4181,7 +4181,7 @@
       "key": "context-limit",
       "classification": "host-applied",
       "owner": "common",
-      "note": "host context limit; Codex exact 262144 predicate"
+      "note": "host context limit; Codex requires a positive JSON integer"
     },
     {
       "key": "contextLimit",
@@ -4419,15 +4419,15 @@
     },
     {
       "key": "shell-default-timeout-seconds",
-      "classification": "rejected",
-      "owner": "common",
-      "note": "rejected"
+      "classification": "host-applied",
+      "owner": "rust-shell-executor",
+      "note": "Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; other APIs reject"
     },
     {
       "key": "shell-max-timeout-seconds",
-      "classification": "rejected",
-      "owner": "common",
-      "note": "rejected"
+      "classification": "host-applied",
+      "owner": "rust-shell-executor",
+      "note": "Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; other APIs reject"
     },
     {
       "key": "shell-inactivity-timeout-seconds",
@@ -4497,21 +4497,21 @@
     },
     {
       "key": "image-resize.maxLongEdge",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "rejected image-sizing key"
+      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
     },
     {
       "key": "image-resize.maxShortEdge",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "rejected image-sizing key"
+      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
     },
     {
       "key": "image-resize.maxPixels",
-      "classification": "rejected",
+      "classification": "host-applied",
       "owner": "common",
-      "note": "rejected image-sizing key"
+      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
     },
     {
       "key": "max-image-dimension",

@@ -284,6 +284,7 @@ pub struct EphemeralSettings {
     /// The raw inline `auth-key` bytes, preserved for the transport. Never rendered.
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
+    pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
     pub max_output_tokens: Option<u64>,
     /// `ephemeralSettings.maxTurnsPerPrompt`: `-1` = unlimited (no round cap), as is an
     /// absent knob; a positive integer caps the rounds.
@@ -347,6 +348,7 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("auth_key", &"[redacted]")
             .field("auth_keyfile_orig", &"[redacted keyfile]")
             .field("context_limit", &self.context_limit)
+            .field("shell_timeouts", &self.shell_timeouts)
             .field("max_output_tokens", &self.max_output_tokens)
             .field("max_turns_per_prompt", &self.max_turns_per_prompt)
             .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)

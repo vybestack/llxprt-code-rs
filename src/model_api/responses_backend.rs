@@ -197,12 +197,18 @@ mod tests {
             }
         });
 
-        let model = OpenResponsesModel::new(
-            "loopback-codex",
-            format!("http://127.0.0.1:{port}/responses"),
-        )
-        .codex_http()
-        .bearer("loopback-codex-key");
+        let value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/task-profile/astramedium.json"
+        ))
+        .unwrap();
+        let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
+        let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+        let draft = resolved.codex.unwrap();
+        let model =
+            OpenResponsesModel::new(draft.model(), format!("http://127.0.0.1:{port}/responses"))
+                .with_reasoning(draft.responses_reasoning().unwrap())
+                .codex_http()
+                .bearer("loopback-codex-key");
         let backend = ResponsesBackend::new(
             model,
             ModelSettings {
@@ -367,6 +373,11 @@ mod tests {
     fn assert_codex_wire_contract(bodies: &[serde_json::Value]) {
         assert_eq!(bodies.len(), 2);
         for body in bodies {
+            assert_eq!(body["model"], "gpt-6-astra");
+            assert_eq!(
+                body["reasoning"],
+                serde_json::json!({"effort": "medium", "summary": "auto"})
+            );
             assert_eq!(body["store"], false, "codex must never store");
             assert_eq!(body["stream"], true, "codex must stream over SSE");
             assert!(

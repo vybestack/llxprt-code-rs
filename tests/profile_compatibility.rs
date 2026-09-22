@@ -576,3 +576,19 @@ fn documentation_is_present_and_consistent() {
         "docs mention the in-scope 38 openai + 7 anthropic + 1 codex partition"
     );
 }
+
+#[test]
+fn shell_timeout_inventory_names_the_actual_executor() {
+    let artifact = artifact();
+    for key in ["shell-default-timeout-seconds", "shell-max-timeout-seconds"] {
+        let row = artifact
+            .classifications
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap();
+        assert_eq!(row.owner, "rust-shell-executor");
+        assert!(row.note.contains("executor"));
+        assert!(row.note.contains("-1"));
+        assert!(!row.note.contains("inert"));
+    }
+}

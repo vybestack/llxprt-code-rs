@@ -20,7 +20,10 @@ fn cfg(root: &std::path::Path) -> ToolConfig {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(60),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(60)),
+                maximum: Some(Duration::from_secs(60)),
+            },
             allow_shell: false,
         },
     }
@@ -115,7 +118,10 @@ fn shell_nonzero_and_signal_return_ok_false() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(30),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(30)),
+                maximum: Some(Duration::from_secs(30)),
+            },
             allow_shell: true,
         },
     };
@@ -335,7 +341,10 @@ fn shell_output_total_is_bounded_for_success_and_error() {
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
             max_shell_output: 4096,
-            max_shell_timeout: Duration::from_secs(30),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(30)),
+                maximum: Some(Duration::from_secs(30)),
+            },
             allow_shell: true,
         },
     };
@@ -867,3 +876,5 @@ fn deterministic_swap_write_then_read_is_consistent() {
         assert!(!residue);
     }
 }
+
+mod shell_timeouts;

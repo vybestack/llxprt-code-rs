@@ -5,7 +5,6 @@ use super::provider_settings::CodexResponsesSettings;
 use super::{EphemeralSettings, MaxToolCalls, ModelParams};
 
 const CODEX_PROFILE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex";
-const CODEX_CONTEXT_LIMIT: u64 = 262_144;
 
 pub(super) struct ParsedCodexSettings {
     pub(super) ephemeral: EphemeralSettings,
@@ -20,7 +19,8 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
 
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
-    let reasoning_enabled = parse_reasoning(&ephemeral, name)?;
+    settings.shell_timeouts = parse_shell_timeouts(&ephemeral, name)?;
+    let reasoning_effort = parse_reasoning(&ephemeral, name)?;
     validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
     let model_params = parse_model_params(&model_params, name, &mut settings)?;
@@ -28,7 +28,7 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     Ok(ParsedCodexSettings {
         ephemeral: settings,
         model_params,
-        settings: CodexResponsesSettings { reasoning_enabled },
+        settings: CodexResponsesSettings { reasoning_effort },
     })
 }
 
@@ -65,9 +65,9 @@ fn parse_common(
     settings: &mut EphemeralSettings,
 ) -> Result<(), String> {
     let context_limit = required_u64(map, "context-limit", name)?;
-    if context_limit != CODEX_CONTEXT_LIMIT {
+    if context_limit == 0 {
         return Err(format!(
-            "profile {name:?}: Codex 'context-limit' must be {CODEX_CONTEXT_LIMIT}"
+            "profile {name:?}: Codex 'context-limit' must be a positive integer"
         ));
     }
     settings.context_limit = Some(context_limit);
@@ -97,7 +97,7 @@ fn parse_common(
     Ok(())
 }
 
-fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String> {
+fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<Option<String>, String> {
     let enabled = required_bool(map, "reasoning.enabled", name)?;
     if !enabled {
         if map.contains_key("reasoning.effort") || map.contains_key("reasoning.summary") {
@@ -105,11 +105,16 @@ fn parse_reasoning(map: &Map<String, Value>, name: &str) -> Result<bool, String>
                 "profile {name:?}: disabled Codex reasoning must omit effort and summary"
             ));
         }
-        return Ok(false);
+        return Ok(None);
     }
-    require_exact_string(map, "reasoning.effort", "high", name)?;
+    let effort = required_string(map, "reasoning.effort", name)?;
+    if !matches!(effort, "low" | "medium" | "high") {
+        return Err(format!(
+            "profile {name:?}: 'reasoning.effort' must be 'low', 'medium', or 'high'"
+        ));
+    }
     require_exact_string(map, "reasoning.summary", "auto", name)?;
-    Ok(true)
+    Ok(Some(effort.to_owned()))
 }
 
 fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result<(), String> {
@@ -119,8 +124,7 @@ fn validate_provider_constraints(map: &Map<String, Value>, name: &str) -> Result
     require_exact_string(map, "reasoning.stripFromContext", "none", name)?;
     require_exact_string(map, "text.verbosity", "medium", name)?;
     optional_exact_u64(map, "stream-idle-timeout-ms", 0, name)?;
-    validate_host_task_number(map, "task-default-timeout-seconds", name)?;
-    validate_host_task_number(map, "task-max-timeout-seconds", name)?;
+    validate_inert_settings(map, name)?;
 
     match optional_string(map, "prompt-caching", name)? {
         None | Some("off" | "1h" | "24h") => Ok(()),
@@ -227,6 +231,62 @@ fn parse_allowed_tools(map: &Map<String, Value>, name: &str) -> Result<(), Strin
     Ok(())
 }
 
+// Shell timers belong to this runtime, independently of provider/turn deadlines.
+fn parse_shell_timeouts(
+    map: &Map<String, Value>,
+    name: &str,
+) -> Result<crate::tools::ShellTimeoutPolicy, String> {
+    fn read(
+        map: &Map<String, Value>,
+        key: &str,
+        name: &str,
+    ) -> Result<Option<std::time::Duration>, String> {
+        match map.get(key) {
+            None => Ok(Some(std::time::Duration::from_secs(120))),
+            Some(value) if value.as_i64() == Some(-1) => Ok(None),
+            Some(value) => {
+                let seconds = value
+                    .as_u64()
+                    .filter(|seconds| *seconds > 0 && *seconds <= u64::from(u32::MAX))
+                    .ok_or_else(|| {
+                        format!(
+                            "profile {name}: {key} must be -1 or an integer from 1 through {}",
+                            u32::MAX
+                        )
+                    })?;
+                Ok(Some(std::time::Duration::from_secs(seconds)))
+            }
+        }
+    }
+    Ok(crate::tools::ShellTimeoutPolicy {
+        default: read(map, "shell-default-timeout-seconds", name)?,
+        maximum: read(map, "shell-max-timeout-seconds", name)?,
+    })
+}
+
+// Image resizing and external task execution belong to the host, not this runtime.
+fn validate_inert_settings(map: &Map<String, Value>, name: &str) -> Result<(), String> {
+    for key in [
+        "task-default-timeout-seconds",
+        "task-max-timeout-seconds",
+        "image-resize.maxLongEdge",
+        "image-resize.maxShortEdge",
+        "image-resize.maxPixels",
+    ] {
+        validate_host_number(map, key, name)?;
+    }
+    // There is no separate first-response timer. Only the disabled sentinel is
+    // inert; an active phase deadline must not silently become a request timeout.
+    if let Some(value) = map.get("stream-first-response-timeout-ms") {
+        if value.as_i64() != Some(-1) {
+            return Err(format!(
+                "profile {name:?}: 'stream-first-response-timeout-ms' must be -1 (disabled)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), String> {
     const ALLOWED: &[&str] = &[
         "apiMode",
@@ -253,6 +313,12 @@ fn reject_unknown_ephemeral(map: &Map<String, Value>, name: &str) -> Result<(), 
         "stream-idle-timeout-ms",
         "task-default-timeout-seconds",
         "task-max-timeout-seconds",
+        "shell-default-timeout-seconds",
+        "shell-max-timeout-seconds",
+        "image-resize.maxLongEdge",
+        "image-resize.maxShortEdge",
+        "image-resize.maxPixels",
+        "stream-first-response-timeout-ms",
     ];
     if let Some(key) = btree(map)
         .keys()
@@ -339,14 +405,9 @@ fn require_exact_string(
     }
 }
 
-/// Validate only the persisted registry type for task-runner settings. The llxprt
-/// host owns their values and semantics; this headless Rust runtime has no task
-/// executor, so the values must not become provider, shell, request, or turn limits.
-fn validate_host_task_number(
-    map: &Map<String, Value>,
-    key: &str,
-    name: &str,
-) -> Result<(), String> {
+/// Validate the persisted registry type for inert host settings. Their values
+/// never become Rust runtime limits.
+fn validate_host_number(map: &Map<String, Value>, key: &str, name: &str) -> Result<(), String> {
     match map.get(key) {
         None | Some(Value::Number(_)) => Ok(()),
         Some(_) => Err(format!("profile {name:?}: '{key}' must be a number")),
@@ -369,5 +430,45 @@ fn optional_exact_u64(
         Ok(())
     } else {
         Err(format!("profile {name:?}: '{key}' must be {expected}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Map, Value};
+
+    use super::parse_common;
+    use crate::profile::EphemeralSettings;
+
+    fn common_settings(context_limit: Value) -> Map<String, Value> {
+        Map::from_iter([
+            ("context-limit".to_owned(), context_limit),
+            ("maxTurnsPerPrompt".to_owned(), Value::from(-1)),
+            ("loopDetectionEnabled".to_owned(), Value::from(false)),
+            ("emojifilter".to_owned(), Value::from("auto")),
+        ])
+    }
+
+    #[test]
+    fn configured_positive_context_limit_is_preserved() {
+        let settings = common_settings(Value::from(300_000_u64));
+        let mut parsed = EphemeralSettings::default();
+
+        parse_common(&settings, "astramedium", &mut parsed).unwrap();
+
+        assert_eq!(parsed.context_limit, Some(300_000));
+    }
+
+    #[test]
+    fn zero_context_limit_is_rejected() {
+        let settings = common_settings(Value::from(0_u64));
+        let mut parsed = EphemeralSettings::default();
+
+        let error = parse_common(&settings, "zero", &mut parsed).unwrap_err();
+
+        assert_eq!(
+            error,
+            "profile \"zero\": Codex 'context-limit' must be a positive integer"
+        );
     }
 }
