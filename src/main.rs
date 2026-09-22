@@ -10,6 +10,18 @@ fn main() {
         println!("{}", cli::json(&outcome, &session_hint));
         std::process::exit(cli::Code::Usage as i32);
     }
+    if let Some(llxprt_code_rs::transcript::Command::Transcript(options)) = &args.command {
+        match options.render() {
+            Ok(output) => print!("{output}"),
+            Err(error) => {
+                let code = error.code as i32;
+                let error = cli::AppError::new(error.code, error.key, error.message);
+                println!("{}", cli::json(&Err(error), &options.session));
+                std::process::exit(code);
+            }
+        }
+        return;
+    }
     if let Err(error) = cli::validate_cli_limits(&args) {
         let outcome = Err(error);
         println!("{}", cli::json(&outcome, &session_hint));
@@ -32,6 +44,7 @@ fn main() {
         },
         None => None,
     };
+    let transcript = !args.emit.is_empty();
     let mut outcome = cli::run_profiled(args, profiler.clone());
     let mut summary = None;
     if let Some(profiler) = profiler {
@@ -54,7 +67,7 @@ fn main() {
     let value = cli::json(&outcome, &session_hint);
     let code = cli::exit_code(&outcome);
     println!("{value}");
-    if let Some(summary) = summary {
+    if let Some(summary) = summary.filter(|_| !transcript) {
         eprintln!("{}", summary.stderr_line());
     }
     std::process::exit(code);

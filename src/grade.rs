@@ -783,9 +783,40 @@ fn run_verification(
     command: &str,
     env_add: Vec<(String, String)>,
 ) -> (bool, String) {
+    // Never let Cargo search ancestors when a generated workspace is incomplete.
+    // Resolve the intended package from the capability-checked local manifest first.
+    let (program, args) = if command == "cargo test --offline" {
+        let Some(package) = encryption_package_name(workspace) else {
+            return (
+                false,
+                "missing or invalid local Cargo.toml package".to_string(),
+            );
+        };
+        if grader_file(workspace, "src/lib.rs").is_none() {
+            return (false, "missing local src/lib.rs target".to_string());
+        }
+        (
+            "cargo".to_string(),
+            vec![
+                "test".to_string(),
+                "--offline".to_string(),
+                "--manifest-path".to_string(),
+                "./Cargo.toml".to_string(),
+                "--package".to_string(),
+                package,
+                "--lib".to_string(),
+                "--tests".to_string(),
+            ],
+        )
+    } else {
+        (
+            "bash".to_string(),
+            vec!["-c".to_string(), command.to_string()],
+        )
+    };
     let o = match process::run_cmd(CmdSpec {
-        program: "bash".to_string(),
-        args: vec!["-c".to_string(), command.to_string()],
+        program,
+        args,
         cwd: None,
         cwd_fd: Some(workspace_fd(workspace)),
         env_add,

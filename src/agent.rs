@@ -114,6 +114,7 @@ pub struct CodingAgent {
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
+    shell_timeouts: (std::time::Duration, std::time::Duration),
     /// Digest admission floor handed to every read so a re-fetch recipe can name a
     /// window that stays under it (issue 125).
     digest_size_floor: usize,
@@ -128,9 +129,11 @@ pub struct CodingAgent {
     pub prompt_notes: Option<String>,
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
+    emitter: std::sync::Mutex<crate::transcript::Emitter>,
     profiler: Option<crate::memory_profile::Profiler>,
 }
 
+mod emission;
 mod error;
 pub use error::AgentError;
 mod helpers;
@@ -189,6 +192,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -196,6 +203,7 @@ impl CodingAgent {
             secrets: config.secret_values(),
             prompt_notes: None,
             context_limit: config.context_limit,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -219,6 +227,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -226,6 +238,7 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -245,6 +258,10 @@ impl CodingAgent {
             max_tool_calls: None,
             turn_time_budget: None,
             output_caps: OutputCaps::default(),
+            shell_timeouts: (
+                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(120),
+            ),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
@@ -252,22 +269,9 @@ impl CodingAgent {
             secrets: Vec::new(),
             prompt_notes: None,
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         }
-    }
-
-    /// Override the agent's conservative per-request context budget (tests drive budget
-    /// enforcement with an explicit token budget instead of a profile).
-    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
-        self.context_limit = context_limit;
-        self
-    }
-
-    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// budgets instead of the uncapped default).
-    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
-        self.max_rounds = max_rounds;
-        self
     }
 
     /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
@@ -282,8 +286,17 @@ impl CodingAgent {
         self
     }
 
-    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
-    /// aggregate per-turn tool-output bound enforced by the turn loop.
+    /// Set host shell default and maximum budgets (independent of provider requests).
+    pub fn with_shell_timeouts(
+        mut self,
+        default: std::time::Duration,
+        max: std::time::Duration,
+    ) -> Self {
+        self.shell_timeouts = (default.min(max), max);
+        self
+    }
+
+    /// Override per-result and aggregate tool-output caps.
     pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
         self.output_caps = caps;
         self
@@ -297,15 +310,6 @@ impl CodingAgent {
     /// Override the outbound model-request timeout (`None` = backend default).
     pub fn with_request_timeout(mut self, timeout: Option<std::time::Duration>) -> CodingAgent {
         self.request_timeout = timeout;
-        self
-    }
-
-    /// Attach the optional process-memory event sink.
-    pub fn with_profiler(
-        mut self,
-        profiler: Option<crate::memory_profile::Profiler>,
-    ) -> CodingAgent {
-        self.profiler = profiler;
         self
     }
 
@@ -374,6 +378,10 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        self.emitter
+            .lock()
+            .expect("transcript mutex poisoned")
+            .reset();
         let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
@@ -445,6 +453,7 @@ impl Turn<'_> {
             total_calls: 0,
         };
         self.enforce_usage(store, reserved, &[], &usage)?;
+        self.emit_response(store, reserved, &[], &current)?;
         Ok(AttemptState {
             requests,
             rounds: Vec::new(),
@@ -569,7 +578,8 @@ impl Turn<'_> {
             .args_bytes
             .saturating_add(turn_args_bytes(&attempt.current));
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)
+        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &attempt.current)
     }
 
     fn check_request_budget(
@@ -696,6 +706,7 @@ impl Turn<'_> {
             .saturating_add(forced.text.len());
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         self.check_round_limit(store, reserved, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &forced)?;
         Ok(forced.text)
     }
 

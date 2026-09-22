@@ -199,7 +199,9 @@ fn construct_openai_responses(
     crate::limits::validate_timeout(model_settings.timeout)?;
     let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
-        backend: Box::new(ResponsesBackend::new_openai(model, model_settings)),
+        backend: Box::new(
+            ResponsesBackend::new_openai(model, model_settings).with_secrets(secret_values.clone()),
+        ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
         max_rounds,
@@ -299,7 +301,9 @@ fn construct_anthropic(
     let max_rounds = resolve_max_rounds(profile)?;
 
     Ok(ConstructedBackend {
-        backend: Box::new(AnthropicBackend::new(model, model_settings)),
+        backend: Box::new(
+            AnthropicBackend::new(model, model_settings).with_secrets(secret_values.clone()),
+        ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
         max_rounds,
@@ -351,7 +355,7 @@ fn construct_codex(
         .credential_source()
         .load(dependencies.clock())
         .map_err(|error| error.to_string())?;
-    let secret_values = credential
+    let secret_values: Vec<String> = credential
         .secret_values()
         .into_iter()
         .map(ToOwned::to_owned)
@@ -376,7 +380,9 @@ fn construct_codex(
     let model_settings = codex_model_settings(profile);
     crate::limits::validate_timeout(model_settings.timeout)?;
     Ok(ConstructedBackend {
-        backend: Box::new(ResponsesBackend::new(model, model_settings)),
+        backend: Box::new(
+            ResponsesBackend::new(model, model_settings).with_secrets(secret_values.clone()),
+        ),
         secret_values,
         context_limit: profile.ephemeral.context_limit,
         max_rounds,

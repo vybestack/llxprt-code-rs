@@ -318,6 +318,14 @@ impl SessionStore {
         })
     }
 
+    /// Read current-format transcript state without creating or repairing any file.
+    pub fn read_transcript_at(
+        session: &SessionId,
+        config_root: &Path,
+    ) -> Result<SessionState, StoreError> {
+        snapshot::read_transcript(session, config_root)
+    }
+
     /// Open (or create) the store for a session.
     pub fn load(session: &SessionId) -> Result<SessionStore, StoreError> {
         Self::open(session)

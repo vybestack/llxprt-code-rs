@@ -41,6 +41,7 @@ impl ChatBackend for MockBackend {
                     calls: Vec::new(),
                     finish_reason: Some(FinishReason::Stop),
 
+                    thinking: String::new(),
                     usage: LlmUsage::default(),
                 }
             })
@@ -128,6 +129,7 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let r2 = LlmResult {
@@ -135,6 +137,7 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let a = agent_with_caps(
@@ -182,6 +185,7 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
             calls: Vec::new(),
             finish_reason: Some(FinishReason::Stop),
 
+            thinking: String::new(),
             usage: LlmUsage::default(),
         };
         let a = CodingAgent::with_backend(
@@ -191,6 +195,7 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
                     calls: Vec::new(),
                     finish_reason: Some(FinishReason::Stop),
 
+                    thinking: String::new(),
                     usage: LlmUsage::default(),
                 },
                 r2,
@@ -229,6 +234,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let rr2 = LlmResult {
@@ -236,6 +242,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let ra = CodingAgent::with_backend(
@@ -301,6 +308,7 @@ fn reflected_secret_in_assistant_text_fails_without_persisting_it() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -336,6 +344,7 @@ fn reflected_secret_in_tool_args_prevents_tool_side_effect() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -369,6 +378,7 @@ fn oversized_tool_call_id_is_rejected_before_side_effect() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -400,6 +410,7 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
@@ -407,6 +418,7 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -438,6 +450,7 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
@@ -445,6 +458,7 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -479,6 +493,7 @@ fn forced_summary_counts_already_persisted_rounds() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let empty_round = LlmResult {
@@ -486,6 +501,7 @@ fn forced_summary_counts_already_persisted_rounds() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let forced_round = LlmResult {
@@ -493,6 +509,7 @@ fn forced_summary_counts_already_persisted_rounds() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -525,6 +542,7 @@ fn forced_summary_with_tool_call_markup_fails_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let forced = LlmResult {
@@ -532,6 +550,7 @@ fn forced_summary_with_tool_call_markup_fails_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -565,6 +584,7 @@ fn forced_summary_in_prose_still_completes_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let forced = LlmResult {
@@ -572,6 +592,7 @@ fn forced_summary_in_prose_still_completes_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -596,6 +617,7 @@ fn malformed_tool_call_text_fails_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -633,6 +655,7 @@ fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let fragment = LlmResult {
@@ -640,6 +663,7 @@ fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -667,6 +691,7 @@ fn normal_wrap_up_keeps_ok_exit_and_reports_zero_call_tail() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -698,6 +723,7 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
@@ -705,6 +731,7 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -738,6 +765,7 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
         }],
         finish_reason: Some(FinishReason::ToolCall),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
@@ -745,6 +773,7 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
 
+        thinking: String::new(),
         usage: LlmUsage::default(),
     };
     let agent = CodingAgent::with_backend(
@@ -773,4 +802,30 @@ fn with_request_timeout_emits_resolved_value() {
     )
     .with_request_timeout(Some(timeout));
     assert_eq!(agent.request_timeout, Some(timeout));
+}
+
+#[test]
+fn issue286_shell_budgets_reach_per_turn_tool_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let profile = crate::profile::parse_profile_value(
+        &serde_json::from_str(include_str!(
+            "../../tests/fixtures/profiles/astramedium-native.json"
+        ))
+        .unwrap(),
+        "astramedium",
+    )
+    .unwrap();
+    let agent = CodingAgent::with_backend(
+        Box::new(MockBackend::new(Vec::new())),
+        root.path().to_path_buf(),
+        false,
+    )
+    .with_shell_timeouts(
+        std::time::Duration::from_secs(profile.ephemeral.shell_default_timeout_seconds.unwrap()),
+        std::time::Duration::from_secs(profile.ephemeral.shell_max_timeout_seconds.unwrap()),
+    );
+    let config = super::helpers::tool_config_with_floor(&agent, true).unwrap();
+    assert_eq!(config.shell.default_shell_timeout.as_secs(), 2700);
+    assert_eq!(config.shell.max_shell_timeout.as_secs(), u32::MAX as u64);
+    assert!(config.shell.allow_shell);
 }

@@ -13,13 +13,17 @@ const CODEX_SERVICE: &str = "llxprt-code-oauth";
 const CODEX_ACCOUNT: &str = "codex:default";
 const KEYCHAIN_LOAD_BOUND: Duration = Duration::from_secs(10);
 
-pub(crate) struct MacOsCredentialSource;
+pub(crate) struct MacOsCredentialSource {
+    pub(crate) transcript: bool,
+}
 
 impl CredentialSource for MacOsCredentialSource {
     fn load(&self, clock: &dyn Clock) -> Result<CodexCredential, CredentialError> {
-        eprintln!(
-            "loading macOS keychain credential (service={CODEX_SERVICE}, account={CODEX_ACCOUNT}); this can block on an authorization prompt"
-        );
+        if !self.transcript {
+            eprintln!(
+                "loading macOS keychain credential (service={CODEX_SERVICE}, account={CODEX_ACCOUNT}); this can block on an authorization prompt"
+            );
+        }
         let bytes = read_bounded(
             CODEX_SERVICE,
             CODEX_ACCOUNT,

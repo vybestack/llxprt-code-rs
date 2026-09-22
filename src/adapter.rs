@@ -43,18 +43,23 @@ pub struct LlmUsage {
 /// The model's reply for one round.
 #[derive(Debug)]
 pub struct LlmResult {
+    /// Bounded provider-exposed reasoning, live-only.
+    pub thinking: String,
     pub text: String,
     pub calls: Vec<ToolCall>,
     pub finish_reason: Option<FinishReason>,
     pub usage: LlmUsage,
 }
 
-impl From<&ModelResponse> for LlmResult {
-    fn from(resp: &ModelResponse) -> Self {
+impl LlmResult {
+    /// Scrub reasoning before its first lossy bound, including secrets crossing the cap.
+    pub fn from_response(resp: &ModelResponse, secrets: &[String]) -> Self {
         let mut text = String::new();
+        let mut thinking = String::new();
         let mut calls = Vec::new();
         for part in &resp.parts {
             match part {
+                ModelResponsePart::Thinking(t) => thinking.push_str(&t.content),
                 ModelResponsePart::Text(t) => text.push_str(&t.content),
                 ModelResponsePart::ToolCall(tc) => {
                     let args_json = match &tc.args {
@@ -70,6 +75,10 @@ impl From<&ModelResponse> for LlmResult {
                 _ => {}
             }
         }
+        let thinking = crate::redact::truncate_utf8(
+            crate::redact::scrub_secrets(&thinking, secrets),
+            crate::limits::MAX_TURN_ASSISTANT_BYTES,
+        );
         let finish_reason = resp.finish_reason.clone();
         let usage = resp
             .usage
@@ -82,6 +91,7 @@ impl From<&ModelResponse> for LlmResult {
                 cache_read_tokens: u.cache_read_tokens,
             });
         LlmResult {
+            thinking,
             text,
             calls,
             finish_reason,
@@ -98,6 +108,12 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Text rendered by this transport for a failed tool return.
+    /// Successful returns are verbatim. This must match the provider converter.
+    fn tool_error_prefix(&self) -> &'static str {
+        "Error: "
+    }
+
     /// Send the accumulated parts and map the reply. A network/transport error becomes
     /// `Err(String)`; the agent turns that into a terminal failure.
     fn request<'a>(
@@ -335,7 +351,7 @@ impl ModelAdapter {
                     None => e.to_string(),
                 }
             })?;
-        Ok(LlmResult::from(&resp))
+        Ok(LlmResult::from_response(&resp, &[]))
     }
 }
 
@@ -497,7 +513,7 @@ mod tests {
             cache_read_tokens: Some(80),
             details: None,
         });
-        let result = super::LlmResult::from(&resp);
+        let result = super::LlmResult::from_response(&resp, &[]);
         assert_eq!(result.usage.request_tokens, Some(100));
         assert_eq!(result.usage.response_tokens, Some(20));
         assert_eq!(result.usage.total_tokens, Some(120));
@@ -505,7 +521,7 @@ mod tests {
         assert_eq!(result.usage.cache_read_tokens, Some(80));
 
         let none_resp = serdes_ai::core::ModelResponse::new();
-        let result = super::LlmResult::from(&none_resp);
+        let result = super::LlmResult::from_response(&none_resp, &[]);
         assert_eq!(result.usage, super::LlmUsage::default());
     }
 }

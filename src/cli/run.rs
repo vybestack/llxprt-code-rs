@@ -35,7 +35,7 @@ pub fn run_profiled(
     };
     // Resolve every settings layer before production dependencies can read credentials.
     let settings = resolve_settings(&args)?;
-    let dependencies = RuntimeDependencies::production()
+    let dependencies = RuntimeDependencies::production(!args.emit.is_empty())
         .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
     let mut profile = resolve_profile(&args, settings.paths.config_root.value.as_path())?;
     apply_runtime_settings(&mut profile, &settings)?;
@@ -138,11 +138,23 @@ fn build_agent(
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?;
     agent = agent
+        .with_emission(args.emit.clone())
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
         .with_max_rounds(constructed.max_rounds)
         .with_max_tool_calls(max_tool_calls)
         .with_turn_time(turn_time)
+        .with_shell_timeouts(
+            std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_default_timeout_seconds
+                    .unwrap_or(120),
+            ),
+            std::time::Duration::from_secs(
+                profile.ephemeral.shell_max_timeout_seconds.unwrap_or(120),
+            ),
+        )
         .with_output_caps(resolved_output_caps(settings))
         .with_request_timeout(Some(settings.budgets.request_timeout.value))
         .with_profiler(profiler);

@@ -42,6 +42,7 @@ fn run_refusal_turn(turn_cap: usize, expected_sha256: &str) -> Turn {
     let store = SessionStore::load_at(&id, &config).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c1".into(),
@@ -55,6 +56,7 @@ fn run_refusal_turn(turn_cap: usize, expected_sha256: &str) -> Turn {
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
+        thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),

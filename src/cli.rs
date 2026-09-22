@@ -33,9 +33,18 @@ const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
 #[command(
     name = "llxprt-code-rs",
     version,
-    about = "Headless coding agent. One JSON object on stdout per run."
+    about = "Headless coding agent. Exactly one JSON object on stdout per run.",
+    after_help = "Examples:\n  llxprt-code-rs --session demo --cwd ws -p 'fix the test'\n  llxprt-code-rs --session demo -p 'now add coverage'\n  llxprt-code-rs --session demo --emit all -p 'inspect' 2>turn.jsonl\n  llxprt-code-rs transcript --session demo --turn 1 --json\n\nExit codes: 2 usage, 3 config, 4 session, 5 model, 6 turn.\nTranscript human output and --help/--version are stdout protocol exceptions."
 )]
 pub struct Args {
+    /// Read a finished or in-progress session without changing it.
+    #[command(subcommand)]
+    pub command: Option<crate::transcript::Command>,
+
+    /// Emit thinking,text,calls,results (or all) as live stderr JSONL; repeatable.
+    /// Chat has no thinking. Use transcript for persisted look-back.
+    #[arg(long, value_delimiter = ',')]
+    pub emit: Vec<crate::transcript::Emit>,
     /// Session id: a safe identifier of [A-Za-z0-9_-]; no '/', '.', '..'.
     #[arg(long, default_value = "default")]
     pub session: String,
@@ -747,6 +756,27 @@ mod tests {
         assert_eq!(args.max_shell_output, Some(1048576));
         assert_eq!(args.max_tool_output, Some(1048576));
         assert_eq!(args.max_turn_output, Some(20971520));
+    }
+
+    #[test]
+    fn issue286_named_native_profile_preserves_host_settings() {
+        let root = tempfile::tempdir_in("target").unwrap();
+        std::fs::create_dir(root.path().join("profiles")).unwrap();
+        let bytes = include_bytes!("../tests/fixtures/profiles/astramedium-native.json");
+        let path = root.path().join("profiles/astramedium.json");
+        std::fs::write(&path, bytes).unwrap();
+        let args = Args::try_parse_from(["llxprt-code-rs", "--profile", "astramedium"]).unwrap();
+        let profile = super::resolve_profile(&args, root.path()).unwrap();
+        assert_eq!(profile.model, "gpt-6-astra");
+        assert_eq!(profile.ephemeral.context_limit, Some(300000));
+        assert_eq!(profile.ephemeral.timeout_ms, None);
+        assert_eq!(profile.ephemeral.shell_default_timeout_seconds, Some(2700));
+        assert_eq!(
+            profile.ephemeral.shell_max_timeout_seconds,
+            Some(u32::MAX as u64)
+        );
+        assert_eq!(profile.ephemeral.image_resize.max_long_edge, Some(2048));
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
 
     #[test]

@@ -38,6 +38,12 @@ impl super::Turn<'_> {
         self.execute_calls(config, attempt, &mut round, &calls, store, reserved)?;
         refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
         refuse_unknown_tools(self.allow_shell, attempt, &mut round, &refused);
+        for call in &round.calls[calls.len()..] {
+            self.emit_result(reserved.turn, attempt.rounds.len() + 1, call)
+                .map_err(|error| {
+                    self.dead(store, reserved, "transcript", &error, &attempt.rounds)
+                })?;
+        }
         attempt.rounds.push(round);
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         store
@@ -74,6 +80,12 @@ impl super::Turn<'_> {
             in_flight::clear(store);
             outcome
                 .map_err(|failure| self.tool_failure(store, reserved, failure, &attempt.rounds))?;
+            self.emit_result(
+                reserved.turn,
+                round_index,
+                round.calls.last().expect("executed call record"),
+            )
+            .map_err(|error| self.dead(store, reserved, "transcript", &error, &attempt.rounds))?;
             self.update_profile_usage(&attempt.usage);
             self.profile(
                 "tool_exec_after",
