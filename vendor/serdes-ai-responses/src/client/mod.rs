@@ -90,6 +90,7 @@ struct Inner {
     codex_http: bool,
     headers: Vec<(String, String)>,
     reasoning: Option<ReasoningSettings>,
+    prompt_cache_key: Option<String>,
     http: reqwest::Client,
     profile: ModelProfile,
     session: Mutex<Session>,
@@ -171,6 +172,7 @@ impl OpenResponsesModel {
                 codex_http: false,
                 headers: Vec::new(),
                 reasoning: None,
+                prompt_cache_key: None,
                 http: reqwest::Client::new(),
                 profile: openai_gpt4o_profile(),
                 session: Mutex::new(Session {
@@ -225,6 +227,15 @@ impl OpenResponsesModel {
         let inner =
             Arc::get_mut(&mut self.inner).expect("model already in use; configure before sharing");
         inner.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Set session prompt-cache routing independently of response continuation.
+    #[must_use]
+    pub fn with_prompt_cache_key(mut self, key: Option<String>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("model already in use; configure before sharing")
+            .prompt_cache_key = key;
         self
     }
 
@@ -510,6 +521,7 @@ fn build_request(
     };
     Ok(CreateResponseRequest {
         model: inner.model_name.clone(),
+        prompt_cache_key: inner.prompt_cache_key.clone(),
         input: if items.is_empty() && !inner.codex_http {
             crate::types::ResponseInput::Text(String::new())
         } else {
@@ -805,7 +817,9 @@ impl OpenResponsesModel {
                     response_tokens: usage.output_tokens,
                     total_tokens: usage.total_tokens,
                     cache_creation_tokens: None,
-                    cache_read_tokens: None,
+                    cache_read_tokens: usage
+                        .input_tokens_details
+                        .and_then(|details| details.cached_tokens),
                     details: None,
                 }),
                 vendor_id: Some(object.id),

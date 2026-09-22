@@ -1,0 +1,38 @@
+{
+  "source": "70d144873955d6109976d0583111d91446abf8b1",
+  "binary_sha256": "7d9d8ced6813937f08de4790efd254e7d6d18bb82869237869073a776a5ba2c7",
+  "runs": [
+    {
+      "mode": "off",
+      "turn": 0,
+      "status": 0,
+      "wall_seconds": 2.1674413750879467,
+      "input": 2941,
+      "cached": 0
+    },
+    {
+      "mode": "enabled",
+      "turn": 0,
+      "status": 0,
+      "wall_seconds": 2.4473387920297682,
+      "input": 2941,
+      "cached": 0
+    },
+    {
+      "mode": "off",
+      "turn": 1,
+      "status": 0,
+      "wall_seconds": 2.1693135000532493,
+      "input": 5309,
+      "cached": 0
+    },
+    {
+      "mode": "enabled",
+      "turn": 1,
+      "status": 0,
+      "wall_seconds": 3.546399583108723,
+      "input": 5309,
+      "cached": 2816
+    }
+  ]
+}

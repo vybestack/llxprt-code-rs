@@ -1,5 +1,19 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 79: stateless prompt-cache routing
+
+The retained Responses client adds an optional `prompt_cache_key` request field and
+construction-time setter. The host supplies the session label when caching is enabled,
+including Codex HTTP. It also preserves optional `input_tokens_details.cached_tokens`
+through both SSE completion assembly and JSON response conversion, which previously
+discarded this counter. Anthropic usage counters now remain optional even when the
+usage object or individual input/output fields are absent; no zero denominator is
+fabricated. The stream parser's input carrier follows the type change without
+changing its transport. No transport behavior changes. The upstream revision and licenses
+remain unchanged; the aggregate `SERDES-AI-0.2.6.patch` contains this delta and fixture
+updates. Cache usage interpretation and reporting live in the host provider layer.
+
+
 `llxprt-code-rs` depends on serdes-ai `=0.2.6` through the path dependency
 `vendor/serdes-ai` (`default-features = false, features = ["openai", "anthropic", "chatgpt-oauth"]`).
 The retained crates are based on the 0.2.6 release. The Responses client is based on the tested `serdes-ai-responses` subtree at Git commit `bd6aefc96f699276afb6384257b101039a663b5f`. The local transport patches below adapt those sources into one offline build.
@@ -52,7 +66,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `0144b4e99ac63adf0daf17985a6e3fdb53d6c59f08c36c03b06308d519c3f660`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `e7d278fa6b9364645b975d794eacb088db1400a96c0c8f751a40a683d8961cdf`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

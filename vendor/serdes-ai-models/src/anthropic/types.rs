@@ -556,6 +556,7 @@ pub struct MessagesResponse {
     /// Stop sequence if hit.
     pub stop_sequence: Option<String>,
     /// Token usage.
+    #[serde(default)]
     pub usage: AnthropicUsage,
 }
 
@@ -597,10 +598,10 @@ pub enum ResponseContentBlock {
 pub struct AnthropicUsage {
     /// Input tokens.
     #[serde(default)]
-    pub input_tokens: u64,
+    pub input_tokens: Option<u64>,
     /// Output tokens.
     #[serde(default)]
-    pub output_tokens: u64,
+    pub output_tokens: Option<u64>,
     /// Tokens used to create cache.
     #[serde(default)]
     pub cache_creation_input_tokens: Option<u64>,
@@ -881,7 +882,7 @@ mod tests {
         let resp: MessagesResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.id, "msg_123");
         assert_eq!(resp.content.len(), 1);
-        assert_eq!(resp.usage.input_tokens, 10);
+        assert_eq!(resp.usage.input_tokens, Some(10));
     }
 
     #[test]

@@ -11,6 +11,7 @@
 mod anthropic;
 mod chat;
 mod codex;
+mod host;
 mod openai_responses;
 mod parsing;
 /// Provider-neutral settings carriers: read by `model_api` when it interprets a
@@ -275,9 +276,24 @@ pub fn resolve_max_tool_calls(cli: Option<i64>, profile: MaxToolCalls) -> Option
     }
 }
 
-/// Transport + request settings from a profile's `ephemeralSettings`.
+/// Host-owned image limits, retained but not applied by the text-only native runtime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImageResizeSettings {
+    pub max_long_edge: Option<u32>,
+    pub max_short_edge: Option<u32>,
+    pub max_pixels: Option<u64>,
+}
+
+/// Host and transport settings from a profile's `ephemeralSettings`.
 #[derive(Clone, Default)]
 pub struct EphemeralSettings {
+    /// Session prompt-cache routing, enabled when absent.
+    pub prompt_caching: Option<provider_settings::PromptCachingSetting>,
+    /// Host shell budgets; seconds, strictly positive.
+    pub shell_default_timeout_seconds: Option<u64>,
+    pub shell_max_timeout_seconds: Option<u64>,
+    /// Validated host image policy. Dormant: native requests are text-only.
+    pub image_resize: ImageResizeSettings,
     pub base_url: Option<RedactedUrl>,
     /// Redacted keyfile rendering (basename only) for `Debug`/errors.
     pub auth_keyfile: Option<String>,
@@ -352,6 +368,12 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)
             .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
+            .field(
+                "shell_default_timeout_seconds",
+                &self.shell_default_timeout_seconds,
+            )
+            .field("shell_max_timeout_seconds", &self.shell_max_timeout_seconds)
+            .field("image_resize", &self.image_resize)
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)

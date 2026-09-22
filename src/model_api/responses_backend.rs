@@ -101,6 +101,9 @@ impl ChatBackend for ResponsesBackend {
 }
 
 #[cfg(test)]
+mod cache_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -145,10 +148,19 @@ mod tests {
         });
 
         let model = OpenResponsesModel::new("test-model", format!("ws://127.0.0.1:{port}"));
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/task-profile/astra-headless.json"
+        ))
+        .unwrap();
+        value["ephemeralSettings"]["stream-first-response-timeout-ms"] = serde_json::json!(1000);
+        let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
         let backend = ResponsesBackend::new(
             model,
             ModelSettings {
-                timeout: Some(std::time::Duration::from_secs(1)),
+                timeout: profile
+                    .ephemeral
+                    .timeout_ms
+                    .map(std::time::Duration::from_millis),
                 ..Default::default()
             },
         );
@@ -166,7 +178,7 @@ mod tests {
     }
 
     /// Offset just past the CRLF CRLF header/body separator.
-    fn find_body_start(request: &[u8]) -> Option<usize> {
+    pub(super) fn find_body_start(request: &[u8]) -> Option<usize> {
         request
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -202,6 +214,7 @@ mod tests {
             format!("http://127.0.0.1:{port}/responses"),
         )
         .codex_http()
+        .with_prompt_cache_key(Some("loopback-session".to_string()))
         .bearer("loopback-codex-key");
         let backend = ResponsesBackend::new(
             model,
@@ -236,6 +249,8 @@ mod tests {
 
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
         assert_codex_wire_contract(&bodies);
+        assert_eq!(first.usage.cache_read_tokens, Some(6));
+        assert_eq!(second.usage.cache_read_tokens, Some(6));
         assert!(
             first.text.contains("codex turn one"),
             "folded output missing: {first:?}"
@@ -249,7 +264,7 @@ mod tests {
 
     /// Reads one full HTTP request (headers plus a content-length body) off
     /// the accepted codex connection.
-    fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    pub(super) fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         use std::io::Read as _;
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(10)))
@@ -279,7 +294,7 @@ mod tests {
     /// real codex backend: the terminal response event, then EOF, no
     /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
     /// covered.
-    fn codex_turn_sse_payload(round: usize) -> String {
+    pub(super) fn codex_turn_sse_payload(round: usize) -> String {
         let turn = if round == 0 { "one" } else { "two" };
         let response_id = format!("resp_loopback_{round}");
         let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
@@ -290,11 +305,13 @@ mod tests {
                 .unwrap(),
         );
         object.status = serdes_ai_responses::types::ResponseStatus::Completed;
-        object.usage = Some(serdes_ai_responses::types::ResponseUsage {
-            input_tokens: Some(11),
-            output_tokens: Some(7),
-            total_tokens: Some(18),
-        });
+        object.usage = Some(
+            serde_json::from_value(serde_json::json!({
+                "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
+                "input_tokens_details": {"cached_tokens": 6}
+            }))
+            .unwrap(),
+        );
         let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
             sequence_number: 0,
             response: object.clone(),
@@ -368,6 +385,7 @@ mod tests {
         assert_eq!(bodies.len(), 2);
         for body in bodies {
             assert_eq!(body["store"], false, "codex must never store");
+            assert_eq!(body["prompt_cache_key"], "loopback-session");
             assert_eq!(body["stream"], true, "codex must stream over SSE");
             assert!(
                 body.get("max_output_tokens").is_none(),
