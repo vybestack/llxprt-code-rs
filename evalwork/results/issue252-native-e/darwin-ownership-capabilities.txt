@@ -1,0 +1,22 @@
+Darwin
+501
+ * DEPRECATED!!!!!!!!!
+ * NOTE_TRACK, NOTE_TRACKERR, and NOTE_CHILD are no longer supported as of 10.5
+ */
+/* additional flags for EVFILT_PROC */
+#define NOTE_TRACK      0x00000001              /* follow across forks */
+#define NOTE_TRACKERR   0x00000002              /* could not track child */
+#define NOTE_CHILD      0x00000004              /* am a child process */
+	ES_NEW_CLIENT_RESULT_ERR_INTERNAL,
+	/// The caller is not properly entitled to connect.
+	ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED,
+	/// The caller lacks Transparency, Consent, and Control (TCC) approval from the user.
+	ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED,
+	/// The caller is not running as root.
+	ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED,
+int proc_terminate(pid_t pid, int *sig);
+int proc_terminate_all_rsr(int sig);
+int proc_signal_with_audittoken(audit_token_t *audittoken, int sig);
+int proc_terminate_with_audittoken(audit_token_t *audittoken, int *sig);
+int proc_signal_delegate(audit_token_t instigator, audit_token_t target, int sig);
+int proc_terminate_delegate(audit_token_t instigator, audit_token_t target, int *sig);
