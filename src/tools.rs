@@ -39,6 +39,7 @@ use std::io::Read;
 mod publication;
 mod replace;
 mod search;
+mod shell;
 
 use publication::{atomic_write_into, atomic_write_into_after};
 #[cfg(test)]
@@ -367,6 +368,8 @@ pub struct ToolConfig {
 #[derive(Debug)]
 pub struct ShellConfig {
     pub max_shell_output: usize,
+    /// Timeout used when a shell call omits `timeout_seconds`.
+    pub default_shell_timeout: std::time::Duration,
     /// Ceiling for any single shell command, independent of what the model asks for.
     pub max_shell_timeout: std::time::Duration,
     /// Whether `run_shell_command` is registered (`--allow-shell` gate).
@@ -857,73 +860,6 @@ fn list_directory_tool(
     }
 }
 
-/// Run a shell command via the shared bounded runner. Nonzero exit, a signal, or a timeout
-/// is an `Err` carrying the captured output (the model sees `ok=false`).
-fn shell_tool(
-    fd: i32,
-    args: &BTreeMap<String, JsonValue>,
-    max_timeout: std::time::Duration,
-    max_output: usize,
-) -> Result<String, String> {
-    reject_unknown(args, &["command", "timeout_seconds"])?;
-    let command = arg_str(args, "command", true)?.unwrap();
-    if command.trim().is_empty() {
-        return Err("command must not be empty".into());
-    }
-    let timeout = bounded(
-        arg_u64(args, "timeout_seconds")?,
-        max_timeout.as_secs() as usize,
-        max_timeout.as_secs() as usize,
-    );
-    let timeout = std::time::Duration::from_secs(u64::from(
-        u32::try_from(timeout.max(1)).unwrap_or(u32::MAX),
-    ));
-    let o = crate::process::run_cmd(crate::process::CmdSpec {
-        program: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), command.to_string()],
-        cwd: None,
-        cwd_fd: Some(fd),
-        env_add: Vec::new(),
-        timeout,
-        max_output,
-    })?;
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&o.stdout),
-        String::from_utf8_lossy(&o.stderr)
-    );
-    // Every model-visible shell string (success or failure diagnostic) is bounded as one
-    // value, framing and combined output included, to `max_output`.
-    let s = if o.timed_out {
-        format!(
-            "command timed out after {} ms; output:\n{}",
-            timeout.as_millis(),
-            combined.trim_end()
-        )
-    } else {
-        match o.status {
-            Some(0) => combined.trim_end().to_string(),
-            Some(code) => format!(
-                "command exited with {code}; output:\n{}",
-                combined.trim_end()
-            ),
-            None => format!(
-                "command was killed by a signal; output:\n{}",
-                combined.trim_end()
-            ),
-        }
-    };
-    let bounded = truncate(&s, max_output);
-    if o.timed_out {
-        Err(bounded)
-    } else {
-        match o.status {
-            Some(0) => Ok(bounded),
-            Some(_) | None => Err(bounded),
-        }
-    }
-}
-
 /// Choose and execute a tool by name, returning `(ok, text)`. `ok=false` is a normal,
 /// model-visible tool result. All five *file* tools execute through the retained
 /// [`WorkspaceCap`] on [`ToolConfig::ws`]; `run_shell_command` derives its cwd descriptor from
@@ -995,9 +931,10 @@ pub(crate) fn execute_tool_with_limit(
             if !config.shell.allow_shell {
                 Err("run_shell_command is disabled; enable it with --allow-shell".into())
             } else {
-                shell_tool(
+                shell::shell_tool(
                     crate::tools::shell_cwd_fd(&config.ws),
                     &map,
+                    config.shell.default_shell_timeout,
                     config.shell.max_shell_timeout,
                     config.shell.max_shell_output.min(output_limit),
                 )

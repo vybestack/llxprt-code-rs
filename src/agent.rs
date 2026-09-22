@@ -111,6 +111,10 @@ pub struct CodingAgent {
     /// Wall-clock budget for one prompt turn. `None` (the default) means no
     /// time limit; set from the CLI `--turn-time` flag.
     turn_time_budget: Option<std::time::Duration>,
+    /// Resolved shell timeout policy from the profile. Every command receives the
+    /// configured default and remains capped by the finite configured maximum.
+    shell_default_timeout: std::time::Duration,
+    shell_max_timeout: std::time::Duration,
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
@@ -188,6 +192,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -218,6 +228,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -244,6 +260,12 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
+            shell_default_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
+            shell_max_timeout: std::time::Duration::from_secs(
+                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
+            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -254,44 +276,6 @@ impl CodingAgent {
             context_limit: None,
             profiler: None,
         }
-    }
-
-    /// Override the agent's conservative per-request context budget (tests drive budget
-    /// enforcement with an explicit token budget instead of a profile).
-    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
-        self.context_limit = context_limit;
-        self
-    }
-
-    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// budgets instead of the uncapped default).
-    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
-        self.max_rounds = max_rounds;
-        self
-    }
-
-    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
-    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
-        self.max_tool_calls = max_tool_calls;
-        self
-    }
-
-    /// Override the wall-clock turn budget (`None` = no time limit).
-    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
-        self.turn_time_budget = budget;
-        self
-    }
-
-    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
-    /// aggregate per-turn tool-output bound enforced by the turn loop.
-    pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
-        self.output_caps = caps;
-        self
-    }
-
-    /// The resolved output caps this agent enforces.
-    pub fn output_caps(&self) -> OutputCaps {
-        self.output_caps
     }
 
     /// Override the outbound model-request timeout (`None` = backend default).
@@ -896,10 +880,6 @@ impl Turn<'_> {
             .map_err(|failure| self.round_failure(store, reserved, failure, persisted_rounds))?;
         self.renew(store, reserved)?;
         Ok(r)
-    }
-
-    fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
-        helpers::tool_config_with_floor(self, shell_on)
     }
 }
 

@@ -180,23 +180,6 @@ pub(super) fn refuse_over_budget(
     }
 }
 
-/// The per-turn tool configuration, including the digest admission floor (issue 125).
-pub(super) fn tool_config_with_floor(
-    agent: &CodingAgent,
-    shell_on: bool,
-) -> Result<crate::tools::ToolConfig, String> {
-    Ok(crate::tools::ToolConfig {
-        ws: agent.workspace.try_clone()?,
-        max_output_bytes: agent.output_caps.tool,
-        digest_size_floor: agent.digest_size_floor,
-        shell: crate::tools::ShellConfig {
-            max_shell_output: agent.output_caps.shell,
-            max_shell_timeout: std::time::Duration::from_secs(120),
-            allow_shell: shell_on,
-        },
-    })
-}
-
 impl CodingAgent {
     /// Sets the digest admission floor (issue 125) the session resolved.
     ///
