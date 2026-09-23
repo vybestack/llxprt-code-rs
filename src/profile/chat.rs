@@ -208,17 +208,7 @@ fn parse_ephemeral_primary(
             settings.max_turns_per_prompt = Some(n);
         }
         "loopDetectionEnabled" => {
-            // Exact false only: this runtime's loop detection is not configurable
-            // from a profile, so `true` (or any non-boolean) is refused rather
-            // than silently ignored. Same value-free bounded error as Codex.
-            if !value.is_boolean() {
-                return Err(format!("profile {name:?}: '{key}' must be a boolean"));
-            }
-            if value.as_bool() == Some(true) {
-                return Err(format!(
-                    "profile {name:?}: loop detection is not supported by this runtime"
-                ));
-            }
+            parse_loop_detection_enabled(value, name, key)?;
             settings.loop_detection_enabled = Some(false);
         }
         "streaming" => {
@@ -238,6 +228,12 @@ fn parse_ephemeral_primary(
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
         "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
+        "shell-default-timeout-seconds" => {
+            settings.shell_default_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
+        }
+        "shell-max-timeout-seconds" => {
+            settings.shell_max_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
+        }
         "apiMode" | "openaiResponsesEnabled" => {}
         "base-url" | "baseUrl" | "baseURL" => {
             let raw = required_string(value, name, key)?;
@@ -266,6 +262,24 @@ fn parse_ephemeral_primary(
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// This runtime does not make loop detection profile-configurable: only an
+/// explicit `false` is accepted, so unsupported input cannot become a no-op.
+fn parse_loop_detection_enabled(
+    value: &serde_json::Value,
+    name: &str,
+    key: &str,
+) -> Result<(), String> {
+    if !value.is_boolean() {
+        return Err(format!("profile {name:?}: '{key}' must be a boolean"));
+    }
+    if value.as_bool() == Some(true) {
+        return Err(format!(
+            "profile {name:?}: loop detection is not supported by this runtime"
+        ));
+    }
+    Ok(())
 }
 
 fn parse_ephemeral_credentials(
@@ -550,9 +564,11 @@ pub(super) fn parse_model_params(
                     format!("profile {name:?}: '{k}' must be a non-negative integer")
                 })?);
             }
-            // `top_k` is intentionally NOT an accepted setting: the OpenAI Chat Completions
-            // transport cannot serialize it, so it is rejected as unsupported (listed in
-            // MODELPARAM_OUTPUT_AFFECTING) instead of being silently dropped.
+            "top_k" => {
+                m.top_k = Some(nonneg_u64(v).ok_or_else(|| {
+                    format!("profile {name:?}: 'top_k' must be a non-negative integer")
+                })?);
+            }
             "seed" => {
                 let n = nonneg_u64(v).ok_or_else(|| {
                     format!("profile {name:?}: 'seed' must be a non-negative integer")
@@ -588,6 +604,20 @@ pub(super) fn btree(
         out.insert(k.clone(), v.clone());
     }
     out
+}
+
+fn shell_timeout_seconds(value: &serde_json::Value, key: &str, name: &str) -> Result<u64, String> {
+    let seconds = value
+        .as_u64()
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| format!("profile {name}: '{key}' must be a positive integer"))?;
+    if seconds > crate::profile::MAX_SHELL_TIMEOUT_SECONDS {
+        return Err(format!(
+            "profile {name}: '{key}' must be at most {} seconds",
+            crate::profile::MAX_SHELL_TIMEOUT_SECONDS
+        ));
+    }
+    Ok(seconds)
 }
 
 fn nonneg_u64(v: &serde_json::Value) -> Option<u64> {

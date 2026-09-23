@@ -39,6 +39,7 @@ use std::io::Read;
 mod publication;
 mod replace;
 mod search;
+mod shell;
 
 use publication::{atomic_write_into, atomic_write_into_after};
 #[cfg(test)]
@@ -254,8 +255,9 @@ fn fd_identity(d: &openat::Dir) -> Result<(u64, u64), String> {
     use std::os::unix::fs::MetadataExt;
     Ok((m.dev(), m.ino()))
 }
-/// blocking on a (possible) FIFO: `openat` with `O_DIRECTORY|O_NOFOLLOW`. This is
-/// used for **traversal** components, including a `search`/`list` start directory.
+/// Reopen a retained directory descriptor-relative with an independent stream offset.
+/// Unlike `try_clone`/`dup`, repeated root listings and searches do not share an offset.
+/// `O_DIRECTORY|O_NOFOLLOW` keeps this a directory-only, no-follow operation.
 fn reopen_directory(dir: &openat::Dir) -> Result<openat::Dir, String> {
     use std::os::unix::io::{AsRawFd as _, FromRawFd as _};
 
@@ -366,6 +368,8 @@ pub struct ToolConfig {
 #[derive(Debug)]
 pub struct ShellConfig {
     pub max_shell_output: usize,
+    /// Timeout used when a shell call omits `timeout_seconds`.
+    pub default_shell_timeout: std::time::Duration,
     /// Ceiling for any single shell command, independent of what the model asks for.
     pub max_shell_timeout: std::time::Duration,
     /// Whether `run_shell_command` is registered (`--allow-shell` gate).
@@ -550,7 +554,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
         ToolSpec {
             name: "list_directory".into(),
             description: "List files and subdirectories of a directory inside the project.".into(),
-            properties: vec![("path".into(), json!({"type": "string"}), true)],
+            properties: vec![("path".into(), directory_path_schema(), true)],
         },
         ToolSpec {
             name: "search_file_content".into(),
@@ -558,7 +562,7 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
             properties: vec![
                 ("pattern".into(), json!({"type": "string"}), true),
                 ("max_results".into(), json!({"type": "integer"}), false),
-                ("path".into(), json!({"type": "string"}), false),
+                ("path".into(), directory_path_schema(), false),
                 (
                     "max_output_bytes".into(),
                     json!({"type": "integer"}),
@@ -577,6 +581,24 @@ pub fn tool_specs(allow_shell: bool) -> Vec<ToolSpec> {
     ];
     specs.retain(|s| s.name != "run_shell_command" || allow_shell);
     specs
+}
+
+/// Directory tools accept the root itself as well as named descendants. Keep this
+/// separate from file-path validation: `.` must never become a writable leaf or a
+/// reason to discard components from an otherwise rejected path.
+fn open_directory_path(cap: &WorkspaceCap, rel: &str) -> Result<openat::Dir, String> {
+    let root = ws_root(cap)?;
+    match rel {
+        "" | "." => reopen_directory(root),
+        _ => ensure_parent_dir_read(root, &resolve_comps(rel)?),
+    }
+}
+
+fn directory_path_schema() -> JsonValue {
+    json!({
+        "type": "string",
+        "description": "Directory relative to --cwd: use \".\" or \"\" for the project root, or a named path such as src/tools. Absolute paths, '..' components, and symlink traversal (even inside the root) are rejected."
+    })
 }
 
 pub(crate) fn ws_root(ws: &WorkspaceCap) -> Result<&openat::Dir, String> {
@@ -798,26 +820,7 @@ fn list_directory_tool(
 ) -> Result<String, String> {
     reject_unknown(args, &["path"])?;
     let rel = arg_str(args, "path", true)?.unwrap();
-    let dir = {
-        let root = ws_root(cap)?;
-        match rel {
-            "" => reopen_directory(root)?,
-            r => {
-                let comps = resolve_comps(r)?;
-                if comps.is_empty() {
-                    reopen_directory(root)?
-                } else {
-                    let (leaf_last, parent_comps) = comps.split_last().unwrap();
-                    if parent_comps.is_empty() {
-                        open_named_dir(root, leaf_last)?
-                    } else {
-                        let parent = ensure_parent_dir_read(root, parent_comps)?;
-                        open_named_dir(&parent, leaf_last)?
-                    }
-                }
-            }
-        }
-    };
+    let dir = open_directory_path(cap, rel)?;
     let mut names = Vec::new();
     for e in dir
         .list_self()
@@ -854,73 +857,6 @@ fn list_directory_tool(
             out.push('\n');
         }
         Ok(truncate(out.trim_end_matches('\n'), output_limit))
-    }
-}
-
-/// Run a shell command via the shared bounded runner. Nonzero exit, a signal, or a timeout
-/// is an `Err` carrying the captured output (the model sees `ok=false`).
-fn shell_tool(
-    fd: i32,
-    args: &BTreeMap<String, JsonValue>,
-    max_timeout: std::time::Duration,
-    max_output: usize,
-) -> Result<String, String> {
-    reject_unknown(args, &["command", "timeout_seconds"])?;
-    let command = arg_str(args, "command", true)?.unwrap();
-    if command.trim().is_empty() {
-        return Err("command must not be empty".into());
-    }
-    let timeout = bounded(
-        arg_u64(args, "timeout_seconds")?,
-        max_timeout.as_secs() as usize,
-        max_timeout.as_secs() as usize,
-    );
-    let timeout = std::time::Duration::from_secs(u64::from(
-        u32::try_from(timeout.max(1)).unwrap_or(u32::MAX),
-    ));
-    let o = crate::process::run_cmd(crate::process::CmdSpec {
-        program: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), command.to_string()],
-        cwd: None,
-        cwd_fd: Some(fd),
-        env_add: Vec::new(),
-        timeout,
-        max_output,
-    })?;
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&o.stdout),
-        String::from_utf8_lossy(&o.stderr)
-    );
-    // Every model-visible shell string (success or failure diagnostic) is bounded as one
-    // value, framing and combined output included, to `max_output`.
-    let s = if o.timed_out {
-        format!(
-            "command timed out after {} ms; output:\n{}",
-            timeout.as_millis(),
-            combined.trim_end()
-        )
-    } else {
-        match o.status {
-            Some(0) => combined.trim_end().to_string(),
-            Some(code) => format!(
-                "command exited with {code}; output:\n{}",
-                combined.trim_end()
-            ),
-            None => format!(
-                "command was killed by a signal; output:\n{}",
-                combined.trim_end()
-            ),
-        }
-    };
-    let bounded = truncate(&s, max_output);
-    if o.timed_out {
-        Err(bounded)
-    } else {
-        match o.status {
-            Some(0) => Ok(bounded),
-            Some(_) | None => Err(bounded),
-        }
     }
 }
 
@@ -995,9 +931,10 @@ pub(crate) fn execute_tool_with_limit(
             if !config.shell.allow_shell {
                 Err("run_shell_command is disabled; enable it with --allow-shell".into())
             } else {
-                shell_tool(
+                shell::shell_tool(
                     crate::tools::shell_cwd_fd(&config.ws),
                     &map,
+                    config.shell.default_shell_timeout,
                     config.shell.max_shell_timeout,
                     config.shell.max_shell_output.min(output_limit),
                 )

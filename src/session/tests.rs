@@ -187,3 +187,5 @@ fn tool_call_record_debug_omits_live_payload_in_embedded_round() {
         assert!(debug.contains("CTXDIGEST v1"));
     }
 }
+
+mod vault_entropy;

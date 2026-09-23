@@ -212,7 +212,13 @@ Example success object:
 `read_file`, `write_file`, `replace`, `list_directory`, `search_file_content`, and
 (only with `--allow-shell`) `run_shell_command`. File paths are resolved relative to
 `--cwd`; writes create parents inside the root and paths (including symlinks) that escape
-are rejected. Tool arguments are strictly typed (missing required, wrong type, unknown extra
+are rejected. For `list_directory` and `search_file_content`, use `"."` or `""` to
+select the project root, or a named relative directory such as `src/tools` for a
+nested directory. Omitting the optional search `path` selects the root; listing
+requires `path`. Absolute paths and every `..` component are rejected, and neither
+directory tool traverses symlinks, even when their targets are inside the root.
+Root directory representations are not file paths for `read_file`, `write_file`, or
+`replace`. Tool arguments are strictly typed (missing required, wrong type, unknown extra
 fields all fail). `read_file` honors an exact bounded `limit` (at most the requested
 bytes, with an explicit truncation marker) and an exact `offset`. `read_file` and
 `search_file_content` accept `max_output_bytes` to clamp both successful and error results
@@ -246,6 +252,20 @@ suffix, or that carries an empty path segment, fails with a fixed
 rejected. The redacted
 `scheme://host:port` rendering is never substituted for the request URL. OpenAI Chat has no
 `top_k` field, so a profile that sets it is rejected instead of being silently dropped.
+Anthropic Messages accepts `top_k` and sends it on the request; it rejects `seed` and
+`chat_template_kwargs`. Chat targets support `seed` and (except OpenAI Vercel)
+`chat_template_kwargs`. Codex and public Responses retain their provider-specific
+parameter restrictions.
+
+`--model-params-mode loose|known-model|strict` (also `LLXPRT_MODEL_PARAMS_MODE`)
+controls untyped `modelParams` keys. The default `loose` mode forwards them verbatim
+on Chat and Messages requests. `known-model` checks the shipped registry, including
+its per-provider acceptance overrides; `strict` refuses untyped keys. In every mode,
+known parameters that cannot be applied fail with a key/provider diagnostic, not a
+warning followed by success. Applicability uses the resolved provider/API: a registry
+entry does not add transport support. Responses transports have no extra-field wire
+channel and reject extras rather than silently discarding them. Parameter values are
+not included in these local refusal messages.
 
 ## JSON output contract
 
