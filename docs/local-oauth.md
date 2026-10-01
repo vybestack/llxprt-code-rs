@@ -8,7 +8,7 @@ Sign in with a fresh device authorization:
 llxprt-code-rs --localoauth --oauth-login
 ```
 
-The command prints the authorization URL and device code to stderr. Complete authorization in the browser; the command stores the resulting token and emits one JSON result on stdout. Login does not consume a prompt or resolve a model profile. Device authorization has a 15-minute bound; individual HTTP requests have a 30-second bound. Error responses expose status only, never response bodies or tokens. The protocol uses the same client ID and endpoints as the TypeScript Codex device flow in `packages/auth/src/flows/codex-device-flow.ts`.
+The command prints the authorization URL and device code to stderr. Complete authorization in the browser; the command stores the resulting token and emits one JSON result on stdout. Login does not consume a prompt or resolve a model profile. Device authorization has a 15-minute bound; individual HTTP requests have a 30-second bound. HTTP error responses expose the operation and status, never response bodies or tokens. The protocol uses the same client ID and endpoints as the TypeScript Codex device flow in `packages/auth/src/flows/codex-device-flow.ts` and Codex's Rust device flow. Token expiry uses a validated `expires_in` when supplied; when it is absent, the access-token JWT must contain an integral `exp` beyond the existing 30-second expiry skew. No guessed token lifetime is used. JWT metadata is read only from the authenticated token endpoint response; this extraction is not independent signature verification.
 
 Use the selected storage on every worker invocation:
 

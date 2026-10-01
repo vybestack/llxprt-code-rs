@@ -36,8 +36,8 @@ impl Protocol {
             .client
             .post(format!("{}/api/accounts/deviceauth/usercode", self.issuer))
             .json(&json!({"client_id": CLIENT_ID}));
-        let (status, value) = consume(response).await?;
-        require_success(status)?;
+        let (status, value) = consume(response, "device-code request").await?;
+        require_success(status, "device-code request")?;
         let id = required_string(&value, "device_auth_id")?;
         let code = required_string(&value, "user_code")?;
         if code.len() > 32 || !code.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
@@ -54,7 +54,7 @@ impl Protocol {
                 .client
                 .post(format!("{}/api/accounts/deviceauth/token", self.issuer))
                 .json(&json!({"device_auth_id": id, "user_code": code}));
-            let (status, value) = consume(poll).await?;
+            let (status, value) = consume(poll, "device authorization polling").await?;
             if status == 403 || status == 404 {
                 tokio::time::sleep(
                     interval.min(deadline.saturating_duration_since(Instant::now())),
@@ -62,7 +62,7 @@ impl Protocol {
                 .await;
                 continue;
             }
-            require_success(status)?;
+            require_success(status, "device authorization polling")?;
             let response = self
                 .client
                 .post(format!("{}/oauth/token", self.issuer))
@@ -76,8 +76,8 @@ impl Protocol {
                     ),
                     ("client_id", CLIENT_ID),
                 ]);
-            let (status, value) = consume(response).await?;
-            require_success(status)?;
+            let (status, value) = consume(response, "authorization-code exchange").await?;
+            require_success(status, "authorization-code exchange")?;
             return token_document(value, None, clock);
         }
     }
@@ -96,17 +96,20 @@ impl Protocol {
                 ("refresh_token", refresh),
                 ("client_id", CLIENT_ID),
             ]);
-        let (status, value) = consume(response).await?;
-        require_success(status)?;
+        let (status, value) = consume(response, "token refresh").await?;
+        require_success(status, "token refresh")?;
         token_document(value, Some(previous), clock)
     }
 }
 
-async fn consume(request: reqwest::RequestBuilder) -> Result<(u16, Value), CredentialError> {
+async fn consume(
+    request: reqwest::RequestBuilder,
+    stage: &'static str,
+) -> Result<(u16, Value), CredentialError> {
     let mut response = request
         .send()
         .await
-        .map_err(|_| failure("OAuth request failed"))?;
+        .map_err(|_| failure(&format!("{stage} request failed")))?;
     let status = response.status().as_u16();
     let mut bytes = Vec::new();
     while let Some(chunk) = response
@@ -128,12 +131,12 @@ async fn consume(request: reqwest::RequestBuilder) -> Result<(u16, Value), Crede
     Ok((status, value))
 }
 
-fn require_success(status: u16) -> Result<(), CredentialError> {
+fn require_success(status: u16, stage: &'static str) -> Result<(), CredentialError> {
     if (200..300).contains(&status) {
         Ok(())
     } else {
         Err(CredentialError::local(&format!(
-            "OAuth endpoint returned HTTP {status}; login may need to be renewed"
+            "{stage} returned HTTP {status}"
         )))
     }
 }
@@ -171,15 +174,22 @@ fn token_document(
     previous: Option<&Value>,
     clock: &dyn Clock,
 ) -> Result<Vec<u8>, CredentialError> {
-    let seconds = response
-        .get("expires_in")
-        .and_then(Value::as_i64)
-        .filter(|n| *n > 30)
-        .ok_or_else(|| failure("invalid token lifetime"))?;
-    let expiry = clock
-        .unix_seconds()?
-        .checked_add(seconds)
-        .ok_or_else(|| failure("token lifetime overflow"))?;
+    let expiry = match response.get("expires_in") {
+        Some(value) => {
+            let seconds = value
+                .as_i64()
+                .filter(|n| *n > 30)
+                .ok_or_else(|| failure("invalid token lifetime"))?;
+            clock
+                .unix_seconds()?
+                .checked_add(seconds)
+                .ok_or_else(|| failure("token lifetime overflow"))?
+        }
+        None => jwt_claims(required_string(&response, "access_token")?)?
+            .get("exp")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| failure("access token does not identify its expiry"))?,
+    };
     let account = match response.get("id_token") {
         Some(value) => account_id(value.as_str().ok_or_else(|| failure("invalid ID token"))?)?,
         None => required_string(
@@ -206,19 +216,22 @@ fn token_document(
     Ok(bytes)
 }
 
-fn account_id(token: &str) -> Result<String, CredentialError> {
+fn jwt_claims(token: &str) -> Result<Value, CredentialError> {
     if token.len() > 16_384 {
-        return Err(failure("ID token exceeds byte limit"));
+        return Err(failure("JWT exceeds byte limit"));
     }
     let parts: Vec<_> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err(failure("invalid ID token"));
+        return Err(failure("invalid JWT"));
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(parts[1])
-        .map_err(|_| failure("invalid ID token encoding"))?;
-    let claims: Value =
-        serde_json::from_slice(&bytes).map_err(|_| failure("invalid ID token claims"))?;
+        .map_err(|_| failure("invalid JWT encoding"))?;
+    serde_json::from_slice(&bytes).map_err(|_| failure("invalid JWT claims"))
+}
+
+fn account_id(token: &str) -> Result<String, CredentialError> {
+    let claims = jwt_claims(token)?;
     let account = [
         claims.pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id"),
         claims.pointer("/https:~1~1api.openai.com~1auth/account_id"),
