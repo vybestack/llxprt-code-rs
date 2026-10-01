@@ -1,15 +1,22 @@
 use super::{AgentError, CodingAgent};
 use crate::adapter::ToolCall;
-use crate::session::{ReservedRequest, RoundRecord, SessionStore, ToolCallRecord};
+use crate::session::{
+    ReservedRequest, RoundRecord, SessionStore, ToolCallRecord, ToolResultProjection,
+};
 
-pub(super) fn tool_call_record(call: &ToolCall, ok: bool, result: String) -> ToolCallRecord {
+pub(super) fn tool_call_record(
+    call: &ToolCall,
+    ok: bool,
+    projection: ToolResultProjection,
+) -> ToolCallRecord {
     ToolCallRecord {
         id: call.id.clone(),
         name: call.name.clone(),
         args: call.args_json.clone(),
         ok,
         refused: false,
-        result,
+        result: projection.persisted,
+        result_live: projection.live,
     }
 }
 
@@ -22,6 +29,9 @@ pub(super) fn refused_call_record(call: &ToolCall, result: String) -> ToolCallRe
         args: call.args_json.clone(),
         ok: false,
         refused: true,
+        // A refusal was never executed, so there is no admitted content at all:
+        // both projections carry the refusal notice (#134).
+        result_live: result.clone(),
         result,
     }
 }
