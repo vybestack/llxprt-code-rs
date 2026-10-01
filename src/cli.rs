@@ -24,6 +24,12 @@ pub use run::run_profiled;
 /// Re-exported exit code type (defined in the leaf `envelope` module).
 pub use crate::envelope::Code;
 
+/// Perform an explicitly selected filesystem OAuth login without resolving a profile or prompt.
+pub fn local_oauth_login() -> Result<(), AppError> {
+    crate::model_api::local_oauth::login()
+        .map_err(|error| AppError::new(Code::Config, "local-oauth", error))
+}
+
 /// The maximum number of bytes read from stdin before the prompt is rejected. The cap is
 /// applied **while reading**, not after allocation.
 const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
@@ -71,6 +77,14 @@ pub struct Args {
     /// Explicit opt-in to allow plaintext HTTP to a remote host (dsflash-mi300x style).
     #[arg(long)]
     pub allow_insecure_http: bool,
+
+    /// Use filesystem OAuth storage (0700 directory, 0600 files), never Keychain.
+    #[arg(long)]
+    pub localoauth: bool,
+
+    /// Sign in using device authorization and save locally, then exit. Requires --localoauth.
+    #[arg(long, requires = "localoauth", conflicts_with_all = ["prompt", "print_config", "mem_profile"])]
+    pub oauth_login: bool,
 
     /// Explicit opt-in to register the run_shell_command tool.
     #[arg(long)]

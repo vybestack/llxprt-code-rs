@@ -1,3 +1,23 @@
+#[test]
+fn explicit_local_source_failure_does_not_load_native_keychain() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ConfigHomeRoot::for_test(root.path().canonicalize().unwrap()).unwrap();
+    let error = select_credential_source(&home, true)
+        .load(&FixedClock(1_000))
+        .unwrap_err();
+    assert!(error.to_string().contains("--localoauth --oauth-login"));
+    assert!(!error.to_string().contains("keychain"));
+    assert!(home.as_path().join("oauth/codex.lock").exists());
+}
+
+#[test]
+fn selecting_default_source_does_not_initialize_filesystem_store() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ConfigHomeRoot::for_test(root.path().canonicalize().unwrap()).unwrap();
+    let _source = select_credential_source(&home, false);
+    assert!(!home.as_path().join("oauth").exists());
+}
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

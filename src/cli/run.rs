@@ -35,7 +35,7 @@ pub fn run_profiled(
     };
     // Resolve every settings layer before production dependencies can read credentials.
     let settings = resolve_settings(&args)?;
-    let dependencies = RuntimeDependencies::production()
+    let dependencies = RuntimeDependencies::production(args.localoauth)
         .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
     let mut profile = resolve_profile(&args, settings.paths.config_root.value.as_path())?;
     apply_runtime_settings(&mut profile, &settings)?;

@@ -59,6 +59,8 @@ clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
 thiserror = "2"
 url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+base64 = "0.22"
 # All descriptor-relative/no-follow workspace file operations (read/write/replace/list/search)
 # go through `openat`; `cap-std` and `rustix` are not direct dependencies.
 openat = "0.1.21"

@@ -2,6 +2,7 @@ mod anthropic_backend;
 pub(crate) mod credentials;
 pub(crate) mod dependencies;
 pub(crate) mod interpret;
+pub(crate) mod local_oauth;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_keychain;
 pub(crate) mod model_registry;
