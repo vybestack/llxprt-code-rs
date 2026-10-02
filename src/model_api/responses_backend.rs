@@ -303,7 +303,6 @@ pub(super) mod tests {
             &serde_json::from_value(serde_json::json!({"model": "loopback-codex", "input": []}))
                 .unwrap(),
         );
-        object.status = serdes_ai_responses::types::ResponseStatus::Completed;
         object.usage = Some(serdes_ai_responses::types::ResponseUsage {
             input_tokens: Some(11),
             output_tokens: Some(7),
@@ -344,6 +343,8 @@ pub(super) mod tests {
                 content: Vec::new(),
             },
         };
+        // The created object is nonterminal; only the final object is completed.
+        object.status = serdes_ai_responses::types::ResponseStatus::Completed;
         let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
             sequence_number: 4,
             response: object,
