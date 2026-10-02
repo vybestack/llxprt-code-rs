@@ -69,9 +69,9 @@ impl Turn<'_> {
         rounds: &[RoundRecord],
         forced: &LlmResult,
     ) -> Result<(), AgentError> {
-        let (calls, refused) = validate_calls(ids, forced, self.allow_shell)
+        let calls = validate_calls(ids, forced)
             .map_err(|error| self.dead(store, reserved, "invalid-tool-call", &error, rounds))?;
-        if !calls.is_empty() || !refused.is_empty() {
+        if !calls.is_empty() {
             return Err(self.dead(
                 store,
                 reserved,

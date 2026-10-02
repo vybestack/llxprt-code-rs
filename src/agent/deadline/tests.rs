@@ -238,3 +238,49 @@ fn provider_timeout_keeps_its_own_failure_instead_of_turn_budget() {
     assert_eq!(error.key, "model");
     assert_eq!(f.active.get(), 0);
 }
+
+#[test]
+fn naming_failure_prefix_survives_cancellation_on_the_same_turn_deadline() {
+    let unknown = ToolCall {
+        name: "run_socket_command".into(),
+        ..list()
+    };
+    let mut f = Fixture::new(
+        vec![reply(6, "naming", vec![unknown]), reply(6, "OK", vec![])],
+        Some(10),
+    );
+    f.assert_timeout(2, 1);
+    let snapshot = f.store.snapshot().unwrap();
+    let record = &snapshot.branches[0].rounds[0].calls[0];
+    assert_eq!(record.name, "run_socket_command");
+    assert_eq!((record.ok, record.refused), (false, false));
+    assert!(record.result.contains("available:"));
+    assert!(record.result_live.is_empty());
+}
+
+#[test]
+fn provider_request_timeout_after_naming_failure_is_not_a_turn_timeout() {
+    let unknown = ToolCall {
+        name: "run_socket_command".into(),
+        ..list()
+    };
+    let mut f = Fixture::new(
+        vec![
+            reply(1, "naming", vec![unknown]),
+            Reply {
+                delay: Duration::from_secs(1),
+                result: Err("responses request exceeded the configured timeout".into()),
+            },
+        ],
+        Some(10),
+    );
+    let error = f.run().unwrap_err();
+    assert_eq!(error.key, "model");
+    assert!(error.message.contains("configured timeout"));
+    assert_eq!(f.agent.model_calls(), 2);
+    assert_eq!(f.active.get(), 0);
+    let snapshot = f.store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Failed);
+    assert_eq!(snapshot.branches[0].rounds.len(), 1);
+    assert!(!snapshot.branches[0].rounds[0].calls[0].refused);
+}
