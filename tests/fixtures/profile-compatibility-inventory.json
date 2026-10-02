@@ -4499,19 +4499,19 @@
       "key": "image-resize.maxLongEdge",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
     },
     {
       "key": "image-resize.maxShortEdge",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
     },
     {
       "key": "image-resize.maxPixels",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
     },
     {
       "key": "max-image-dimension",

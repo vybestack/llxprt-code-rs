@@ -1,15 +1,22 @@
 use super::{AgentError, CodingAgent};
 use crate::adapter::ToolCall;
-use crate::session::{ReservedRequest, RoundRecord, SessionStore, ToolCallRecord};
+use crate::session::{
+    ReservedRequest, RoundRecord, SessionStore, ToolCallRecord, ToolResultProjection,
+};
 
-pub(super) fn tool_call_record(call: &ToolCall, ok: bool, result: String) -> ToolCallRecord {
+pub(super) fn tool_call_record(
+    call: &ToolCall,
+    ok: bool,
+    projection: ToolResultProjection,
+) -> ToolCallRecord {
     ToolCallRecord {
         id: call.id.clone(),
         name: call.name.clone(),
         args: call.args_json.clone(),
         ok,
         refused: false,
-        result,
+        result: projection.persisted,
+        result_live: projection.live,
     }
 }
 
@@ -22,6 +29,9 @@ pub(super) fn refused_call_record(call: &ToolCall, result: String) -> ToolCallRe
         args: call.args_json.clone(),
         ok: false,
         refused: true,
+        // A refusal was never executed, so there is no admitted content at all:
+        // both projections carry the refusal notice (#134).
+        result_live: result.clone(),
         result,
     }
 }
@@ -180,23 +190,6 @@ pub(super) fn refuse_over_budget(
     }
 }
 
-/// The per-turn tool configuration, including the digest admission floor (issue 125).
-pub(super) fn tool_config_with_floor(
-    agent: &CodingAgent,
-    shell_on: bool,
-) -> Result<crate::tools::ToolConfig, String> {
-    Ok(crate::tools::ToolConfig {
-        ws: agent.workspace.try_clone()?,
-        max_output_bytes: agent.output_caps.tool,
-        digest_size_floor: agent.digest_size_floor,
-        shell: crate::tools::ShellConfig {
-            max_shell_output: agent.output_caps.shell,
-            timeouts: agent.shell_timeouts,
-            allow_shell: shell_on,
-        },
-    })
-}
-
 impl CodingAgent {
     /// Sets the digest admission floor (issue 125) the session resolved.
     ///
@@ -304,7 +297,7 @@ mod shell_policy_tests {
         )
         .unwrap();
         agent.shell_timeouts = profile.ephemeral.shell_timeouts;
-        let config = tool_config_with_floor(&agent, true).unwrap();
+        let config = agent.tools_config(true).unwrap();
         assert_eq!(
             config.shell.timeouts.default,
             Some(std::time::Duration::from_secs(2700))

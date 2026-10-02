@@ -3,7 +3,7 @@ use super::*;
 fn run(
     policy: ShellTimeoutPolicy,
     command: &str,
-    requested: Option<u64>,
+    requested: Option<i64>,
 ) -> Result<String, String> {
     let root = tempfile::tempdir().unwrap();
     let mut config = cfg(root.path());
@@ -131,4 +131,23 @@ fn parsed_profile_shell_policy_controls_execution() {
             assert!(result.unwrap_err().contains("timed out"));
         }
     }
+}
+
+#[test]
+fn explicit_unlimited_shell_call_bypasses_default_but_obeys_maximum() {
+    let policy = ShellTimeoutPolicy {
+        default: Some(Duration::from_secs(1)),
+        maximum: None,
+    };
+    assert_eq!(
+        run(policy, "sleep 2; printf explicit", Some(-1)).unwrap(),
+        "explicit"
+    );
+    let capped = ShellTimeoutPolicy {
+        default: None,
+        maximum: Some(Duration::from_secs(1)),
+    };
+    let error = run(capped, "sleep 2", Some(-1)).unwrap_err();
+    assert!(error.contains("timed out"));
+    assert!(error.contains("requested timeout unlimited; effective timeout 1s"));
 }

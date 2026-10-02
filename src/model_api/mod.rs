@@ -5,6 +5,7 @@ pub(crate) mod interpret;
 pub(crate) mod local_oauth;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos_keychain;
+mod model_params;
 pub(crate) mod model_registry;
 pub(crate) mod registry;
 mod responses_backend;

@@ -597,9 +597,9 @@ function buildClassificationTable() {
   add('tool-output-item-size-limit', rej, common, 'rejected');
   add('file-read-max-lines', rej, common, 'rejected');
   add('image-resize.enabled', rej, common, 'rejected image-sizing key');
-  add('image-resize.maxLongEdge', host, common, 'Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject');
-  add('image-resize.maxShortEdge', host, common, 'Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject');
-  add('image-resize.maxPixels', host, common, 'Codex: JSON number owned by the host, typed but inert in Rust; other APIs reject');
+  add('image-resize.maxLongEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
+  add('image-resize.maxShortEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
+  add('image-resize.maxPixels', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
   add('max-image-dimension', rej, common, 'rejected image-sizing key');
   add('max-image-pixels', rej, common, 'rejected image-sizing key');
   add('prompt-caching', meta, resp, 'responses/codex cache mode off|1h|24h; 5m rejects');
@@ -1042,6 +1042,12 @@ function renderMarkdown(artifact) {
     const sources = (e.applicationPaths ?? []).map((a) => a.split('/').pop()).join(', ');
     push(`| \`${e.key}\` | ${e.type ?? 'declared'} | ${(e.aliases ?? []).map((a) => '`' + a + '`').join(', ')} | ${sources} |`);
   }
+  push();
+  push('Shell timeout compatibility: `shell-default-timeout-seconds` and');
+  push('`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to');
+  push('120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy');
+  push('ceiling), and the default may not exceed the maximum. A requested per-call timeout');
+  push('above the configured maximum is clamped and reports its requested and effective values.');
   push();
   push(`## In-scope installed profile disposition (${c.installedInScope} fixtures)`);
   push();

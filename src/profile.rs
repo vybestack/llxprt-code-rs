@@ -47,8 +47,8 @@ pub struct Profile {
     pub(crate) chat_missing_discriminator: Option<String>,
 }
 
-/// Model sampling parameters (the fields the transport can honor) plus keys we know we
-/// cannot apply to the openai chat-completions path.
+/// Parsed model parameters. Applicability is checked for the resolved provider/API
+/// before construction; parsing a typed value does not promise every wire supports it.
 #[derive(Debug, Clone, Default)]
 pub struct ModelParams {
     pub temperature: Option<f64>,
@@ -67,8 +67,8 @@ pub struct ModelParams {
     /// they are forwarded on the provider wire, checked against the model registry,
     /// or refused.
     pub forwarded: BTreeMap<String, serde_json::Value>,
-    /// Recognized keys the chat-completions wire cannot serialize (the max-output
-    /// alias family, `top_k`). Recorded, never silently dropped: every name reaches
+    /// Recognized keys this build does not serialize. Recorded, never silently
+    /// dropped: every name reaches
     /// the operator through the acceptance policy on the `model_api` side.
     pub unsupported: Vec<String>,
 }
@@ -236,6 +236,12 @@ pub enum MaxToolCalls {
 /// nor the profile field declares one (the historical hardcoded 16).
 pub const DEFAULT_CALLS: usize = 16;
 
+/// Default and hard ceiling for a single shell command. The two-hour ceiling matches
+/// the profile task-timeout policy, while keeping every command finite even when a
+/// turn has no wall-clock budget.
+pub const DEFAULT_SHELL_TIMEOUT_SECONDS: u64 = 120;
+pub const MAX_SHELL_TIMEOUT_SECONDS: u64 = 7_200;
+
 impl MaxToolCalls {
     /// Strict parse in the file's sibling-key error style: only a JSON
     /// integer is accepted; 0, out-of-range values, strings, floats, and
@@ -275,6 +281,16 @@ pub fn resolve_max_tool_calls(cli: Option<i64>, profile: MaxToolCalls) -> Option
     }
 }
 
+/// Image preprocessing is owned by the external host: this runtime accepts text/tool
+/// prompts and neither loads images nor resizes them. Preserve the numeric host policy
+/// without projecting it into provider requests or shell execution.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostImageResizeSettings {
+    pub max_long_edge: Option<serde_json::Number>,
+    pub max_short_edge: Option<serde_json::Number>,
+    pub max_pixels: Option<serde_json::Number>,
+}
+
 /// Transport + request settings from a profile's `ephemeralSettings`.
 #[derive(Clone, Default)]
 pub struct EphemeralSettings {
@@ -285,6 +301,7 @@ pub struct EphemeralSettings {
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
     pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
+    pub host_image_resize: HostImageResizeSettings,
     pub max_output_tokens: Option<u64>,
     /// `ephemeralSettings.maxTurnsPerPrompt`: `-1` = unlimited (no round cap), as is an
     /// absent knob; a positive integer caps the rounds.
@@ -296,6 +313,12 @@ pub struct EphemeralSettings {
     /// loop detection is not configurable from a profile.
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
+    /// Non-Codex `shell-default-timeout-seconds`: positive seconds used when a tool call
+    /// omits `timeout_seconds`.
+    pub shell_default_timeout_seconds: Option<u64>,
+    /// Non-Codex `shell-max-timeout-seconds`: positive per-command ceiling. Both shell
+    /// timeout settings are bounded by [`MAX_SHELL_TIMEOUT_SECONDS`].
+    pub shell_max_timeout_seconds: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
     /// final component are never both shown if one of them looks like a key name).
     pub auth_keyfile_orig: Option<String>,
@@ -349,11 +372,17 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("auth_keyfile_orig", &"[redacted keyfile]")
             .field("context_limit", &self.context_limit)
             .field("shell_timeouts", &self.shell_timeouts)
+            .field("host_image_resize", &self.host_image_resize)
             .field("max_output_tokens", &self.max_output_tokens)
             .field("max_turns_per_prompt", &self.max_turns_per_prompt)
             .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)
             .field("loop_detection_enabled", &self.loop_detection_enabled)
             .field("timeout_ms", &self.timeout_ms)
+            .field(
+                "shell_default_timeout_seconds",
+                &self.shell_default_timeout_seconds,
+            )
+            .field("shell_max_timeout_seconds", &self.shell_max_timeout_seconds)
             .field("flags", &self.flags)
             .field("prompt_note_keys", &prompt_note_keys)
             .field("unsupported", &self.unsupported)
@@ -481,6 +510,17 @@ pub fn parse_profile_value(value: &serde_json::Value, name: &str) -> Result<Prof
         openai_responses_settings,
         chat_missing_discriminator,
     } = provider_settings::parse(obj, name, &selection)?;
+    let shell_default = ephemeral
+        .shell_default_timeout_seconds
+        .unwrap_or(DEFAULT_SHELL_TIMEOUT_SECONDS);
+    let shell_max = ephemeral
+        .shell_max_timeout_seconds
+        .unwrap_or(DEFAULT_SHELL_TIMEOUT_SECONDS);
+    if shell_default > shell_max {
+        return Err(format!(
+            "profile {name}: 'shell-default-timeout-seconds' must not exceed 'shell-max-timeout-seconds'"
+        ));
+    }
 
     Ok(Profile {
         name: name.to_string(),

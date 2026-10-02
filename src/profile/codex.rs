@@ -20,6 +20,11 @@ pub(super) fn parse(obj: &Map<String, Value>, name: &str) -> Result<ParsedCodexS
     parse_endpoint(&ephemeral, name, &mut settings)?;
     parse_common(&ephemeral, name, &mut settings)?;
     settings.shell_timeouts = parse_shell_timeouts(&ephemeral, name)?;
+    settings.host_image_resize = super::HostImageResizeSettings {
+        max_long_edge: host_number(&ephemeral, "image-resize.maxLongEdge", name)?,
+        max_short_edge: host_number(&ephemeral, "image-resize.maxShortEdge", name)?,
+        max_pixels: host_number(&ephemeral, "image-resize.maxPixels", name)?,
+    };
     let reasoning_effort = parse_reasoning(&ephemeral, name)?;
     validate_provider_constraints(&ephemeral, name)?;
     reject_unknown_ephemeral(&ephemeral, name)?;
@@ -266,13 +271,7 @@ fn parse_shell_timeouts(
 
 // Image resizing and external task execution belong to the host, not this runtime.
 fn validate_inert_settings(map: &Map<String, Value>, name: &str) -> Result<(), String> {
-    for key in [
-        "task-default-timeout-seconds",
-        "task-max-timeout-seconds",
-        "image-resize.maxLongEdge",
-        "image-resize.maxShortEdge",
-        "image-resize.maxPixels",
-    ] {
+    for key in ["task-default-timeout-seconds", "task-max-timeout-seconds"] {
         validate_host_number(map, key, name)?;
     }
     // There is no separate first-response timer. Only the disabled sentinel is
@@ -407,11 +406,20 @@ fn require_exact_string(
 
 /// Validate the persisted registry type for inert host settings. Their values
 /// never become Rust runtime limits.
-fn validate_host_number(map: &Map<String, Value>, key: &str, name: &str) -> Result<(), String> {
+fn host_number(
+    map: &Map<String, Value>,
+    key: &str,
+    name: &str,
+) -> Result<Option<serde_json::Number>, String> {
     match map.get(key) {
-        None | Some(Value::Number(_)) => Ok(()),
+        None => Ok(None),
+        Some(Value::Number(value)) => Ok(Some(value.clone())),
         Some(_) => Err(format!("profile {name:?}: '{key}' must be a number")),
     }
+}
+
+fn validate_host_number(map: &Map<String, Value>, key: &str, name: &str) -> Result<(), String> {
+    host_number(map, key, name).map(|_| ())
 }
 
 fn optional_exact_u64(

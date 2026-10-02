@@ -8,8 +8,10 @@
 //!
 //! The parity grader re-runs the real build/test commands and runs its own descriptor
 //! relative hidden probes, so a superficially valid run with a fake CLI can never grade
-//! green. The report must record those scenarios failed and the parity binary must exit
-//! nonzero. Nothing here talks to a live endpoint.
+//! green. The fixtures must first pass protocol, structure, and their own deliberately
+//! weak tests; otherwise a broken fixture could satisfy the failure assertions. The
+//! valid starter is a positive control. The report must record the adversarial scenarios
+//! failed and the parity binary must exit nonzero. Nothing here talks to a live endpoint.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -83,15 +85,17 @@ def move_paddle(paddle, dy):
 def point_scored(ball):
     return False
 ''')
-    W('test_pong.py', "import pong_logic
-assert True
-")
-    W('pong.py', "import pong_logic
+    W('test_pong.py', '''import pong_logic
+assert pong_logic.move_ball((1, 2), (1, 1)) == (1, 2)
+assert pong_logic.bounce((1, 1), 0) == (1, 1)
+assert pong_logic.move_paddle(0, 10) == 0
+assert pong_logic.point_scored((-1, 0)) is False
+''')
+    W('pong.py', '''import pong_logic
 print('PONG', pong_logic.move_ball((1, 2), (1, 1)))
-")
+''')
 elif 'flappy' in lp and 'filecrypt' not in lp:
-    W('flappy_logic.py', '''random_marker = 1
-GRAV = 1.0
+    W('flappy_logic.py', '''GRAV = 1.0
 FLAP_VY = -8.0
 BIRD_R = 8.0
 PIPE_W = 60.0
@@ -111,21 +115,30 @@ def passed(bird, pipe):
 def score(bird, pipes):
     return 0
 ''')
-    W('test_flappy.py', "import flappy_logic
-assert True
-")
-    W('flappy.py', "import flappy_logic
+    W('test_flappy.py', '''import flappy_logic
+bird = (100, 200, 0)
+pipes = [(100, 50, 150)]
+assert flappy_logic.update_bird(bird) == bird
+assert flappy_logic.flap(bird) == bird
+assert flappy_logic.collides(bird, pipes) is False
+assert flappy_logic.passed(bird, pipes[0]) is False
+assert flappy_logic.score(bird, pipes) == 0
+''')
+    W('flappy.py', '''import flappy_logic
 print('FLAPPY', flappy_logic.score((100, 200, 0), [(400, 50, 250)]))
-")
-else:
-    W('Cargo.toml', '[package]
+''')
+elif 'filecrypt' in lp:
+    # Keep Cargo inside this fixture even when TMPDIR is under a Rust workspace.
+    W('Cargo.toml', '''[package]
 name = "filecrypt"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 # aes-gcm = "0.10"
-')
+
+[workspace]
+''')
     os.makedirs(os.path.join(cwd_name, 'src'), exist_ok=True)
     W('src/lib.rs', '''pub fn encrypt(_password: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
     Ok(plaintext.to_vec())
@@ -138,10 +151,18 @@ pub fn decrypt(_password: &str, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
     W('tests/roundtrip.rs', '''use filecrypt::{encrypt, decrypt};
 #[test]
 fn identity_smoke() {
-    let _ = encrypt("k", b"x");
-    let _ = decrypt("k", b"x");
+    assert_eq!(encrypt("k", b"x").unwrap(), b"x");
+    assert_eq!(decrypt("wrong", b"x").unwrap(), b"x");
 }
 ''')
+elif 'math_utils.py' in lp:
+    W('math_utils.py', 'def add(a, b): return a + b\n')
+    W('test_math_utils.py', 'from math_utils import add\nassert add(2, 3) == 5\n')
+elif 'double.py' in lp:
+    W('double.py', 'def double(n): return n * 2\n')
+    W('test_double.py', 'from double import double\nassert double(21) == 42\n')
+else:
+    raise ValueError('unrecognized parity scenario prompt: ' + repr(prompt))
 
 print(json.dumps({
     "session_id": session,
@@ -167,6 +188,17 @@ fn install_fake_cli(dir: &Path) -> PathBuf {
     let bin = dir.join("fake-cli");
     let script = dir.join("fake_cli.py");
     std::fs::write(&script, FAKE_CLI).unwrap();
+    let syntax = Command::new("python3")
+        .arg("-m")
+        .arg("py_compile")
+        .arg(&script)
+        .output()
+        .expect("run Python fixture syntax check");
+    assert!(
+        syntax.status.success(),
+        "fake CLI fixture must parse before adverse behavior is exercised: {}",
+        String::from_utf8_lossy(&syntax.stderr)
+    );
     let launcher = format!("#!/bin/sh\nexec python3 '{}' \"$@\"\n", script.display());
     std::fs::write(&bin, launcher).unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -179,7 +211,8 @@ fn install_fake_cli(dir: &Path) -> PathBuf {
 /// The black-box `--all` adversarial fixture: with the fake CLI producing superficially
 /// valid outputs but a Pong stub, a Flappy identity/no-collision core, and identity
 /// encryption, the parity report must record every adversarial scenario failed and the
-/// binary must exit nonzero.
+/// binary must exit nonzero. The starter succeeds as a positive control; all three
+/// adversarial workspaces must pass protocol, structural, and ordinary test checks.
 #[test]
 #[cfg(unix)]
 fn adversarial_fake_cli_all_report_fails_and_exits_nonzero() {
@@ -193,14 +226,14 @@ fn adversarial_fake_cli_all_report_fails_and_exits_nonzero() {
         .arg(d.path().join("out"))
         .output()
         .unwrap();
-    assert_ne!(
+    assert_eq!(
         out.status.code(),
-        Some(0),
+        Some(1),
         "an adversarial --all run must exit nonzero"
     );
     let report: Value = serde_json::from_slice(&out.stdout)
         .unwrap_or_else(|e| panic!("report is one JSON object on stdout: {e}"));
-    let scenarios = report["scenarios"].as_array().expect("absences scenarios");
+    let scenarios = report["scenarios"].as_array().expect("report scenarios");
     let find = |name: &str| {
         scenarios
             .iter()
@@ -208,19 +241,48 @@ fn adversarial_fake_cli_all_report_fails_and_exits_nonzero() {
             .unwrap_or_else(|| panic!("scenario {name} missing from report"))
     };
 
-    let pong = find("pong");
+    assert_eq!(scenarios.len(), 4, "--all must run all four scenarios");
+    let starter = find("starter");
     assert_eq!(
-        pong["question"]["passed"], false,
-        "the Pong identity stub must fail: {pong}"
+        starter["question"]["passed"], true,
+        "the valid starter is a positive control: {starter}"
     );
-    let flappy = find("flappy");
-    assert_eq!(
-        flappy["question"]["passed"], false,
-        "the Flappy identity/no-collision must fail: {flappy}"
-    );
-    let enc = find("encryption");
-    assert_eq!(
-        enc["question"]["passed"], false,
-        "identity encryption must fail: {enc}"
-    );
+
+    // Pong/Flappy reach behavioral probes. Identity encryption is rejected before
+    // the consumer runs: a commented dependency is not an established crypto crate.
+    for (name, hidden_check) in [
+        ("pong", "pong-behavior-contract"),
+        ("flappy", "flappy-behavior-contract"),
+        ("encryption", "encryption-consumer-green"),
+    ] {
+        let scenario = find(name);
+        // A broken launcher, missing artifact, or syntax error must not masquerade
+        // as evidence that the hidden grader rejected the deliberately wrong logic.
+        for score in ["protocol", "tool_use", "build_test", "structural"] {
+            assert_eq!(
+                scenario["scores"][score], 1.0,
+                "{name} must pass {score} before adversarial grading: {scenario}"
+            );
+        }
+        let verifications = scenario["verifications"].as_array().unwrap();
+        assert!(
+            !verifications.is_empty(),
+            "{name} must run real verification"
+        );
+        for verification in verifications {
+            assert_eq!(verification["passed"], true, "{name}: {verification}");
+        }
+        let hidden = scenario["hidden_graders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["check"] == hidden_check)
+            .unwrap_or_else(|| panic!("missing {hidden_check}: {scenario}"));
+        assert_eq!(
+            hidden["passed"], false,
+            "{name}'s identity stub must fail {hidden_check}: {scenario}"
+        );
+        assert_eq!(scenario["hidden_graders_pass"], false, "{scenario}");
+        assert_eq!(scenario["question"]["passed"], false, "{scenario}");
+    }
 }

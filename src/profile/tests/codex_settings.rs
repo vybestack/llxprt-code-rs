@@ -109,8 +109,16 @@ fn astramedium_host_settings_are_typed_inert_values() {
     }
     let omitted = parse_profile_value(&without_host, "astramedium").unwrap();
     assert_eq!(
-        format!("{:?}", profile.ephemeral),
-        format!("{:?}", omitted.ephemeral)
+        omitted.ephemeral.host_image_resize,
+        super::super::HostImageResizeSettings::default()
+    );
+    assert_eq!(
+        profile.ephemeral.shell_timeouts,
+        omitted.ephemeral.shell_timeouts
+    );
+    assert_eq!(
+        profile.ephemeral.context_limit,
+        omitted.ephemeral.context_limit
     );
     assert_eq!(
         format!("{:?}", profile.model_params),
@@ -175,5 +183,44 @@ fn astramedium_shell_policy_is_preserved_and_validated() {
             .ephemeral
             .shell_timeouts,
         crate::tools::ShellTimeoutPolicy::default()
+    );
+}
+
+#[test]
+fn image_host_settings_are_retained_without_provider_projection() {
+    let value = astra();
+    let profile = parse_profile_value(&value, "astramedium").unwrap();
+    assert_eq!(
+        profile
+            .ephemeral
+            .host_image_resize
+            .max_long_edge
+            .as_ref()
+            .unwrap(),
+        value["ephemeralSettings"]["image-resize.maxLongEdge"]
+            .as_number()
+            .unwrap()
+    );
+    assert_eq!(
+        profile
+            .ephemeral
+            .host_image_resize
+            .max_short_edge
+            .as_ref()
+            .unwrap(),
+        value["ephemeralSettings"]["image-resize.maxShortEdge"]
+            .as_number()
+            .unwrap()
+    );
+    assert_eq!(
+        profile
+            .ephemeral
+            .host_image_resize
+            .max_pixels
+            .as_ref()
+            .unwrap(),
+        value["ephemeralSettings"]["image-resize.maxPixels"]
+            .as_number()
+            .unwrap()
     );
 }

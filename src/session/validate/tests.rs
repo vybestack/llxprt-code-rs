@@ -26,6 +26,7 @@ fn valid_state() -> SessionState {
                         args: "{}".to_string(),
                         ok: true,
                         result: String::new(),
+                        result_live: String::new(),
                         refused: false,
                     }],
                 },
@@ -137,6 +138,7 @@ fn refused_calls_never_count_as_executed() {
                 ok: false,
                 refused: false,
                 result: String::new(),
+                result_live: String::new(),
             }],
         })
         .collect();

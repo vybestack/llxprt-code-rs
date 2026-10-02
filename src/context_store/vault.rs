@@ -67,8 +67,9 @@ impl Vault {
     ///
     /// The nonce prefix is drawn straight from the OS entropy pool
     /// (`/dev/urandom`, via os_entropy_u64), so two processes that share
-    /// key material never reuse a nonce even after a restart (the slot counter
-    /// restarts at zero, the prefix does not). Deterministic tests open with
+    /// key material get independent 32-bit prefixes after a restart. Prefix
+    /// collisions remain possible (probability 2^-32 for two independent draws);
+    /// this is not a guarantee of nonce uniqueness across processes. Tests open with
     /// [`Vault::open_with_prefix`], so the test plane keeps its injected
     /// prefixes while the production path draws from the OS.
     pub fn open(key: &VaultKey) -> Self {
@@ -87,8 +88,8 @@ impl Vault {
     }
 
     /// Seals `raw` and returns its handle. Nonces mix the per-process random
-    /// prefix with the slot number, so sealing never repeats a nonce under a
-    /// fixed key; handles never repeat.
+    /// prefix with the slot number, so seals in this vault have distinct nonces
+    /// and handles until the slot counter is exhausted.
     pub fn put(&mut self, raw: &[u8], reason: &str) -> Result<String, VaultError> {
         let slot = self.next;
         self.next += 1;
@@ -196,8 +197,8 @@ impl Vault {
     /// the length the AEAD in use requires), the slot counter advances past
     /// every recorded handle, and the nonce prefix is replaced by a fresh
     /// per-process draw. Restored handles read back unchanged, but every new
-    /// seal after a restart mixes a prefix the previous process never used,
-    /// so a nonce is never reused under one key (issue #101).
+    /// seal after a restart mixes a newly drawn prefix, which can collide with
+    /// a previous prefix; cross-process uniqueness is probabilistic (issue #101).
     pub fn restore(&mut self, snapshot: VaultSnapshot) -> Result<(), VaultError> {
         let mut slots = HashMap::new();
         // Floor the slot counter at one past the highest embedded slot
@@ -288,8 +289,8 @@ pub struct VaultSlotSnapshot {
 /// Deterministic serialized vault state, including the slot counter.
 ///
 /// `nonce_prefix` is the per-process random prefix mixed into every nonce, so
-/// a snapshot taken after a restart can prove the prefix changed (nonce reuse
-/// under one key is impossible across processes).
+/// snapshots expose the prefix chosen by each open or restore. Independent
+/// 32-bit draws can collide; cross-process nonce uniqueness is not guaranteed.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultSnapshot {
     pub nonce_prefix: u32,

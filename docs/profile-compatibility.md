@@ -53,8 +53,9 @@ summary `auto`. Disabled reasoning still requires effort and summary to be omitt
 
 The current `astramedium` shape includes host image-resize settings.
 `image-resize.maxLongEdge`, `image-resize.maxShortEdge`, and `image-resize.maxPixels`
-accept JSON numbers as inert host data: this runtime has no image-input/resizing
-pipeline. Non-numeric values reject.
+accept JSON numbers retained in `HostImageResizeSettings` as external-host data:
+this runtime accepts text/tool prompts and has no image-input/resizing pipeline,
+so these settings are not projected into provider requests. Non-numeric values reject.
 
 `shell-default-timeout-seconds` and `shell-max-timeout-seconds` govern this runtime's
 `run_shell_command` executor (still gated by `--allow-shell`). Each accepts integer
@@ -222,6 +223,12 @@ Duplicate definitions:
 | `stream-idle-timeout-ms` | number |  | registry-entries-3.ts |
 | `stream-first-response-timeout-ms` | number |  | registry-entries-3.ts |
 | `kimi.experimental-video` | boolean |  | registry-entries-3.ts |
+
+Shell timeout compatibility: `shell-default-timeout-seconds` and
+`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to
+120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy
+ceiling), and the default may not exceed the maximum. A requested per-call timeout
+above the configured maximum is clamped and reports its requested and effective values.
 
 ## In-scope installed profile disposition (46 fixtures)
 

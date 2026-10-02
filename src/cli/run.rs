@@ -137,7 +137,24 @@ fn build_agent(
     let turn_time = settings.budgets.turn_time.value;
     let mut agent = CodingAgent::new_with_backend(constructed.backend, cwd, args.allow_shell)
         .map_err(|error| AppError::new(error.code, error.key, error.message))?;
-    agent.shell_timeouts = profile.ephemeral.shell_timeouts;
+    agent.shell_timeouts = if profile.provider == "codex" {
+        profile.ephemeral.shell_timeouts
+    } else {
+        crate::tools::ShellTimeoutPolicy {
+            default: Some(std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_default_timeout_seconds
+                    .unwrap_or(crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS),
+            )),
+            maximum: Some(std::time::Duration::from_secs(
+                profile
+                    .ephemeral
+                    .shell_max_timeout_seconds
+                    .unwrap_or(crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS),
+            )),
+        }
+    };
     agent = agent
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)

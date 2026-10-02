@@ -51,6 +51,7 @@ pub use request_budget::{
 pub(crate) mod malformed_tool_call;
 mod memory;
 mod request_budget;
+mod summary;
 mod tool_round;
 mod tool_validation;
 pub use crate::tools::known_tool;
@@ -111,6 +112,8 @@ pub struct CodingAgent {
     /// Wall-clock budget for one prompt turn. `None` (the default) means no
     /// time limit; set from the CLI `--turn-time` flag.
     turn_time_budget: Option<std::time::Duration>,
+    /// Resolved shell timeout policy from the profile. Every command receives the
+    /// configured default and remains capped by the finite configured maximum.
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
@@ -258,44 +261,6 @@ impl CodingAgent {
             context_limit: None,
             profiler: None,
         }
-    }
-
-    /// Override the agent's conservative per-request context budget (tests drive budget
-    /// enforcement with an explicit token budget instead of a profile).
-    pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {
-        self.context_limit = context_limit;
-        self
-    }
-
-    /// Override the per-turn round cap (tests drive round-cap enforcement with explicit
-    /// budgets instead of the uncapped default).
-    pub fn with_max_rounds(mut self, max_rounds: usize) -> CodingAgent {
-        self.max_rounds = max_rounds;
-        self
-    }
-
-    /// Override the resolved per-prompt tool-call budget (`None` = unlimited).
-    pub fn with_max_tool_calls(mut self, max_tool_calls: Option<usize>) -> CodingAgent {
-        self.max_tool_calls = max_tool_calls;
-        self
-    }
-
-    /// Override the wall-clock turn budget (`None` = no time limit).
-    pub fn with_turn_time(mut self, budget: Option<std::time::Duration>) -> CodingAgent {
-        self.turn_time_budget = budget;
-        self
-    }
-
-    /// Override the resolved output caps (issue 77): per-result shell/tool caps and the
-    /// aggregate per-turn tool-output bound enforced by the turn loop.
-    pub fn with_output_caps(mut self, caps: OutputCaps) -> CodingAgent {
-        self.output_caps = caps;
-        self
-    }
-
-    /// The resolved output caps this agent enforces.
-    pub fn output_caps(&self) -> OutputCaps {
-        self.output_caps
     }
 
     /// Override the outbound model-request timeout (`None` = backend default).
@@ -533,17 +498,26 @@ impl Turn<'_> {
         } else {
             format!("{text}\n\n{notice}")
         };
-        // Pre-entry compaction (#39): a bulk tool result is digested before it joins the
-        // request list and the round, so neither the next provider request nor the
-        // checkpointed transcript ever carries raw bulk bytes.
-        let text = store
+        // Pre-entry compaction (#39): a bulk tool result is admitted before it joins
+        // the request list and the round, so neither the next provider request nor
+        // the checkpointed transcript ever carries raw bulk bytes. The same ingress
+        // record yields two projections (#66): the live sanitized admitted content
+        // the provider sees and the turn budget charges, and the compact persisted
+        // representation the round and checkpoint keep.
+        let projection = store
             .compact_tool_result(&call.name, &text)
             .map_err(|error| ToolCallFailure::Invalid(error.to_string()))?;
-        attempt.usage.output_bytes = attempt.usage.output_bytes.saturating_add(text.len());
-        attempt
-            .requests
-            .push(tool_return_request(&call.name, &call.id, ok, &text));
-        round.calls.push(tool_call_record(call, ok, text));
+        attempt.usage.output_bytes = attempt
+            .usage
+            .output_bytes
+            .saturating_add(projection.live.len());
+        attempt.requests.push(tool_return_request(
+            &call.name,
+            &call.id,
+            ok,
+            &projection.live,
+        ));
+        round.calls.push(tool_call_record(call, ok, projection));
         Ok(())
     }
 
@@ -643,105 +617,6 @@ impl Turn<'_> {
             reserved,
             rounds,
         )
-    }
-
-    fn resolve_summary(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        tools: &[crate::tools::ToolSpec],
-        attempt: &mut AttemptState,
-    ) -> Result<String, AgentError> {
-        if !attempt.current.text.trim().is_empty() {
-            self.check_round_limit(store, reserved, &attempt.rounds)?;
-            if let Some((_, message)) = malformed_tool_call::classify(
-                &attempt.current.text,
-                attempt.current.calls.len(),
-                self.allow_shell,
-            ) {
-                // A reply that looks like a tool call but parses to none is a collapsed
-                // turn, not a finished one: persist it as a terminal failure so the
-                // session keeps the rounds and the CLI keeps the nonzero exit.
-                // The collapsed turn keeps its typed failure; the verdict rides the error.
-                let mut error = self.dead(
-                    store,
-                    reserved,
-                    MALFORMED_TOOL_CALL_KEY,
-                    &message,
-                    &attempt.rounds,
-                );
-                if error.key == MALFORMED_TOOL_CALL_KEY {
-                    error.terminal_outcome = Some(MALFORMED_TOOL_CALL_KEY);
-                }
-                return Err(error);
-            }
-            return Ok(std::mem::take(&mut attempt.current.text));
-        }
-        self.forced_summary(store, reserved, tools, attempt)
-    }
-
-    fn forced_summary(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        tools: &[crate::tools::ToolSpec],
-        attempt: &mut AttemptState,
-    ) -> Result<String, AgentError> {
-        self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        attempt.requests.push(assistant_request(&attempt.current));
-        attempt.requests.push(final_summary_request());
-        self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
-        let forced =
-            self.run_final_round(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
-        self.validate_forced_summary(store, reserved, &mut attempt.ids, &attempt.rounds, &forced)?;
-        attempt.usage.assistant_bytes = attempt
-            .usage
-            .assistant_bytes
-            .saturating_add(forced.text.len());
-        self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_round_limit(store, reserved, &attempt.rounds)?;
-        Ok(forced.text)
-    }
-
-    fn validate_forced_summary(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        ids: &mut std::collections::HashSet<String>,
-        rounds: &[RoundRecord],
-        forced: &LlmResult,
-    ) -> Result<(), AgentError> {
-        let (calls, refused) = validate_calls(ids, forced, self.allow_shell)
-            .map_err(|error| self.dead(store, reserved, "invalid-tool-call", &error, rounds))?;
-        if !calls.is_empty() || !refused.is_empty() {
-            return Err(self.dead(
-                store,
-                reserved,
-                "invalid-tool-call",
-                "final summary round asked for tools again; giving up",
-                rounds,
-            ));
-        }
-        finish_check(forced)
-            .map_err(|error| self.dead(store, reserved, "finish-reason", &error, rounds))?;
-        if forced.text.trim().is_empty() {
-            return Err(self.dead(
-                store,
-                reserved,
-                "empty-final-output",
-                "no summary text from the model",
-                rounds,
-            ));
-        }
-        // The forced summary is the reply of record for a collapsed turn, so the same
-        // malformed-tool-call detector as the normal round applies: a summary that
-        // answers with invoke markup is a failed turn, not a finished one.
-        if let Some((_, message)) =
-            malformed_tool_call::classify(&forced.text, forced.calls.len(), self.allow_shell)
-        {
-            return Err(self.dead(store, reserved, MALFORMED_TOOL_CALL_KEY, &message, rounds));
-        }
-        Ok(())
     }
 
     fn complete_attempt(
@@ -881,10 +756,14 @@ impl Turn<'_> {
                 .map(|round| round.assistant.len())
                 .sum(),
             args_bytes: 0,
+            // Forced-summary reconstruction (#66): the unit is what the request
+            // list actually carries, which is the live projection of each call,
+            // so the reconstructed cap matches the live bytes charged while the
+            // rounds were executed.
             output_bytes: persisted_rounds
                 .iter()
                 .flat_map(|round| &round.calls)
-                .map(|call| call.result.len())
+                .map(|call| call.result_live.len())
                 .sum(),
             total_calls: persisted_rounds.iter().map(|round| round.calls.len()).sum(),
         };
@@ -900,10 +779,6 @@ impl Turn<'_> {
             .map_err(|failure| self.round_failure(store, reserved, failure, persisted_rounds))?;
         self.renew(store, reserved)?;
         Ok(r)
-    }
-
-    fn tools_config(&self, shell_on: bool) -> Result<crate::tools::ToolConfig, String> {
-        helpers::tool_config_with_floor(self, shell_on)
     }
 }
 
