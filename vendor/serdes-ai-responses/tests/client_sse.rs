@@ -9,6 +9,13 @@ use serdes_ai_responses::client::OpenResponsesModel;
 use serdes_ai_responses::types::{ErrorBodyRef, ResponseObject, ResponseStatus, StreamEvent};
 use std::io::{Read, Write};
 
+// These clients only talk to the in-process loopback fixture. Do not inherit
+// CI's off-box proxy blackhole (or a developer's proxy) for that connection.
+fn fixture_model(port: u16) -> OpenResponsesModel {
+    OpenResponsesModel::new("fixture", format!("http://127.0.0.1:{port}/responses"))
+        .with_http_client(reqwest::Client::builder().no_proxy().build().unwrap())
+}
+
 fn serve(body: Vec<u8>) -> (OpenResponsesModel, std::thread::JoinHandle<()>) {
     serve_http(body, true, 0)
 }
@@ -55,7 +62,7 @@ fn serve_http(
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     });
-    let model = OpenResponsesModel::new("fixture", format!("http://127.0.0.1:{port}/responses"));
+    let model = fixture_model(port);
     (if codex { model.codex_http() } else { model }, server)
 }
 
@@ -174,11 +181,7 @@ fn stalled_server_with_prefix(prefix: String) -> (OpenResponsesModel, std::threa
         listener.set_nonblocking(true).unwrap();
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     });
-    (
-        OpenResponsesModel::new("fixture", format!("http://127.0.0.1:{port}/responses"))
-            .codex_http(),
-        server,
-    )
+    (fixture_model(port).codex_http(), server)
 }
 
 #[tokio::test]
@@ -227,8 +230,7 @@ async fn interrupted_body_is_terminal_nonretryable_not_partial_success() {
         assert!(socket.read(&mut buffer).unwrap() > 0);
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 999\r\nConnection: close\r\n\r\ndata: {\"type\":\"keepalive\"}\n\n").unwrap();
     });
-    let model = OpenResponsesModel::new("fixture", format!("http://127.0.0.1:{port}/responses"))
-        .codex_http();
+    let model = fixture_model(port).codex_http();
     let error = model
         .request(
             &[ModelRequest::default()],
@@ -387,6 +389,7 @@ async fn public_stream_deadline_after_terminal_is_only_error() {
     let (model, server) = stalled_server_with_prefix(progress() + &terminal(false));
     let model = model.with_http_client(
         reqwest::Client::builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_millis(300))
             .build()
             .unwrap(),
