@@ -10,30 +10,38 @@ impl Turn<'_> {
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
-        if !attempt.current.text.trim().is_empty() {
-            self.check_round_limit(store, reserved, &attempt.rounds)?;
-            if let Some((_, message)) = malformed_tool_call::classify(
-                &attempt.current.text,
-                attempt.current.calls.len(),
-                self.allow_shell,
-            ) {
-                // A reply that looks like a tool call but parses to none is a collapsed
-                // turn, not a finished one: persist it as a terminal failure so the
-                // session keeps the rounds and the CLI keeps the nonzero exit.
-                // The collapsed turn keeps its typed failure; the verdict rides the error.
-                let mut error = self.dead(
-                    store,
-                    reserved,
-                    MALFORMED_TOOL_CALL_KEY,
-                    &message,
-                    &attempt.rounds,
-                );
-                if error.key == MALFORMED_TOOL_CALL_KEY {
-                    error.terminal_outcome = Some(MALFORMED_TOOL_CALL_KEY);
+        if let Some(current) = attempt.current.take() {
+            // The loop only leaves an unassembled reply when it has no tool calls.
+            // A consumed/truncated tool reply (including its preamble) lives in requests,
+            // and must receive a final follow-up over the actual admitted results.
+            debug_assert!(current.calls.is_empty());
+            if !current.text.trim().is_empty() {
+                self.check_round_limit(store, reserved, &attempt.rounds)?;
+                if let Some((_, message)) = malformed_tool_call::classify(
+                    &current.text,
+                    current.calls.len(),
+                    self.allow_shell,
+                ) {
+                    // A reply that looks like a tool call but parses to none is a collapsed
+                    // turn, not a finished one: persist it as a terminal failure so the
+                    // session keeps the rounds and the CLI keeps the nonzero exit.
+                    // The collapsed turn keeps its typed failure; the verdict rides the error.
+                    let mut error = self.dead(
+                        store,
+                        reserved,
+                        MALFORMED_TOOL_CALL_KEY,
+                        &message,
+                        &attempt.rounds,
+                    );
+                    if error.key == MALFORMED_TOOL_CALL_KEY {
+                        error.terminal_outcome = Some(MALFORMED_TOOL_CALL_KEY);
+                    }
+                    return Err(error);
                 }
-                return Err(error);
+                return Ok(current.text);
             }
-            return Ok(std::mem::take(&mut attempt.current.text));
+            // Ordinary empty no-tool replies have not yet joined the outgoing requests.
+            attempt.requests.push(assistant_request(&current));
         }
         self.forced_summary(store, reserved, tools, attempt)
     }
@@ -46,7 +54,6 @@ impl Turn<'_> {
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        attempt.requests.push(assistant_request(&attempt.current));
         attempt.requests.push(final_summary_request());
         self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
         let forced =

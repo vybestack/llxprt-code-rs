@@ -260,7 +260,7 @@ fn naming_failures_obey_existing_round_and_time_limits() {
         .unwrap();
     turn.execute_tool_round(&store, &reserved, &config, &mut attempt)
         .unwrap();
-    attempt.current = reply(vec![call("two", "run_socket_command")]);
+    attempt.current = Some(reply(vec![call("two", "run_socket_command")]));
     // Expire the shared turn deadline without sleeping or changing request timeouts.
     turn.deadline = Some(tokio::time::Instant::now() - std::time::Duration::from_secs(2));
     assert_eq!(

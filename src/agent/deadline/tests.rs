@@ -285,3 +285,35 @@ fn provider_request_timeout_after_naming_failure_is_not_a_turn_timeout() {
     assert_eq!(snapshot.branches[0].rounds.len(), 1);
     assert!(!snapshot.branches[0].rounds[0].calls[0].refused);
 }
+
+#[test]
+fn truncated_tool_preamble_summary_cancels_on_the_shared_deadline() {
+    let unknown = ToolCall {
+        id: "unknown".into(),
+        name: "run_socket_command".into(),
+        args_json: "{}".into(),
+    };
+    let write = ToolCall {
+        id: "write".into(),
+        name: "write_file".into(),
+        args_json: r#"{"path":"must-not-exist","content":"bad"}"#.into(),
+    };
+    let mut f = Fixture::new(
+        vec![
+            reply(6, "Working on it", vec![unknown, write]),
+            reply(6, "Final answer", vec![]),
+        ],
+        Some(10),
+    );
+    f.agent = f.agent.with_max_tool_calls(Some(1));
+    f.assert_timeout(2, 1);
+    assert!(!f._root.path().join("must-not-exist").exists());
+    assert_eq!(f.active.get(), 0, "final request future was dropped");
+    let snapshot = f.store.snapshot().unwrap();
+    let calls = &snapshot.branches[0].rounds[0].calls;
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[0].ok);
+    assert!(!calls[0].refused);
+    assert!(!calls[1].ok);
+    assert!(calls[1].refused);
+}

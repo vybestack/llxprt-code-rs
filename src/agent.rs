@@ -159,7 +159,9 @@ struct TurnUsage {
 struct AttemptState {
     requests: Vec<serdes_ai::core::ModelRequest>,
     rounds: Vec<RoundRecord>,
-    current: LlmResult,
+    // Some is the unassembled provider reply. Taking it transfers ownership to requests;
+    // None means the answered tool batch is already assembled (including refusals).
+    current: Option<LlmResult>,
     ids: std::collections::HashSet<String>,
     usage: TurnUsage,
     budget_exhausted: bool,
@@ -427,7 +429,7 @@ impl Turn<'_> {
         Ok(AttemptState {
             requests,
             rounds: Vec::new(),
-            current,
+            current: Some(current),
             ids: std::collections::HashSet::new(),
             usage,
             budget_exhausted: false,
@@ -442,7 +444,11 @@ impl Turn<'_> {
         config: &crate::tools::ToolConfig,
         attempt: &mut AttemptState,
     ) -> Result<(), AgentError> {
-        while !attempt.current.calls.is_empty() {
+        while attempt
+            .current
+            .as_ref()
+            .is_some_and(|reply| !reply.calls.is_empty())
+        {
             if self.execute_tool_round(store, reserved, config, attempt)? {
                 // The budget truncated this round; no more exploration. The
                 // loop exit resolves the forced summary from here.
@@ -556,19 +562,21 @@ impl Turn<'_> {
             &attempt.rounds,
         )?;
         self.renew(store, reserved)?;
-        attempt.current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
+        let current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
         self.renew(store, reserved)?;
         attempt.usage.assistant_bytes = attempt
             .usage
             .assistant_bytes
-            .saturating_add(attempt.current.text.len());
+            .saturating_add(current.text.len());
         attempt.usage.args_bytes = attempt
             .usage
             .args_bytes
-            .saturating_add(turn_args_bytes(&attempt.current));
+            .saturating_add(turn_args_bytes(&current));
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)?;
-        self.emit_response(store, reserved, &attempt.rounds, &attempt.current)
+        self.check_finish(store, reserved, &current, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &current)?;
+        attempt.current = Some(current);
+        Ok(())
     }
 
     fn check_request_budget(

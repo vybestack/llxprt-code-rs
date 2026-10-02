@@ -10,7 +10,11 @@ impl super::Turn<'_> {
     ) -> Result<bool, AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
         self.check_time_limit(store, reserved, &attempt.rounds)?;
-        let mut calls = validate_calls(&mut attempt.ids, &attempt.current).map_err(|error| {
+        let current = attempt
+            .current
+            .take()
+            .expect("tool round owns an unassembled reply");
+        let mut calls = validate_calls(&mut attempt.ids, &current).map_err(|error| {
             self.dead(
                 store,
                 reserved,
@@ -19,7 +23,7 @@ impl super::Turn<'_> {
                 &attempt.rounds,
             )
         })?;
-        attempt.requests.push(assistant_request(&attempt.current));
+        attempt.requests.push(assistant_request(&current));
         // Enforce the tool-call budget by executing only what fits: the model
         // gets explicit refusals for the rest, and the turn resolves through a
         // forced summary instead of dying mid-work.
@@ -29,7 +33,7 @@ impl super::Turn<'_> {
             attempt.budget_exhausted = true;
         }
         let mut round = RoundRecord {
-            assistant: attempt.current.text.clone(),
+            assistant: current.text,
             calls: Vec::new(),
         };
         self.execute_calls(config, attempt, &mut round, &calls, store, reserved)?;
@@ -196,13 +200,13 @@ mod tests {
         let mut attempt = AttemptState {
             requests: Vec::new(),
             rounds: Vec::new(),
-            current: LlmResult {
+            current: Some(LlmResult {
                 thinking: String::new(),
                 text: "working".into(),
                 calls: vec![],
                 finish_reason: None,
                 usage: Default::default(),
-            },
+            }),
             ids: Default::default(),
             usage: TurnUsage {
                 assistant_bytes: 0,
