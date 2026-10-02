@@ -24,6 +24,10 @@ pub struct CreateResponseRequest {
     /// routing.
     pub model: String,
 
+    /// Session identity for prompt-cache routing on stateless HTTP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+
     /// Conversation input: a plain string or a list of input items.
     #[serde(default)]
     pub input: ResponseInput,
@@ -650,9 +654,20 @@ pub struct IncompleteDetails {
     pub reason: String,
 }
 
+/// Input token detail accounting reported by Responses providers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputTokensDetails {
+    /// Cache reads, absent rather than zero if omitted by the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u64>,
+}
+
 /// Token usage reported on a response.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponseUsage {
+    /// Provider-reported input cache details, absent when not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens_details: Option<InputTokensDetails>,
     /// Input (prompt) tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
@@ -1133,6 +1148,7 @@ mod tests {
                 "gpt-4o",
                 &CreateResponseRequest {
                     model: "gpt-4o".into(),
+                    prompt_cache_key: None,
                     input: ResponseInput::Text("".into()),
                     instructions: None,
                     tools: None,

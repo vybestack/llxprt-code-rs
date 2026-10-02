@@ -294,6 +294,8 @@ pub struct HostImageResizeSettings {
 /// Transport + request settings from a profile's `ephemeralSettings`.
 #[derive(Clone, Default)]
 pub struct EphemeralSettings {
+    /// Session prompt-cache routing, enabled when absent.
+    pub prompt_caching: Option<provider_settings::PromptCachingSetting>,
     pub base_url: Option<RedactedUrl>,
     /// Redacted keyfile rendering (basename only) for `Debug`/errors.
     pub auth_keyfile: Option<String>,

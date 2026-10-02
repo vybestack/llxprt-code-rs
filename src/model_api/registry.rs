@@ -39,9 +39,10 @@ pub(crate) fn construct_backend(
         .iter()
         .find(|registration| registration.target == resolved.target)
         .ok_or_else(|| "selected model API is not registered".to_string())?;
-    match registration.constructor {
+    let mut constructed = match registration.constructor {
         ConstructorKind::OpenAiChat => construct_chat(
             profile,
+            session_id,
             dependencies,
             profile_from_file,
             allow_insecure_http,
@@ -61,8 +62,20 @@ pub(crate) fn construct_backend(
             profile_from_file,
             allow_insecure_http,
         ),
-        ConstructorKind::CodexResponses => construct_codex(profile, &resolved, dependencies),
-    }
+        ConstructorKind::CodexResponses => {
+            construct_codex(profile, &resolved, session_id, dependencies)
+        }
+    }?;
+    let accounting = if matches!(registration.constructor, ConstructorKind::AnthropicMessages) {
+        super::cache_observation::InputAccounting::Anthropic
+    } else {
+        super::cache_observation::InputAccounting::Inclusive
+    };
+    constructed.backend = Box::new(super::cache_observation::ObservedBackend::new(
+        constructed.backend,
+        accounting,
+    ));
+    Ok(constructed)
 }
 
 /// The single request-timeout policy consumed at backend construction. The settings
@@ -81,11 +94,12 @@ fn resolved_timeout(profile: &Profile) -> std::time::Duration {
 
 fn construct_chat(
     profile: &Profile,
+    session_id: &crate::session::SessionId,
     dependencies: &RuntimeDependencies,
     profile_from_file: bool,
     allow_insecure_http: bool,
 ) -> Result<ConstructedBackend, String> {
-    let config = ModelConfig::from_profile_in(
+    let mut config = ModelConfig::from_profile_in(
         profile,
         profile_from_file,
         allow_insecure_http,
@@ -101,6 +115,20 @@ fn construct_chat(
     crate::limits::validate_timeout(config.timeout)?;
     let secret_values = config.secret_values();
     let context_limit = config.context_limit;
+    let forwarded = &mut config
+        .model_params
+        .get_or_insert_with(Default::default)
+        .forwarded;
+    // The session owns this routing field, not arbitrary model parameters.
+    forwarded.remove("prompt_cache_key");
+    if profile.ephemeral.prompt_caching
+        != Some(crate::profile::provider_settings::PromptCachingSetting::Off)
+    {
+        forwarded.insert(
+            "prompt_cache_key".to_string(),
+            serde_json::json!(session_id.id),
+        );
+    }
     let backend = make_adapter(&config).map_err(|error| error.to_string())?;
     let max_rounds = resolve_max_rounds(profile)?;
     Ok(ConstructedBackend {
@@ -341,6 +369,7 @@ fn validate_anthropic_settings(profile: &Profile) -> Result<(), String> {
 fn construct_codex(
     profile: &Profile,
     resolved: &crate::model_api::interpret::ResolvedProfile,
+    session_id: &crate::session::SessionId,
     dependencies: &RuntimeDependencies,
 ) -> Result<ConstructedBackend, String> {
     let draft = resolved
@@ -360,6 +389,11 @@ fn construct_codex(
     let user_agent = format!("llxprt-code-rs/{}", env!("CARGO_PKG_VERSION"));
     let mut model = OpenResponsesModel::new(draft.model(), draft.endpoint().responses_url())
         .codex_http()
+        .with_prompt_cache_key(
+            (profile.ephemeral.prompt_caching
+                != Some(crate::profile::provider_settings::PromptCachingSetting::Off))
+            .then(|| session_id.id.clone()),
+        )
         .bearer(credential.access_token())
         .header("chatgpt-account-id", credential.account_id())
         .header("OpenAI-Beta", CODEX_RESPONSES_BETA)

@@ -173,6 +173,16 @@ fn parse_ephemeral_entry(
     value: &serde_json::Value,
     name: &str,
 ) -> Result<bool, String> {
+    if key == "prompt-caching" {
+        let raw = value
+            .as_str()
+            .ok_or_else(|| format!("profile {name:?}: 'prompt-caching' must be a string"))?;
+        settings.prompt_caching = Some(
+            super::provider_settings::PromptCachingSetting::openai_responses(Some(raw))
+                .map_err(|error| format!("profile {name:?}: 'prompt-caching' {error}"))?,
+        );
+        return Ok(true);
+    }
     if parse_ephemeral_primary(settings, key, value, name)? {
         return Ok(true);
     }

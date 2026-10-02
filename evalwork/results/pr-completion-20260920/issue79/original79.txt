@@ -1,0 +1,27 @@
+author:	acoliver
+association:	contributor
+edited:	false
+status:	none
+--
+Branch-4 claims full implementation of #79 under Andrew's next-five-issues dispatch. Worktree `branch-4/worktrees/issue79`, branch `branch4-issue79-prompt-cache`, starting at main `44530155`. Actual headless Rust CLI workers will use Astra. Scope includes cache measurement first, exact-wire multi-round/turn prefix invariants, settings-driven cache routing/breakpoints, and measured enabled/disabled evidence. Reuses #231 usage fields, does not take #78 epoch ownership or #191 transport diagnostics. Parallel branch-4 #28/#220 work will be integrated serially at shared adapter/prompt boundaries. No acceptance items deferred.
+--
+author:	acoliver
+association:	contributor
+edited:	false
+status:	none
+--
+Andrew returned for native authorization. A fresh-session attempt on the retained final feature SHA256 `9271f6ec73f828ee01e749e0a19d98a82d0adf541926eb20f837393bbfb00403`, source `28e2399eb21b9c4820c31f635ddc04deece47fdc`, retained the prepared profiles and input after hash checks. The first cache-off call exited 3 because this separate binary's Keychain prompt went unanswered for 10 seconds. The six-call lane stopped immediately, before any provider measurement; no automatic retry or policy change was made.
+
+New evidence: `branch-4/worktrees/issue79/evalwork/results/branch4-wave2/issue79/approved-live-a/`. The retained predecessor observations and the complete 71-row evidence matrix remain distinct from missing final-feature measurements. A coordinated prompt retry awaits Andrew's readiness. Shared #252 gates and final review remain outstanding; no cache benefit, completion or merge is claimed.
+--
+author:	acoliver
+association:	contributor
+edited:	false
+status:	none
+--
+The second native live attempt on the retained feature binary succeeded at authentication and failed at provider quota. Evidence `branch-4/worktrees/issue79/evalwork/results/branch4-wave2/issue79/approved-live-b/`.
+
+The off-0 turn loaded the macOS keychain credential (service `llxprt-code-oauth`, account `codex:default`) without the earlier 10-second authorization timeout, reached the provider, and returned native exit5 `model-quota-exhausted`: HTTP429 `usage_limit_reached`, plan `pro`, `resets_at`1789435393 (2026-09-15T01:16:22Z), `resets_in_seconds`553228. The lane stopped at that first failure as designed; no further calls were made. Binary SHA256 remains 9271f6ec73f828ee01e749e0a19d98a82d0adf541926eb20f837393bbfb00403 on clean 28e2399e.
+
+This separates three failure classes on this lane: the a-lane Keychain timeout (exit3, pre-provider), this provider quota exhaustion (429, not retryable before reset), and the separate zai transport class recorded on #191. The matched six-call cache-on/cache-off measurement remains outstanding until the plan resets or an alternative is explicitly chosen; switching provider or model would change what is being measured and is not being done silently. All prior static, fixture, vendor and audit evidence is unaffected.
+--
