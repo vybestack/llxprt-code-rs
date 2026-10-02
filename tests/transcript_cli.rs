@@ -327,7 +327,7 @@ fn budget_and_unknown_refusals_match_wire_in_execution_order() {
             .iter()
             .map(|e| e["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["exec", "skipped", "unknown"]
+        ["unknown", "exec", "skipped"]
     );
     let wire: Vec<_> = requests[1]["messages"]
         .as_array()
@@ -343,13 +343,101 @@ fn budget_and_unknown_refusals_match_wire_in_execution_order() {
     assert_eq!(results[0]["refused"], false);
     assert_eq!(results[1]["refused"], true);
     assert_eq!(results[2]["refused"], true);
-    // The integrated read-window contract exposes truncation and a replayable recipe.
     assert!(results[0]["result"]
         .as_str()
         .unwrap()
-        .contains("**truncated**"));
-    assert!(results[0]["result"].as_str().unwrap().len() < 700);
-    assert!(results[0]["result"].as_str().unwrap().contains("re-fetch:"));
+        .contains("unknown or disabled tool not_registered"));
+    assert!(results[0]["result"]
+        .as_str()
+        .unwrap()
+        .contains("budget: 0 of 1"));
+    assert!(results[1]["result"]
+        .as_str()
+        .unwrap()
+        .contains("budget exhausted"));
+    assert!(results[2]["result"]
+        .as_str()
+        .unwrap()
+        .contains("budget exhausted"));
+    assert!(!results
+        .iter()
+        .any(|result| result["result"].as_str().unwrap().contains("hello")));
+}
+
+#[test]
+fn charged_naming_then_bulk_read_match_wire_and_durable_order() {
+    let root = tempfile::tempdir().unwrap();
+    let unknown = json!({"id":"unknown","type":"function","function":{"name":"not_registered","arguments":"{}"}});
+    let (output, requests) = run_capped(
+        root.path(),
+        &["--emit", "all", "--max-tool-calls", "3"],
+        vec![unknown, read_call("exec")],
+        "4096",
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let events: Vec<Value> = String::from_utf8(output.stderr)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let results: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "tool_result")
+        .collect();
+    assert_eq!(
+        results
+            .iter()
+            .map(|event| event["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["unknown", "exec"]
+    );
+    assert_eq!(results[0]["ok"], false);
+    assert_eq!(results[0]["refused"], false);
+    assert_eq!(results[1]["ok"], true);
+    let wire: Vec<_> = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .collect();
+    assert_eq!(wire.len(), 2);
+    for (event, message) in results.iter().zip(wire) {
+        assert_eq!(event["id"], message["tool_call_id"]);
+        assert_eq!(event["result"], message["content"]);
+    }
+    let directory = root.path().join("code-rs-sessions/demo");
+    let before = snapshot(&directory);
+    let look = bin(root.path())
+        .args(["transcript", "--session", "demo", "--json"])
+        .output()
+        .unwrap();
+    assert!(look.status.success());
+    assert!(look.stderr.is_empty());
+    let durable: Value = serde_json::from_slice(&look.stdout).unwrap();
+    let calls = durable["turns"][0]["rounds"][0]["calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["unknown", "exec"]
+    );
+    assert_eq!(
+        results[0]["result"],
+        format!("Error: {}", calls[0]["result"].as_str().unwrap())
+    );
+    assert!(calls[1]["result"]
+        .as_str()
+        .unwrap()
+        .starts_with("CTXDIGEST"));
+    assert_ne!(results[1]["result"], calls[1]["result"]);
+    assert_eq!(before, snapshot(&directory));
 }
 
 #[test]

@@ -12,7 +12,7 @@
 //! The loop inspects `finish_reason` after every round. Only allowed completion
 //! reasons succeed; `length`/`content_filter`/`error`/unknown terminally fail and
 //! are persisted. //! Empty/duplicate ids, non-object arguments, and the exact tool-call budget are
-//! validated before any side effect; unknown or disabled tools are refused with a correction.
+//! validated before any side effect; unknown or disabled tools return charged failures.
 //! Malformed argument JSON is a hard error, not a normalized `{}` that could execute.
 
 use crate::adapter::{
@@ -143,8 +143,8 @@ mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
-    final_summary_request, refuse_over_budget, refuse_unknown_tools, split_over_budget,
-    tool_call_record, validate_provider_result,
+    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
+    validate_provider_result,
 };
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
@@ -493,13 +493,23 @@ impl Turn<'_> {
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
-        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-            &self.cwd,
-            &call.name,
-            parsed,
-            config,
-            body_budget,
-        );
+        let (ok, raw_text) = if known_tool(&call.name, self.allow_shell) {
+            crate::tools::execute_tool_with_limit(
+                &self.cwd,
+                &call.name,
+                parsed,
+                config,
+                body_budget,
+            )
+        } else {
+            (
+                false,
+                crate::redact::truncate_utf8(
+                    helpers::naming_failure(self.allow_shell, &call.name),
+                    config.max_output_bytes.min(body_budget),
+                ),
+            )
+        };
         let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
         attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
@@ -816,6 +826,10 @@ enum RoundFailure {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod naming_projection_tests;
+#[cfg(test)]
+mod naming_recovery_tests;
 #[cfg(test)]
 mod tool_validation_tests;
 
