@@ -912,6 +912,7 @@ async fn run_http_stream(
     let mut byte_stream = response.bytes_stream();
     let mut decoder = sse::Decoder::default();
     let mut terminal_id = None;
+    let mut pending_terminal = None;
     let mut done = false;
     while let Some(chunk) = byte_stream.next().await {
         let chunk = chunk.map_err(|_| {
@@ -951,6 +952,10 @@ async fn run_http_stream(
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
                 terminal_id = Some(response.id.clone());
+                // Completion is a verdict, not progress. Keep it private until
+                // the remaining body, DONE ordering and EOF all validate.
+                pending_terminal = Some(event);
+                continue;
             }
             for translated in assembler::translate(event) {
                 match translated {
@@ -975,6 +980,11 @@ async fn run_http_stream(
     // The codex backend closes the stream after the terminal response
     // event without a `[DONE]` marker, so a clean EOF after one counts.
     if let Some(id) = &terminal_id {
+        for translated in assembler::translate(pending_terminal.expect("terminal retained")) {
+            tx.send(translated)
+                .await
+                .map_err(|_| ModelError::Cancelled)?;
+        }
         if !inner.codex_http {
             session.previous_response_id = Some(id.clone());
             session.sent_requests = messages.len();

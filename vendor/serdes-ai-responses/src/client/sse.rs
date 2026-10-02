@@ -178,6 +178,21 @@ fn decode(name: Option<&str>, data: &str, has_data: bool) -> Result<Frame, Model
     let event: StreamEvent = serde_json::from_value(value)
         .map_err(|_| invalid("unknown or malformed Responses event"))?;
     match &event {
+        // These lifecycle objects are discarded by the assembler. Validate
+        // their nonterminal status/error first so contradictions cannot vanish.
+        StreamEvent::ResponseCreated { response, .. }
+            if !matches!(
+                response.status,
+                ResponseStatus::Queued | ResponseStatus::InProgress
+            ) || response.error.is_some() =>
+        {
+            return Err(invalid("ambiguous created response"))
+        }
+        StreamEvent::ResponseInProgress { response, .. }
+            if response.status != ResponseStatus::InProgress || response.error.is_some() =>
+        {
+            return Err(invalid("ambiguous in-progress response"))
+        }
         StreamEvent::ResponseCompleted { response, .. }
             if response.status != ResponseStatus::Completed || response.error.is_some() =>
         {
@@ -288,6 +303,61 @@ mod tests {
             frames(format!("data: {}\n\n", serde_json::to_string(&event).unwrap()).as_bytes())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn nonterminal_lifecycle_status_and_error_are_checked_before_translation() {
+        use crate::types::{ErrorBodyRef, ResponseObject};
+        let request =
+            serde_json::from_value(serde_json::json!({"model":"fixture","input":[]})).unwrap();
+        for created in [true, false] {
+            for status in [
+                ResponseStatus::Queued,
+                ResponseStatus::InProgress,
+                ResponseStatus::Completed,
+                ResponseStatus::Incomplete,
+                ResponseStatus::Failed,
+            ] {
+                for with_error in [false, true] {
+                    let mut response = ResponseObject::in_progress("r", 1, "fixture", &request);
+                    response.status = status;
+                    if with_error {
+                        response.error = Some(ErrorBodyRef {
+                            code: "server_error".into(),
+                            message: "SECRET".into(),
+                        });
+                    }
+                    // Unrelated metadata remains permitted, including opaque values.
+                    response.metadata = Some(
+                        serde_json::from_value(serde_json::json!({
+                            "opaque": {"type": "error"}
+                        }))
+                        .unwrap(),
+                    );
+                    let event = if created {
+                        StreamEvent::ResponseCreated {
+                            sequence_number: 0,
+                            response,
+                        }
+                    } else {
+                        StreamEvent::ResponseInProgress {
+                            sequence_number: 0,
+                            response,
+                        }
+                    };
+                    let wire = format!("data: {}\n\n", serde_json::to_string(&event).unwrap());
+                    let valid = !with_error
+                        && (status == ResponseStatus::InProgress
+                            || (created && status == ResponseStatus::Queued));
+                    let result = frames(wire.as_bytes());
+                    assert_eq!(result.is_ok(), valid, "{created:?} {status:?} {with_error}");
+                    if let Err(error) = result {
+                        assert!(!error.to_string().contains("SECRET"));
+                        assert!(!error.is_retryable());
+                    }
+                }
+            }
+        }
     }
 
     #[test]

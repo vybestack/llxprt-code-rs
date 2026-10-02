@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `9d35fd905cf4a7f3d14c891d23f1d12c7b76799e6b40c7b6f50ea0a763547d65`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `660214c069af80cd7a9d0b442e61f1263f6da78f00031a29a526849deebe65b9`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -315,8 +315,16 @@ malformed frames, premature DONE and semantic events after completion fail
 truthfully. Existing WebSocket reconnect policy and non-streaming HTTP policy
 are unchanged.
 
-Streaming callers retain already emitted output followed by exactly one terminal
-error, even under channel backpressure. Folded Codex requests fail rather than
+Created responses must be queued or in-progress, and in-progress responses must
+be in-progress; neither may carry an error. These checks precede the assembler's
+lifecycle-dropping arms. Unrelated metadata and opaque keepalive payloads remain
+allowed; this is not a new general protocol state machine.
+
+Streaming completion is held until the remaining body, DONE ordering and clean
+EOF validate. Trailing provider/protocol errors, duplicate terminals/DONE, body
+failures and invalid EOF discard that pending completion. Streaming callers
+retain already emitted output followed by exactly one terminal error, even under
+channel backpressure. Folded Codex requests fail rather than
 return partial success and retain accumulated event count in the diagnosis.
 Dropping a stream/request aborts its owning task; it does not leave an ambiguous
 request running or launch a replacement. Runtime adapter diagnosis is scrubbed

@@ -166,3 +166,47 @@ fn codex_sse_frames_after_terminal_are_not_silent_success() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn codex_sse_nonterminal_lifecycle_contradictions_cannot_be_dropped() {
+    use serdes_ai_responses::types::{ErrorBodyRef, ResponseObject, ResponseStatus, StreamEvent};
+    let wire = codex_turn_sse_payload(0);
+    let normal = wire.split_once("\r\n\r\n").unwrap().1;
+    let request =
+        serde_json::from_value(serde_json::json!({"model":"loopback-codex","input":[]})).unwrap();
+    for created in [true, false] {
+        for with_error in [false, true] {
+            let mut response = ResponseObject::in_progress("r", 1, "loopback-codex", &request);
+            if with_error {
+                response.error = Some(ErrorBodyRef {
+                    code: "server_error".into(),
+                    message: "SECRET".into(),
+                });
+            } else {
+                response.status = ResponseStatus::Failed;
+            }
+            let event = if created {
+                StreamEvent::ResponseCreated {
+                    sequence_number: 0,
+                    response,
+                }
+            } else {
+                StreamEvent::ResponseInProgress {
+                    sequence_number: 0,
+                    response,
+                }
+            };
+            let (backend, server) = loopback_sse(format!(
+                "data: {}\n\n{normal}",
+                serde_json::to_string(&event).unwrap()
+            ));
+            let error = test_runtime()
+                .block_on(backend.request(&[ModelRequest::default()], &[]))
+                .unwrap_err();
+            assert!(error.contains("ambiguous"), "{error}");
+            assert!(!error.contains("SECRET"));
+            assert_eq!(backend.request_calls(), 1);
+            server.join().unwrap();
+        }
+    }
+}
