@@ -164,8 +164,8 @@ fn run_case(off: bool, cached_overflow: bool) {
     assert!(bodies[1].to_string().contains("overflow tool evidence"));
     for body in &bodies {
         assert_eq!(
-            body.get("prompt_cache_key"),
-            if off { None } else { Some(&json!("overflow")) }
+            body.get("prompt_cache_key").and_then(Value::as_str),
+            if off { None } else { Some("overflow") }
         );
     }
     let store = SessionStore::load_at(&SessionId::parse("overflow").unwrap(), work.path()).unwrap();
