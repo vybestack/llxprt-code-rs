@@ -16,9 +16,16 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<(), String> {
     let mut args = env::args().skip(1);
-    let command = args.next().ok_or_else(usage)?;
+    let first = args.next().ok_or_else(usage)?;
+    let (root, command) = if first == "--root" {
+        let root = PathBuf::from(args.next().ok_or("--root requires a directory")?)
+            .canonicalize()
+            .map_err(|e| format!("--root: {e}"))?;
+        (root, args.next().ok_or_else(usage)?)
+    } else {
+        (project_root()?, first)
+    };
     let remaining: Vec<String> = args.collect();
-    let root = project_root()?;
     match command.as_str() {
         "loc" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Loc)),
         "complexity" => no_args(&remaining).and_then(|()| run_gate(&root, Gate::Complexity)),
@@ -31,6 +38,19 @@ fn real_main() -> Result<(), String> {
         "envelope-schema" => run_envelope_schema(&root, &remaining),
         "release-fixtures" => no_args(&remaining).and_then(|()| run_release_fixtures(&root)),
         "source-bundle" => run_source_bundle(&root, &remaining),
+        "publish-release" => xtask::publication::run(&root, &remaining),
+        "run-issue1-operator-protocol" => xtask::operator_protocol::run(&root, &remaining),
+        "test-vendor-provenance"
+        | "test-provider-features"
+        | "test-dependency-inventory"
+        | "test-release-workflow"
+        | "test-source-bundle-verifier"
+        | "test-issue1-operator-protocol-runner" => {
+            no_args(&remaining).and_then(|()| xtask::release_fixtures::run(&root, &command))
+        }
+        "verify-vendor-provenance" => {
+            no_args(&remaining).and_then(|()| xtask::vendor_provenance::run(&root))
+        }
         "context-evals" => run_context_evals(&root, &remaining),
         _ => Err(usage()),
     }
@@ -126,7 +146,7 @@ fn no_args(args: &[String]) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: cargo xtask <lint|quality|loc|complexity|coupling-check [--base-ref REF] [--owner-check] [--accept-new-coupling]|envelope-schema [--check]|release-gates|release-fixtures|source-bundle|context-evals>"
+    "usage: cargo xtask [--root ROOT] <lint|quality|loc|complexity|compat|coupling-check [--base-ref REF] [--owner-check] [--accept-new-coupling]|envelope-schema [--check]|release-gates|release-fixtures|source-bundle <build [OUT]|list|verify [--run-local-source-code] [BUNDLE]|test>|publish-release [--verify-tag-only]|verify-vendor-provenance|run-issue1-operator-protocol MODE|test-source-bundle-verifier|test-release-workflow|test-provider-features|test-dependency-inventory|test-vendor-provenance|test-issue1-operator-protocol-runner|context-evals>"
         .to_string()
 }
 

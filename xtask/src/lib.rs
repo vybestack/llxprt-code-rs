@@ -8,12 +8,20 @@
 //! module's production Rust files, and enforces a checked-in burn-down debt ledger.
 
 pub mod analyze;
+mod bundle_policy;
 pub mod compat;
 pub mod complexity;
 pub mod coupling;
 mod coupling_graph;
 pub mod loc;
+pub mod operator_protocol;
+pub mod publication;
 pub mod release;
+mod release_cancellation;
+pub mod release_fixtures;
+mod release_support;
+pub mod source_bundle;
+pub mod vendor_provenance;
 
 pub use analyze::{find_production_sources, run_gate, Gate, Report, Violation};
 
