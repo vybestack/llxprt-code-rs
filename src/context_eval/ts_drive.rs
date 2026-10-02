@@ -70,7 +70,7 @@ pub(super) fn drive_typescript(scen: &Scenario, opts: &Options) -> Result<Drive,
             ("XDG_CONFIG_HOME".into(), settings.display().to_string()),
             ("CTXEVAL_LOOPBACK_BASE_URL".into(), url),
         ],
-        timeout: Duration::from_secs(TURN_TIMEOUT_SECS),
+        timeout: Some(Duration::from_secs(TURN_TIMEOUT_SECS)),
         max_output: 32 * 1024 * 1024,
     });
     let obs = server.snapshot();

@@ -114,8 +114,6 @@ pub struct CodingAgent {
     turn_time_budget: Option<std::time::Duration>,
     /// Resolved shell timeout policy from the profile. Every command receives the
     /// configured default and remains capped by the finite configured maximum.
-    shell_default_timeout: std::time::Duration,
-    shell_max_timeout: std::time::Duration,
     /// Resolved output caps (issue 77): per-result shell/tool caps and the live
     /// per-turn tool-output bound. Defaults until the resolver overrides them.
     output_caps: OutputCaps,
@@ -133,6 +131,7 @@ pub struct CodingAgent {
     pub prompt_notes: Option<String>,
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
+    pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
     profiler: Option<crate::memory_profile::Profiler>,
 }
 
@@ -193,12 +192,6 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
-            shell_default_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
-            shell_max_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -206,6 +199,7 @@ impl CodingAgent {
             allow_shell,
             secrets: config.secret_values(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: config.context_limit,
             profiler: None,
         })
@@ -229,12 +223,6 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
-            shell_default_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
-            shell_max_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -242,6 +230,7 @@ impl CodingAgent {
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
             profiler: None,
         })
@@ -261,12 +250,6 @@ impl CodingAgent {
             workspace,
             max_tool_calls: None,
             turn_time_budget: None,
-            shell_default_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
-            shell_max_timeout: std::time::Duration::from_secs(
-                crate::profile::DEFAULT_SHELL_TIMEOUT_SECONDS,
-            ),
             output_caps: OutputCaps::default(),
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
@@ -274,6 +257,7 @@ impl CodingAgent {
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
+            shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
             profiler: None,
         }

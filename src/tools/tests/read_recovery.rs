@@ -15,9 +15,11 @@ fn cfg_floor(root: &std::path::Path, floor: usize) -> ToolConfig {
         max_output_bytes: 16 * 1024,
         digest_size_floor: floor,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(60),
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(60),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(60)),
+                maximum: Some(Duration::from_secs(60)),
+            },
             allow_shell: false,
         },
     }
@@ -338,9 +340,11 @@ fn read_file_total_is_bounded_including_frame() {
         max_output_bytes: 8192,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(60),
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(30),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(30)),
+                maximum: Some(Duration::from_secs(30)),
+            },
             allow_shell: false,
         },
     };

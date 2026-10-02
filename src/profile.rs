@@ -281,6 +281,16 @@ pub fn resolve_max_tool_calls(cli: Option<i64>, profile: MaxToolCalls) -> Option
     }
 }
 
+/// Image preprocessing is owned by the external host: this runtime accepts text/tool
+/// prompts and neither loads images nor resizes them. Preserve the numeric host policy
+/// without projecting it into provider requests or shell execution.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostImageResizeSettings {
+    pub max_long_edge: Option<serde_json::Number>,
+    pub max_short_edge: Option<serde_json::Number>,
+    pub max_pixels: Option<serde_json::Number>,
+}
+
 /// Transport + request settings from a profile's `ephemeralSettings`.
 #[derive(Clone, Default)]
 pub struct EphemeralSettings {
@@ -290,6 +300,8 @@ pub struct EphemeralSettings {
     /// The raw inline `auth-key` bytes, preserved for the transport. Never rendered.
     pub auth_key: Option<String>,
     pub context_limit: Option<u64>,
+    pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
+    pub host_image_resize: HostImageResizeSettings,
     pub max_output_tokens: Option<u64>,
     /// `ephemeralSettings.maxTurnsPerPrompt`: `-1` = unlimited (no round cap), as is an
     /// absent knob; a positive integer caps the rounds.
@@ -301,10 +313,10 @@ pub struct EphemeralSettings {
     /// loop detection is not configurable from a profile.
     pub loop_detection_enabled: Option<bool>,
     pub timeout_ms: Option<u64>,
-    /// `shell-default-timeout-seconds`: positive seconds used when a tool call
+    /// Non-Codex `shell-default-timeout-seconds`: positive seconds used when a tool call
     /// omits `timeout_seconds`.
     pub shell_default_timeout_seconds: Option<u64>,
-    /// `shell-max-timeout-seconds`: positive per-command ceiling. Both shell
+    /// Non-Codex `shell-max-timeout-seconds`: positive per-command ceiling. Both shell
     /// timeout settings are bounded by [`MAX_SHELL_TIMEOUT_SECONDS`].
     pub shell_max_timeout_seconds: Option<u64>,
     /// The original keyfile path (redacted for display travel; the parent directory and
@@ -359,6 +371,8 @@ impl std::fmt::Debug for EphemeralSettings {
             .field("auth_key", &"[redacted]")
             .field("auth_keyfile_orig", &"[redacted keyfile]")
             .field("context_limit", &self.context_limit)
+            .field("shell_timeouts", &self.shell_timeouts)
+            .field("host_image_resize", &self.host_image_resize)
             .field("max_output_tokens", &self.max_output_tokens)
             .field("max_turns_per_prompt", &self.max_turns_per_prompt)
             .field("max_tool_calls_per_prompt", &self.max_tool_calls_per_prompt)

@@ -24,6 +24,12 @@ pub use run::run_profiled;
 /// Re-exported exit code type (defined in the leaf `envelope` module).
 pub use crate::envelope::Code;
 
+/// Perform an explicitly selected filesystem OAuth login without resolving a profile or prompt.
+pub fn local_oauth_login() -> Result<(), AppError> {
+    crate::model_api::local_oauth::login()
+        .map_err(|error| AppError::new(Code::Config, "local-oauth", error))
+}
+
 /// The maximum number of bytes read from stdin before the prompt is rejected. The cap is
 /// applied **while reading**, not after allocation.
 const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
@@ -71,6 +77,14 @@ pub struct Args {
     /// Explicit opt-in to allow plaintext HTTP to a remote host (dsflash-mi300x style).
     #[arg(long)]
     pub allow_insecure_http: bool,
+
+    /// Use filesystem OAuth storage (0700 directory, 0600 files), never Keychain.
+    #[arg(long)]
+    pub localoauth: bool,
+
+    /// Sign in using device authorization and save locally, then exit. Requires --localoauth.
+    #[arg(long, requires = "localoauth", conflicts_with_all = ["prompt", "print_config", "mem_profile"])]
+    pub oauth_login: bool,
 
     /// Explicit opt-in to register the run_shell_command tool.
     #[arg(long)]
@@ -685,6 +699,30 @@ mod tests {
     use super::{has_session_argument, session_hint_from, Args};
     use clap::Parser as _;
     use std::ffi::OsString;
+
+    #[test]
+    fn runtime_projection_preserves_shell_policy_and_independent_deadlines() {
+        let value = serde_json::from_str(include_str!(
+            "../tests/fixtures/task-profile/astramedium.json"
+        ))
+        .unwrap();
+        let mut profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let settings = crate::settings::resolve(crate::settings::SettingsLayers {
+            config_root: root.path().to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+        let shell = profile.ephemeral.shell_timeouts;
+        super::apply_runtime_settings(&mut profile, &settings).unwrap();
+        assert_eq!(profile.ephemeral.shell_timeouts, shell);
+        assert_eq!(
+            profile.ephemeral.timeout_ms,
+            Some(settings.budgets.request_timeout.value.as_millis() as u64)
+        );
+        assert_eq!(shell.default, Some(std::time::Duration::from_secs(2700)));
+        assert_eq!(shell.maximum, None);
+    }
 
     #[test]
     fn omitted_session_gets_a_fresh_valid_hint() {

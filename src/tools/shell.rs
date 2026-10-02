@@ -4,29 +4,32 @@ use super::*;
 
 fn shell_timeout_request(
     args: &BTreeMap<String, JsonValue>,
-    default_timeout: std::time::Duration,
-    max_timeout: std::time::Duration,
-) -> Result<(u64, String, bool), String> {
-    match args.get("timeout_seconds") {
-        None => {
-            let seconds = default_timeout.as_secs().max(1);
-            Ok((seconds, format!("{seconds}s"), false))
-        }
-        Some(JsonValue::Number(value)) if value.as_i64() == Some(-1) => {
-            Ok((max_timeout.as_secs(), "unlimited".to_string(), true))
-        }
-        Some(JsonValue::Number(value)) => {
-            let seconds = value
+    policy: ShellTimeoutPolicy,
+) -> Result<(Option<std::time::Duration>, String, bool), String> {
+    let requested = match args.get("timeout_seconds") {
+        None => policy.default,
+        Some(JsonValue::Number(value)) if value.as_i64() == Some(-1) => None,
+        Some(JsonValue::Number(value)) => Some(std::time::Duration::from_secs(
+            value
                 .as_u64()
                 .filter(|seconds| *seconds > 0)
                 .ok_or_else(|| {
                     "argument 'timeout_seconds' must be -1 (unlimited) or a positive integer"
                         .to_string()
-                })?;
-            Ok((seconds, format!("{seconds}s"), false))
-        }
-        Some(_) => Err("argument 'timeout_seconds' must be an integer".into()),
-    }
+                })?,
+        )),
+        Some(_) => return Err("argument 'timeout_seconds' must be an integer".into()),
+    };
+    let effective = if args.contains_key("timeout_seconds") {
+        policy.clamp(requested)
+    } else {
+        policy.resolve(None)
+    };
+    let label = requested.map_or_else(
+        || "unlimited".to_string(),
+        |timeout| format!("{}s", timeout.as_secs()),
+    );
+    Ok((effective, label, effective != requested))
 }
 
 /// Run a shell command via the shared bounded runner. Nonzero exit, a signal, or a timeout
@@ -34,8 +37,7 @@ fn shell_timeout_request(
 pub(super) fn shell_tool(
     fd: i32,
     args: &BTreeMap<String, JsonValue>,
-    default_timeout: std::time::Duration,
-    max_timeout: std::time::Duration,
+    policy: ShellTimeoutPolicy,
     max_output: usize,
 ) -> Result<String, String> {
     reject_unknown(args, &["command", "timeout_seconds"])?;
@@ -43,11 +45,7 @@ pub(super) fn shell_tool(
     if command.trim().is_empty() {
         return Err("command must not be empty".into());
     }
-    let (requested, requested_label, unlimited) =
-        shell_timeout_request(args, default_timeout, max_timeout)?;
-    let effective = requested.min(max_timeout.as_secs());
-    let clamped = unlimited || requested > max_timeout.as_secs();
-    let timeout = std::time::Duration::from_secs(effective);
+    let (timeout, requested_label, clamped) = shell_timeout_request(args, policy)?;
     let o = crate::process::run_cmd(crate::process::CmdSpec {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), command.to_string()],
@@ -65,20 +63,26 @@ pub(super) fn shell_tool(
     // Every model-visible shell string (success or failure diagnostic) is bounded as one
     // value, framing and combined output included, to `max_output`.
     let clamp_note = if clamped {
-        format!(" (requested timeout {requested_label}; effective timeout {effective}s)")
+        format!(
+            " (requested timeout {requested_label}; effective timeout {}s)",
+            timeout.map_or(0, |timeout| timeout.as_secs())
+        )
     } else {
         String::new()
     };
     let framing = if o.timed_out {
         format!(
             "command timed out after {} ms{}; output:\n",
-            timeout.as_millis(),
+            timeout.map_or(0, |timeout| timeout.as_millis()),
             clamp_note,
         )
     } else {
         match o.status {
             Some(0) if clamped => {
-                format!("[requested timeout {requested_label}; effective timeout {effective}s]\n")
+                format!(
+                    "[requested timeout {requested_label}; effective timeout {}s]\n",
+                    timeout.map_or(0, |timeout| timeout.as_secs())
+                )
             }
             Some(0) => String::new(),
             Some(code) => format!("command exited with {code}{clamp_note}; output:\n"),

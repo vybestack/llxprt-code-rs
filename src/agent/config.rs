@@ -70,8 +70,10 @@ impl super::CodingAgent {
         default_timeout: std::time::Duration,
         max_timeout: std::time::Duration,
     ) -> CodingAgent {
-        self.shell_default_timeout = default_timeout;
-        self.shell_max_timeout = max_timeout;
+        self.shell_timeouts = crate::tools::ShellTimeoutPolicy {
+            default: Some(default_timeout),
+            maximum: Some(max_timeout),
+        };
         self
     }
 
@@ -95,8 +97,7 @@ impl super::CodingAgent {
             digest_size_floor: self.digest_size_floor,
             shell: crate::tools::ShellConfig {
                 max_shell_output: self.output_caps.shell,
-                default_shell_timeout: self.shell_default_timeout,
-                max_shell_timeout: self.shell_max_timeout,
+                timeouts: self.shell_timeouts,
                 allow_shell: shell_on,
             },
         })

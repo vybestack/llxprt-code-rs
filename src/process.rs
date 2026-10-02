@@ -54,7 +54,8 @@ pub struct CmdSpec {
     pub cwd_fd: Option<i32>,
     /// Explicit extra environment variables added on top of the allow-list.
     pub env_add: Vec<(String, String)>,
-    pub timeout: Duration,
+    /// None disables the command deadline; cancellation and output bounds are unchanged.
+    pub timeout: Option<Duration>,
     /// Combined cap for stdout + stderr in bytes.
     pub max_output: usize,
 }
@@ -222,7 +223,7 @@ pub fn run_sh(
         cwd: cwd.map(|p| p.to_path_buf()),
         cwd_fd: None,
         env_add,
-        timeout,
+        timeout: Some(timeout),
         max_output,
     })
 }
@@ -284,8 +285,8 @@ pub fn run_cmd(spec: CmdSpec) -> Result<CmdOutcome, String> {
 /// Reader setup, deadline supervision, and output collection for one already-spawned child.
 fn supervise_and_collect(
     mut child: Child,
-    deadline: Instant,
-    escalation_deadline: Instant,
+    deadline: Option<Instant>,
+    escalation_deadline: Option<Instant>,
     max_output: usize,
 ) -> CmdOutcome {
     let budget = Arc::new(ByteBudget::new(max_output));
@@ -345,14 +346,20 @@ fn supervise_and_collect(
 }
 
 /// A mutex-guarded combined byte budget. `take` never underflows: it returns the smaller of the
-fn command_deadlines(start: Instant, timeout: Duration) -> Result<(Instant, Instant), String> {
+fn command_deadlines(
+    start: Instant,
+    timeout: Option<Duration>,
+) -> Result<(Option<Instant>, Option<Instant>), String> {
+    let Some(timeout) = timeout else {
+        return Ok((None, None));
+    };
     let deadline = start
         .checked_add(timeout)
         .ok_or_else(|| "command timeout cannot be represented".to_string())?;
     let escalation_deadline = deadline
         .checked_add(TERM_GRACE)
         .ok_or_else(|| "command termination deadline cannot be represented".to_string())?;
-    Ok((deadline, escalation_deadline))
+    Ok((Some(deadline), Some(escalation_deadline)))
 }
 
 /// requested amount and the remaining budget.
@@ -450,8 +457,8 @@ fn drain_thread<R: Read + AsRawFd + Send + 'static>(
 /// an unrelated process group.
 fn supervise(
     mut child: Child,
-    deadline: Instant,
-    escalation_deadline: Instant,
+    deadline: Option<Instant>,
+    escalation_deadline: Option<Instant>,
     done: &AtomicUsize,
     pipes: usize,
 ) -> (Option<i32>, bool) {
@@ -471,7 +478,7 @@ fn supervise(
         }
         let closed = done.load(Ordering::SeqCst) >= pipes;
         let now = Instant::now();
-        if now >= deadline {
+        if deadline.is_some_and(|deadline| now >= deadline) {
             passed_deadline = true;
         }
         if exited && closed && !passed_deadline {
@@ -480,7 +487,7 @@ fn supervise(
         // A timed-out direct child may exit and close its pipes while a TERM-ignoring descendant
         // remains in the same process group with redirected stdio. Always complete the group-wide
         // escalation before reaping the retained leader and returning from a timeout.
-        if now >= escalation_deadline {
+        if escalation_deadline.is_some_and(|deadline| now >= deadline) {
             let _ = kill_group(&mut child, libc::SIGKILL);
             return (child.wait().ok().and_then(|status| status.code()), true);
         }
@@ -742,7 +749,8 @@ mod tests {
         let deadline = Instant::now();
         let escalation_deadline = deadline + TERM_GRACE;
         let done = AtomicUsize::new(0);
-        let (status, timed_out) = supervise(child, deadline, escalation_deadline, &done, 0);
+        let (status, timed_out) =
+            supervise(child, Some(deadline), Some(escalation_deadline), &done, 0);
         assert!(timed_out);
         assert_eq!(status, Some(0));
 
@@ -779,7 +787,7 @@ mod tests {
                 high = middle - 1;
             }
         }
-        let error = command_deadlines(start, duration_from_nanos(low)).unwrap_err();
+        let error = command_deadlines(start, Some(duration_from_nanos(low))).unwrap_err();
         assert_eq!(error, "command termination deadline cannot be represented");
     }
 }

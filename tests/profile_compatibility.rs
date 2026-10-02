@@ -3,7 +3,8 @@
 //!
 //! These tests are independent: they read only the checked-in
 //! `tests/fixtures/profile-compatibility-inventory.json`, the redacted
-//! `tests/fixtures/profiles/` fixtures, and `docs/profile-compatibility.md`.
+//! `tests/fixtures/profiles/` fixtures, `docs/profile-compatibility.md`, and the pure
+//! classification/renderer exports of the inventory generator.
 //! They never read the sibling checkout or the installed profiles directory, and
 //! they never implement Phase 1 parsing. They fail if the inventory is
 //! internally inconsistent or if any tracked fixture field is unclassified or
@@ -574,5 +575,62 @@ fn documentation_is_present_and_consistent() {
             c.in_scope_open_ai, c.in_scope_codex
         )) || (doc.contains("`38` provider") && doc.contains("`7` provider `anthropic`")),
         "docs mention the in-scope 38 openai + 7 anthropic + 1 codex partition"
+    );
+}
+
+#[test]
+fn shell_timeout_inventory_names_the_actual_executor() {
+    let artifact = artifact();
+    for key in ["shell-default-timeout-seconds", "shell-max-timeout-seconds"] {
+        let row = artifact
+            .classifications
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap();
+        assert_eq!(row.owner, "rust-shell-executor");
+        assert!(row.note.contains("executor"));
+        assert!(row.note.contains("-1"));
+        assert!(row.note.contains("Codex:"));
+        assert!(row.note.contains("Non-Codex Chat:"));
+        assert!(row.note.contains("1..7200"));
+        assert!(row.note.contains("omission 120"));
+        assert!(row.note.contains("default must not exceed maximum"));
+        assert!(row.note.contains("-1 rejects"));
+        assert!(!row.note.contains("other APIs reject"));
+        assert!(!row.note.contains("inert"));
+    }
+}
+
+#[test]
+fn shell_timeout_inventory_supported_chat_case_parses() {
+    let profile = llxprt_code_rs::profile::parse_profile_value(
+        &serde_json::json!({
+            "provider": "openai",
+            "model": "m",
+            "ephemeralSettings": {
+                "shell-default-timeout-seconds": 240,
+                "shell-max-timeout-seconds": 600
+            }
+        }),
+        "inventory-chat-shell",
+    )
+    .expect("the documented non-Codex Chat shell settings must remain supported");
+    assert_eq!(profile.ephemeral.shell_default_timeout_seconds, Some(240));
+    assert_eq!(profile.ephemeral.shell_max_timeout_seconds, Some(600));
+}
+
+#[test]
+fn generator_pure_rendering_regressions() {
+    let output = std::process::Command::new("node")
+        .arg("--test")
+        .arg(test_root().join("tests/profile_compatibility_generator.test.mjs"))
+        .current_dir(test_root())
+        .output()
+        .expect("node is required for the pure generator regression tests");
+    assert!(
+        output.status.success(),
+        "pure generator regressions failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }

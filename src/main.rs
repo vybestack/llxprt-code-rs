@@ -15,6 +15,20 @@ fn main() {
         println!("{}", cli::json(&outcome, &session_hint));
         std::process::exit(cli::exit_code(&outcome));
     }
+    if args.oauth_login {
+        match cli::local_oauth_login() {
+            Ok(()) => println!(
+                "{}",
+                serde_json::json!({"session_id": args.session, "status": "ok", "oauth_storage": "local"})
+            ),
+            Err(error) => {
+                let outcome = Err(error);
+                println!("{}", cli::json(&outcome, &session_hint));
+                std::process::exit(cli::exit_code(&outcome));
+            }
+        }
+        return;
+    }
     if args.print_config {
         match cli::print_config(&args) {
             Ok(settings) => println!("{settings}"),

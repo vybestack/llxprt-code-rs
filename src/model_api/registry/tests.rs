@@ -95,7 +95,7 @@ impl CredentialSource for InMemorySource {
 fn codex_transport_identity_is_fixed() {
     let draft = crate::model_api::settings::CodexResponsesSettingsDraft::new(
         "gpt-5.6-sol".to_string(),
-        true,
+        Some("high".to_owned()),
     );
     assert_eq!(
         draft.endpoint().responses_url(),

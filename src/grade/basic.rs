@@ -69,7 +69,7 @@ pub(super) fn run_python_probe(ws: &crate::tools::WorkspaceCap, code: &str) -> b
         cwd: None,
         cwd_fd: Some(workspace_fd(ws)),
         env_add: Vec::new(),
-        timeout: Duration::from_secs(120),
+        timeout: Some(Duration::from_secs(120)),
         max_output: 64 * 1024,
     }) {
         Ok(o) => o,

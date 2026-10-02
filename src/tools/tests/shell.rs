@@ -11,9 +11,11 @@ fn shell_timeout_defaults_clamps_and_reports_effective_value() {
         max_output_bytes: 16 * 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(2),
+            timeouts: ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(2)),
+                maximum: Some(Duration::from_secs(3)),
+            },
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(3),
             allow_shell: true,
         },
     };
@@ -73,9 +75,11 @@ fn shell_nonzero_and_signal_return_ok_false() {
         max_output_bytes: 16 * 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(60),
+            timeouts: ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(60)),
+                maximum: Some(Duration::from_secs(30)),
+            },
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(30),
             allow_shell: true,
         },
     };
@@ -115,9 +119,11 @@ fn shell_unlimited_timeout_uses_the_maximum_and_rejects_other_nonpositive_values
         max_output_bytes: 16 * 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(1),
+            timeouts: ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(1)),
+                maximum: Some(Duration::from_secs(2)),
+            },
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(2),
             allow_shell: true,
         },
     };
@@ -164,8 +170,10 @@ fn shell_omitted_timeout_enforces_default_and_cleans_up_group() {
         max_output_bytes: 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(1),
-            max_shell_timeout: Duration::from_secs(4),
+            timeouts: ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(1)),
+                maximum: Some(Duration::from_secs(4)),
+            },
             max_shell_output: 1024,
             allow_shell: true,
         },
@@ -202,8 +210,10 @@ fn shell_clamp_disclosure_survives_capped_large_output() {
         max_output_bytes: 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(2),
-            max_shell_timeout: Duration::from_secs(3),
+            timeouts: ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(2)),
+                maximum: Some(Duration::from_secs(3)),
+            },
             max_shell_output: 1024,
             allow_shell: true,
         },

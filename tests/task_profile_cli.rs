@@ -61,14 +61,25 @@ fn printed_config(config_home: &std::path::Path, profile: Option<&str>) -> Value
 
 #[test]
 fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
+    assert_named_profile(
+        "astra-headless",
+        include_str!("fixtures/task-profile/astra-headless.json"),
+    );
+}
+
+#[test]
+fn named_astramedium_loads_without_reassigning_deadlines() {
+    assert_named_profile(
+        "astramedium",
+        include_str!("fixtures/task-profile/astramedium.json"),
+    );
+}
+
+fn assert_named_profile(name: &str, fixture: &str) {
     let config = tempfile::tempdir().unwrap();
     let profiles = config.path().join("profiles");
     std::fs::create_dir(&profiles).unwrap();
-    std::fs::write(
-        profiles.join("astra-headless.json"),
-        include_str!("fixtures/task-profile/astra-headless.json"),
-    )
-    .unwrap();
+    std::fs::write(profiles.join(format!("{name}.json")), fixture).unwrap();
 
     std::fs::write(
         profiles.join("dsflash-mi300x.json"),
@@ -83,7 +94,7 @@ fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
     )
     .unwrap();
 
-    let settings = printed_config(config.path(), Some("astra-headless"));
+    let settings = printed_config(config.path(), Some(name));
     let without_profile = printed_config(config.path(), None);
     let fixture_base_url = serde_json::json!({
         "value": "https://chatgpt.com/backend-api/codex",
@@ -113,4 +124,38 @@ fn named_astra_shape_reaches_config_print_without_reassigning_deadlines() {
     );
     assert!(!settings.to_string().contains("task-default-timeout"));
     assert!(!settings.to_string().contains("task-max-timeout"));
+}
+
+#[test]
+fn named_shell_policy_values_validate_before_config_print() {
+    let config = tempfile::tempdir().unwrap();
+    let profiles = config.path().join("profiles");
+    std::fs::create_dir(&profiles).unwrap();
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/task-profile/astramedium.json")).unwrap();
+    for (default, maximum, valid) in [(1, 2, true), (-1, -1, true), (0, 1, false), (1, -2, false)] {
+        let mut profile = fixture.clone();
+        profile["ephemeralSettings"]["shell-default-timeout-seconds"] = serde_json::json!(default);
+        profile["ephemeralSettings"]["shell-max-timeout-seconds"] = serde_json::json!(maximum);
+        std::fs::write(profiles.join("shell-policy.json"), profile.to_string()).unwrap();
+        let output = bin()
+            .env("LLXPRT_CONFIG_HOME", config.path())
+            .args(["--profile", "shell-policy", "--print-config"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            valid,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if !valid {
+            let diagnostic = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(diagnostic.contains("shell-"), "{diagnostic}");
+        }
+    }
 }

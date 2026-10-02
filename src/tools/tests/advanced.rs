@@ -275,9 +275,11 @@ fn file_tools_execute_through_retained_capability() {
         max_output_bytes: 16 * 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(60),
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(60),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(60)),
+                maximum: Some(Duration::from_secs(60)),
+            },
             allow_shell: false,
         },
     };
@@ -316,9 +318,11 @@ fn renamed_workspace_keeps_file_and_shell_tools_on_retained_directory() {
         max_output_bytes: 16 * 1024,
         digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
         shell: ShellConfig {
-            default_shell_timeout: Duration::from_secs(60),
             max_shell_output: 64 * 1024,
-            max_shell_timeout: Duration::from_secs(60),
+            timeouts: crate::tools::ShellTimeoutPolicy {
+                default: Some(Duration::from_secs(60)),
+                maximum: Some(Duration::from_secs(60)),
+            },
             allow_shell: true,
         },
     };

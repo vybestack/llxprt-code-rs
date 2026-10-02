@@ -1054,12 +1054,14 @@ name = "llxprt-code-rs"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "base64",
  "clap",
  "fs2",
  "jsonschema",
  "libc",
  "openat",
  "regex-lite",
+ "reqwest",
  "schemars",
  "security-framework",
  "serde",
