@@ -14,7 +14,7 @@ fn field<'a>(body: &'a str, key: &str) -> &'a str {
 }
 
 fn response(provider: &str, round: usize) -> Value {
-    let tool = round % 2 == 0;
+    let tool = round.is_multiple_of(2);
     match provider {
         "anthropic" => {
             json!({"id":"msg", "type":"message", "role":"assistant", "model":"fixture", "stop_reason": if tool {"tool_use"} else {"end_turn"},
@@ -163,8 +163,7 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
         let aggregate: Value = stderr
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter(|event| event["event"] == "prompt_cache_run")
-            .next_back()
+            .rfind(|event| event["event"] == "prompt_cache_run")
             .unwrap();
         assert_eq!(aggregate["usage"]["calls"], 2);
         assert_eq!(
