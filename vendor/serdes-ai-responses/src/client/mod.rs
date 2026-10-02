@@ -6,6 +6,8 @@
 //! sends the new input items.
 
 mod assembler;
+mod sse;
+mod sse_json;
 
 use crate::convert::{history_to_wire, tool_choice_to_wire, tool_to_wire};
 use crate::error::{codes, WsErrorEnvelope};
@@ -13,6 +15,7 @@ use crate::types::{
     CreateResponseRequest, ReasoningSettings, ResponseObject, ResponseStatus, StreamEvent,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::Serialize;
 use serdes_ai_core::messages::{ModelRequest, ModelRequestPart, ModelResponseStreamEvent};
 use serdes_ai_core::FinishReason;
@@ -25,6 +28,14 @@ use serdes_ai_tools::ToolDefinition;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
+
+/// Dropping a request or its stream must cancel the one owning HTTP task.
+struct AbortOnDrop(tokio::task::AbortHandle);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 /// Transport used to reach the endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -603,7 +614,7 @@ impl Model for OpenResponsesModel {
         let settings = settings.clone();
         let params = params.clone();
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let result = match inner.transport {
                 Transport::WebSocket => {
                     let mut sink = ChannelSink(&tx);
@@ -618,11 +629,15 @@ impl Model for OpenResponsesModel {
             if let Err(error) = result {
                 // A failure after events escaped still reaches the caller as
                 // an error item; a failure before that is the only item.
-                let _ = tx.try_send(Err(error));
+                let _ = tx.send(Err(error)).await;
             }
         });
 
-        Ok(Box::pin(ReceiverStream::new(rx)))
+        let abort = AbortOnDrop(task.abort_handle());
+        Ok(Box::pin(ReceiverStream::new(rx).map(move |item| {
+            let _ = &abort;
+            item
+        })))
     }
 
     fn profile(&self) -> &ModelProfile {
@@ -722,15 +737,20 @@ impl OpenResponsesModel {
         let task = tokio::spawn(async move {
             run_http_stream(&inner, &messages, &settings, &params, &tx).await
         });
+        let _abort = AbortOnDrop(task.abort_handle());
         let mut events = Vec::new();
         while let Some(item) = rx.recv().await {
-            events.push(item?);
+            match item {
+                Ok(event) => events.push(event),
+                Err(error) => return Err(retain_sse_evidence(error, events.len())),
+            }
         }
         // `run_http_stream` fails the stream on any wire error; the join
         // result must propagate that error, not just the JoinError.
         let terminal_id = task
             .await
-            .map_err(|e| ModelError::Connection(e.to_string()))??;
+            .map_err(|e| ModelError::Connection(e.to_string()))?
+            .map_err(|error| retain_sse_evidence(error, events.len()))?;
         Ok(response_from_events(
             events,
             &self.inner.model_name,
@@ -820,18 +840,20 @@ impl OpenResponsesModel {
     }
 }
 
-/// Decode one Responses event payload at the SSE transport boundary.
-///
-/// Codex emits `keepalive` transport frames while a response is running.
-/// They are not Responses semantic events, so they neither reach the model
-/// assembler nor affect stream terminal state. All other event types remain
-/// subject to the closed [`StreamEvent`] protocol enum.
-fn parse_sse_response_event(payload: &str) -> Result<Option<StreamEvent>, serde_json::Error> {
-    let value: serde_json::Value = serde_json::from_str(payload)?;
-    if value.get("type").and_then(serde_json::Value::as_str) == Some("keepalive") {
-        return Ok(None);
+/// The streaming API preserves already delivered events verbatim. The folded
+/// request API cannot return a successful partial response on failure; preserve
+/// its progress count in the terminal diagnostic instead of erasing that evidence.
+fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
+    match error {
+        ModelError::InvalidResponse(detail) => ModelError::InvalidResponse(format!(
+            "{detail}; accumulated {events} stream events (partial response is not completion)"
+        )),
+        ModelError::Api { message, code } => ModelError::Api {
+            message: format!("{message}; accumulated {events} stream events (partial response is not completion)"),
+            code,
+        },
+        other => other,
     }
-    serde_json::from_value(value).map(Some)
 }
 
 /// Streaming HTTP turn (SSE). Returns the terminal response id when the
@@ -849,8 +871,6 @@ async fn run_http_stream(
     params: &ModelRequestParameters,
     tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
 ) -> Result<Option<String>, ModelError> {
-    use futures::StreamExt;
-
     let mut session = inner.session.lock().await;
 
     let response = loop {
@@ -890,33 +910,52 @@ async fn run_http_stream(
     };
 
     let mut byte_stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut decoder = sse::Decoder::default();
     let mut terminal_id = None;
+    let mut pending_terminal = None;
+    let mut done = false;
     while let Some(chunk) = byte_stream.next().await {
-        let chunk = chunk.map_err(|e| ModelError::Connection(e.to_string()))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(newline) = buffer.find('\n') {
-            let line: String = buffer.drain(..=newline).collect();
-            let payload = line.trim_end_matches(['\n', '\r']);
-            let Some(payload) = payload.strip_prefix("data: ") else {
+        let chunk = chunk.map_err(|_| {
+            ModelError::InvalidResponse(
+                "responses SSE: body read failed after request accepted; request not replayed"
+                    .to_string(),
+            )
+        })?;
+        for byte in chunk {
+            let Some(frame) = decoder.byte(byte)? else {
                 continue;
             };
-            if payload == "[DONE]" {
-                return Ok(terminal_id);
+            if done {
+                return Err(ModelError::InvalidResponse(
+                    "responses SSE: frame after DONE".to_string(),
+                ));
             }
-            let Some(event) = parse_sse_response_event(payload)
-                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?
-            else {
-                continue;
+            let event = match frame {
+                sse::Frame::Control => continue,
+                sse::Frame::Done if terminal_id.is_some() => {
+                    done = true;
+                    continue;
+                }
+                sse::Frame::Done => {
+                    return Err(ModelError::InvalidResponse(
+                        "responses SSE: DONE before terminal event".to_string(),
+                    ))
+                }
+                sse::Frame::Event(event) => *event,
             };
+            if terminal_id.is_some() {
+                return Err(ModelError::InvalidResponse(
+                    "responses SSE: semantic event after terminal event".to_string(),
+                ));
+            }
             if let StreamEvent::ResponseCompleted { response, .. }
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
                 terminal_id = Some(response.id.clone());
-                if !inner.codex_http {
-                    session.previous_response_id = Some(response.id.clone());
-                    session.sent_requests = messages.len();
-                }
+                // Completion is a verdict, not progress. Keep it private until
+                // the remaining body, DONE ordering and EOF all validate.
+                pending_terminal = Some(event);
+                continue;
             }
             for translated in assembler::translate(event) {
                 match translated {
@@ -936,9 +975,20 @@ async fn run_http_stream(
         }
     }
 
+    decoder.finish()?;
+
     // The codex backend closes the stream after the terminal response
     // event without a `[DONE]` marker, so a clean EOF after one counts.
-    if terminal_id.is_some() {
+    if let Some(id) = &terminal_id {
+        for translated in assembler::translate(pending_terminal.expect("terminal retained")) {
+            tx.send(translated)
+                .await
+                .map_err(|_| ModelError::Cancelled)?;
+        }
+        if !inner.codex_http {
+            session.previous_response_id = Some(id.clone());
+            session.sent_requests = messages.len();
+        }
         Ok(terminal_id)
     } else {
         Err(ModelError::InvalidResponse(
@@ -949,21 +999,29 @@ async fn run_http_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sse_response_event;
+    use super::sse::{Decoder, Frame};
 
     #[test]
     fn sse_keepalives_are_transport_only_and_other_types_remain_closed() {
-        assert!(parse_sse_response_event(r#"{"type":"keepalive"}"#)
-            .expect("keepalive without a payload must parse")
-            .is_none());
-        assert!(
-            parse_sse_response_event(r#"{"type":"keepalive","payload":{"tick":1}}"#)
-                .expect("keepalive payload must remain transport-only")
-                .is_none()
-        );
-
-        let error = parse_sse_response_event(r#"{"type":"response.not_a_real_event"}"#)
-            .expect_err("unknown semantic response events must remain rejected");
-        assert!(error.to_string().contains("unknown variant"));
+        for payload in [
+            r#"{"type":"keepalive"}"#,
+            r#"{"type":"keepalive","payload":{"tick":1}}"#,
+        ] {
+            let mut decoder = Decoder::default();
+            let mut controls = 0;
+            for byte in format!("data: {payload}\n\n").bytes() {
+                if let Some(frame) = decoder.byte(byte).expect("supported keepalive") {
+                    assert!(matches!(frame, Frame::Control));
+                    controls += 1;
+                }
+            }
+            assert_eq!(controls, 1);
+            decoder.finish().unwrap();
+        }
+        let mut decoder = Decoder::default();
+        assert!("data: {\"type\":\"response.not_a_real_event\"}\n\n"
+            .bytes()
+            .try_for_each(|byte| decoder.byte(byte).map(|_| ()))
+            .is_err());
     }
 }

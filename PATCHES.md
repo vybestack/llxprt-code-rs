@@ -52,7 +52,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `0144b4e99ac63adf0daf17985a6e3fdb53d6c59f08c36c03b06308d519c3f660`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `14ea9fcf2fa7c6631df6a3603dfaa03615c978bbe1511249b1350d62d9668058`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -294,3 +294,39 @@ Patch 13 flattened-extra wire shapes), `src/model_api/registry/tests.rs` (the `l
 (offline, no configured endpoint request). The end-to-end release
 gate is `cargo xtask release-gates` (release build of the source tree with the vendor
 path deps plus the vendor/license file checks); `cargo package` is not a release gate.
+
+
+## Patch 14 - issue #256 strict Responses SSE error/control boundary
+
+The client-only path-patched `serdes-ai-responses` HTTP SSE reader now assembles
+UTF-8 byte lines and complete frames (LF/CRLF/CR, multiple data lines), with a
+1 MiB frame ceiling. It explicitly accepts comments, SSE id/retry fields,
+unnamed `[DONE]` only after a terminal response, named empty `keepalive`, and
+JSON `keepalive` (optional sequence number and opaque payload, matching retained
+Codex fixtures). Keepalive top-level semantic/error fields are rejected.
+
+Flat Responses `error` and nested error envelopes (optional 400–599 status) are
+typed, validated and terminal. `response.failed` follows the same scrubbed SSE
+failure path. Free-form provider message, param and unknown code are never
+printed: known categories produce bounded `sse_provider_*` API errors, which
+are non-retryable under the existing ModelError policy. No request replay is
+introduced. Unknown names, duplicate JSON keys, mismatched event/type names,
+malformed frames, premature DONE and semantic events after completion fail
+truthfully. Existing WebSocket reconnect policy and non-streaming HTTP policy
+are unchanged.
+
+Created responses must be queued or in-progress, and in-progress responses must
+be in-progress; neither may carry an error. These checks precede the assembler's
+lifecycle-dropping arms. Unrelated metadata and opaque keepalive payloads remain
+allowed; this is not a new general protocol state machine.
+
+Streaming completion is held until the remaining body, DONE ordering and clean
+EOF validate. Trailing provider/protocol errors, duplicate terminals/DONE, body
+failures and invalid EOF discard that pending completion. Streaming callers
+retain already emitted output followed by exactly one terminal error, even under
+channel backpressure. Folded Codex requests fail rather than
+return partial success and retain accumulated event count in the diagnosis.
+Dropping a stream/request aborts its owning task; it does not leave an ambiguous
+request running or launch a replacement. Runtime adapter diagnosis is scrubbed
+and bounded using the existing host diagnostic boundary. Owning parser and
+loopback transport/runtime regression fixtures pin these semantics.
