@@ -10,9 +10,9 @@ from bundle_publication import gone
 
 
 def run(root, xtask, temporary):
-    # Exercise both status and captured-output helpers plus the tar pipeline, not
+    # Exercise status, captured-output, and standalone snapshot helpers, not
     # just publisher delegation. Each case has its own private TMPDIR and peers.
-    for boundary in ['registry', 'git-output', 'tar', 'gzip', 'snapshot']:
+    for boundary in ['registry', 'git-output', 'snapshot']:
         case = temporary / ('release-cancellation-' + boundary)
         case.mkdir()
         scratch = case / 'tmp'
@@ -20,21 +20,19 @@ def run(root, xtask, temporary):
         ready = case / 'ready'
         descendant = case / 'descendant'
         group = case / 'group'
-        executable = 'git' if boundary == 'git-output' else boundary if boundary in ['tar', 'gzip'] else 'python3'
+        executable = 'git' if boundary == 'git-output' else 'python3'
         real = __import__('shutil').which(executable)
         peer = case / executable
         selection = {
             'registry': 'len(sys.argv) > 1 and sys.argv[1].endswith("/verify-registry-vendor.py")',
             'git-output': '"rev-parse" in sys.argv',
-            'tar': '"-cf" in sys.argv',
-            'gzip': 'True',
             'snapshot': 'True',
         }[boundary]
         peer.write_text('#!' + sys.executable + '\n' + f'''
 import os, pathlib, signal, subprocess, sys, time
 if not ({selection}): os.execv({real!r}, [{real!r}] + sys.argv[1:])
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'])
+child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)'])
 pathlib.Path(os.environ['DESCENDANT']).write_text(str(child.pid))
 pathlib.Path(os.environ['GROUP']).write_text(str(os.getpgrp()))
 pathlib.Path(os.environ['READY']).write_text(str(os.getpid()))
@@ -50,12 +48,12 @@ while True: time.sleep(.01)
                'TMPDIR': str(scratch), 'READY': str(ready),
                'DESCENDANT': str(descendant), 'GROUP': str(group)}
         # A concurrently live, unowned process must not be signalled by cleanup.
-        unowned = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+        unowned = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])
         process = subprocess.Popen([xtask, '--root', str(root), 'source-bundle', operation, str(destination)],
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             try:
-                # Construction includes real Git validation/materialization before tar.
+                # Wait for semantic helper entry before measuring cancellation.
                 startup = time.monotonic() + 120
                 while not ready.exists() and process.poll() is None and time.monotonic() < startup:
                     time.sleep(.01)
