@@ -479,7 +479,7 @@ fn offline_gates(root: &Path, extracted: &Path, stage: &Path) -> Result {
             .env("HTTP_PROXY", "http://127.0.0.1:9")
             .env("HTTPS_PROXY", "http://127.0.0.1:9")
             .env("ALL_PROXY", "http://127.0.0.1:9")
-            .env_remove("NO_PROXY")
+            .env("NO_PROXY", "127.0.0.1,localhost")
             .env_remove("no_proxy");
     };
     for args in [
@@ -519,6 +519,7 @@ fn offline_gates(root: &Path, extracted: &Path, stage: &Path) -> Result {
         .current_dir(extracted)
         .arg("scripts/test-vendor-feature-surfaces.sh");
     environment(&mut surfaces, &target.0);
+    surfaces.env_remove("NO_PROXY").env_remove("no_proxy");
     checked(&mut surfaces)?;
     for (name, features) in [
         ("responses", vec![]),
@@ -534,6 +535,7 @@ fn offline_gates(root: &Path, extracted: &Path, stage: &Path) -> Result {
             .arg(format!("vendor/serdes-ai-{name}/Cargo.toml"))
             .args(features);
         environment(&mut command, &target.0);
+        command.env_remove("NO_PROXY").env_remove("no_proxy");
         checked(&mut command)?;
     }
     println!("bundle verify ok: single bundle/ top dir, exact member round-trip, tests and release build and direct provider tests pass");
