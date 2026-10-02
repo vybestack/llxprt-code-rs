@@ -231,4 +231,76 @@ mod tests {
         assert_eq!(run.measured_calls, 0);
         assert_eq!(run.hit_ratio, None);
     }
+
+    struct BoundaryBackend {
+        attempts: std::cell::Cell<usize>,
+    }
+
+    impl ChatBackend for BoundaryBackend {
+        fn request<'a>(
+            &'a self,
+            _requests: &'a [ModelRequest],
+            _tools: &'a [ToolSpec],
+        ) -> crate::adapter::ModelFuture<'a> {
+            Box::pin(async move {
+                let call = self.attempts.get() + 1;
+                self.attempts.set(call);
+                match call {
+                    1 => Ok(crate::adapter::LlmResult {
+                        usage: LlmUsage {
+                            request_tokens: Some(100),
+                            cache_read_tokens: Some(60),
+                            ..Default::default()
+                        },
+                        text: "fixture completion".to_string(),
+                        calls: Vec::new(),
+                        finish_reason: Some(serdes_ai::core::messages::FinishReason::Stop),
+                    }),
+                    2 => Err("fixture terminal failure".to_string()),
+                    _ => std::future::pending().await,
+                }
+            })
+        }
+
+        fn request_calls(&self) -> usize {
+            self.attempts.get()
+        }
+    }
+
+    #[test]
+    fn failed_and_cancelled_requests_do_not_add_completion_usage_or_replay() {
+        let observed = ObservedBackend::new(
+            Box::new(BoundaryBackend {
+                attempts: std::cell::Cell::new(0),
+            }),
+            InputAccounting::Inclusive,
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let reply = observed.request(&[], &[]).await.unwrap();
+            assert_eq!(reply.usage.cache_read_tokens, Some(60));
+            assert_eq!(observed.request_calls(), 1);
+            assert_eq!(
+                observed.request(&[], &[]).await.unwrap_err(),
+                "fixture terminal failure"
+            );
+            assert_eq!(observed.request_calls(), 2);
+            assert!(tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                observed.request(&[], &[])
+            )
+            .await
+            .is_err());
+        });
+        assert_eq!(observed.request_calls(), 3);
+        let run = observed.run.borrow();
+        assert_eq!(run.calls, 1);
+        assert_eq!(run.measured_calls, 1);
+        assert_eq!(run.measured_input_tokens, 100);
+        assert_eq!(run.measured_cached_tokens, 60);
+        assert_eq!(run.hit_ratio, Some(0.6));
+    }
 }

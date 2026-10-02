@@ -296,6 +296,18 @@ pub(super) mod tests {
         request
     }
 
+    /// Provider-reported usage shared by each synthetic completed turn.
+    fn codex_fixture_usage() -> serdes_ai_responses::types::ResponseUsage {
+        serdes_ai_responses::types::ResponseUsage {
+            input_tokens: Some(11),
+            input_tokens_details: Some(serdes_ai_responses::types::InputTokensDetails {
+                cached_tokens: Some(6),
+            }),
+            output_tokens: Some(7),
+            total_tokens: Some(18),
+        }
+    }
+
     /// Builds the SSE response for one codex turn. Round 0 ends like the
     /// real codex backend: the terminal response event, then EOF, no
     /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
@@ -310,14 +322,7 @@ pub(super) mod tests {
             &serde_json::from_value(serde_json::json!({"model": "loopback-codex", "input": []}))
                 .unwrap(),
         );
-        object.usage = Some(serdes_ai_responses::types::ResponseUsage {
-            input_tokens: Some(11),
-            input_tokens_details: Some(serdes_ai_responses::types::InputTokensDetails {
-                cached_tokens: Some(6),
-            }),
-            output_tokens: Some(7),
-            total_tokens: Some(18),
-        });
+        object.usage = Some(codex_fixture_usage());
         let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
             sequence_number: 0,
             response: object.clone(),

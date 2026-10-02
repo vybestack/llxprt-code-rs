@@ -40,8 +40,11 @@ summary `concise`, `detailed`, or `auto`. Optional `text.verbosity` uses the sam
 Omitted `prompt-caching`, `1h`, and `24h` send the validated session label as
 `prompt_cache_key` with retention `24h`; `off` omits both fields. Session labels therefore leave
 the process in cached mode and must not contain project or secret information. The literal
-`default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends
-neither that key nor a session header.
+`default` is used when the CLI session option is omitted. OpenAI Chat and Codex HTTP also
+use the session label as a cache routing key unless caching is `off`, without using it
+for response continuation. Codex sends neither a session header nor a retention request.
+See [stateless prompt caching](prompt-caching.md) for prefix invariants and truthful usage
+accounting. Provider/model selection and the configured context/reasoning policy are unchanged.
 
 ## Codex configured budgets and reasoning (issue 274)
 
