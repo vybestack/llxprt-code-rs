@@ -85,9 +85,29 @@ CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$PWD/target" TMPDIR="$PWD/tmp" \
   cargo +1.88.0 test --offline --locked --test context_recovery -- --nocapture
 ```
 
-This command is for the recovery binary only. Full-suite Cargo scratch must have
-legitimate physical topology outside Cargo ancestry while shared #252 is open;
-that precaution does not repair its malformed parity fixture or weak assertions.
+This command is for the recovery binary only. The current-main remediation
+candidate integrates final shared #308 at
+`bc839f206a40f5953900881342d2a1684a342b34` with pinned main
+`fc872110ec5a9b67ae8dce5dd9dbd727ad5f6ef8`. Its parity fixture uses legitimate
+isolated Cargo topology; do not create fake Cargo ancestors or relax assertions.
+Managed nested lifetimes use retained ownership pipes and a group guardian, not
+universal hostile daemon containment. The original #308 full review and completed
+findings-only follow-up remain scoped to #308; the added #194 fixture scope still
+requires its separate independent acceptance.
+
+Main #309 already owns Codex profile context/reasoning/bootstrap policy. This
+candidate does not reintroduce the historical #286/profile stack. A separate lane
+accounts for any remaining all-provider #300 scope. Current main removed the
+compatibility ledger and allowlist via #254; historical compat gate records below
+are evidence, not a request to restore those surfaces.
+
+Historical integrated verification and source pins were cited under
+`evalwork/results/pr-completion-20260920/issue194-integrated/`, with supplied-candidate
+reconstruction evidence under the sibling `issue194/` directory. Those citations
+do not establish that the original evidence is available in this workspace. The
+supplied candidate is a reconstruction, not the unavailable original incident
+patch. Current candidate commands, source mapping, archive binding, and evidence
+availability are recorded separately in the shared308 remediation report.
 
 ## Evidence and acceptance limits
 

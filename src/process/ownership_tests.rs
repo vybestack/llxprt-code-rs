@@ -37,7 +37,7 @@ fn native_spec(args: Vec<String>, env: Vec<(String, String)>, timeout: Duration)
         cwd: None,
         cwd_fd: None,
         env_add: env,
-        timeout,
+        timeout: Some(timeout),
         max_output: 4096,
     }
 }
