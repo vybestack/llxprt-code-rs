@@ -51,10 +51,8 @@ fn host_profile_request_budget_respects_resolver_precedence_and_separate_turn_ti
             }
             let settings = crate::settings::resolve(layers).unwrap();
             apply_runtime_settings(&mut profile, &settings).unwrap();
-            assert_eq!(
-                profile.ephemeral.timeout_ms,
-                Some(if overridden { 2000 } else { 1234 })
-            );
+            let expected = if overridden { 2000 } else { 1234 };
+            assert_eq!(profile.ephemeral.timeout_ms, Some(expected));
             assert_eq!(
                 settings.budgets.turn_time.value,
                 Some(std::time::Duration::from_secs(5))

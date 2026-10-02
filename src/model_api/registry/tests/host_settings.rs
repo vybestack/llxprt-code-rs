@@ -58,49 +58,54 @@ fn non_codex_profile_request_budgets_reach_backend_configuration() {
     }
 }
 
+fn capture_request_then_stall(
+    listener: std::net::TcpListener,
+    tx: std::sync::mpsc::Sender<serde_json::Value>,
+) {
+    use std::io::Read as _;
+    let (mut stream, _) = listener.accept().unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    let mut bytes = Vec::new();
+    let mut buf = [0_u8; 4096];
+    loop {
+        let n = stream.read(&mut buf).unwrap();
+        assert!(n > 0);
+        bytes.extend_from_slice(&buf[..n]);
+        if let Some(start) = bytes
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|n| n + 4)
+        {
+            let headers = String::from_utf8_lossy(&bytes[..start]).to_lowercase();
+            let len: usize = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            if bytes.len() >= start + len {
+                tx.send(
+                    serde_json::from_slice::<serde_json::Value>(&bytes[start..start + len])
+                        .unwrap(),
+                )
+                .unwrap();
+                break;
+            }
+        }
+    }
+    // Hold the connection open, but neither emit headers nor an SSE event.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+}
+
 #[test]
 fn responses_profile_request_budget_bounds_a_stalled_loopback_request() {
-    use std::io::Read as _;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-        let mut bytes = Vec::new();
-        let mut buf = [0_u8; 4096];
-        loop {
-            let n = stream.read(&mut buf).unwrap();
-            assert!(n > 0);
-            bytes.extend_from_slice(&buf[..n]);
-            if let Some(start) = bytes
-                .windows(4)
-                .position(|w| w == b"\r\n\r\n")
-                .map(|n| n + 4)
-            {
-                let headers = String::from_utf8_lossy(&bytes[..start]).to_lowercase();
-                let len: usize = headers
-                    .lines()
-                    .find_map(|line| line.strip_prefix("content-length:"))
-                    .unwrap()
-                    .trim()
-                    .parse()
-                    .unwrap();
-                if bytes.len() >= start + len {
-                    tx.send(
-                        serde_json::from_slice::<serde_json::Value>(&bytes[start..start + len])
-                            .unwrap(),
-                    )
-                    .unwrap();
-                    break;
-                }
-            }
-        }
-        // Hold the connection open, but neither emit headers nor an SSE event.
-        std::thread::sleep(std::time::Duration::from_secs(2));
-    });
+    let server = std::thread::spawn(move || capture_request_then_stall(listener, tx));
     let input = serde_json::json!({
         "provider":"openai", "model":"test", "ephemeralSettings": {
             "apiMode":"responses", "base-url":format!("http://127.0.0.1:{port}"),
