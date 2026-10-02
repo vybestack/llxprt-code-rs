@@ -1,5 +1,7 @@
 //! #220: exercise the registered production editor boundary, not a simulated write.
-use llxprt_code_rs::tools::{execute_tool, tool_specs, ShellConfig, ShellTimeoutPolicy, ToolConfig, WorkspaceCap};
+use llxprt_code_rs::tools::{
+    execute_tool, tool_specs, ShellConfig, ShellTimeoutPolicy, ToolConfig, WorkspaceCap,
+};
 use serde_json::json;
 use std::time::Duration;
 
@@ -16,9 +18,9 @@ fn block_as_whole_file_write_succeeds_but_destroys_preservation() {
         shell: ShellConfig {
             max_shell_output: 1024,
             timeouts: ShellTimeoutPolicy {
-            default: Some(Duration::from_secs(1)),
-            maximum: Some(Duration::from_secs(1)),
-        },
+                default: Some(Duration::from_secs(1)),
+                maximum: Some(Duration::from_secs(1)),
+            },
             allow_shell: false,
         },
     };
