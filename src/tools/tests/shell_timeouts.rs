@@ -151,3 +151,32 @@ fn explicit_unlimited_shell_call_bypasses_default_but_obeys_maximum() {
     assert!(error.contains("timed out"));
     assert!(error.contains("requested timeout unlimited; effective timeout 1s"));
 }
+
+#[test]
+fn host_shell_timing_witnesses_assert_budgets_not_registry_queue_time() {
+    let policy = ShellTimeoutPolicy {
+        default: Some(Duration::from_secs(1)),
+        maximum: Some(Duration::from_secs(3)),
+    };
+    let error = run(policy, "sleep 2", None).unwrap_err();
+    assert!(error.contains("command timed out after 1000 ms"), "{error}");
+    assert_eq!(
+        run(policy, "sleep 2; printf override", Some(3)).unwrap(),
+        "override"
+    );
+    let error = run(policy, "sleep 10", Some(30)).unwrap_err();
+    assert!(error.contains("command timed out after 3000 ms"), "{error}");
+    for invalid in [0, -2] {
+        assert!(run(policy, "true", Some(invalid))
+            .unwrap_err()
+            .contains("positive"));
+    }
+    let uncapped = ShellTimeoutPolicy {
+        maximum: None,
+        ..policy
+    };
+    assert_eq!(
+        run(uncapped, "sleep 4; printf completed", Some(5)).unwrap(),
+        "completed"
+    );
+}
