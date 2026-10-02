@@ -1,7 +1,7 @@
 //! Source bundle construction and verification. Archive parsing and descriptor-bound
 //! publication remain in the existing Python helpers; policy and orchestration live here.
 use crate::bundle_policy::{self as policy, DIGESTS, MANIFEST};
-use crate::release_support::{cargo, checked, output, python, text, Result, Temp};
+use crate::release_support::{cargo, checked, output, python, text, ReleaseChild, Result, Temp};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -9,7 +9,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 pub fn run(root: &Path, args: &[String]) -> Result {
@@ -36,49 +36,55 @@ fn archive_argument(root: &Path, args: &[String]) -> Result<PathBuf> {
     Ok(root.join(name))
 }
 
-struct Publisher(Child);
-impl Drop for Publisher {
-    fn drop(&mut self) {
-        if matches!(self.0.try_wait(), Ok(None)) {
-            let _ = Command::new("kill")
-                .args(["-TERM", &self.0.id().to_string()])
-                .status();
-            // The publisher owns bounded verifier-group termination and reaping.
-            let _ = self.0.wait();
-        }
-    }
-}
-
-fn publisher(root: &Path, destination: &str) -> Result<(Publisher, UnixStream)> {
+fn publisher(root: &Path, destination: &str) -> Result<(ReleaseChild, UnixStream)> {
     let (reader, writer) = UnixStream::pair().map_err(|e| e.to_string())?;
     reader
-        .set_read_timeout(Some(Duration::from_secs(10)))
+        .set_read_timeout(Some(Duration::from_millis(100)))
         .map_err(|e| e.to_string())?;
     let descriptor: OwnedFd = writer.into();
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-    let child = python(root, "source-bundle-publish.py")
-        .args(["--await-source", destination, "1", "--"])
-        .arg(executable)
-        .arg("--root")
-        .arg(root)
-        .args([
-            "source-bundle",
-            "verify",
-            "--run-local-source-code",
-            "{SOURCE}",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::from(descriptor))
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok((Publisher(child), reader))
+    let mut child = ReleaseChild::spawn(
+        python(root, "source-bundle-publish.py")
+            .args(["--await-source", destination, "1", "--"])
+            .arg(executable)
+            .arg("--root")
+            .arg(root)
+            .args([
+                "source-bundle",
+                "verify",
+                "--run-local-source-code",
+                "{SOURCE}",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(descriptor)),
+    )?;
+    // Publisher owns a one-second verifier TERM grace before its own KILL/reap.
+    child.termination_grace = Duration::from_secs(2);
+    Ok((child, reader))
 }
 
 fn handshake(reader: &mut BufReader<UnixStream>, expected: &str) -> Result {
     let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .map_err(|e| format!("publisher handshake: {e}"))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        crate::release_cancellation::check()?;
+        match reader.read_line(&mut line) {
+            Ok(_) => break,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                if std::time::Instant::now() >= deadline {
+                    return Err("publisher handshake timed out".into());
+                }
+            }
+            Err(e) => return Err(format!("publisher handshake: {e}")),
+        }
+    }
     if line == expected {
         Ok(())
     } else {
@@ -100,7 +106,11 @@ fn build(root: &Path, args: &[String]) -> Result {
     let (mut publisher, reader) = publisher(root, destination)?;
     let mut reader = BufReader::new(reader);
     handshake(&mut reader, "READY\n")?;
-    let mut source = publisher.0.stdin.take().ok_or("publisher stdin missing")?;
+    let mut source = publisher
+        .child
+        .stdin
+        .take()
+        .ok_or("publisher stdin missing")?;
     source.write_all(b"PREPARE\0").map_err(|e| e.to_string())?;
     handshake(&mut reader, "PARENT_READY\n")?;
     let stage = Temp::new(root, "llxprt-bundle-build")?;
@@ -162,7 +172,7 @@ fn build(root: &Path, args: &[String]) -> Result {
             Err(e) => return Err(e.to_string()),
         }
     }
-    let status = publisher.0.wait().map_err(|e| e.to_string())?;
+    let status = publisher.wait()?;
     if !status.success() {
         return Err(format!("source-bundle publisher: {status}"));
     }
@@ -247,19 +257,15 @@ fn make_tar(stage: &Path, candidate: &Path) -> Result {
             "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
         ]);
     }
-    let mut tar = command
-        .args(["-cf", "-", "bundle"])
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut tar = ReleaseChild::spawn(command.args(["-cf", "-", "bundle"]).stdout(Stdio::piped()))?;
     let result = checked(
         Command::new("gzip")
             .args(["-n", "-c"])
-            .stdin(tar.stdout.take().ok_or("tar stdout missing")?)
+            .stdin(tar.child.stdout.take().ok_or("tar stdout missing")?)
             .stdout(File::create(candidate).map_err(|e| e.to_string())?),
     );
-    let status = tar.wait().map_err(|e| e.to_string())?;
     result?;
+    let status = tar.wait()?;
     if status.success() {
         Ok(())
     } else {
@@ -311,6 +317,7 @@ with os.fdopen(fd, 'rb') as source, open(destination, 'xb') as target:
 "#;
 
 fn verify(root: &Path, args: &[String]) -> Result {
+    let _cancellation = crate::release_cancellation::Cancellation::install()?;
     let local = args.first().is_some_and(|a| a == "--run-local-source-code");
     let bundle = archive_argument(root, if local { &args[1..] } else { args })?;
     let stage = Temp::new(root, "llxprt-bundle-verify")?;

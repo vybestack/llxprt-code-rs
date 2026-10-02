@@ -11,6 +11,7 @@ import tempfile
 
 from bundle_archives import malformed, matching
 import bundle_publication
+import bundle_cancellation
 
 ROOT = Path(__file__).resolve().parents[2]
 XTASK = sys.argv[1]
@@ -258,6 +259,7 @@ def main():
         policy_source = tmp / 'policy-source'
         clean_copy(ROOT, policy_source)
         output_policy(policy_source, tmp)
+        bundle_cancellation.run(policy_source, XTASK, tmp)
         git_inputs(ROOT, tmp)
         bundle_publication.run(ROOT / 'scripts/source-bundle-publish.py', tmp)
         builder_cases(ROOT, tmp)

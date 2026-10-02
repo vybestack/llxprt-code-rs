@@ -30,3 +30,7 @@ pub const FILE_LOC_LIMIT: usize = 800;
 pub const FUNCTION_LOC_LIMIT: usize = 80;
 pub const CYCLOMATIC_LIMIT: usize = 25;
 pub const COGNITIVE_LIMIT: usize = 30;
+
+// Use the existing retained scope leader; release commands are not runtime launches.
+#[path = "../../src/process/ownership.rs"]
+mod release_scope;
