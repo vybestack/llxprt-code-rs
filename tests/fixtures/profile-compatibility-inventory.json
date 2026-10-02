@@ -4421,13 +4421,13 @@
       "key": "shell-default-timeout-seconds",
       "classification": "host-applied",
       "owner": "rust-shell-executor",
-      "note": "Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; other APIs reject"
+      "note": "Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; Non-Codex Chat: executor seconds 1..7200; omission 120 for each; default must not exceed maximum; -1 rejects"
     },
     {
       "key": "shell-max-timeout-seconds",
       "classification": "host-applied",
       "owner": "rust-shell-executor",
-      "note": "Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; other APIs reject"
+      "note": "Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; Non-Codex Chat: executor seconds 1..7200; omission 120 for each; default must not exceed maximum; -1 rejects"
     },
     {
       "key": "shell-inactivity-timeout-seconds",

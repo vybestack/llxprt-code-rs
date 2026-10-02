@@ -25,6 +25,8 @@
  *       --sibling <absolute-llxprt-code-checkout> \
  *       --profiles <absolute-profile-directory>
  *   node scripts/generate-profile-compatibility-inventory.mjs --self-test
+ *   node --test tests/profile_compatibility_generator.test.mjs
+ *       (pure checked-in artifact regressions; no sibling or installed profiles)
  */
 
 import fs from 'node:fs';
@@ -466,7 +468,7 @@ function collectStringLiterals(ts, abs) {
   return out;
 }
 
-function buildClassificationTable() {
+export function buildClassificationTable() {
   const rows = [];
   const add = (key, classification, owner, note) => rows.push({ key, classification, owner, note });
   const wire = 'wire-applied';
@@ -584,8 +586,8 @@ function buildClassificationTable() {
   add('task-max-async', rej, common, 'rejected');
   add('shell-max-background-jobs', rej, common, 'rejected');
   add('shell-background-log-max-bytes', rej, common, 'rejected');
-  add('shell-default-timeout-seconds', host, 'rust-shell-executor', 'Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; other APIs reject');
-  add('shell-max-timeout-seconds', host, 'rust-shell-executor', 'Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; other APIs reject');
+  add('shell-default-timeout-seconds', host, 'rust-shell-executor', 'Codex: executor default seconds 1..4294967295 or -1 (disabled); omission 120; per-call override then maximum cap; Non-Codex Chat: executor seconds 1..7200; omission 120 for each; default must not exceed maximum; -1 rejects');
+  add('shell-max-timeout-seconds', host, 'rust-shell-executor', 'Codex: executor maximum seconds 1..4294967295 or -1 (no ceiling); omission 120; independent of request/turn deadlines; Non-Codex Chat: executor seconds 1..7200; omission 120 for each; default must not exceed maximum; -1 rejects');
   add('shell-inactivity-timeout-seconds', rej, common, 'rejected');
   add('shell-output-retention-max-bytes', rej, common, 'rejected');
   add('subagents.async.enabled', rej, common, 'rejected');
@@ -930,7 +932,7 @@ function omitFixtures() {
 // ---------------------------------------------------------------------------
 // Markdown rendering (deterministic).
 // ---------------------------------------------------------------------------
-function renderMarkdown(artifact) {
+export function renderMarkdown(artifact) {
   const c = artifact.counts;
   const L = [];
   const push = (s = '') => L.push(s);
@@ -989,8 +991,9 @@ function renderMarkdown(artifact) {
   push();
   push("The current `astramedium` shape includes host image-resize settings.");
   push("`image-resize.maxLongEdge`, `image-resize.maxShortEdge`, and `image-resize.maxPixels`");
-  push("accept JSON numbers as inert host data: this runtime has no image-input/resizing");
-  push("pipeline. Non-numeric values reject.");
+  push("accept JSON numbers retained in `HostImageResizeSettings` as external-host data:");
+  push("this runtime accepts text/tool prompts and has no image-input/resizing pipeline,");
+  push("so these settings are not projected into provider requests. Non-numeric values reject.");
   push("");
   push("`shell-default-timeout-seconds` and `shell-max-timeout-seconds` govern this runtime's");
   push("`run_shell_command` executor (still gated by `--allow-shell`). Each accepts integer");
@@ -1501,4 +1504,7 @@ function main() {
   generate({ siblingRoot: path.resolve(sibling), profilesDir: path.resolve(profiles) });
 }
 
-main();
+// Importing the pure classification/renderer functions never captures installed profiles.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
