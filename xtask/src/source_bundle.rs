@@ -479,7 +479,8 @@ fn offline_gates(root: &Path, extracted: &Path, stage: &Path) -> Result {
             .env("HTTP_PROXY", "http://127.0.0.1:9")
             .env("HTTPS_PROXY", "http://127.0.0.1:9")
             .env("ALL_PROXY", "http://127.0.0.1:9")
-            .env("NO_PROXY", "127.0.0.1,localhost");
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy");
     };
     for args in [
         vec![
