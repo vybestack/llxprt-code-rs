@@ -10,6 +10,11 @@ and built on [`serdes-ai`] 0.2.6. Each invocation:
 3. persists session/turn state under the real config dir,
 4. prints **exactly one JSON object to stdout** (including on failure).
 
+Use `--emit all` for an opt-in live JSONL transcript on stderr, or
+`llxprt-code-rs transcript --session ID --json` for read-only look-back.
+See [transcript emission and look-back](docs/transcripts.md) for categories, limits,
+reasoning availability, human viewing caps and branch lineage.
+
 The project also ships a reusable library API ([`crate::cli`]), a black-box parity
 harness ([`llxprt-parity`]), and scenario grading. The API key is only ever held
 in memory; it is never logged or persisted.

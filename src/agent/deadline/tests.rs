@@ -55,6 +55,7 @@ fn reply(seconds: u64, text: &str, calls: Vec<ToolCall>) -> Reply {
     Reply {
         delay: Duration::from_secs(seconds),
         result: Ok(LlmResult {
+            thinking: String::new(),
             text: text.into(),
             finish_reason: Some(if calls.is_empty() {
                 FinishReason::Stop

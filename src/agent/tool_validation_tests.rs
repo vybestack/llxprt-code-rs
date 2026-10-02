@@ -13,6 +13,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
     let store = SessionStore::load(&SessionId::parse("unknown-tool-recovery").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let unknown = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "unknown-1".into(),
@@ -24,6 +25,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
         usage: LlmUsage::default(),
     };
     let read = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "read-1".into(),
@@ -35,6 +37,7 @@ fn unknown_tool_name_gets_corrective_result_and_turn_continues() {
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
+        thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -61,6 +64,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
     let store = SessionStore::load(&SessionId::parse("unknown-tool-budget").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let unknown = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "unknown-1".into(),
@@ -71,6 +75,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
         usage: LlmUsage::default(),
     };
     let read = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "read-1".into(),
@@ -81,6 +86,7 @@ fn unknown_tool_refusal_counts_toward_the_tool_budget() {
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
+        thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -108,6 +114,7 @@ fn disabled_shell_tool_gets_corrective_result() {
     let store = SessionStore::load(&SessionId::parse("disabled-shell-recovery").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let shell = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "shell-1".into(),
@@ -119,6 +126,7 @@ fn disabled_shell_tool_gets_corrective_result() {
         usage: LlmUsage::default(),
     };
     let done = LlmResult {
+        thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -150,6 +158,7 @@ fn assert_invalid_tool_call(call: ToolCall) {
     .unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let reply = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![call],
         finish_reason: Some(FinishReason::ToolCall),
@@ -188,6 +197,7 @@ fn duplicate_tool_call_id_still_fatal() {
         args_json: "{}".into(),
     };
     let reply = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![call.clone(), call],
         finish_reason: Some(FinishReason::ToolCall),

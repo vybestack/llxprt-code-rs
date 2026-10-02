@@ -58,6 +58,7 @@ impl Turn<'_> {
             .saturating_add(forced.text.len());
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         self.check_round_limit(store, reserved, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &forced)?;
         Ok(forced.text)
     }
 

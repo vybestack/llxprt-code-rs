@@ -132,9 +132,11 @@ pub struct CodingAgent {
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
     pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
+    emitter: std::sync::Mutex<crate::transcript::Emitter>,
     profiler: Option<crate::memory_profile::Profiler>,
 }
 
+mod emission;
 mod error;
 pub use error::AgentError;
 mod helpers;
@@ -201,6 +203,7 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: config.context_limit,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -232,6 +235,7 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         })
     }
@@ -259,6 +263,7 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
         }
     }
@@ -343,6 +348,10 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        self.emitter
+            .lock()
+            .expect("transcript mutex poisoned")
+            .reset();
         let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
@@ -414,6 +423,7 @@ impl Turn<'_> {
             total_calls: 0,
         };
         self.enforce_usage(store, reserved, &[], &usage)?;
+        self.emit_response(store, reserved, &[], &current)?;
         Ok(AttemptState {
             requests,
             rounds: Vec::new(),
@@ -547,7 +557,8 @@ impl Turn<'_> {
             .args_bytes
             .saturating_add(turn_args_bytes(&attempt.current));
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)
+        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &attempt.current)
     }
 
     fn check_request_budget(

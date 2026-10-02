@@ -17,6 +17,7 @@ pub(crate) struct ResponsesBackend {
     model: ResponsesModel,
     model_settings: ModelSettings,
     calls: AtomicUsize,
+    secrets: Vec<String>,
 }
 
 impl ResponsesBackend {
@@ -36,7 +37,13 @@ impl ResponsesBackend {
             model,
             model_settings,
             calls: AtomicUsize::new(0),
+            secrets: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_secrets(mut self, secrets: Vec<String>) -> Self {
+        self.secrets = secrets;
+        self
     }
 
     async fn request_async(
@@ -79,11 +86,18 @@ impl ResponsesBackend {
             };
             crate::redact::scrub_and_bound_diagnostic(&diagnostic)
         })?;
-        Ok(LlmResult::from(&response))
+        Ok(LlmResult::from_response(&response, &self.secrets))
     }
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn tool_error_prefix(&self) -> &'static str {
+        match &self.model {
+            ResponsesModel::Codex(_) => "tool error: ",
+            ResponsesModel::OpenAi(_) => "Error: ",
+        }
+    }
+
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],
@@ -236,7 +250,13 @@ pub(super) mod tests {
             ])
         };
         let first_history = vec![turn("first codex turn")];
-        let second_history = vec![turn("first codex turn"), turn("second codex turn")];
+        let mut second_history = vec![turn("first codex turn"), turn("second codex turn")];
+        second_history.push(crate::adapter::tool_return_request(
+            "read_file",
+            "failed",
+            false,
+            "fixture failure",
+        ));
         // Both rounds share one executor, mirroring the single per-turn
         // runtime in src/agent/deadline.rs.
         let rt = test_runtime();
@@ -250,6 +270,7 @@ pub(super) mod tests {
 
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
         assert_codex_wire_contract(&bodies);
+        assert_codex_transcript_contract(&bodies, &backend, &first, &second);
         assert!(
             first.text.contains("codex turn one"),
             "folded output missing: {first:?}"
@@ -259,6 +280,26 @@ pub(super) mod tests {
             "folded output missing: {second:?}"
         );
         assert_eq!(backend.request_calls(), 2);
+    }
+
+    fn assert_codex_transcript_contract(
+        bodies: &[serde_json::Value],
+        backend: &ResponsesBackend,
+        first: &LlmResult,
+        second: &LlmResult,
+    ) {
+        let wire_result = bodies[1]["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call_output")
+            .unwrap();
+        assert_eq!(
+            wire_result["output"],
+            format!("{}fixture failure", backend.tool_error_prefix())
+        );
+        assert_eq!(first.thinking, "codex reasoning one");
+        assert_eq!(second.thinking, "codex reasoning two");
     }
 
     /// Reads one full HTTP request (headers plus a content-length body) off
@@ -346,7 +387,7 @@ pub(super) mod tests {
         // The created object is nonterminal; only the final object is completed.
         object.status = serdes_ai_responses::types::ResponseStatus::Completed;
         let completed = serdes_ai_responses::types::StreamEvent::ResponseCompleted {
-            sequence_number: 4,
+            sequence_number: 7,
             response: object,
         };
         let sse = |event: &serdes_ai_responses::types::StreamEvent| {
@@ -369,11 +410,22 @@ pub(super) mod tests {
             sse(&item_added),
             keepalive("[1,2,3]"),
             sse(&text_delta),
-            sse(&item_done),
+            format_args!("{}{}", sse(&item_done), codex_reasoning_sse(turn)),
             sse(&completed),
             keepalive("\"after\""),
             done,
         )
+    }
+
+    fn codex_reasoning_sse(turn: &str) -> String {
+        [
+            serde_json::json!({"type":"response.output_item.added","sequence_number":4,"output_index":1,
+                "item":{"type":"reasoning","id":"reason","summary":[]}}),
+            serde_json::json!({"type":"response.reasoning_summary_text.delta","sequence_number":5,
+                "item_id":"reason","output_index":1,"summary_index":0,"delta":format!("codex reasoning {turn}")}),
+            serde_json::json!({"type":"response.output_item.done","sequence_number":6,"output_index":1,
+                "item":{"type":"reasoning","id":"reason","summary":[]}}),
+        ].iter().map(|event| format!("data: {event}\n\n")).collect()
     }
 
     /// Pins the codex wire shape every turn must keep: `store: false`,

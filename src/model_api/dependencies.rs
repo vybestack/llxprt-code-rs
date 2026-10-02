@@ -85,28 +85,32 @@ pub(crate) struct RuntimeDependencies {
     config_home: ConfigHomeRoot,
     registrations: &'static [ModelRegistration],
 }
-fn select_credential_source(root: &ConfigHomeRoot, localoauth: bool) -> Arc<dyn CredentialSource> {
+fn select_credential_source(
+    root: &ConfigHomeRoot,
+    localoauth: bool,
+    transcript: bool,
+) -> Arc<dyn CredentialSource> {
     if localoauth {
         Arc::new(super::local_oauth::LocalCredentialSource::new(root))
     } else {
-        production_credential_source()
+        production_credential_source(transcript)
     }
 }
 
 #[cfg(target_os = "macos")]
-fn production_credential_source() -> Arc<dyn CredentialSource> {
-    Arc::new(super::macos_keychain::MacOsCredentialSource)
+fn production_credential_source(transcript: bool) -> Arc<dyn CredentialSource> {
+    Arc::new(super::macos_keychain::MacOsCredentialSource { transcript })
 }
 
 #[cfg(not(target_os = "macos"))]
-fn production_credential_source() -> Arc<dyn CredentialSource> {
+fn production_credential_source(_transcript: bool) -> Arc<dyn CredentialSource> {
     Arc::new(super::credentials::UnsupportedCredentialSource)
 }
 
 impl RuntimeDependencies {
-    pub(crate) fn production(localoauth: bool) -> Result<Self, String> {
+    pub(crate) fn production(localoauth: bool, transcript: bool) -> Result<Self, String> {
         let config_home = ConfigHomeRoot::discover()?;
-        let credential_source = select_credential_source(&config_home, localoauth);
+        let credential_source = select_credential_source(&config_home, localoauth, transcript);
         Ok(Self {
             credential_source,
             clock: Arc::new(super::credentials::SystemClock),
