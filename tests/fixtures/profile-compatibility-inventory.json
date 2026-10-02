@@ -3922,8 +3922,8 @@
     {
       "key": "stream-first-response-timeout-ms",
       "classification": "host-applied",
-      "owner": "standard-chat",
-      "note": "nonnegative integer in chat; Codex accepts only inert disabled integer -1"
+      "owner": "common",
+      "note": "Non-Codex Chat/Anthropic/Responses: bounded whole-request milliseconds; positive integer, 0/-1/omission native policy; Codex accepts only inert disabled integer -1"
     },
     {
       "key": "streamFirstResponseTimeoutMs",
@@ -4499,19 +4499,19 @@
       "key": "image-resize.maxLongEdge",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u32::MAX; retained host policy, never provider/runtime-applied"
     },
     {
       "key": "image-resize.maxShortEdge",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u32::MAX; short edge must not exceed long edge; retained host policy, never provider/runtime-applied"
     },
     {
       "key": "image-resize.maxPixels",
       "classification": "host-applied",
       "owner": "common",
-      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject"
+      "note": "Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u64::MAX; retained host policy, never provider/runtime-applied"
     },
     {
       "key": "max-image-dimension",

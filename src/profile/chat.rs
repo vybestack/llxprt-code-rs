@@ -163,6 +163,7 @@ pub(super) fn parse_ephemeral(
             unsupported.push(key.clone());
         }
     }
+    super::host::validate(&settings, name)?;
     settings.unsupported = unsupported;
     Ok(settings)
 }
@@ -173,6 +174,9 @@ fn parse_ephemeral_entry(
     value: &serde_json::Value,
     name: &str,
 ) -> Result<bool, String> {
+    if super::host::parse(settings, key, value, name)? {
+        return Ok(true);
+    }
     if parse_ephemeral_primary(settings, key, value, name)? {
         return Ok(true);
     }
@@ -227,7 +231,6 @@ fn parse_ephemeral_primary(
             settings.max_tool_calls_per_prompt = MaxToolCalls::parse(value, name)?;
         }
         "context-limit" | "contextLimit" => settings.context_limit = Some(nonnegative()?),
-        "stream-first-response-timeout-ms" => settings.timeout_ms = Some(nonnegative()?),
         "shell-default-timeout-seconds" => {
             settings.shell_default_timeout_seconds = Some(shell_timeout_seconds(value, key, name)?);
         }

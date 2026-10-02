@@ -9,7 +9,7 @@ fn astra() -> serde_json::Value {
 
 #[test]
 fn configured_codex_context_budgets_are_preserved() {
-    for limit in [1, 262_143, 262_144, 300_000, u64::MAX] {
+    for limit in [1, 262_143, 262_144, 300_000, 1_000_000, u64::MAX] {
         let mut value = astra();
         value["ephemeralSettings"]["context-limit"] = json!(limit);
         let profile = parse_profile_value(&value, "astramedium").unwrap();
@@ -222,5 +222,18 @@ fn image_host_settings_are_retained_without_provider_projection() {
         value["ephemeralSettings"]["image-resize.maxPixels"]
             .as_number()
             .unwrap()
+    );
+}
+
+#[test]
+fn codex_still_requires_an_explicit_context_limit() {
+    let mut value = astra();
+    value["ephemeralSettings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("context-limit");
+    assert_eq!(
+        parse_profile_value(&value, "astra").unwrap_err(),
+        "profile \"astra\": missing required setting 'context-limit'"
     );
 }

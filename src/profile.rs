@@ -11,6 +11,7 @@
 mod anthropic;
 mod chat;
 mod codex;
+mod host;
 mod openai_responses;
 mod parsing;
 /// Provider-neutral settings carriers: read by `model_api` when it interprets a

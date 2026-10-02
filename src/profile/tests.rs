@@ -4,6 +4,7 @@ mod codex_settings;
 mod codex_task_timeouts;
 mod codex_tools;
 mod dsflash_effort;
+mod host_settings;
 mod numeric_strings;
 mod openai_responses_settings;
 use serde_json::json;
