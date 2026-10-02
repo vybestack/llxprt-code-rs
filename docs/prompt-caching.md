@@ -30,7 +30,7 @@ the exactly-one-object stdout envelope:
 * `prompt_cache_call`: call ordinal, raw reported input, cached-read input, cache
   creation input, uncached input, total input, and denominator convention.
 * `prompt_cache_run`: cumulative completed calls, measured calls, measured total and
-  cached input, and token-weighted `hit_ratio` for this process invocation. The last
+  cached input, `aggregate_valid`, and token-weighted `hit_ratio` for this process invocation. The last
   line is the run aggregate, including completed calls before a later failure.
 
 OpenAI reports input inclusive of cache reads. Uncached input is input minus reads.
@@ -43,7 +43,14 @@ input usage. Inconsistent external counters (reads exceeding inclusive input, or
 an overflowing per-call sum) preserve the raw values but omit invalid derived
 values and do not enter the ratio. A call enters the ratio only
 when its total denominator and cached-read count are known. A zero-token denominator
-produces null ratio. Cache-off calls can still report implicit hits. Failed transports
+produces null ratio. These totals and the ratio cover only `measured_calls`, not
+unmeasured completions; `calls` also includes completions with missing or invalid usage.
+Cross-call overflow makes the affected aggregate counter permanently null and sets
+`aggregate_valid` to false, with a null ratio thereafter. Other representable totals
+and coverage counts remain exact; raw per-call counters are preserved. An overflowing
+call count or measured-call count likewise becomes null and invalidates the ratio.
+`aggregate_valid` means the measured subset can be represented, not that every call
+was measured (nor that a zero denominator has a ratio). Cache-off calls can still report implicit hits. Failed transports
 have no completion usage and do not enter the aggregate. These numbers describe
 provider-reported tokens, not a local tokenizer estimate or a request-flag prediction.
 Matched enabled/disabled measurements should report missing usage or no benefit as

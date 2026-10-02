@@ -7493,7 +7493,7 @@ index 0d35170..8228ad5 100644
                  cache_read_input_tokens: None,
              },
 diff --git a/vendor/serdes-ai-models/src/anthropic/stream.rs b/vendor/serdes-ai-models/src/anthropic/stream.rs
-index 8623d2c..910b24a 100644
+index 8623d2c..9112c5e 100644
 --- a/vendor/serdes-ai-models/src/anthropic/stream.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/stream.rs
 @@ -22,13 +22,14 @@ pin_project! {
@@ -7612,7 +7612,14 @@ index 8623d2c..910b24a 100644
      }
  }
  
-@@ -345,7 +353,7 @@ mod tests {
+@@ -339,13 +347,13 @@ mod tests {
+     use futures::StreamExt;
+ 
+     fn make_sse_bytes(event_type: &str, data: &str) -> Bytes {
+-        Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
++        Bytes::from(format!("event: {event_type}\ndata: {data}\n\n"))
+     }
+ 
      #[tokio::test]
      async fn test_parse_message_start() {
          let data = r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":10,"output_tokens":0}}}"#;
@@ -7636,6 +7643,15 @@ index 8623d2c..910b24a 100644
          ];
  
          let stream = stream::iter(bytes);
+@@ -379,7 +387,7 @@ mod tests {
+         }
+ 
+         // Should have: PartStart, PartDelta, PartEnd
+-        assert_eq!(events.len(), 3, "Expected 3 events, got {:?}", events);
++        assert_eq!(events.len(), 3, "Expected 3 events, got {events:?}");
+ 
+         assert!(
+             matches!(&events[0], ModelResponseStreamEvent::PartStart(_)),
 @@ -404,11 +412,11 @@ mod tests {
          let block_stop = r#"{"type":"content_block_stop","index":0}"#;
  
@@ -7653,6 +7669,15 @@ index 8623d2c..910b24a 100644
          ];
  
          let stream = stream::iter(bytes);
+@@ -420,7 +428,7 @@ mod tests {
+         }
+ 
+         // Should have: PartStart, PartDelta, PartDelta, PartEnd
+-        assert_eq!(events.len(), 4, "Expected 4 events, got {:?}", events);
++        assert_eq!(events.len(), 4, "Expected 4 events, got {events:?}");
+ 
+         // First should be PartStart with tool_use
+         if let ModelResponseStreamEvent::PartStart(start) = &events[0] {
 @@ -437,20 +445,21 @@ mod tests {
      async fn test_parse_error() {
          let error =

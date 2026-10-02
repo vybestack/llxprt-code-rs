@@ -28,7 +28,7 @@ archives=(
 )
 
 patch_digest="$(shasum -a 256 SERDES-AI-0.2.6.patch | awk '{print $1}')"
-if [[ "$patch_digest" != "ba2ed2b08842dfbe6ad938be035c7a70ef24552f4ba66eb91c1f8b0c8bcbad7e" ]]; then
+if [[ "$patch_digest" != "f904dfeb61f3305e60d1c2e037a8b907e2ad9d56af006293ead3bda4480eff67" ]]; then
   echo "retained SerdesAI patch digest mismatch" >&2
   exit 1
 fi

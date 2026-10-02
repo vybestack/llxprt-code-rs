@@ -347,7 +347,7 @@ mod tests {
     use futures::StreamExt;
 
     fn make_sse_bytes(event_type: &str, data: &str) -> Bytes {
-        Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
+        Bytes::from(format!("event: {event_type}\ndata: {data}\n\n"))
     }
 
     #[tokio::test]
@@ -387,7 +387,7 @@ mod tests {
         }
 
         // Should have: PartStart, PartDelta, PartEnd
-        assert_eq!(events.len(), 3, "Expected 3 events, got {:?}", events);
+        assert_eq!(events.len(), 3, "Expected 3 events, got {events:?}");
 
         assert!(
             matches!(&events[0], ModelResponseStreamEvent::PartStart(_)),
@@ -428,7 +428,7 @@ mod tests {
         }
 
         // Should have: PartStart, PartDelta, PartDelta, PartEnd
-        assert_eq!(events.len(), 4, "Expected 4 events, got {:?}", events);
+        assert_eq!(events.len(), 4, "Expected 4 events, got {events:?}");
 
         // First should be PartStart with tool_use
         if let ModelResponseStreamEvent::PartStart(start) = &events[0] {

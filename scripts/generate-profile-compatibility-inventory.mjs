@@ -978,8 +978,11 @@ export function renderMarkdown(artifact) {
   push('Omitted `prompt-caching`, `1h`, and `24h` send the validated session label as');
   push('`prompt_cache_key` with retention `24h`; `off` omits both fields. Session labels therefore leave');
   push('the process in cached mode and must not contain project or secret information. The literal');
-  push('`default` is used when the CLI session option is omitted. Codex WebSocket is separate and sends');
-  push('neither that key nor a session header.');
+  push('`default` is used when the CLI session option is omitted. OpenAI Chat and Codex HTTP also');
+  push('use the session label as a cache routing key unless caching is `off`, without using it');
+  push('for response continuation. Codex sends neither a session header nor a retention request.');
+  push('See [stateless prompt caching](prompt-caching.md) for prefix invariants and truthful usage');
+  push('accounting. Provider/model selection and the configured context/reasoning policy are unchanged.');
   push();
   push("## Codex configured budgets and reasoning (issue 274)");
   push();

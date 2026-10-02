@@ -16,19 +16,20 @@ pub(super) enum InputAccounting {
     Anthropic,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 struct RunCache {
-    calls: u64,
-    measured_calls: u64,
-    measured_input_tokens: u64,
-    measured_cached_tokens: u64,
+    calls: Option<u64>,
+    measured_calls: Option<u64>,
+    measured_input_tokens: Option<u64>,
+    measured_cached_tokens: Option<u64>,
+    aggregate_valid: bool,
     hit_ratio: Option<f64>,
 }
 
 #[derive(Serialize)]
 struct Observation {
     event: &'static str,
-    call: u64,
+    call: Option<u64>,
     reported_input_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
     uncached_input_tokens: Option<u64>,
@@ -38,7 +39,7 @@ struct Observation {
 }
 
 impl InputAccounting {
-    fn observe(self, usage: &LlmUsage, call: u64) -> Observation {
+    fn observe(self, usage: &LlmUsage, call: Option<u64>) -> Observation {
         let (total, uncached, accounting) = match self {
             Self::Inclusive => (
                 usage.request_tokens,
@@ -81,27 +82,47 @@ impl InputAccounting {
     }
 }
 
+impl Default for RunCache {
+    fn default() -> Self {
+        Self {
+            calls: Some(0),
+            measured_calls: Some(0),
+            measured_input_tokens: Some(0),
+            measured_cached_tokens: Some(0),
+            aggregate_valid: true,
+            hit_ratio: None,
+        }
+    }
+}
+
 impl RunCache {
     fn record(&mut self, accounting: InputAccounting, usage: &LlmUsage) -> Observation {
-        self.calls += 1;
+        self.calls = self.calls.and_then(|n| n.checked_add(1));
         let observation = accounting.observe(usage, self.calls);
         if let Some((input, read)) = observation
             .total_input_tokens
             .zip(observation.cached_input_tokens)
             .filter(|(input, read)| read <= input)
         {
-            self.measured_calls += 1;
+            self.measured_calls = self.measured_calls.and_then(|n| n.checked_add(1));
+            // Each total becomes permanently unknown on overflow. Retain the other
+            // exact totals and coverage counts, never a saturated or partial ratio.
             self.measured_input_tokens = self
                 .measured_input_tokens
-                .checked_add(input)
-                .expect("run input overflow");
+                .and_then(|n| n.checked_add(input));
             self.measured_cached_tokens = self
                 .measured_cached_tokens
-                .checked_add(read)
-                .expect("run cache overflow");
-            self.hit_ratio = (self.measured_input_tokens != 0)
-                .then(|| self.measured_cached_tokens as f64 / self.measured_input_tokens as f64);
+                .and_then(|n| n.checked_add(read));
         }
+        self.aggregate_valid = self.calls.is_some()
+            && self.measured_calls.is_some()
+            && self.measured_input_tokens.is_some()
+            && self.measured_cached_tokens.is_some();
+        self.hit_ratio = self
+            .measured_input_tokens
+            .zip(self.measured_cached_tokens)
+            .filter(|(input, _)| self.aggregate_valid && *input != 0)
+            .map(|(input, read)| read as f64 / input as f64);
         observation
     }
 }
@@ -190,8 +211,8 @@ mod tests {
         assert_eq!(second.total_input_tokens, Some(200));
         assert_eq!(second.uncached_input_tokens, Some(150));
         assert_eq!(run.hit_ratio, Some(110.0 / 300.0));
-        assert_eq!(run.calls, 4);
-        assert_eq!(run.measured_calls, 3);
+        assert_eq!(run.calls, Some(4));
+        assert_eq!(run.measured_calls, Some(3));
         let missing = run.record(
             InputAccounting::Anthropic,
             &LlmUsage {
@@ -201,7 +222,7 @@ mod tests {
             },
         );
         assert_eq!(missing.total_input_tokens, None);
-        assert_eq!(run.measured_calls, 3);
+        assert_eq!(run.measured_calls, Some(3));
     }
 
     #[test]
@@ -228,8 +249,127 @@ mod tests {
         );
         assert_eq!(overflow.total_input_tokens, None);
         assert_eq!(overflow.uncached_input_tokens, None);
-        assert_eq!(run.measured_calls, 0);
+        assert_eq!(run.measured_calls, Some(0));
         assert_eq!(run.hit_ratio, None);
+    }
+
+    fn usage(input: u64, read: u64) -> LlmUsage {
+        LlmUsage {
+            request_tokens: Some(input),
+            cache_read_tokens: Some(read),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn multicall_input_overflow_preserves_raw_values_and_measured_coverage() {
+        let mut run = RunCache::default();
+        run.record(InputAccounting::Inclusive, &LlmUsage::default());
+        run.record(InputAccounting::Inclusive, &usage(u64::MAX, 0));
+        assert!(run.aggregate_valid);
+        assert_eq!(run.hit_ratio, Some(0.0));
+        let overflow = run.record(InputAccounting::Inclusive, &usage(1, 0));
+        assert_eq!(overflow.reported_input_tokens, Some(1));
+        assert_eq!(overflow.total_input_tokens, Some(1));
+        assert_eq!(overflow.cached_input_tokens, Some(0));
+        assert_eq!(run.measured_input_tokens, None);
+        assert_eq!(run.measured_cached_tokens, Some(0));
+        assert!(!run.aggregate_valid);
+        assert_eq!(run.hit_ratio, None);
+        run.record(InputAccounting::Inclusive, &LlmUsage::default());
+        run.record(InputAccounting::Inclusive, &usage(2, 1));
+        assert_eq!(run.calls, Some(5));
+        assert_eq!(run.measured_calls, Some(3));
+        assert_eq!(run.measured_input_tokens, None);
+        assert_eq!(run.measured_cached_tokens, Some(1));
+        assert_eq!(run.hit_ratio, None);
+        let serialized = serde_json::to_value(&run).unwrap();
+        assert!(serialized["measured_input_tokens"].is_null());
+        assert_eq!(serialized["aggregate_valid"], false);
+    }
+
+    #[test]
+    fn multicall_cached_overflow_is_permanently_unmeasurable() {
+        for accounting in [InputAccounting::Inclusive, InputAccounting::Anthropic] {
+            let mut run = RunCache::default();
+            for read in [u64::MAX, 1, 0] {
+                let mut usage = usage(read, read);
+                if matches!(accounting, InputAccounting::Anthropic) {
+                    usage.request_tokens = Some(0);
+                    usage.cache_creation_tokens = Some(0);
+                }
+                let observation = run.record(accounting, &usage);
+                assert_eq!(observation.cached_input_tokens, Some(read));
+                assert_eq!(observation.total_input_tokens, Some(read));
+                assert_eq!(observation.uncached_input_tokens, Some(0));
+            }
+            assert_eq!(run.calls, Some(3));
+            assert_eq!(run.measured_calls, Some(3));
+            assert_eq!(run.measured_input_tokens, None);
+            assert_eq!(run.measured_cached_tokens, None);
+            assert_eq!(run.hit_ratio, None);
+            assert!(!run.aggregate_valid);
+        }
+    }
+
+    #[test]
+    fn partial_invalid_and_zero_calls_retain_exact_measured_subset() {
+        let mut run = RunCache::default();
+        run.record(InputAccounting::Inclusive, &usage(0, 0));
+        assert!(run.aggregate_valid);
+        assert_eq!(run.hit_ratio, None);
+        run.record(InputAccounting::Inclusive, &usage(100, 25));
+        run.record(
+            InputAccounting::Inclusive,
+            &LlmUsage {
+                request_tokens: Some(u64::MAX),
+                ..Default::default()
+            },
+        );
+        run.record(InputAccounting::Inclusive, &usage(1, 2));
+        run.record(
+            InputAccounting::Anthropic,
+            &LlmUsage {
+                request_tokens: Some(u64::MAX),
+                cache_creation_tokens: Some(1),
+                cache_read_tokens: Some(0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(run.calls, Some(5));
+        assert_eq!(run.measured_calls, Some(2));
+        assert_eq!(run.measured_input_tokens, Some(100));
+        assert_eq!(run.measured_cached_tokens, Some(25));
+        assert_eq!(run.hit_ratio, Some(0.25));
+        assert!(run.aggregate_valid);
+    }
+
+    #[test]
+    fn call_and_measured_count_overflow_do_not_fabricate_ordinals_or_ratio() {
+        // These bounds cannot be reached in a practical process; seed the exact
+        // predecessor to exercise the same checked arithmetic used for every call.
+        for measured_overflow in [false, true] {
+            let mut run = RunCache {
+                calls: Some(u64::MAX),
+                measured_calls: Some(if measured_overflow { u64::MAX } else { 0 }),
+                ..Default::default()
+            };
+            let observation = run.record(InputAccounting::Inclusive, &usage(1, 1));
+            assert_eq!(observation.call, None);
+            assert_eq!(observation.cached_input_tokens, Some(1));
+            assert_eq!(run.calls, None);
+            assert_eq!(
+                run.measured_calls,
+                if measured_overflow { None } else { Some(1) }
+            );
+            assert_eq!(run.measured_input_tokens, Some(1));
+            assert_eq!(run.measured_cached_tokens, Some(1));
+            assert!(!run.aggregate_valid);
+            assert_eq!(run.hit_ratio, None);
+            run.record(InputAccounting::Inclusive, &usage(1, 0));
+            assert_eq!(run.calls, None);
+            assert_eq!(run.hit_ratio, None);
+        }
     }
 
     struct BoundaryBackend {
@@ -297,10 +437,10 @@ mod tests {
         });
         assert_eq!(observed.request_calls(), 3);
         let run = observed.run.borrow();
-        assert_eq!(run.calls, 1);
-        assert_eq!(run.measured_calls, 1);
-        assert_eq!(run.measured_input_tokens, 100);
-        assert_eq!(run.measured_cached_tokens, 60);
+        assert_eq!(run.calls, Some(1));
+        assert_eq!(run.measured_calls, Some(1));
+        assert_eq!(run.measured_input_tokens, Some(100));
+        assert_eq!(run.measured_cached_tokens, Some(60));
         assert_eq!(run.hit_ratio, Some(0.6));
     }
 }
