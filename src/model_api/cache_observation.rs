@@ -358,10 +358,8 @@ mod tests {
             assert_eq!(observation.call, None);
             assert_eq!(observation.cached_input_tokens, Some(1));
             assert_eq!(run.calls, None);
-            assert_eq!(
-                run.measured_calls,
-                if measured_overflow { None } else { Some(1) }
-            );
+            let expected_measured = if measured_overflow { None } else { Some(1) };
+            assert_eq!(run.measured_calls, expected_measured);
             assert_eq!(run.measured_input_tokens, Some(1));
             assert_eq!(run.measured_cached_tokens, Some(1));
             assert!(!run.aggregate_valid);
