@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-from bundle_publication import gone, wait_file
+from bundle_publication import gone
 
 
 def run(root, xtask, temporary):
@@ -55,7 +55,11 @@ while True: time.sleep(.01)
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             try:
-                wait_file(ready, process)
+                # Construction includes real Git validation/materialization before tar.
+                startup = time.monotonic() + 120
+                while not ready.exists() and process.poll() is None and time.monotonic() < startup:
+                    time.sleep(.01)
+                assert ready.exists(), "release helper boundary was not reached"
             except AssertionError:
                 process.terminate()
                 stdout, stderr = process.communicate(timeout=5)
