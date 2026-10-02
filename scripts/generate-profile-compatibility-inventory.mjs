@@ -493,7 +493,7 @@ export function buildClassificationTable() {
   add('max-output', wire, common, 'alias of maxOutputTokens');
   add('maxOutput', wire, common, 'Rust-only max-output spelling; normalized common integer');
   add('seed', wire, std, 'nonnegative integer; Standard Chat only');
-  add('stream-first-response-timeout-ms', host, std, 'nonnegative integer in chat; Codex accepts only inert disabled integer -1');
+  add('stream-first-response-timeout-ms', host, common, 'Non-Codex Chat/Anthropic/Responses: bounded whole-request milliseconds; positive integer, 0/-1/omission native policy; Codex accepts only inert disabled integer -1');
   add('streamFirstResponseTimeoutMs', host, std, 'alias of stream-first-response-timeout-ms');
   add('stream-idle-timeout-ms', host, ds, 'nonnegative integer; dsflash; Codex accepts only 0');
   add('streamIdleTimeoutMs', host, ds, 'alias of stream-idle-timeout-ms');
@@ -599,9 +599,9 @@ export function buildClassificationTable() {
   add('tool-output-item-size-limit', rej, common, 'rejected');
   add('file-read-max-lines', rej, common, 'rejected');
   add('image-resize.enabled', rej, common, 'rejected image-sizing key');
-  add('image-resize.maxLongEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
-  add('image-resize.maxShortEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
-  add('image-resize.maxPixels', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; not provider/runtime-applied; other APIs reject');
+  add('image-resize.maxLongEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u32::MAX; retained host policy, never provider/runtime-applied');
+  add('image-resize.maxShortEdge', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u32::MAX; short edge must not exceed long edge; retained host policy, never provider/runtime-applied');
+  add('image-resize.maxPixels', host, common, 'Codex: JSON number retained in HostImageResizeSettings for external-host preprocessing; Non-Codex Chat/Anthropic/Responses: positive integer through u64::MAX; retained host policy, never provider/runtime-applied');
   add('max-image-dimension', rej, common, 'rejected image-sizing key');
   add('max-image-pixels', rej, common, 'rejected image-sizing key');
   add('prompt-caching', meta, resp, 'responses/codex cache mode off|1h|24h; 5m rejects');
@@ -994,6 +994,9 @@ export function renderMarkdown(artifact) {
   push("accept JSON numbers retained in `HostImageResizeSettings` as external-host data:");
   push("this runtime accepts text/tool prompts and has no image-input/resizing pipeline,");
   push("so these settings are not projected into provider requests. Non-numeric values reject.");
+  push("Non-Codex Chat, Anthropic and Responses retain positive integer image limits:");
+  push("edges through `u32::MAX`, pixels through `u64::MAX`, short edge at most long edge.");
+  push("See [native host settings](host-profile-settings.md) for provider-specific ownership.");
   push("");
   push("`shell-default-timeout-seconds` and `shell-max-timeout-seconds` govern this runtime's");
   push("`run_shell_command` executor (still gated by `--allow-shell`). Each accepts integer");
@@ -1013,6 +1016,9 @@ export function renderMarkdown(artifact) {
   push("phase timer. Active values reject rather than being reassigned to the provider");
   push("request timeout. The existing disabled idle-timeout constraint remains unchanged.");
   push("No alternate profile reader, migration, fallback, or new alias is introduced.");
+  push("Non-Codex Chat, Anthropic and Responses instead accept a positive bounded whole-request");
+  push("millisecond budget; `0`, `-1` or omission selects native request policy. This does not");
+  push("create a first-token timer or alter separate shell and turn deadlines.");
   push();
   push('Host task timeout ownership: `task-default-timeout-seconds` and');
   push('`task-max-timeout-seconds` belong to the llxprt host task runner. This Rust runtime has');

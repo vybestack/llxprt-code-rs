@@ -695,6 +695,9 @@ mod turn_time_tests {
 }
 
 #[cfg(test)]
+mod host_settings_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{has_session_argument, session_hint_from, Args};
     use clap::Parser as _;

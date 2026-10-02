@@ -56,3 +56,41 @@ fn openai_responses_cache_settings_are_session_bound_and_stateless() {
     assert!(off.prompt_cache_key.is_none());
     assert!(off.prompt_cache_retention.is_none());
 }
+
+#[test]
+fn codex_profile_effort_reaches_serialized_reasoning() {
+    let base: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/task-profile/astra-headless.json"
+    ))
+    .unwrap();
+    for effort in ["low", "medium", "high"] {
+        let mut value = base.clone();
+        value["ephemeralSettings"]["reasoning.effort"] = serde_json::json!(effort);
+        let profile = crate::profile::parse_profile_value(&value, "astra").unwrap();
+        let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+        let reasoning = resolved.codex.unwrap().responses_reasoning().unwrap();
+        assert_eq!(
+            serde_json::to_value(reasoning).unwrap(),
+            serde_json::json!({
+                "effort": effort, "summary": "auto"
+            })
+        );
+    }
+    for effort in [
+        serde_json::json!("invalid"),
+        serde_json::json!(42),
+        serde_json::json!(null),
+    ] {
+        let mut value = base.clone();
+        value["ephemeralSettings"]["reasoning.effort"] = effort;
+        assert!(crate::profile::parse_profile_value(&value, "astra").is_err());
+    }
+    let mut disabled = base;
+    let settings = disabled["ephemeralSettings"].as_object_mut().unwrap();
+    settings.insert("reasoning.enabled".into(), serde_json::json!(false));
+    settings.remove("reasoning.effort");
+    settings.remove("reasoning.summary");
+    let profile = crate::profile::parse_profile_value(&disabled, "astra").unwrap();
+    let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+    assert!(resolved.codex.unwrap().responses_reasoning().is_none());
+}
