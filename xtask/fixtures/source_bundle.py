@@ -243,6 +243,10 @@ def main():
         for name, message in [('concatenated-gzip-expansion', 'expanded tar-stream'), ('unsorted-manifest', 'manifest entries are not byte-sorted')]:
             command(['python3', ROOT / 'scripts/source-bundle-validate.py', tmp / f'{name}.tar.gz'], accepted=False, contains=message)
         task(ROOT, 'verify', tmp / 'oversize-archive.tar.gz', accepted=False, contains='compressed-size cap')
+        # Prove the lockfile boundary itself, not an earlier omitted required file.
+        command(['python3', ROOT / 'scripts/source-bundle-validate.py', tmp / 'missing-models-lockfile.tar.gz'])
+        task(ROOT, 'verify', tmp / 'missing-models-lockfile.tar.gz', accepted=False, contains='required regular file missing in extracted bundle: vendor/serdes-ai-models/Cargo.lock')
+        print('isolated missing-models-lockfile witness passed', flush=True)
         for archive in sorted(tmp.glob('*.tar.gz')):
             task(ROOT, 'verify', archive, accepted=False)
             print('rejected archive:', archive.name, flush=True)

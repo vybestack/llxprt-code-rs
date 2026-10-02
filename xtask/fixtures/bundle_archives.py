@@ -98,6 +98,7 @@ def malformed(tmp, marker):
         manifest(tf, b'a.txt\n' + minimal)
     # Self-consistent required-file fixture missing the direct models lockfile.
     files = ['Cargo.toml', 'Cargo.lock', 'LICENSE', 'README.md', 'PATCHES.md', 'SERDES-AI-0.2.6.patch', '.gitignore', 'src/lib.rs', 'src/bin/llxprt-parity.rs', '.cargo/config.toml', 'xtask/Cargo.toml', 'xtask/Cargo.lock', 'xtask/src/main.rs', 'xtask/src/lib.rs', 'vendor/serdes-ai/Cargo.toml', 'vendor/serdes-ai/.cargo_vcs_info.json', 'vendor/serdes-ai/src/lib.rs', 'vendor/serdes-ai-core/Cargo.toml', 'vendor/serdes-ai-core/src/lib.rs', 'vendor/serdes-ai-models/Cargo.toml', 'vendor/serdes-ai-models/src/openai/chat.rs', 'THIRD_PARTY_LICENSES/README.md', 'THIRD_PARTY_LICENSES/SERDES-AI-MIT.txt', '.github/workflows/ci.yml']
+    files += ['xtask/src/release.rs', 'vendor/serdes-ai-responses/Cargo.toml', 'vendor/serdes-ai-responses/src/client/mod.rs', 'provenance/serdes-ai-responses-git.json', 'scripts/verify-serdes-responses-evidence.py', 'vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz', 'THIRD_PARTY_LICENSES/source-bundle.sha256']
     dirs = set()
     for path in files:
         dirs.update(str(p) + '/' for p in Path(path).parents if str(p) != '.')
