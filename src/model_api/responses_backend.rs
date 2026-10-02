@@ -62,14 +62,22 @@ impl ResponsesBackend {
         }
         .map_err(|error| {
             let error = crate::transport::context_length_400(&error).unwrap_or(error);
-            match &error {
+            let diagnostic = match &error {
                 serdes_ai::models::ModelError::InvalidResponse(detail)
                 | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
+                serdes_ai::models::ModelError::Api { message, code }
+                    if code
+                        .as_deref()
+                        .is_some_and(|code| code.starts_with("sse_provider_")) =>
+                {
+                    message.clone()
+                }
                 _ => match crate::transport::TransportFailure::from_model_error(&error) {
                     Some(failure) => failure.diagnostic(),
                     None => error.to_string(),
                 },
-            }
+            };
+            crate::redact::scrub_and_bound_diagnostic(&diagnostic)
         })?;
         Ok(LlmResult::from(&response))
     }
@@ -101,12 +109,12 @@ impl ChatBackend for ResponsesBackend {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     /// One current-thread executor per test, mirroring the single runtime a
     /// `Turn` owns in production (src/agent/deadline.rs).
-    fn test_runtime() -> tokio::runtime::Runtime {
+    pub(crate) fn test_runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -255,7 +263,7 @@ mod tests {
 
     /// Reads one full HTTP request (headers plus a content-length body) off
     /// the accepted codex connection.
-    fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    pub(crate) fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         use std::io::Read as _;
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(10)))
@@ -285,7 +293,7 @@ mod tests {
     /// real codex backend: the terminal response event, then EOF, no
     /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
     /// covered.
-    fn codex_turn_sse_payload(round: usize) -> String {
+    pub(crate) fn codex_turn_sse_payload(round: usize) -> String {
         let turn = if round == 0 { "one" } else { "two" };
         let response_id = format!("resp_loopback_{round}");
         let mut object = serdes_ai_responses::types::ResponseObject::in_progress(
@@ -448,7 +456,7 @@ Connection: close
         let error = test_runtime()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("JSON body cannot fold into a codex turn");
-        assert!(error.contains("sse stream"), "unexpected error: {error}");
+        assert!(error.contains("responses SSE"), "unexpected error: {error}");
         server.join().expect("server");
     }
 }
