@@ -7256,7 +7256,7 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..b370ae9 100644
+index 0d35170..8228ad5 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
 @@ -18,10 +18,11 @@ use serdes_ai_core::{
@@ -7345,7 +7345,7 @@ index 0d35170..b370ae9 100644
          }
      }
  
-@@ -512,12 +528,16 @@ impl AnthropicModel {
+@@ -512,18 +528,26 @@ impl AnthropicModel {
              }
          }
  
@@ -7368,7 +7368,20 @@ index 0d35170..b370ae9 100644
          });
  
          let usage = RequestUsage {
-@@ -550,36 +570,8 @@ impl AnthropicModel {
+-            request_tokens: Some(resp.usage.input_tokens),
+-            response_tokens: Some(resp.usage.output_tokens),
+-            total_tokens: Some(resp.usage.input_tokens + resp.usage.output_tokens),
++            request_tokens: resp.usage.input_tokens,
++            response_tokens: resp.usage.output_tokens,
++            total_tokens: resp
++                .usage
++                .input_tokens
++                .zip(resp.usage.output_tokens)
++                .and_then(|(input, output)| input.checked_add(output)),
+             cache_creation_tokens: resp.usage.cache_creation_input_tokens,
+             cache_read_tokens: resp.usage.cache_read_input_tokens,
+             details: None,
+@@ -550,36 +574,8 @@ impl AnthropicModel {
      }
  
      /// Handle API error response.
@@ -7407,7 +7420,7 @@ index 0d35170..b370ae9 100644
      }
  }
  
-@@ -630,14 +622,11 @@ impl Model for AnthropicModel {
+@@ -630,14 +626,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7424,7 +7437,7 @@ index 0d35170..b370ae9 100644
  
          self.parse_response(resp)
      }
-@@ -673,11 +662,11 @@ impl Model for AnthropicModel {
+@@ -673,11 +666,11 @@ impl Model for AnthropicModel {
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7438,7 +7451,7 @@ index 0d35170..b370ae9 100644
          let parser = AnthropicStreamParser::new(byte_stream);
  
          Ok(Box::pin(parser))
-@@ -767,6 +756,29 @@ mod tests {
+@@ -767,6 +760,29 @@ mod tests {
          assert_eq!(request.messages.len(), 1);
          assert_eq!(request.temperature, Some(0.7));
          assert!(request.stream.is_none());
@@ -7468,11 +7481,22 @@ index 0d35170..b370ae9 100644
      }
  
      #[test]
+@@ -822,8 +838,8 @@ mod tests {
+             stop_reason: Some("end_turn".to_string()),
+             stop_sequence: None,
+             usage: AnthropicUsage {
+-                input_tokens: 10,
+-                output_tokens: 5,
++                input_tokens: Some(10),
++                output_tokens: Some(5),
+                 cache_creation_input_tokens: None,
+                 cache_read_input_tokens: None,
+             },
 diff --git a/vendor/serdes-ai-models/src/anthropic/stream.rs b/vendor/serdes-ai-models/src/anthropic/stream.rs
-index 8623d2c..0ced5fe 100644
+index 8623d2c..9112c5e 100644
 --- a/vendor/serdes-ai-models/src/anthropic/stream.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/stream.rs
-@@ -22,6 +22,7 @@ pin_project! {
+@@ -22,13 +22,14 @@ pin_project! {
          #[pin]
          inner: S,
          buffer: String,
@@ -7480,7 +7504,15 @@ index 8623d2c..0ced5fe 100644
          // Track content blocks in progress
          blocks: HashMap<usize, BlockState>,
          // Message metadata
-@@ -61,15 +62,17 @@ enum BlockState {
+         message_id: Option<String>,
+         model: Option<String>,
+         // Usage tracking
+-        input_tokens: u64,
++        input_tokens: Option<u64>,
+         output_tokens: u64,
+         cache_creation_tokens: Option<u64>,
+         cache_read_tokens: Option<u64>,
+@@ -61,19 +62,21 @@ enum BlockState {
      },
  }
  
@@ -7500,6 +7532,11 @@ index 8623d2c..0ced5fe 100644
              blocks: HashMap::new(),
              message_id: None,
              model: None,
+-            input_tokens: 0,
++            input_tokens: None,
+             output_tokens: 0,
+             cache_creation_tokens: None,
+             cache_read_tokens: None,
 @@ -82,9 +85,10 @@ where
      }
  }
@@ -7538,6 +7575,15 @@ index 8623d2c..0ced5fe 100644
                  }
                  Poll::Pending => return Poll::Pending,
              }
+@@ -190,7 +198,7 @@ fn process_event(
+     blocks: &mut HashMap<usize, BlockState>,
+     message_id: &mut Option<String>,
+     model: &mut Option<String>,
+-    input_tokens: &mut u64,
++    input_tokens: &mut Option<u64>,
+     output_tokens: &mut u64,
+     cache_creation_tokens: &mut Option<u64>,
+     cache_read_tokens: &mut Option<u64>,
 @@ -199,9 +207,10 @@ fn process_event(
      // Parse the JSON data
      let event: StreamEvent = match serde_json::from_str(data) {
@@ -7566,7 +7612,14 @@ index 8623d2c..0ced5fe 100644
      }
  }
  
-@@ -345,7 +353,7 @@ mod tests {
+@@ -339,13 +347,13 @@ mod tests {
+     use futures::StreamExt;
+ 
+     fn make_sse_bytes(event_type: &str, data: &str) -> Bytes {
+-        Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
++        Bytes::from(format!("event: {event_type}\ndata: {data}\n\n"))
+     }
+ 
      #[tokio::test]
      async fn test_parse_message_start() {
          let data = r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":10,"output_tokens":0}}}"#;
@@ -7590,6 +7643,15 @@ index 8623d2c..0ced5fe 100644
          ];
  
          let stream = stream::iter(bytes);
+@@ -379,7 +387,7 @@ mod tests {
+         }
+ 
+         // Should have: PartStart, PartDelta, PartEnd
+-        assert_eq!(events.len(), 3, "Expected 3 events, got {:?}", events);
++        assert_eq!(events.len(), 3, "Expected 3 events, got {events:?}");
+ 
+         assert!(
+             matches!(&events[0], ModelResponseStreamEvent::PartStart(_)),
 @@ -404,11 +412,11 @@ mod tests {
          let block_stop = r#"{"type":"content_block_stop","index":0}"#;
  
@@ -7607,6 +7669,15 @@ index 8623d2c..0ced5fe 100644
          ];
  
          let stream = stream::iter(bytes);
+@@ -420,7 +428,7 @@ mod tests {
+         }
+ 
+         // Should have: PartStart, PartDelta, PartDelta, PartEnd
+-        assert_eq!(events.len(), 4, "Expected 4 events, got {:?}", events);
++        assert_eq!(events.len(), 4, "Expected 4 events, got {events:?}");
+ 
+         // First should be PartStart with tool_use
+         if let ModelResponseStreamEvent::PartStart(start) = &events[0] {
 @@ -437,20 +445,21 @@ mod tests {
      async fn test_parse_error() {
          let error =
@@ -7634,7 +7705,7 @@ index 8623d2c..0ced5fe 100644
          let mut parser = AnthropicStreamParser::new(stream);
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/types.rs b/vendor/serdes-ai-models/src/anthropic/types.rs
-index 90bb06a..f6534bd 100644
+index 90bb06a..5eb2d6d 100644
 --- a/vendor/serdes-ai-models/src/anthropic/types.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/types.rs
 @@ -4,6 +4,7 @@
@@ -7664,6 +7735,36 @@ index 90bb06a..f6534bd 100644
          }
      }
  }
+@@ -550,6 +556,7 @@ pub struct MessagesResponse {
+     /// Stop sequence if hit.
+     pub stop_sequence: Option<String>,
+     /// Token usage.
++    #[serde(default)]
+     pub usage: AnthropicUsage,
+ }
+ 
+@@ -591,10 +598,10 @@ pub enum ResponseContentBlock {
+ pub struct AnthropicUsage {
+     /// Input tokens.
+     #[serde(default)]
+-    pub input_tokens: u64,
++    pub input_tokens: Option<u64>,
+     /// Output tokens.
+     #[serde(default)]
+-    pub output_tokens: u64,
++    pub output_tokens: Option<u64>,
+     /// Tokens used to create cache.
+     #[serde(default)]
+     pub cache_creation_input_tokens: Option<u64>,
+@@ -875,7 +882,7 @@ mod tests {
+         let resp: MessagesResponse = serde_json::from_str(json).unwrap();
+         assert_eq!(resp.id, "msg_123");
+         assert_eq!(resp.content.len(), 1);
+-        assert_eq!(resp.usage.input_tokens, 10);
++        assert_eq!(resp.usage.input_tokens, Some(10));
+     }
+ 
+     #[test]
 diff --git a/vendor/serdes-ai-models/src/antigravity/model.rs b/vendor/serdes-ai-models/src/antigravity/model.rs
 index c98b56f..9ef7c6d 100644
 --- a/vendor/serdes-ai-models/src/antigravity/model.rs
@@ -25777,10 +25878,23 @@ index 5bc1e9f..0000000
 -    Ok(())
 -}
 diff --git a/vendor/serdes-ai-responses/src/client/assembler.rs b/vendor/serdes-ai-responses/src/client/assembler.rs
-index 9993fc0..78de8d4 100644
+index 9993fc0..b5dcd7e 100644
 --- a/vendor/serdes-ai-responses/src/client/assembler.rs
 +++ b/vendor/serdes-ai-responses/src/client/assembler.rs
-@@ -147,13 +147,10 @@ pub(super) fn failure(response: &ResponseObject) -> ModelError {
+@@ -137,7 +137,11 @@ pub(super) fn stream_complete(
+         input_tokens,
+         output_tokens,
+         cache_creation_tokens: None,
+-        cache_read_tokens: None,
++        cache_read_tokens: response
++            .usage
++            .as_ref()
++            .and_then(|usage| usage.input_tokens_details.as_ref())
++            .and_then(|details| details.cached_tokens),
+     }
+ }
+ 
+@@ -147,13 +151,10 @@ pub(super) fn failure(response: &ResponseObject) -> ModelError {
      let code = body
          .map(|error| error.code.clone())
          .unwrap_or_else(|| "response_failed".to_string());
@@ -25796,8 +25910,34 @@ index 9993fc0..78de8d4 100644
      )
  }
  
+@@ -213,6 +214,9 @@ mod tests {
+             id: "resp_1".into(),
+             usage: Some(ResponseUsage {
+                 input_tokens: Some(7),
++                input_tokens_details: Some(crate::types::InputTokensDetails {
++                    cached_tokens: Some(5),
++                }),
+                 output_tokens: Some(4),
+                 total_tokens: Some(11),
+             }),
+@@ -227,6 +231,7 @@ mod tests {
+                 assert_eq!(complete.finish_reason, FinishReason::Stop);
+                 assert_eq!(complete.input_tokens, Some(7));
+                 assert_eq!(complete.output_tokens, Some(4));
++                assert_eq!(complete.cache_read_tokens, Some(5));
+             }
+             other => panic!("expected stream complete, got {other:?}"),
+         }
+@@ -240,6 +245,7 @@ mod tests {
+             "gpt-4o",
+             &CreateResponseRequest {
+                 model: "gpt-4o".into(),
++                prompt_cache_key: None,
+                 input: crate::types::ResponseInput::Text(String::new()),
+                 instructions: None,
+                 tools: None,
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..84db050 100644
+index f90cc22..f64d65b 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,8 @@
@@ -25836,23 +25976,29 @@ index f90cc22..84db050 100644
  /// Transport used to reach the endpoint.
  #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
  pub enum Transport {
-@@ -88,6 +98,7 @@ struct Inner {
+@@ -88,8 +98,10 @@ struct Inner {
      model_name: String,
      endpoint: String,
      transport: Transport,
 +    codex_http: bool,
      headers: Vec<(String, String)>,
      reasoning: Option<ReasoningSettings>,
++    prompt_cache_key: Option<String>,
      http: reqwest::Client,
-@@ -168,6 +179,7 @@ impl OpenResponsesModel {
+     profile: ModelProfile,
+     session: Mutex<Session>,
+@@ -168,8 +180,10 @@ impl OpenResponsesModel {
                  model_name,
                  endpoint,
                  transport,
 +                codex_http: false,
                  headers: Vec::new(),
                  reasoning: None,
++                prompt_cache_key: None,
                  http: reqwest::Client::new(),
-@@ -193,6 +205,19 @@ impl OpenResponsesModel {
+                 profile: openai_gpt4o_profile(),
+                 session: Mutex::new(Session {
+@@ -193,6 +207,19 @@ impl OpenResponsesModel {
          self
      }
  
@@ -25872,7 +26018,23 @@ index f90cc22..84db050 100644
      /// Authenticate with a bearer token (HTTP `Authorization` header, or the
      /// same header on the websocket handshake).
      #[must_use]
-@@ -472,6 +497,9 @@ fn build_request(
+@@ -214,6 +241,15 @@ impl OpenResponsesModel {
+         self
+     }
+ 
++    /// Set session prompt-cache routing independently of response continuation.
++    #[must_use]
++    pub fn with_prompt_cache_key(mut self, key: Option<String>) -> Self {
++        Arc::get_mut(&mut self.inner)
++            .expect("model already in use; configure before sharing")
++            .prompt_cache_key = key;
++        self
++    }
++
+     /// Configure reasoning (effort/summary) for every turn.
+     #[must_use]
+     pub fn with_reasoning(mut self, reasoning: ReasoningSettings) -> Self {
+@@ -472,6 +508,9 @@ fn build_request(
      previous_response_id: Option<String>,
      store: bool,
  ) -> Result<CreateResponseRequest, ModelError> {
@@ -25882,7 +26044,7 @@ index f90cc22..84db050 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +512,19 @@ fn build_request(
+@@ -484,11 +523,20 @@ fn build_request(
                  .collect(),
          )
      };
@@ -25896,6 +26058,7 @@ index f90cc22..84db050 100644
      Ok(CreateResponseRequest {
          model: inner.model_name.clone(),
 -        input: if items.is_empty() {
++        prompt_cache_key: inner.prompt_cache_key.clone(),
 +        input: if items.is_empty() && !inner.codex_http {
              crate::types::ResponseInput::Text(String::new())
          } else {
@@ -25903,7 +26066,7 @@ index f90cc22..84db050 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +532,7 @@ fn build_request(
+@@ -496,7 +544,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -25912,7 +26075,7 @@ index f90cc22..84db050 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -512,35 +548,23 @@ fn build_request(
+@@ -512,35 +560,23 @@ fn build_request(
      })
  }
  
@@ -25958,7 +26121,7 @@ index f90cc22..84db050 100644
      }
  }
  
-@@ -571,6 +595,9 @@ impl Model for OpenResponsesModel {
+@@ -571,6 +607,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -25968,7 +26131,7 @@ index f90cc22..84db050 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -587,7 +614,7 @@ impl Model for OpenResponsesModel {
+@@ -587,7 +626,7 @@ impl Model for OpenResponsesModel {
          let settings = settings.clone();
          let params = params.clone();
  
@@ -25977,7 +26140,7 @@ index f90cc22..84db050 100644
              let result = match inner.transport {
                  Transport::WebSocket => {
                      let mut sink = ChannelSink(&tx);
-@@ -602,11 +629,15 @@ impl Model for OpenResponsesModel {
+@@ -602,11 +641,15 @@ impl Model for OpenResponsesModel {
              if let Err(error) = result {
                  // A failure after events escaped still reaches the caller as
                  // an error item; a failure before that is the only item.
@@ -25995,7 +26158,7 @@ index f90cc22..84db050 100644
      }
  
      fn profile(&self) -> &ModelProfile {
-@@ -620,7 +651,7 @@ fn response_from_events(
+@@ -620,7 +663,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -26004,7 +26167,7 @@ index f90cc22..84db050 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -665,6 +696,18 @@ fn response_from_events(
+@@ -665,6 +708,18 @@ fn response_from_events(
          }
      }
  
@@ -26023,7 +26186,7 @@ index f90cc22..84db050 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +721,45 @@ fn response_from_events(
+@@ -678,7 +733,45 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -26070,7 +26233,18 @@ index f90cc22..84db050 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -759,7 +840,24 @@ impl OpenResponsesModel {
+@@ -744,7 +837,9 @@ impl OpenResponsesModel {
+                     response_tokens: usage.output_tokens,
+                     total_tokens: usage.total_tokens,
+                     cache_creation_tokens: None,
+-                    cache_read_tokens: None,
++                    cache_read_tokens: usage
++                        .input_tokens_details
++                        .and_then(|details| details.cached_tokens),
+                     details: None,
+                 }),
+                 vendor_id: Some(object.id),
+@@ -759,7 +854,24 @@ impl OpenResponsesModel {
      }
  }
  
@@ -26096,7 +26270,7 @@ index f90cc22..84db050 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,9 +870,7 @@ async fn run_http_stream(
+@@ -772,9 +884,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -26107,7 +26281,7 @@ index f90cc22..84db050 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -814,26 +910,52 @@ async fn run_http_stream(
+@@ -814,26 +924,52 @@ async fn run_http_stream(
      };
  
      let mut byte_stream = response.bytes_stream();
@@ -26173,7 +26347,7 @@ index f90cc22..84db050 100644
              }
              for translated in assembler::translate(event) {
                  match translated {
-@@ -846,14 +968,60 @@ async fn run_http_stream(
+@@ -846,14 +982,60 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -28220,6 +28394,50 @@ index 35bba05..0000000
 -        assert!(cache.get("resp_2").is_some());
 -    }
 -}
+diff --git a/vendor/serdes-ai-responses/src/types.rs b/vendor/serdes-ai-responses/src/types.rs
+index 806f448..953a356 100644
+--- a/vendor/serdes-ai-responses/src/types.rs
++++ b/vendor/serdes-ai-responses/src/types.rs
+@@ -24,6 +24,10 @@ pub struct CreateResponseRequest {
+     /// routing.
+     pub model: String,
+ 
++    /// Session identity for prompt-cache routing on stateless HTTP.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub prompt_cache_key: Option<String>,
++
+     /// Conversation input: a plain string or a list of input items.
+     #[serde(default)]
+     pub input: ResponseInput,
+@@ -650,9 +654,20 @@ pub struct IncompleteDetails {
+     pub reason: String,
+ }
+ 
++/// Input token detail accounting reported by Responses providers.
++#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
++pub struct InputTokensDetails {
++    /// Cache reads, absent rather than zero if omitted by the provider.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub cached_tokens: Option<u64>,
++}
++
+ /// Token usage reported on a response.
+ #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct ResponseUsage {
++    /// Provider-reported input cache details, absent when not reported.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub input_tokens_details: Option<InputTokensDetails>,
+     /// Input (prompt) tokens.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub input_tokens: Option<u64>,
+@@ -1133,6 +1148,7 @@ mod tests {
+                 "gpt-4o",
+                 &CreateResponseRequest {
+                     model: "gpt-4o".into(),
++                    prompt_cache_key: None,
+                     input: ResponseInput::Text("".into()),
+                     instructions: None,
+                     tools: None,
 diff --git a/vendor/serdes-ai-responses/src/websocket.rs b/vendor/serdes-ai-responses/src/websocket.rs
 deleted file mode 100644
 index 0620b19..0000000
@@ -29667,10 +29885,10 @@ index 0000000..dfc1224
 +}
 diff --git a/vendor/serdes-ai-responses/tests/client_ws.rs b/vendor/serdes-ai-responses/tests/client_ws.rs
 new file mode 100644
-index 0000000..0865eb4
+index 0000000..8ddd13a
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_ws.rs
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,236 @@
 +//! Scripted WebSocket tests retained from the live-tested Responses client.
 +
 +use futures::{SinkExt, StreamExt};
@@ -29758,6 +29976,7 @@ index 0000000..0865eb4
 +    }];
 +    response.usage = Some(ResponseUsage {
 +        input_tokens: Some(1),
++        input_tokens_details: None,
 +        output_tokens: Some(1),
 +        total_tokens: Some(2),
 +    });

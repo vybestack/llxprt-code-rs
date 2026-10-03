@@ -137,7 +137,11 @@ pub(super) fn stream_complete(
         input_tokens,
         output_tokens,
         cache_creation_tokens: None,
-        cache_read_tokens: None,
+        cache_read_tokens: response
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.input_tokens_details.as_ref())
+            .and_then(|details| details.cached_tokens),
     }
 }
 
@@ -210,6 +214,9 @@ mod tests {
             id: "resp_1".into(),
             usage: Some(ResponseUsage {
                 input_tokens: Some(7),
+                input_tokens_details: Some(crate::types::InputTokensDetails {
+                    cached_tokens: Some(5),
+                }),
                 output_tokens: Some(4),
                 total_tokens: Some(11),
             }),
@@ -224,6 +231,7 @@ mod tests {
                 assert_eq!(complete.finish_reason, FinishReason::Stop);
                 assert_eq!(complete.input_tokens, Some(7));
                 assert_eq!(complete.output_tokens, Some(4));
+                assert_eq!(complete.cache_read_tokens, Some(5));
             }
             other => panic!("expected stream complete, got {other:?}"),
         }
@@ -237,6 +245,7 @@ mod tests {
             "gpt-4o",
             &CreateResponseRequest {
                 model: "gpt-4o".into(),
+                prompt_cache_key: None,
                 input: crate::types::ResponseInput::Text(String::new()),
                 instructions: None,
                 tools: None,

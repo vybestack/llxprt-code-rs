@@ -29,7 +29,7 @@ pin_project! {
         message_id: Option<String>,
         model: Option<String>,
         // Usage tracking
-        input_tokens: u64,
+        input_tokens: Option<u64>,
         output_tokens: u64,
         cache_creation_tokens: Option<u64>,
         cache_read_tokens: Option<u64>,
@@ -76,7 +76,7 @@ where
             blocks: HashMap::new(),
             message_id: None,
             model: None,
-            input_tokens: 0,
+            input_tokens: None,
             output_tokens: 0,
             cache_creation_tokens: None,
             cache_read_tokens: None,
@@ -198,7 +198,7 @@ fn process_event(
     blocks: &mut HashMap<usize, BlockState>,
     message_id: &mut Option<String>,
     model: &mut Option<String>,
-    input_tokens: &mut u64,
+    input_tokens: &mut Option<u64>,
     output_tokens: &mut u64,
     cache_creation_tokens: &mut Option<u64>,
     cache_read_tokens: &mut Option<u64>,
@@ -347,7 +347,7 @@ mod tests {
     use futures::StreamExt;
 
     fn make_sse_bytes(event_type: &str, data: &str) -> Bytes {
-        Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
+        Bytes::from(format!("event: {event_type}\ndata: {data}\n\n"))
     }
 
     #[tokio::test]
@@ -387,7 +387,7 @@ mod tests {
         }
 
         // Should have: PartStart, PartDelta, PartEnd
-        assert_eq!(events.len(), 3, "Expected 3 events, got {:?}", events);
+        assert_eq!(events.len(), 3, "Expected 3 events, got {events:?}");
 
         assert!(
             matches!(&events[0], ModelResponseStreamEvent::PartStart(_)),
@@ -428,7 +428,7 @@ mod tests {
         }
 
         // Should have: PartStart, PartDelta, PartDelta, PartEnd
-        assert_eq!(events.len(), 4, "Expected 4 events, got {:?}", events);
+        assert_eq!(events.len(), 4, "Expected 4 events, got {events:?}");
 
         // First should be PartStart with tool_use
         if let ModelResponseStreamEvent::PartStart(start) = &events[0] {

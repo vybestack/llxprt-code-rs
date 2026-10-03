@@ -123,6 +123,9 @@ impl ChatBackend for ResponsesBackend {
 }
 
 #[cfg(test)]
+mod cache_tests;
+
+#[cfg(test)]
 pub(super) mod tests {
     use super::*;
 
@@ -188,7 +191,7 @@ pub(super) mod tests {
     }
 
     /// Offset just past the CRLF CRLF header/body separator.
-    fn find_body_start(request: &[u8]) -> Option<usize> {
+    pub(super) fn find_body_start(request: &[u8]) -> Option<usize> {
         request
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -230,6 +233,8 @@ pub(super) mod tests {
             OpenResponsesModel::new(draft.model(), format!("http://127.0.0.1:{port}/responses"))
                 .with_reasoning(draft.responses_reasoning().unwrap())
                 .codex_http()
+                .with_http_client(reqwest::Client::builder().no_proxy().build().unwrap())
+                .with_prompt_cache_key(Some("loopback-session".to_string()))
                 .bearer("loopback-codex-key");
         let backend = ResponsesBackend::new(
             model,
@@ -240,6 +245,11 @@ pub(super) mod tests {
                 timeout: Some(std::time::Duration::from_secs(10)),
                 ..Default::default()
             },
+        );
+
+        let backend = crate::model_api::cache_observation::ObservedBackend::new(
+            Box::new(backend),
+            crate::model_api::cache_observation::InputAccounting::Inclusive,
         );
 
         let turn = |text: &str| {
@@ -271,6 +281,8 @@ pub(super) mod tests {
         let bodies: Vec<serde_json::Value> = bodies_rx.iter().collect();
         assert_codex_wire_contract(&bodies);
         assert_codex_transcript_contract(&bodies, &backend, &first, &second);
+        assert_eq!(first.usage.cache_read_tokens, Some(6));
+        assert_eq!(second.usage.cache_read_tokens, Some(6));
         assert!(
             first.text.contains("codex turn one"),
             "folded output missing: {first:?}"
@@ -284,7 +296,7 @@ pub(super) mod tests {
 
     fn assert_codex_transcript_contract(
         bodies: &[serde_json::Value],
-        backend: &ResponsesBackend,
+        backend: &dyn ChatBackend,
         first: &LlmResult,
         second: &LlmResult,
     ) {
@@ -330,6 +342,18 @@ pub(super) mod tests {
         request
     }
 
+    /// Provider-reported usage shared by each synthetic completed turn.
+    fn codex_fixture_usage() -> serdes_ai_responses::types::ResponseUsage {
+        serdes_ai_responses::types::ResponseUsage {
+            input_tokens: Some(11),
+            input_tokens_details: Some(serdes_ai_responses::types::InputTokensDetails {
+                cached_tokens: Some(6),
+            }),
+            output_tokens: Some(7),
+            total_tokens: Some(18),
+        }
+    }
+
     /// Builds the SSE response for one codex turn. Round 0 ends like the
     /// real codex backend: the terminal response event, then EOF, no
     /// `[DONE]` marker. Round 1 keeps the marker so both terminations stay
@@ -344,11 +368,7 @@ pub(super) mod tests {
             &serde_json::from_value(serde_json::json!({"model": "loopback-codex", "input": []}))
                 .unwrap(),
         );
-        object.usage = Some(serdes_ai_responses::types::ResponseUsage {
-            input_tokens: Some(11),
-            output_tokens: Some(7),
-            total_tokens: Some(18),
-        });
+        object.usage = Some(codex_fixture_usage());
         let created = serdes_ai_responses::types::StreamEvent::ResponseCreated {
             sequence_number: 0,
             response: object.clone(),
@@ -440,6 +460,7 @@ pub(super) mod tests {
                 serde_json::json!({"effort": "medium", "summary": "auto"})
             );
             assert_eq!(body["store"], false, "codex must never store");
+            assert_eq!(body["prompt_cache_key"], "loopback-session");
             assert_eq!(body["stream"], true, "codex must stream over SSE");
             assert!(
                 body.get("max_output_tokens").is_none(),
@@ -504,6 +525,7 @@ Connection: close
             "loopback-codex",
             format!("http://127.0.0.1:{port}/responses"),
         )
+        .with_http_client(reqwest::Client::builder().no_proxy().build().unwrap())
         .codex_http();
         let backend = ResponsesBackend::new(model, ModelSettings::default());
         let error = test_runtime()

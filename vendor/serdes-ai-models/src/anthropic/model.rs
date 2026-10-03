@@ -541,9 +541,13 @@ impl AnthropicModel {
         });
 
         let usage = RequestUsage {
-            request_tokens: Some(resp.usage.input_tokens),
-            response_tokens: Some(resp.usage.output_tokens),
-            total_tokens: Some(resp.usage.input_tokens + resp.usage.output_tokens),
+            request_tokens: resp.usage.input_tokens,
+            response_tokens: resp.usage.output_tokens,
+            total_tokens: resp
+                .usage
+                .input_tokens
+                .zip(resp.usage.output_tokens)
+                .and_then(|(input, output)| input.checked_add(output)),
             cache_creation_tokens: resp.usage.cache_creation_input_tokens,
             cache_read_tokens: resp.usage.cache_read_input_tokens,
             details: None,
@@ -834,8 +838,8 @@ mod tests {
             stop_reason: Some("end_turn".to_string()),
             stop_sequence: None,
             usage: AnthropicUsage {
-                input_tokens: 10,
-                output_tokens: 5,
+                input_tokens: Some(10),
+                output_tokens: Some(5),
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: None,
             },
