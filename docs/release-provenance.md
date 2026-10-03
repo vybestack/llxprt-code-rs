@@ -1,5 +1,53 @@
 # Release provenance and verification
 
+## Release command ownership (issue #27)
+
+Release orchestration and bundle policy run in the offline, locked xtask crate. The ten
+release/test shell surfaces retain only current-interface entrypoints. CI invokes
+`cargo +1.88.0 xtask publish-release` directly. No wrapper dispatches back into itself.
+
+```sh
+cargo +1.88.0 xtask source-bundle list
+cargo +1.88.0 xtask source-bundle build [OUT.tar.gz]
+cargo +1.88.0 xtask source-bundle verify [BUNDLE.tar.gz]
+cargo +1.88.0 xtask source-bundle test
+cargo +1.88.0 xtask test-release-workflow
+cargo +1.88.0 xtask test-provider-features
+cargo +1.88.0 xtask test-dependency-inventory
+cargo +1.88.0 xtask verify-vendor-provenance
+cargo +1.88.0 xtask test-vendor-provenance
+cargo +1.88.0 xtask test-issue1-operator-protocol-runner
+cargo +1.88.0 xtask run-issue1-operator-protocol interop
+```
+
+`--root ROOT` before the command selects the checked source tree for copied-tree fixtures;
+it does not change the publisher's caller-relative `dist/`. Fixtures invoke the already-built
+xtask executable, so a deliberately failing Cargo peer cannot accidentally bypass the builder
+or verifier by intercepting wrapper startup. Python fixture suites live in `xtask/fixtures/`.
+The existing Python archive parser, Git blob materializer, output policy, descriptor publisher,
+and OCI helpers are unchanged.
+
+The bundle member set remains the captured commit plus generated member and content manifests.
+Rust enforces regular Git blob modes, deny rules, the load-bearing floor, registry scratch
+rejection, and paired vendor provenance files. Standalone verification never runs extracted
+code. It validates a bounded private snapshot, extracts it, and compares member names and
+content against the checked source tree. Only the builder's explicit local-source verification
+runs shipped offline gates, with an empty Cargo home, blackholed external proxies, and targets
+outside the extraction. The publisher still retains the destination ancestor before construction:
+`READY`, `PREPARE\0`, `PARENT_READY`, then the candidate pathname frame. Its existing timeout,
+process-group cancellation, descriptor ownership, and no-replace installation remain active.
+
+The operator runner keeps its explicit authorization, macOS requirement, external watchdog,
+clean-checkout requirement, interop cleanup, exact single-test proof, capture cap, marker whitelist,
+prerequisite ordering, and smoke retry budget. Its fixture uses a miniature checkout and external
+sibling evidence directories under the test temporary root. It does not access a real keychain.
+
+`release-gates` retains the existing ordered phases and heartbeat records. All Cargo gates use
+Rust 1.88.0 with `--offline --locked`; Python and the existing system archive, patch, digest, Git,
+and GitHub CLI dependencies remain required. Set `TMPDIR` to an isolated scratch directory for
+fixture runs. No release is published by the fixtures.
+
+
 ## SerdesAI inputs
 
 The build retains the eleven crates.io archives used to reconstruct the patched SerdesAI tree.
