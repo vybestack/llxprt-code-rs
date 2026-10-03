@@ -222,20 +222,7 @@ pub(super) mod tests {
             }
         });
 
-        let value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/task-profile/astramedium.json"
-        ))
-        .unwrap();
-        let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
-        let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
-        let draft = resolved.codex.unwrap();
-        let model =
-            OpenResponsesModel::new(draft.model(), format!("http://127.0.0.1:{port}/responses"))
-                .with_reasoning(draft.responses_reasoning().unwrap())
-                .codex_http()
-                .with_http_client(reqwest::Client::builder().no_proxy().build().unwrap())
-                .with_prompt_cache_key(Some("loopback-session".to_string()))
-                .bearer("loopback-codex-key");
+        let model = codex_wire_fixture_model(port);
         let backend = ResponsesBackend::new(
             model,
             ModelSettings {
@@ -292,6 +279,22 @@ pub(super) mod tests {
             "folded output missing: {second:?}"
         );
         assert_eq!(backend.request_calls(), 2);
+    }
+
+    fn codex_wire_fixture_model(port: u16) -> OpenResponsesModel {
+        let value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/task-profile/astramedium.json"
+        ))
+        .unwrap();
+        let profile = crate::profile::parse_profile_value(&value, "astramedium").unwrap();
+        let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
+        let draft = resolved.codex.unwrap();
+        OpenResponsesModel::new(draft.model(), format!("http://127.0.0.1:{port}/responses"))
+            .with_reasoning(draft.responses_reasoning().unwrap())
+            .codex_http()
+            .with_http_client(reqwest::Client::builder().no_proxy().build().unwrap())
+            .with_prompt_cache_key(Some("loopback-session".to_string()))
+            .bearer("loopback-codex-key")
     }
 
     fn assert_codex_transcript_contract(
