@@ -530,6 +530,18 @@ fn read_manifest(dir: &openat::Dir) -> Result<Option<Manifest>, StoreError> {
             "unsupported session manifest version".into(),
         ));
     }
+    // Validate every untrusted artifact name before selection: an invalid current
+    // or retained name is not recoverable corruption in an otherwise safe set.
+    // O_NOFOLLOW on the opener protects only the final component.
+    for set in std::iter::once(&manifest.current).chain(manifest.previous.iter()) {
+        for name in [&set.snapshot, &set.segment] {
+            if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+                return Err(StoreError::Corrupt(
+                    "session manifest artifact name must be a single local basename".into(),
+                ));
+            }
+        }
+    }
     Ok(Some(manifest))
 }
 
