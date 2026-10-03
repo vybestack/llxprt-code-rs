@@ -9,8 +9,8 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-pub(super) struct Scope {
-    pub(super) pgid: i32,
+pub(crate) struct Scope {
+    pub(crate) pgid: i32,
     writer: OwnedFd,
 }
 
@@ -35,7 +35,7 @@ fn pipe() -> Result<(OwnedFd, OwnedFd), String> {
 }
 
 impl Scope {
-    pub(super) fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> Result<Self, String> {
         let (reader, writer) = pipe()?;
         let (ready_read, ready_write) = pipe()?;
         // Calculate before fork: the guardian executes only async-signal-safe libc
@@ -96,7 +96,7 @@ impl Scope {
         }
     }
 
-    pub(super) fn configure(&self, cmd: &mut Command) {
+    pub(crate) fn configure(&self, cmd: &mut Command) {
         let pgid = self.pgid;
         let writer = self.writer.as_raw_fd();
         unsafe {
