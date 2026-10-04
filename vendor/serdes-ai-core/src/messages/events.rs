@@ -431,20 +431,17 @@ impl ToolCallPartDelta {
     /// Apply this delta to an existing ToolCallPart.
     pub fn apply(&self, part: &mut ToolCallPart) {
         if !self.args_delta.is_empty() {
-            // Check if current args are empty (just "{}") - if so, replace instead of append
-            let current = part
-                .args
-                .to_json_string()
-                .unwrap_or_else(|_| part.args.to_json().to_string());
-
-            let new_args = if current == "{}" || current.is_empty() {
-                // Start fresh with the delta
-                self.args_delta.clone()
-            } else {
-                // Append to existing args
-                format!("{}{}", current, self.args_delta)
+            // A typed empty object is the initial placeholder. Raw strings are
+            // received argument bytes, even when they happen to spell "{}".
+            let mut arguments = match &part.args {
+                ToolCallArgs::String(raw) => raw.clone(),
+                ToolCallArgs::Json(value) if value.as_object().is_some_and(|v| v.is_empty()) => {
+                    String::new()
+                }
+                ToolCallArgs::Json(value) => value.to_string(),
             };
-            part.args = ToolCallArgs::String(new_args);
+            arguments.push_str(&self.args_delta);
+            part.args = ToolCallArgs::String(arguments);
         }
         if self.tool_call_id.is_some() && part.tool_call_id.is_none() {
             part.tool_call_id = self.tool_call_id.clone();
