@@ -6,7 +6,7 @@ impl Turn<'_> {
     pub(super) fn resolve_summary(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
@@ -41,14 +41,20 @@ impl Turn<'_> {
     fn forced_summary(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         attempt.requests.push(assistant_request(&attempt.current));
         attempt.requests.push(final_summary_request());
-        self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
+        self.recover_request_budget(
+            store,
+            reserved,
+            &mut attempt.requests,
+            tools,
+            &attempt.rounds,
+        )?;
         let forced =
             self.run_final_round(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
         self.validate_forced_summary(store, reserved, &mut attempt.ids, &attempt.rounds, &forced)?;

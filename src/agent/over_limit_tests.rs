@@ -1,5 +1,9 @@
 //! Over-limit recovery verdict tests: compaction once, terminal failure twice.
 
+mod accounting;
+mod boundaries;
+mod effective_compaction;
+
 use super::tests::shared_config_home;
 use super::*;
 use crate::adapter::{ChatBackend, LlmResult, LlmUsage};
@@ -82,7 +86,7 @@ fn over_limit_preflight_compacts_once_and_proceeds() {
             assistant: "x".repeat(20_000),
             calls: Vec::new(),
         }],
-        summary: String::new(),
+        summary: "Prior work completed, routing preserved".into(),
     });
     let backend = std::sync::Arc::new(RecoveryBackend::new(vec![Ok(stop_reply())]));
     let agent =
@@ -98,7 +102,8 @@ fn over_limit_preflight_compacts_once_and_proceeds() {
 
 #[test]
 fn over_limit_provider_verdict_compacts_once_and_proceeds() {
-    let (cwd, store, reserved) = recovery_store("over-provider");
+    let (cwd, store, mut reserved) = recovery_store("over-provider");
+    reserved.history.push(compactable_history());
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![
             Err("Model context length exceeded (1 tokens maximum, 2 requested)".into()),
@@ -129,7 +134,8 @@ fn over_limit_twice_fails_naming_both_attempts() {
 
 #[test]
 fn provider_verdict_twice_fails_naming_both_attempts() {
-    let (cwd, store, reserved) = recovery_store("provider-twice");
+    let (cwd, store, mut reserved) = recovery_store("provider-twice");
+    reserved.history.push(compactable_history());
     let message = "Model context length exceeded (1 tokens maximum, 2 requested)".to_string();
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![
@@ -160,4 +166,34 @@ fn unrelated_provider_error_untouched() {
     assert_eq!(agent.model_calls(), 1);
     assert_eq!(error.key, "model");
     assert!(!error.message.contains("context length exceeded"));
+}
+
+fn compactable_history() -> crate::session::HistoryTurn {
+    crate::session::HistoryTurn {
+        turn: 0,
+        attempt: 1,
+        branch_id: "prior".into(),
+        prompt: "prior prompt".into(),
+        rounds: vec![RoundRecord {
+            assistant: "narration".repeat(400),
+            calls: vec![],
+        }],
+        summary: "Full completed summary retained".into(),
+    }
+}
+
+#[test]
+fn unchanged_provider_rejection_is_not_replayed() {
+    let (cwd, store, reserved) = recovery_store("provider-unchanged");
+    let agent = CodingAgent::with_backend(
+        Box::new(RecoveryBackend::new(vec![Err(
+            "Model context length exceeded (1 tokens maximum, 2 requested)".into(),
+        )])),
+        cwd.path().to_path_buf(),
+        false,
+    );
+    let error = agent.run(&store, &reserved).unwrap_err();
+    assert_eq!(error.key, "context-limit");
+    assert_eq!(agent.model_calls(), 1);
+    assert!(error.message.contains("no retry sent"));
 }

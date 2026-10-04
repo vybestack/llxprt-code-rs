@@ -61,7 +61,9 @@ impl super::Turn<'_> {
         let first = match self.opening_round(requests, tools, &usage) {
             Ok(reply) => reply,
             Err(RoundFailure::Model(first)) if is_context_limit_error(&first) => {
-                self.compact_provider_context(reserved, requests);
+                if !self.compact_provider_context(reserved, requests, &[]) {
+                    return Err(self.provider_context_unchanged_dead(store, reserved, &first, &[]));
+                }
                 match self.opening_round(requests, tools, &usage) {
                     Ok(reply) => reply,
                     Err(RoundFailure::Model(second)) if is_context_limit_error(&second) => {

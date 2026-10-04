@@ -305,7 +305,20 @@ impl CodingAgent {
         for history in &reserved.history {
             requests.push(user_request(&history.prompt));
             for round in &history.rounds {
-                requests.extend(persisted_round_requests(round));
+                if !round.assistant.is_empty() || !round.calls.is_empty() {
+                    requests.extend(persisted_round_requests(round));
+                }
+            }
+            if !history.summary.is_empty()
+                && !history
+                    .rounds
+                    .iter()
+                    .any(|round| round.assistant == history.summary)
+            {
+                requests.extend(persisted_round_requests(&RoundRecord {
+                    assistant: history.summary.clone(),
+                    calls: Vec::new(),
+                }));
             }
         }
         requests.push(user_request(&reserved.prompt));
