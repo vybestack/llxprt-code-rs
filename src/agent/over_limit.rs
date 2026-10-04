@@ -1,5 +1,7 @@
 //! One-shot preservation-oriented history compaction for context recovery.
 
+pub(super) mod content;
+
 use crate::session::HistoryTurn;
 
 /// Reclaims redundant prior-round assistant narration using the completed summary.
@@ -27,8 +29,9 @@ pub(crate) fn compact_history(history: &mut [HistoryTurn]) -> bool {
 fn compact_observed_results(
     requests: &mut [serdes_ai::core::ModelRequest],
     rounds: &[crate::session::RoundRecord],
-) {
+) -> bool {
     use serdes_ai::core::ModelRequestPart;
+    let mut changed = false;
     let observed = rounds.iter().take(rounds.len().saturating_sub(1));
     let calls: std::collections::HashMap<_, _> = observed
         .flat_map(|round| &round.calls)
@@ -42,12 +45,17 @@ fn compact_observed_results(
         let Some(call) = result.tool_call_id.as_deref().and_then(|id| calls.get(id)) else {
             continue;
         };
-        result.content = if call.ok {
+        let replacement = if call.ok {
             serdes_ai::core::ToolReturnPart::success(&call.name, &call.result).content
         } else {
             serdes_ai::core::ToolReturnPart::error(&call.name, &call.result).content
         };
+        if result.content != replacement {
+            result.content = replacement;
+            changed = true;
+        }
     }
+    changed
 }
 
 /// Total estimated bytes including serialized tool schemas.
@@ -87,8 +95,7 @@ impl super::Turn<'_> {
             return Ok(requests);
         }
         let original = request_total_bytes(&requests, &tools);
-        compact_history(&mut reserved.history);
-        requests = self.materialize_requests(reserved);
+        self.compact_provider_context(reserved, &mut requests, &[]);
         if crate::agent::round_budget_exceeded(&requests, &tools, self.context_limit) {
             return Err(self.dead(
                 store,
@@ -111,12 +118,13 @@ impl super::Turn<'_> {
         reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
+        phases: (&'static str, &'static str),
     ) -> Result<LlmResult, AgentError> {
         match self.profiled_round(
             &attempt.requests,
             tools,
-            "model_call_before",
-            "model_call_after",
+            phases.0,
+            phases.1,
             attempt.rounds.len() + 1,
             &attempt.usage,
         ) {
@@ -131,11 +139,18 @@ impl super::Turn<'_> {
                         &attempt.rounds,
                     ));
                 }
+                self.check_request_budget(
+                    store,
+                    reserved,
+                    &attempt.requests,
+                    tools,
+                    &attempt.rounds,
+                )?;
                 match self.profiled_round(
                     &attempt.requests,
                     tools,
-                    "model_call_before",
-                    "model_call_after",
+                    phases.0,
+                    phases.1,
                     attempt.rounds.len() + 1,
                     &attempt.usage,
                 ) {
@@ -158,23 +173,31 @@ impl super::Turn<'_> {
         }
     }
 
-    /// Rebuild the owned history prefix and reclaim eligible results in the actual
-    /// request suffix. Return whether the complete message estimate strictly shrank,
-    /// so a provider rejection never replays an unchanged request.
+    /// Commit recovery only for an eligible strict content reduction. Internal
+    /// serialization timestamps still count in admission, never retry eligibility.
     pub(super) fn compact_provider_context(
         &self,
         reserved: &mut ReservedRequest,
         requests: &mut Vec<serdes_ai::core::ModelRequest>,
         rounds: &[RoundRecord],
     ) -> bool {
-        let before = crate::agent::estimate_request_bytes(requests);
-        let base_len = self.materialize_requests(reserved).len();
-        let mut suffix = requests.split_off(base_len);
-        compact_history(&mut reserved.history);
-        compact_observed_results(&mut suffix, rounds);
-        *requests = self.materialize_requests(reserved);
-        requests.extend(suffix);
-        crate::agent::estimate_request_bytes(requests) < before
+        let mut history = reserved.clone();
+        let history_changed = compact_history(&mut history.history);
+        let mut candidate = requests.clone();
+        if history_changed {
+            let base_len = self.materialize_requests(reserved).len();
+            let mut prefix = self.materialize_requests(&history);
+            content::preserve_unchanged_prefix(&requests[..base_len], &mut prefix);
+            candidate.splice(..base_len, prefix);
+        }
+        let base_len = self.materialize_requests(&history).len();
+        let results_changed = compact_observed_results(&mut candidate[base_len..], rounds);
+        if !(history_changed || results_changed) || !content::content_shrank(requests, &candidate) {
+            return false;
+        }
+        reserved.history = history.history;
+        *requests = candidate;
+        true
     }
 
     pub(super) fn provider_context_unchanged_dead(

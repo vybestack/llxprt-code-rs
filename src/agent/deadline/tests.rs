@@ -1,3 +1,5 @@
+mod forced_context;
+
 use super::*;
 use crate::adapter::{LlmUsage, ModelFuture};
 use crate::session::{Lifecycle, SessionId};

@@ -3,6 +3,7 @@
 mod accounting;
 mod boundaries;
 mod effective_compaction;
+mod findings;
 
 use super::tests::shared_config_home;
 use super::*;

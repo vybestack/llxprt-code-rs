@@ -64,6 +64,7 @@ impl super::Turn<'_> {
                 if !self.compact_provider_context(reserved, requests, &[]) {
                     return Err(self.provider_context_unchanged_dead(store, reserved, &first, &[]));
                 }
+                self.check_request_budget(store, reserved, requests, tools, &[])?;
                 match self.opening_round(requests, tools, &usage) {
                     Ok(reply) => reply,
                     Err(RoundFailure::Model(second)) if is_context_limit_error(&second) => {
