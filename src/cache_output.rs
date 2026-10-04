@@ -68,6 +68,3 @@ impl Output {
             .map_err(|error| OutputError::at("dir_sync", error))
     }
 }
-
-#[cfg(test)]
-mod tests;

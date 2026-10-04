@@ -854,3 +854,6 @@ mod tool_validation_tests;
 
 #[cfg(test)]
 mod over_limit_tests;
+
+#[cfg(test)]
+mod cache_output_tests;

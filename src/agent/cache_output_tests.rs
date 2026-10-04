@@ -1,5 +1,5 @@
-use super::*;
 use crate::adapter::{ChatBackend, LlmResult};
+use crate::cache_output::{Observation, Output, RunCache, Snapshot};
 
 fn snapshot() -> Snapshot {
     Snapshot {
