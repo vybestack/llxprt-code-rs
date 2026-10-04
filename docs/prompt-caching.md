@@ -43,7 +43,15 @@ The sink is create-only, mode 0600, and retains its descriptor and parent. Exist
 files, final symlinks, FIFOs, directories and stdout/stderr descriptor paths are
 rejected without truncation. Two diagnostic owners or external redirection targeting
 the same existing file fail explicitly (`cache-output-open`, config exit 3); no
-stream mixing or silent drop. Parents must already exist. A write/sync failure
+stream mixing or silent drop. Parents must already exist. Cache destinations are also forbidden anywhere under the
+resolved configuration home's **whole `code-rs-sessions` namespace**, including
+currently absent snapshot/temp/lock paths, other sessions and context children.
+The namespace root itself is reserved before creation. Preflight compares retained
+directory identities/ancestry (so supported parent aliases and `..` cannot bypass
+ownership), then creates through that same output-parent descriptor. Ownership
+rejection is a value-free `cache-output-open` configuration error before profile,
+provider or session side effects; no unsafe output is created then removed. This
+cache boundary does not redesign existing memory-profile behavior. A write/sync failure
 terminally fails the turn (`cache-output-write`, turn exit 6); it never replays the
 completed provider request. Each published pair is synced. A failed pair can leave
 a partial JSONL tail; a terminal failure is not represented as successful telemetry.

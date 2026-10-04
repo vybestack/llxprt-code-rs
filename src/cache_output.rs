@@ -24,7 +24,7 @@ pub struct OutputError {
 }
 
 impl OutputError {
-    fn at(stage: &'static str, error: std::io::Error) -> Self {
+    pub(crate) fn at(stage: &'static str, error: std::io::Error) -> Self {
         Self {
             stage,
             kind: error.kind(),
@@ -42,8 +42,21 @@ impl std::error::Error for OutputError {}
 pub(crate) struct Output(RefCell<Sink>);
 
 impl Output {
+    #[cfg(test)]
     pub(crate) fn create(path: &Path) -> Result<Self, OutputError> {
         Sink::create(path)
+            .map(|sink| Self(RefCell::new(sink)))
+            .map_err(|error| OutputError::at("open", error))
+    }
+
+    pub(crate) fn create_external(
+        path: &Path,
+        config: &crate::config::ConfigHomeRoot,
+    ) -> Result<Self, OutputError> {
+        let parent = Sink::open_parent(path).map_err(|error| OutputError::at("open", error))?;
+        crate::session::validate_diagnostic_destination(config, path, &parent)
+            .map_err(|error| OutputError::at("ownership", error))?;
+        Sink::create_in(path, parent)
             .map(|sink| Self(RefCell::new(sink)))
             .map_err(|error| OutputError::at("open", error))
     }

@@ -108,15 +108,18 @@ fn production_credential_source(_transcript: bool) -> Arc<dyn CredentialSource> 
 }
 
 impl RuntimeDependencies {
-    pub(crate) fn production(localoauth: bool, transcript: bool) -> Result<Self, String> {
-        let config_home = ConfigHomeRoot::discover()?;
+    pub(crate) fn production(
+        config_home: ConfigHomeRoot,
+        localoauth: bool,
+        transcript: bool,
+    ) -> Self {
         let credential_source = select_credential_source(&config_home, localoauth, transcript);
-        Ok(Self {
+        Self {
             credential_source,
             clock: Arc::new(super::credentials::SystemClock),
             config_home,
             registrations: PRODUCTION_REGISTRATIONS,
-        })
+        }
     }
 
     #[cfg(test)]

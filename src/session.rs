@@ -46,6 +46,8 @@ pub(crate) mod records;
 pub use context_persist::ToolResultProjection;
 pub use records::{BranchRecord, Lifecycle, RoundRecord, SessionState, ToolCallRecord};
 mod log;
+mod output_ownership;
+pub(crate) use output_ownership::validate_diagnostic_destination;
 mod replay;
 mod reserve;
 mod snapshot;

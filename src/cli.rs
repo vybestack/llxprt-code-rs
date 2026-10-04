@@ -184,11 +184,14 @@ pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
 
 /// Resolve the actual configuration layers used both by runtime and `--print-config`.
 pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
-    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
-
     let root = crate::config::std_profile_dir()
         .map_err(|e| AppError::new(Code::Config, "config-home", e))?;
-    let profile = resolve_profile(args, &root)?;
+    resolve_settings_in(args, &root)
+}
+
+fn resolve_settings_in(args: &Args, root: &std::path::Path) -> Result<Settings, AppError> {
+    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
+    let profile = resolve_profile(args, root)?;
     let profile_max = match profile.ephemeral.max_tool_calls_per_prompt {
         crate::profile::MaxToolCalls::Limited(value) => i64::try_from(value).ok(),
         crate::profile::MaxToolCalls::Unset | crate::profile::MaxToolCalls::Unlimited => None,
@@ -234,14 +237,14 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
         },
         ..Default::default()
     };
-    let user_file = settings::load_user_file(&root)
+    let user_file = settings::load_user_file(root)
         .map_err(|e| AppError::new(Code::Config, "settings-load", e))?;
     settings::resolve(SettingsLayers {
         user_file,
         profile,
         env,
         cli,
-        config_root: root,
+        config_root: root.to_path_buf(),
     })
     .map_err(|e| AppError::new(Code::Config, "settings-resolve", e.to_string()))
 }

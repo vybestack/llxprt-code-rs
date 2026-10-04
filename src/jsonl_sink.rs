@@ -14,6 +14,10 @@ pub(crate) struct Sink {
 
 impl Sink {
     pub(crate) fn create(path: &Path) -> std::io::Result<Self> {
+        Self::create_in(path, Self::open_parent(path)?)
+    }
+
+    pub(crate) fn open_parent(path: &Path) -> std::io::Result<openat::Dir> {
         let leaf = path.file_name().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -31,6 +35,13 @@ impl Sink {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let parent = crate::tools::open_root(parent_path).map_err(std::io::Error::other)?;
+        Ok(parent)
+    }
+
+    pub(crate) fn create_in(path: &Path, parent: openat::Dir) -> std::io::Result<Self> {
+        let leaf = path
+            .file_name()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let name =
             std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(leaf)).map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in JSONL leaf")
