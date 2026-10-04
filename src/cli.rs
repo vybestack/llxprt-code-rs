@@ -79,6 +79,11 @@ pub struct Args {
     #[arg(short, long)]
     pub prompt: Option<String>,
 
+    /// Write provider-reported cache call/run counters to a create-only JSONL file.
+    /// Independent of prompt caching and live stderr transcript emission; default off.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["oauth_login", "print_config"])]
+    pub cache_observations: Option<PathBuf>,
+
     /// Stream phase-sampled process RSS events to a create-only JSONL file (default off).
     #[arg(long, value_name = "PATH")]
     pub mem_profile: Option<PathBuf>,
@@ -155,6 +160,13 @@ pub struct Args {
 /// consuming stdin. Call this at the common CLI boundary before dispatching runtime
 /// or `--print-config`.
 pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if args.command.is_some() && args.cache_observations.is_some() {
+        return Err(AppError::new(
+            Code::Usage,
+            "cache-output-mode",
+            "cache observations require a live run, not read-only transcript",
+        ));
+    }
     if let Some(value) = args.max_tool_calls {
         crate::settings::validate_max_tool_calls(value)
             .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;

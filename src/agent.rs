@@ -134,6 +134,7 @@ pub struct CodingAgent {
     pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
     emitter: std::sync::Mutex<crate::transcript::Emitter>,
     profiler: Option<crate::memory_profile::Profiler>,
+    cache_output: Option<crate::cache_output::Output>,
 }
 
 mod emission;
@@ -207,6 +208,7 @@ impl CodingAgent {
             context_limit: config.context_limit,
             emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         })
     }
 
@@ -239,6 +241,7 @@ impl CodingAgent {
             context_limit: None,
             emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         })
     }
 
@@ -267,6 +270,7 @@ impl CodingAgent {
             context_limit: None,
             emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         }
     }
 
@@ -282,6 +286,12 @@ impl CodingAgent {
         profiler: Option<crate::memory_profile::Profiler>,
     ) -> CodingAgent {
         self.profiler = profiler;
+        self
+    }
+
+    /// Attach the independent, explicitly requested cache-observation file.
+    pub(crate) fn with_cache_output(mut self, output: Option<crate::cache_output::Output>) -> Self {
+        self.cache_output = output;
         self
     }
 
@@ -829,6 +839,7 @@ enum RoundFailure {
     Model(String),
     ModelTransport(TransportFailure),
     Profiling(AgentError),
+    CacheOutput(crate::cache_output::OutputError),
 }
 
 #[cfg(test)]

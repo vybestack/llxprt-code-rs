@@ -1,9 +1,11 @@
+//! Create-only private regular-file JSONL output, shared by explicit diagnostic owners.
+
 use serde::Serialize;
 use std::io::Write as _;
 use std::os::fd::{AsRawFd as _, FromRawFd as _};
 use std::path::{Path, PathBuf};
 
-pub(super) struct Sink {
+pub(crate) struct Sink {
     file: std::fs::File,
     parent: openat::Dir,
     path: PathBuf,
@@ -11,17 +13,17 @@ pub(super) struct Sink {
 }
 
 impl Sink {
-    pub(super) fn create(path: &Path) -> std::io::Result<Self> {
+    pub(crate) fn create(path: &Path) -> std::io::Result<Self> {
         let leaf = path.file_name().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "profile path needs a file name",
+                "JSONL path needs a file name",
             )
         })?;
         if leaf == "." || leaf == ".." {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "profile path needs a regular-file leaf",
+                "JSONL path needs a regular-file leaf",
             ));
         }
         let parent_path = path
@@ -31,7 +33,7 @@ impl Sink {
         let parent = crate::tools::open_root(parent_path).map_err(std::io::Error::other)?;
         let name =
             std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(leaf)).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in profile leaf")
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in JSONL leaf")
             })?;
         let fd = unsafe {
             libc::openat(
@@ -53,7 +55,7 @@ impl Sink {
         if !file.metadata()?.file_type().is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "profile destination is not a regular file",
+                "JSONL destination is not a regular file",
             ));
         }
         if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
@@ -67,22 +69,27 @@ impl Sink {
         })
     }
 
-    pub(super) fn write_event<T: Serialize>(&mut self, event: &T) -> std::io::Result<()> {
+    pub(crate) fn write_event<T: Serialize>(&mut self, event: &T) -> std::io::Result<()> {
         self.scratch.clear();
         serde_json::to_writer(&mut self.scratch, event).map_err(std::io::Error::other)?;
         self.scratch.push(b'\n');
         self.file.write_all(&self.scratch)
     }
 
-    pub(super) fn sync_file(&self) -> std::io::Result<()> {
+    pub(crate) fn sync_file(&self) -> std::io::Result<()> {
         self.file.sync_all()
     }
 
-    pub(super) fn sync_parent(&self) -> std::io::Result<()> {
+    pub(crate) fn sync_parent(&self) -> std::io::Result<()> {
         self.parent.open_file(".")?.sync_all()
     }
 
-    pub(super) fn path(&self) -> &Path {
+    #[cfg(test)]
+    pub(crate) fn refuse_writes_for_test(&mut self) {
+        self.file = std::fs::File::open(&self.path).unwrap();
+    }
+
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }

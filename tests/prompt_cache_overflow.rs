@@ -101,6 +101,8 @@ fn run_case(off: bool, cached_overflow: bool) {
                 "--cwd",
             ])
             .arg(work.path())
+            .arg("--cache-observations")
+            .arg(work.path().join("cache.jsonl"))
             .args(["-p", "Read fixture.txt then done"])
             .output()
             .unwrap()
@@ -123,7 +125,8 @@ fn run_case(off: bool, cached_overflow: bool) {
     assert_eq!(envelope["summary"], "done");
     assert_eq!(envelope["tool_calls"], 1);
     assert_eq!(envelope["replayed"], false);
-    let events: Vec<Value> = String::from_utf8(output.stderr)
+    assert!(output.stderr.is_empty());
+    let events: Vec<Value> = std::fs::read_to_string(work.path().join("cache.jsonl"))
         .unwrap()
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -184,6 +187,7 @@ fn run_case(off: bool, cached_overflow: bool) {
     assert_eq!(branch.rounds[1].assistant, "done");
     assert!(branch.rounds[1].calls.is_empty());
     let persisted = serde_json::to_vec(&state).unwrap();
+    std::fs::remove_file(work.path().join("cache.jsonl")).unwrap();
     let replay = invoke();
     assert!(
         replay.status.success(),
@@ -205,5 +209,9 @@ fn run_case(off: bool, cached_overflow: bool) {
         std::fs::read_to_string(work.path().join("fixture.txt")).unwrap(),
         "overflow tool evidence"
     );
+    assert!(std::fs::read(work.path().join("cache.jsonl"))
+        .unwrap()
+        .is_empty());
+    std::fs::remove_file(work.path().join("cache.jsonl")).unwrap();
     assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 3);
 }

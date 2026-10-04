@@ -108,6 +108,12 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Latest successful completion and cumulative provider-reported cache usage.
+    /// This does not emit output or infer counters from request flags.
+    fn cache_observation(&self) -> Option<crate::cache_output::Snapshot> {
+        None
+    }
+
     /// Must match the provider converter for failed tool returns.
     fn tool_error_prefix(&self) -> &'static str {
         "Error: "

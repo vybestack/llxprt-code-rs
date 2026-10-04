@@ -4,6 +4,7 @@
 
 pub mod adapter;
 pub mod agent;
+pub mod cache_output;
 pub mod cli;
 pub mod config;
 pub mod context_eval;
@@ -11,6 +12,7 @@ pub mod context_kernel;
 pub mod envelope;
 pub mod grade;
 pub mod harness;
+mod jsonl_sink;
 pub mod limits;
 pub mod memory_profile;
 pub mod model;

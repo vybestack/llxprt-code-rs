@@ -121,6 +121,13 @@ impl<'a> Turn<'a> {
                 Some(failure) => RoundFailure::ModelTransport(failure),
                 None => RoundFailure::Model(message),
             })?;
+        if let (Some(output), Some(snapshot)) =
+            (&self.cache_output, self.backend.cache_observation())
+        {
+            output
+                .publish(&snapshot)
+                .map_err(RoundFailure::CacheOutput)?;
+        }
         // Bound and validate the reply before it can join any transcript or usage total.
         validate_provider_result(&result, &self.secrets).map_err(RoundFailure::Model)?;
         Ok(result)

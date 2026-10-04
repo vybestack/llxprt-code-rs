@@ -12,6 +12,9 @@ and built on [`serdes-ai`] 0.2.6. Each invocation:
 
 Use `--emit all` for an opt-in live JSONL transcript on stderr, or
 `llxprt-code-rs transcript --session ID --json` for read-only look-back.
+Cache usage has its own explicit create-only file: `--cache-observations cache.jsonl`.
+It never writes to default stderr or the selected `--emit` transcript stream. Provider
+prompt-caching settings remain independent; see [prompt caching](docs/prompt-caching.md).
 See [transcript emission and look-back](docs/transcripts.md) for categories, limits,
 reasoning availability, human viewing caps and branch lineage.
 
