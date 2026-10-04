@@ -56,3 +56,17 @@ test('pure rendering preserves the intended HostImageResizeSettings paragraph', 
   assert.equal(renderMarkdown(artifact), rendered, 'rendering is deterministic');
   // Deliberately scoped to F2: unrelated pre-existing friendliglm drift is not repaired here.
 });
+
+
+test('pure renderer preserves the actual Chat and Codex HTTP cache contract', () => {
+  const cacheParagraph = (markdown) => markdown.split('\n\n').find((p) =>
+    p.startsWith('Responses reasoning requires'));
+  const paragraph = cacheParagraph(renderMarkdown(artifact));
+  assert.ok(paragraph);
+  assert.equal(paragraph, cacheParagraph(doc));
+  assert.match(paragraph, /OpenAI Chat and Codex HTTP also\nuse the session label as a cache routing key unless caching is `off`/);
+  assert.match(paragraph, /without using it\nfor response continuation/);
+  assert.match(paragraph, /Codex sends neither a session header nor a retention request/);
+  assert.match(paragraph, /stateless prompt caching/);
+  assert.doesNotMatch(paragraph, /Codex WebSocket/);
+});

@@ -1,4 +1,5 @@
 mod anthropic_backend;
+mod cache_observation;
 pub(crate) mod credentials;
 pub(crate) mod dependencies;
 pub(crate) mod interpret;
