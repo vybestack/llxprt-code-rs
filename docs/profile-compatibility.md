@@ -56,6 +56,9 @@ The current `astramedium` shape includes host image-resize settings.
 accept JSON numbers retained in `HostImageResizeSettings` as external-host data:
 this runtime accepts text/tool prompts and has no image-input/resizing pipeline,
 so these settings are not projected into provider requests. Non-numeric values reject.
+Non-Codex Chat, Anthropic and Responses retain positive integer image limits:
+edges through `u32::MAX`, pixels through `u64::MAX`, short edge at most long edge.
+See [native host settings](host-profile-settings.md) for provider-specific ownership.
 
 `shell-default-timeout-seconds` and `shell-max-timeout-seconds` govern this runtime's
 `run_shell_command` executor (still gated by `--allow-shell`). Each accepts integer
@@ -75,6 +78,9 @@ integer `-1` disabled sentinel (or omission): there is no separate first-respons
 phase timer. Active values reject rather than being reassigned to the provider
 request timeout. The existing disabled idle-timeout constraint remains unchanged.
 No alternate profile reader, migration, fallback, or new alias is introduced.
+Non-Codex Chat, Anthropic and Responses instead accept a positive bounded whole-request
+millisecond budget; `0`, `-1` or omission selects native request policy. This does not
+create a first-token timer or alter separate shell and turn deadlines.
 
 Host task timeout ownership: `task-default-timeout-seconds` and
 `task-max-timeout-seconds` belong to the llxprt host task runner. This Rust runtime has
