@@ -12,7 +12,7 @@
 //! The loop inspects `finish_reason` after every round. Only allowed completion
 //! reasons succeed; `length`/`content_filter`/`error`/unknown terminally fail and
 //! are persisted. //! Empty/duplicate ids, non-object arguments, and the exact tool-call budget are
-//! validated before any side effect; unknown or disabled tools are refused with a correction.
+//! validated before any side effect; unknown or disabled tools return charged failures.
 //! Malformed argument JSON is a hard error, not a normalized `{}` that could execute.
 
 use crate::adapter::{
@@ -132,17 +132,20 @@ pub struct CodingAgent {
     /// The profile's estimated context budget for materialized history.
     pub context_limit: Option<u64>,
     pub shell_timeouts: crate::tools::ShellTimeoutPolicy,
+    emitter: std::sync::Mutex<crate::transcript::Emitter>,
     profiler: Option<crate::memory_profile::Profiler>,
+    cache_output: Option<crate::cache_output::Output>,
 }
 
+mod emission;
 mod error;
 pub use error::AgentError;
 mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
 use helpers::{
-    final_summary_request, refuse_over_budget, refuse_unknown_tools, split_over_budget,
-    tool_call_record, validate_provider_result,
+    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
+    validate_provider_result,
 };
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
@@ -157,7 +160,9 @@ struct TurnUsage {
 struct AttemptState {
     requests: Vec<serdes_ai::core::ModelRequest>,
     rounds: Vec<RoundRecord>,
-    current: LlmResult,
+    // Some is the unassembled provider reply. Taking it transfers ownership to requests;
+    // None means the answered tool batch is already assembled (including refusals).
+    current: Option<LlmResult>,
     ids: std::collections::HashSet<String>,
     usage: TurnUsage,
     budget_exhausted: bool,
@@ -201,7 +206,9 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: config.context_limit,
+            emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         })
     }
 
@@ -232,7 +239,9 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         })
     }
 
@@ -259,7 +268,9 @@ impl CodingAgent {
             prompt_notes: None,
             shell_timeouts: crate::tools::ShellTimeoutPolicy::default(),
             context_limit: None,
+            emitter: Default::default(),
             profiler: None,
+            cache_output: None,
         }
     }
 
@@ -275,6 +286,12 @@ impl CodingAgent {
         profiler: Option<crate::memory_profile::Profiler>,
     ) -> CodingAgent {
         self.profiler = profiler;
+        self
+    }
+
+    /// Attach the independent, explicitly requested cache-observation file.
+    pub(crate) fn with_cache_output(mut self, output: Option<crate::cache_output::Output>) -> Self {
+        self.cache_output = output;
         self
     }
 
@@ -343,6 +360,10 @@ impl CodingAgent {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        self.emitter
+            .lock()
+            .expect("transcript mutex poisoned")
+            .reset();
         let mut reserved = reserved.clone();
         store
             .verify_workspace_identity(self.workspace.identity())
@@ -414,10 +435,11 @@ impl Turn<'_> {
             total_calls: 0,
         };
         self.enforce_usage(store, reserved, &[], &usage)?;
+        self.emit_response(store, reserved, &[], &current)?;
         Ok(AttemptState {
             requests,
             rounds: Vec::new(),
-            current,
+            current: Some(current),
             ids: std::collections::HashSet::new(),
             usage,
             budget_exhausted: false,
@@ -432,7 +454,11 @@ impl Turn<'_> {
         config: &crate::tools::ToolConfig,
         attempt: &mut AttemptState,
     ) -> Result<(), AgentError> {
-        while !attempt.current.calls.is_empty() {
+        while attempt
+            .current
+            .as_ref()
+            .is_some_and(|reply| !reply.calls.is_empty())
+        {
             if self.execute_tool_round(store, reserved, config, attempt)? {
                 // The budget truncated this round; no more exploration. The
                 // loop exit resolves the forced summary from here.
@@ -483,13 +509,23 @@ impl Turn<'_> {
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
-        let (ok, raw_text) = crate::tools::execute_tool_with_limit(
-            &self.cwd,
-            &call.name,
-            parsed,
-            config,
-            body_budget,
-        );
+        let (ok, raw_text) = if known_tool(&call.name, self.allow_shell) {
+            crate::tools::execute_tool_with_limit(
+                &self.cwd,
+                &call.name,
+                parsed,
+                config,
+                body_budget,
+            )
+        } else {
+            (
+                false,
+                crate::redact::truncate_utf8(
+                    helpers::naming_failure(self.allow_shell, &call.name),
+                    config.max_output_bytes.min(body_budget),
+                ),
+            )
+        };
         let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
         attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
@@ -536,18 +572,21 @@ impl Turn<'_> {
             &attempt.rounds,
         )?;
         self.renew(store, reserved)?;
-        attempt.current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
+        let current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
         self.renew(store, reserved)?;
         attempt.usage.assistant_bytes = attempt
             .usage
             .assistant_bytes
-            .saturating_add(attempt.current.text.len());
+            .saturating_add(current.text.len());
         attempt.usage.args_bytes = attempt
             .usage
             .args_bytes
-            .saturating_add(turn_args_bytes(&attempt.current));
+            .saturating_add(turn_args_bytes(&current));
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
-        self.check_finish(store, reserved, &attempt.current, &attempt.rounds)
+        self.check_finish(store, reserved, &current, &attempt.rounds)?;
+        self.emit_response(store, reserved, &attempt.rounds, &current)?;
+        attempt.current = Some(current);
+        Ok(())
     }
 
     fn check_request_budget(
@@ -800,13 +839,21 @@ enum RoundFailure {
     Model(String),
     ModelTransport(TransportFailure),
     Profiling(AgentError),
+    CacheOutput(crate::cache_output::OutputError),
 }
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
+mod naming_projection_tests;
+#[cfg(test)]
+mod naming_recovery_tests;
+#[cfg(test)]
 mod tool_validation_tests;
 
 #[cfg(test)]
 mod over_limit_tests;
+
+#[cfg(test)]
+mod cache_output_tests;

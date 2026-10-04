@@ -106,6 +106,14 @@ impl super::Turn<'_> {
             }
             RoundFailure::TurnTime => self.time_exhausted(store, reserved, rounds),
             RoundFailure::Profiling(error) => error,
+            RoundFailure::CacheOutput(error) => self.dead_coded(
+                store,
+                reserved,
+                crate::envelope::Code::Turn,
+                "cache-output-write",
+                &error.to_string(),
+                rounds,
+            ),
         }
     }
 }

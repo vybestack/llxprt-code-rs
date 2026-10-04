@@ -23,6 +23,9 @@ pub fn run_profiled(
     args: Args,
     profiler: Option<crate::memory_profile::Profiler>,
 ) -> Result<RunOutcome, AppError> {
+    let config_home = crate::config::ConfigHomeRoot::discover()
+        .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
+    let cache_output = open_cache_output(&args, &config_home)?;
     // Issue 88: install the cancellation handlers before anything else so a `kill -TERM` on this
     // worker takes the active tool's process group with it. Best-effort; a platform that rejects
     // the registration still runs the turn.
@@ -34,9 +37,9 @@ pub fn run_profiled(
         None => read_stdin_prompt()?,
     };
     // Resolve every settings layer before production dependencies can read credentials.
-    let settings = resolve_settings(&args)?;
-    let dependencies = RuntimeDependencies::production(args.localoauth)
-        .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
+    let settings = resolve_settings_in(&args, config_home.as_path())?;
+    let dependencies =
+        RuntimeDependencies::production(config_home, args.localoauth, !args.emit.is_empty());
     let mut profile = resolve_profile(&args, settings.paths.config_root.value.as_path())?;
     apply_runtime_settings(&mut profile, &settings)?;
     profile_event(&profiler, "profile_parsed", Default::default())?;
@@ -57,7 +60,8 @@ pub fn run_profiled(
         constructed,
         &cwd,
         profiler.clone(),
-    )?;
+    )?
+    .with_cache_output(cache_output);
     let store = load_session_store_in(&session_id, dependencies.config_home())
         .map_err(|error| AppError::new(Code::Session, "session-store", error))?;
     profile_event(&profiler, "session_store_opened", Default::default())?;
@@ -97,6 +101,17 @@ pub fn run_profiled(
         run,
         output_caps,
     })
+}
+
+fn open_cache_output(
+    args: &Args,
+    config_home: &crate::config::ConfigHomeRoot,
+) -> Result<Option<crate::cache_output::Output>, AppError> {
+    args.cache_observations
+        .as_deref()
+        .map(|path| crate::cache_output::Output::create_external(path, config_home))
+        .transpose()
+        .map_err(|error| AppError::new(Code::Config, "cache-output-open", error.to_string()))
 }
 
 fn resolve_cwd(args: &Args) -> Result<PathBuf, AppError> {
@@ -156,6 +171,7 @@ fn build_agent(
         }
     };
     agent = agent
+        .with_emission(args.emit.clone())
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)
         .with_max_rounds(constructed.max_rounds)

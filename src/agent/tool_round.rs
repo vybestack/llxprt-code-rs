@@ -10,19 +10,20 @@ impl super::Turn<'_> {
     ) -> Result<bool, AgentError> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
         self.check_time_limit(store, reserved, &attempt.rounds)?;
-        let (mut calls, refused) =
-            validate_calls(&mut attempt.ids, &attempt.current, self.allow_shell).map_err(
-                |error| {
-                    self.dead(
-                        store,
-                        reserved,
-                        "invalid-tool-call",
-                        &error,
-                        &attempt.rounds,
-                    )
-                },
-            )?;
-        attempt.requests.push(assistant_request(&attempt.current));
+        let current = attempt
+            .current
+            .take()
+            .expect("tool round owns an unassembled reply");
+        let mut calls = validate_calls(&mut attempt.ids, &current).map_err(|error| {
+            self.dead(
+                store,
+                reserved,
+                "invalid-tool-call",
+                &error,
+                &attempt.rounds,
+            )
+        })?;
+        attempt.requests.push(assistant_request(&current));
         // Enforce the tool-call budget by executing only what fits: the model
         // gets explicit refusals for the rest, and the turn resolves through a
         // forced summary instead of dying mid-work.
@@ -32,13 +33,19 @@ impl super::Turn<'_> {
             attempt.budget_exhausted = true;
         }
         let mut round = RoundRecord {
-            assistant: attempt.current.text.clone(),
+            assistant: current.text,
             calls: Vec::new(),
         };
         self.execute_calls(config, attempt, &mut round, &calls, store, reserved)?;
         refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
-        refuse_unknown_tools(self.allow_shell, attempt, &mut round, &refused);
+        let emitted_prefix = calls.len();
         attempt.rounds.push(round);
+        for call in &attempt.rounds.last().expect("recorded round").calls[emitted_prefix..] {
+            self.emit_result(reserved.turn, attempt.rounds.len(), call)
+                .map_err(|error| {
+                    self.dead(store, reserved, "transcript", &error, &attempt.rounds)
+                })?;
+        }
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         store
             .checkpoint(reserved, &attempt.rounds)
@@ -67,7 +74,9 @@ impl super::Turn<'_> {
                     ..Default::default()
                 },
             )?;
-            in_flight::mark(store, &call.name);
+            if known_tool(&call.name, self.allow_shell) {
+                in_flight::mark(store, &call.name);
+            }
             let outcome =
                 self.execute_one_call(config, store, attempt, round, call, (index, calls.len()));
             in_flight::clear(store);
@@ -82,6 +91,17 @@ impl super::Turn<'_> {
                     });
                 }
                 return Err(self.tool_failure(store, reserved, failure, &attempt.rounds));
+            }
+            if let Err(error) = self.emit_result(
+                reserved.turn,
+                round_index,
+                round.calls.last().expect("admitted call record"),
+            ) {
+                attempt.rounds.push(RoundRecord {
+                    assistant: std::mem::take(&mut round.assistant),
+                    calls: std::mem::take(&mut round.calls),
+                });
+                return Err(self.dead(store, reserved, "transcript", &error, &attempt.rounds));
             }
             self.update_profile_usage(&attempt.usage);
             // `output_bytes` is charged in LIVE bytes (#66), so the persisted
@@ -180,12 +200,13 @@ mod tests {
         let mut attempt = AttemptState {
             requests: Vec::new(),
             rounds: Vec::new(),
-            current: LlmResult {
+            current: Some(LlmResult {
+                thinking: String::new(),
                 text: "working".into(),
                 calls: vec![],
                 finish_reason: None,
                 usage: Default::default(),
-            },
+            }),
             ids: Default::default(),
             usage: TurnUsage {
                 assistant_bytes: 0,

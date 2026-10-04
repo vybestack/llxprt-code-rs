@@ -52,11 +52,20 @@ fn serve_http(
             }
         }
         write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len() + missing_bytes).unwrap();
-        // Split a non-ASCII codepoint between HTTP writes. The decoder works on
-        // bytes until a complete SSE line, never lossy-decodes network chunks.
-        for chunk in body.chunks(7) {
+        // Keep byte fragmentation (including a split non-ASCII codepoint), but
+        // do not dispatch the first frame until the entire semantic witness can
+        // be queued. A rejected lifecycle frame legitimately closes the client
+        // body; racing that closure with later-success writes tests the socket,
+        // not whether the client rejects the contradiction before that success.
+        let boundary = body.windows(2).position(|v| v == b"\n\n").unwrap_or(0);
+        for chunk in body[..boundary].chunks(7) {
             socket.write_all(chunk).unwrap();
         }
+        // One checked write queues the dispatch delimiter and all later frames.
+        // A socket error or a short write is still a fixture failure, never an
+        // excuse to discard a suffix required by the completion/error assertions.
+        let tail = &body[boundary..];
+        assert_eq!(socket.write(tail).unwrap(), tail.len());
         drop(socket);
         listener.set_nonblocking(true).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));

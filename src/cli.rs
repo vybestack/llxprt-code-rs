@@ -39,9 +39,18 @@ const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
 #[command(
     name = "llxprt-code-rs",
     version,
-    about = "Headless coding agent. One JSON object on stdout per run."
+    about = "Headless coding agent. Exactly one JSON object on stdout per run.",
+    after_help = "Examples:\n  llxprt-code-rs --session demo --cwd ws -p 'fix the test'\n  llxprt-code-rs --session demo -p 'now add coverage'\n  llxprt-code-rs --session demo --emit all -p 'inspect' 2>turn.jsonl\n  llxprt-code-rs transcript --session demo --turn 1 --json\n\nExit codes: 2 usage, 3 config, 4 session, 5 model, 6 turn.\nTranscript human output and --help/--version are stdout protocol exceptions."
 )]
 pub struct Args {
+    /// Read a finished or in-progress session without changing it.
+    #[command(subcommand)]
+    pub command: Option<crate::transcript::Command>,
+
+    /// Emit thinking,text,calls,results (or all) as live stderr JSONL; repeatable.
+    /// Chat has no thinking. Use transcript for persisted look-back.
+    #[arg(long, value_delimiter = ',')]
+    pub emit: Vec<crate::transcript::Emit>,
     /// Session id: a safe identifier of [A-Za-z0-9_-]; no '/', '.', '..'.
     #[arg(long, default_value = "default")]
     pub session: String,
@@ -69,6 +78,11 @@ pub struct Args {
     /// Prompt. If omitted, read from stdin (entire input).
     #[arg(short, long)]
     pub prompt: Option<String>,
+
+    /// Write provider-reported cache call/run counters to a create-only JSONL file.
+    /// Independent of prompt caching and live stderr transcript emission; default off.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["oauth_login", "print_config"])]
+    pub cache_observations: Option<PathBuf>,
 
     /// Stream phase-sampled process RSS events to a create-only JSONL file (default off).
     #[arg(long, value_name = "PATH")]
@@ -146,6 +160,13 @@ pub struct Args {
 /// consuming stdin. Call this at the common CLI boundary before dispatching runtime
 /// or `--print-config`.
 pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if args.command.is_some() && args.cache_observations.is_some() {
+        return Err(AppError::new(
+            Code::Usage,
+            "cache-output-mode",
+            "cache observations require a live run, not read-only transcript",
+        ));
+    }
     if let Some(value) = args.max_tool_calls {
         crate::settings::validate_max_tool_calls(value)
             .map_err(|message| AppError::new(Code::Usage, "max-tool-calls", message))?;
@@ -163,11 +184,14 @@ pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
 
 /// Resolve the actual configuration layers used both by runtime and `--print-config`.
 pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
-    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
-
     let root = crate::config::std_profile_dir()
         .map_err(|e| AppError::new(Code::Config, "config-home", e))?;
-    let profile = resolve_profile(args, &root)?;
+    resolve_settings_in(args, &root)
+}
+
+fn resolve_settings_in(args: &Args, root: &std::path::Path) -> Result<Settings, AppError> {
+    use crate::settings::{self, SettingsBudgets, SettingsLayer, SettingsLayers, SettingsProvider};
+    let profile = resolve_profile(args, root)?;
     let profile_max = match profile.ephemeral.max_tool_calls_per_prompt {
         crate::profile::MaxToolCalls::Limited(value) => i64::try_from(value).ok(),
         crate::profile::MaxToolCalls::Unset | crate::profile::MaxToolCalls::Unlimited => None,
@@ -213,14 +237,14 @@ pub(crate) fn resolve_settings(args: &Args) -> Result<Settings, AppError> {
         },
         ..Default::default()
     };
-    let user_file = settings::load_user_file(&root)
+    let user_file = settings::load_user_file(root)
         .map_err(|e| AppError::new(Code::Config, "settings-load", e))?;
     settings::resolve(SettingsLayers {
         user_file,
         profile,
         env,
         cli,
-        config_root: root,
+        config_root: root.to_path_buf(),
     })
     .map_err(|e| AppError::new(Code::Config, "settings-resolve", e.to_string()))
 }

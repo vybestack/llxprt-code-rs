@@ -136,6 +136,7 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
             )
             .unwrap();
     for turn in 0..2 {
+        let observations = work.path().join(format!("cache-{turn}.jsonl"));
         let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
             .env("LLXPRT_CONFIG_HOME", work.path())
             // Only this loopback fixture subprocess ignores CI off-box proxies.
@@ -147,6 +148,8 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
             .env_remove("all_proxy")
             .args(["--profile", "cache", "--session", "cache-session", "--cwd"])
             .arg(work.path())
+            .arg("--cache-observations")
+            .arg(&observations)
             .args([
                 "-p",
                 &format!("Read fixture.txt then say done, turn {turn}"),
@@ -159,7 +162,8 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.stderr.is_empty());
+        let stderr = std::fs::read_to_string(&observations).unwrap();
         let aggregate: Value = stderr
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
