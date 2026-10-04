@@ -1,3 +1,5 @@
+mod forced_context;
+
 use super::*;
 use crate::adapter::{LlmUsage, ModelFuture};
 use crate::session::{Lifecycle, SessionId};
@@ -203,6 +205,19 @@ fn provider_context_retry_does_not_restart_the_clock() {
         result: Err("context length exceeded".into()),
     };
     let mut f = Fixture::new(vec![first, reply(6, "OK", vec![])], Some(10));
+    // Recovery retries only a strictly smaller request. Give this clock fixture
+    // genuinely reclaimable completed narration, not an unchanged empty history.
+    f.reserved.history.push(crate::session::HistoryTurn {
+        turn: 0,
+        attempt: 1,
+        branch_id: "prior".into(),
+        prompt: "prior prompt".into(),
+        rounds: vec![RoundRecord {
+            assistant: "narration".repeat(100),
+            calls: vec![],
+        }],
+        summary: "Completed prior task".into(),
+    });
     f.assert_timeout(2, 0);
 }
 

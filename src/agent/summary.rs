@@ -6,7 +6,7 @@ impl Turn<'_> {
     pub(super) fn resolve_summary(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
@@ -49,15 +49,20 @@ impl Turn<'_> {
     fn forced_summary(
         &self,
         store: &SessionStore,
-        reserved: &ReservedRequest,
+        reserved: &mut ReservedRequest,
         tools: &[crate::tools::ToolSpec],
         attempt: &mut AttemptState,
     ) -> Result<String, AgentError> {
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         attempt.requests.push(final_summary_request());
-        self.check_request_budget(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
-        let forced =
-            self.run_final_round(store, reserved, &attempt.requests, tools, &attempt.rounds)?;
+        self.recover_request_budget(
+            store,
+            reserved,
+            &mut attempt.requests,
+            tools,
+            &attempt.rounds,
+        )?;
+        let forced = self.run_final_round(store, reserved, tools, attempt)?;
         self.validate_forced_summary(store, reserved, &mut attempt.ids, &attempt.rounds, &forced)?;
         attempt.usage.assistant_bytes = attempt
             .usage
@@ -67,6 +72,27 @@ impl Turn<'_> {
         self.check_round_limit(store, reserved, &attempt.rounds)?;
         self.emit_response(store, reserved, &attempt.rounds, &forced)?;
         Ok(forced.text)
+    }
+
+    /// Final calls share provider recovery, the original turn clock, exact live
+    /// usage and typed publication errors. Lease renewals still bracket finalize.
+    fn run_final_round(
+        &self,
+        store: &SessionStore,
+        reserved: &mut ReservedRequest,
+        tools: &[crate::tools::ToolSpec],
+        attempt: &mut AttemptState,
+    ) -> Result<LlmResult, AgentError> {
+        self.renew(store, reserved)?;
+        let reply = self.provider_round_with_recovery(
+            store,
+            reserved,
+            tools,
+            attempt,
+            ("forced_summary_before", "forced_summary_after"),
+        )?;
+        self.renew(store, reserved)?;
+        Ok(reply)
     }
 
     fn validate_forced_summary(
