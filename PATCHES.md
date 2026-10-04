@@ -1,5 +1,18 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 326: preserve raw streamed tool arguments
+
+`ToolCallPartDelta::apply` now distinguishes the typed initial empty-object
+placeholder from raw argument bytes. A raw string spelling `{}` must be appended
+verbatim, not replaced by the next delta. The previous placeholder heuristic
+could lose a valid object followed by whitespace and could erase a malformed
+concatenated-object prefix before strict host validation. The Codex HTTP compiled
+regressions cover these cases, interleaved calls/reasoning, fragmented UTF-8 and
+JSON, malformed external inputs, typed initialization and request boundaries.
+No JSON repair, request retry, done-event fallback or provider shim is added.
+This controlled current-source defect does not establish the cause of the
+historical empty `read_file` argument failure.
+
 ## Issue 79: stateless prompt-cache routing
 
 The retained Responses client adds an optional `prompt_cache_key` request field and
@@ -65,7 +78,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `ec2a3dc2574fae2efa5f8f759e84b7bd0600c385ddc311fb2599d1bfa3338163`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `715a5681c2836676c8c10d667c4fd6e47c818a7262316112e7ee5aa16b45ceb3`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
