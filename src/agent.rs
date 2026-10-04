@@ -322,7 +322,20 @@ impl CodingAgent {
         for history in &reserved.history {
             requests.push(user_request(&history.prompt));
             for round in &history.rounds {
-                requests.extend(persisted_round_requests(round));
+                if !round.assistant.is_empty() || !round.calls.is_empty() {
+                    requests.extend(persisted_round_requests(round));
+                }
+            }
+            if !history.summary.is_empty()
+                && !history
+                    .rounds
+                    .iter()
+                    .any(|round| round.assistant == history.summary)
+            {
+                requests.extend(persisted_round_requests(&RoundRecord {
+                    assistant: history.summary.clone(),
+                    calls: Vec::new(),
+                }));
             }
         }
         requests.push(user_request(&reserved.prompt));
@@ -572,7 +585,13 @@ impl Turn<'_> {
             &attempt.rounds,
         )?;
         self.renew(store, reserved)?;
-        let current = self.provider_round_with_recovery(store, reserved, tools, attempt)?;
+        let current = self.provider_round_with_recovery(
+            store,
+            reserved,
+            tools,
+            attempt,
+            ("model_call_before", "model_call_after"),
+        )?;
         self.renew(store, reserved)?;
         attempt.usage.assistant_bytes = attempt
             .usage
@@ -774,50 +793,6 @@ impl Turn<'_> {
             ));
         }
         Ok(())
-    }
-
-    /// Run the forced final-summary round, renewing the lease around the model request. The
-    /// renewal before the call extends the lease so the request can always finish inside one
-    /// lease, and the renewal after the call re-arms it for the persist; the lease is never
-    /// left held dead by the single-round finalize.
-    fn run_final_round(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        requests: &[serdes_ai::core::ModelRequest],
-        tools: &[crate::tools::ToolSpec],
-        persisted_rounds: &[RoundRecord],
-    ) -> Result<LlmResult, AgentError> {
-        self.renew(store, reserved)?;
-        let usage = TurnUsage {
-            assistant_bytes: persisted_rounds
-                .iter()
-                .map(|round| round.assistant.len())
-                .sum(),
-            args_bytes: 0,
-            // Forced-summary reconstruction (#66): the unit is what the request
-            // list actually carries, which is the live projection of each call,
-            // so the reconstructed cap matches the live bytes charged while the
-            // rounds were executed.
-            output_bytes: persisted_rounds
-                .iter()
-                .flat_map(|round| &round.calls)
-                .map(|call| call.result_live.len())
-                .sum(),
-            total_calls: persisted_rounds.iter().map(|round| round.calls.len()).sum(),
-        };
-        let r = self
-            .profiled_round(
-                requests,
-                tools,
-                "forced_summary_before",
-                "forced_summary_after",
-                persisted_rounds.len() + 1,
-                &usage,
-            )
-            .map_err(|failure| self.round_failure(store, reserved, failure, persisted_rounds))?;
-        self.renew(store, reserved)?;
-        Ok(r)
     }
 }
 
