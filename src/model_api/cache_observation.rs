@@ -6,36 +6,14 @@
 use std::cell::RefCell;
 
 use crate::adapter::{ChatBackend, LlmUsage};
+use crate::cache_output::{Observation, RunCache, Snapshot};
 use crate::tools::ToolSpec;
-use serde::Serialize;
 use serdes_ai::core::ModelRequest;
 
 #[derive(Clone, Copy)]
 pub(super) enum InputAccounting {
     Inclusive,
     Anthropic,
-}
-
-#[derive(Serialize)]
-struct RunCache {
-    calls: Option<u64>,
-    measured_calls: Option<u64>,
-    measured_input_tokens: Option<u64>,
-    measured_cached_tokens: Option<u64>,
-    aggregate_valid: bool,
-    hit_ratio: Option<f64>,
-}
-
-#[derive(Serialize)]
-struct Observation {
-    event: &'static str,
-    call: Option<u64>,
-    reported_input_tokens: Option<u64>,
-    cached_input_tokens: Option<u64>,
-    uncached_input_tokens: Option<u64>,
-    cache_creation_input_tokens: Option<u64>,
-    total_input_tokens: Option<u64>,
-    input_accounting: &'static str,
 }
 
 impl InputAccounting {
@@ -131,6 +109,7 @@ pub(super) struct ObservedBackend {
     inner: Box<dyn ChatBackend>,
     accounting: InputAccounting,
     run: RefCell<RunCache>,
+    latest: RefCell<Option<Observation>>,
 }
 
 impl ObservedBackend {
@@ -139,11 +118,16 @@ impl ObservedBackend {
             inner,
             accounting,
             run: RefCell::new(RunCache::default()),
+            latest: RefCell::new(None),
         }
     }
 }
 
 impl ChatBackend for ObservedBackend {
+    fn tool_error_prefix(&self) -> &'static str {
+        self.inner.tool_error_prefix()
+    }
+
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],
@@ -153,21 +137,20 @@ impl ChatBackend for ObservedBackend {
             let result = self.inner.request(requests, tools).await?;
             let mut run = self.run.borrow_mut();
             let observation = run.record(self.accounting, &result.usage);
-            // Stderr is deliberately separate from the exactly-one-object stdout contract.
-            eprintln!(
-                "{}",
-                serde_json::to_string(&observation).expect("cache observation serialization")
-            );
-            eprintln!(
-                "{}",
-                serde_json::json!({"event": "prompt_cache_run", "usage": &*run})
-            );
+            *self.latest.borrow_mut() = Some(observation);
             Ok(result)
         })
     }
 
     fn request_calls(&self) -> usize {
         self.inner.request_calls()
+    }
+
+    fn cache_observation(&self) -> Option<Snapshot> {
+        self.latest.borrow().clone().map(|call| Snapshot {
+            call,
+            run: self.run.borrow().clone(),
+        })
     }
 }
 
@@ -375,6 +358,10 @@ mod tests {
     }
 
     impl ChatBackend for BoundaryBackend {
+        fn tool_error_prefix(&self) -> &'static str {
+            "tool error: "
+        }
+
         fn request<'a>(
             &'a self,
             _requests: &'a [ModelRequest],
@@ -385,6 +372,7 @@ mod tests {
                 self.attempts.set(call);
                 match call {
                     1 => Ok(crate::adapter::LlmResult {
+                        thinking: "fixture reasoning".to_string(),
                         usage: LlmUsage {
                             request_tokens: Some(100),
                             cache_read_tokens: Some(60),
@@ -417,8 +405,10 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        assert_eq!(observed.tool_error_prefix(), "tool error: ");
         rt.block_on(async {
             let reply = observed.request(&[], &[]).await.unwrap();
+            assert_eq!(reply.thinking, "fixture reasoning");
             assert_eq!(reply.usage.cache_read_tokens, Some(60));
             assert_eq!(observed.request_calls(), 1);
             assert_eq!(

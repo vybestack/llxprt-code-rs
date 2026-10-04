@@ -5,6 +5,7 @@ use crate::agent::over_limit::request_total_bytes;
 
 pub(super) fn read_reply(id: &str) -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         text: format!("Reading evidence {id}"),
         calls: vec![ToolCall {
             id: id.into(),

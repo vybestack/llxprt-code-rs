@@ -1,6 +1,8 @@
 //! Faithful compiled CLI workload at the unchanged 300000-token byte guard.
 //! Real registered reads, edit and shell test; loopback source controls model replies.
 
+mod compaction_output;
+
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
@@ -147,6 +149,9 @@ impl Fixture {
             .arg(profile)
             .args(["--session", "effective-native", "--turn", turn, "--cwd"])
             .arg(self.root.path())
+            .arg("--cache-observations")
+            .arg(self.root.path().join(format!("cache-{turn}.jsonl")))
+            .args(["--emit", "text", "--emit", "results"])
             .args([
                 "--allow-shell",
                 "--max-tool-calls",
@@ -167,19 +172,7 @@ impl Fixture {
         let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(envelope["status"], "ok");
         assert_eq!(envelope["replayed"], false);
-        let events: Vec<Value> = String::from_utf8(output.stderr)
-            .unwrap()
-            .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect();
-        let calls: Vec<_> = events
-            .iter()
-            .filter(|e| e["event"] == "prompt_cache_call")
-            .collect();
-        assert_eq!(calls.len(), if turn == "1" { 6 } else { 2 });
-        for call in calls {
-            assert_eq!(call["reported_input_tokens"], 100);
-        }
+        compaction_output::assert_streams(self.root.path(), turn, &output.stderr, &envelope);
         envelope
     }
 }
@@ -197,6 +190,7 @@ fn compiled_tool_workload_compacts_and_remains_productive_after_restore() {
         "Verify restored task.py; preserve session permissions.",
     );
     assert_eq!(second["tool_calls"], 1);
+    compaction_output::assert_restored_transcript(fixture.root.path());
     let id = SessionId::parse("effective-native").unwrap();
     let store = SessionStore::load_at(&id, fixture.root.path()).unwrap();
     let state = store.snapshot().unwrap();

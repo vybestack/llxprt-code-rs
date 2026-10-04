@@ -54,6 +54,7 @@ impl ChatBackend for std::sync::Arc<RecoveryBackend> {
 }
 fn stop_reply() -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
