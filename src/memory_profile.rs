@@ -4,7 +4,7 @@
 //! records resident mappings rather than allocator ownership.
 
 mod sample;
-mod sink;
+use crate::jsonl_sink as sink;
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};

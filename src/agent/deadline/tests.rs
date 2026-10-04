@@ -55,6 +55,7 @@ fn reply(seconds: u64, text: &str, calls: Vec<ToolCall>) -> Reply {
     Reply {
         delay: Duration::from_secs(seconds),
         result: Ok(LlmResult {
+            thinking: String::new(),
             text: text.into(),
             finish_reason: Some(if calls.is_empty() {
                 FinishReason::Stop
@@ -237,4 +238,82 @@ fn provider_timeout_keeps_its_own_failure_instead_of_turn_budget() {
     let error = f.run().unwrap_err();
     assert_eq!(error.key, "model");
     assert_eq!(f.active.get(), 0);
+}
+
+#[test]
+fn naming_failure_prefix_survives_cancellation_on_the_same_turn_deadline() {
+    let unknown = ToolCall {
+        name: "run_socket_command".into(),
+        ..list()
+    };
+    let mut f = Fixture::new(
+        vec![reply(6, "naming", vec![unknown]), reply(6, "OK", vec![])],
+        Some(10),
+    );
+    f.assert_timeout(2, 1);
+    let snapshot = f.store.snapshot().unwrap();
+    let record = &snapshot.branches[0].rounds[0].calls[0];
+    assert_eq!(record.name, "run_socket_command");
+    assert_eq!((record.ok, record.refused), (false, false));
+    assert!(record.result.contains("available:"));
+    assert!(record.result_live.is_empty());
+}
+
+#[test]
+fn provider_request_timeout_after_naming_failure_is_not_a_turn_timeout() {
+    let unknown = ToolCall {
+        name: "run_socket_command".into(),
+        ..list()
+    };
+    let mut f = Fixture::new(
+        vec![
+            reply(1, "naming", vec![unknown]),
+            Reply {
+                delay: Duration::from_secs(1),
+                result: Err("responses request exceeded the configured timeout".into()),
+            },
+        ],
+        Some(10),
+    );
+    let error = f.run().unwrap_err();
+    assert_eq!(error.key, "model");
+    assert!(error.message.contains("configured timeout"));
+    assert_eq!(f.agent.model_calls(), 2);
+    assert_eq!(f.active.get(), 0);
+    let snapshot = f.store.snapshot().unwrap();
+    assert_eq!(snapshot.branches[0].lifecycle, Lifecycle::Failed);
+    assert_eq!(snapshot.branches[0].rounds.len(), 1);
+    assert!(!snapshot.branches[0].rounds[0].calls[0].refused);
+}
+
+#[test]
+fn truncated_tool_preamble_summary_cancels_on_the_shared_deadline() {
+    let unknown = ToolCall {
+        id: "unknown".into(),
+        name: "run_socket_command".into(),
+        args_json: "{}".into(),
+    };
+    let write = ToolCall {
+        id: "write".into(),
+        name: "write_file".into(),
+        args_json: r#"{"path":"must-not-exist","content":"bad"}"#.into(),
+    };
+    let mut f = Fixture::new(
+        vec![
+            reply(6, "Working on it", vec![unknown, write]),
+            reply(6, "Final answer", vec![]),
+        ],
+        Some(10),
+    );
+    f.agent = f.agent.with_max_tool_calls(Some(1));
+    f.assert_timeout(2, 1);
+    assert!(!f._root.path().join("must-not-exist").exists());
+    assert_eq!(f.active.get(), 0, "final request future was dropped");
+    let snapshot = f.store.snapshot().unwrap();
+    let calls = &snapshot.branches[0].rounds[0].calls;
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[0].ok);
+    assert!(!calls[0].refused);
+    assert!(!calls[1].ok);
+    assert!(calls[1].refused);
 }

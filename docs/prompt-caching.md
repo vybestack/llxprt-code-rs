@@ -24,8 +24,43 @@ different labels. The default label is `default`, not a generated unique identit
 
 ## Observations
 
-Every successful provider completion emits two JSON lines to stderr, separate from
-the exactly-one-object stdout envelope:
+Accounting remains active at every successful provider completion, independent of
+cache settings. Explicit `--cache-observations PATH` writes two JSON lines per
+completion to a **new private regular file**, separate from stdout and stderr:
+
+```sh
+llxprt-code-rs --profile my-profile --session demo --emit all \
+  --cache-observations cache.jsonl -p 'inspect' 2>transcript.jsonl
+```
+
+Default observation output is off; default stderr is quiet. `--emit` owns only
+selected transcript JSONL. There is no cache stderr mode, implicit logging destination,
+or environment alias. Usage is still parsed and accounted in memory without this flag;
+the latest call and cumulative snapshot are available on the backend interface.
+`prompt-caching` configures provider routing/breakpoints, **not** observation output.
+
+The sink is create-only, mode 0600, and retains its descriptor and parent. Existing
+files, final symlinks, FIFOs, directories and stdout/stderr descriptor paths are
+rejected without truncation. Two diagnostic owners or external redirection targeting
+the same existing file fail explicitly (`cache-output-open`, config exit 3); no
+stream mixing or silent drop. Parents must already exist. Cache destinations are also forbidden anywhere under the
+resolved configuration home's **whole `code-rs-sessions` namespace**, including
+currently absent snapshot/temp/lock paths, other sessions and context children.
+The namespace root itself is reserved before creation. Preflight compares retained
+directory identities/ancestry (so supported parent aliases and `..` cannot bypass
+ownership), then creates through that same output-parent descriptor. Ownership
+rejection is a value-free `cache-output-open` configuration error before profile,
+provider or session side effects; no unsafe output is created then removed. This
+cache boundary does not redesign existing memory-profile behavior. A write/sync failure
+terminally fails the turn (`cache-output-write`, turn exit 6); it never replays the
+completed provider request. Each published pair is synced. A failed pair can leave
+a partial JSONL tail; a terminal failure is not represented as successful telemetry.
+Errors carry only stage/OS kind, never paths, provider payloads or secrets.
+Read-only `transcript` refuses this runtime-only flag; it never opens the sink.
+
+Records contain only bounded numeric counters and fixed labels, not request/tool
+text, credentials, provider hosts or session identifiers:
+
 
 * `prompt_cache_call`: call ordinal, raw reported input, cached-read input, cache
   creation input, uncached input, total input, and denominator convention.

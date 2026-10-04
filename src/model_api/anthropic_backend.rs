@@ -12,6 +12,7 @@ pub(crate) struct AnthropicBackend {
     model: serdes_ai::models::anthropic::AnthropicModel,
     model_settings: ModelSettings,
     calls: AtomicUsize,
+    secrets: Vec<String>,
 }
 
 impl AnthropicBackend {
@@ -23,7 +24,13 @@ impl AnthropicBackend {
             model,
             model_settings,
             calls: AtomicUsize::new(0),
+            secrets: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_secrets(mut self, secrets: Vec<String>) -> Self {
+        self.secrets = secrets;
+        self
     }
 
     async fn request_async(
@@ -55,7 +62,7 @@ impl AnthropicBackend {
                     },
                 }
             })?;
-        Ok(LlmResult::from(&response))
+        Ok(LlmResult::from_response(&response, &self.secrets))
     }
 }
 

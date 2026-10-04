@@ -8,6 +8,7 @@ use crate::session::{Lifecycle, SessionId, SessionStore};
 /// A truncated completion: cut by the output cap, no tool call parsed.
 fn truncated(text: &str) -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Length),
@@ -18,6 +19,7 @@ fn truncated(text: &str) -> LlmResult {
 /// A healthy reply that follows one truncation.
 fn healthy(text: &str) -> LlmResult {
     LlmResult {
+        thinking: String::new(),
         text: text.into(),
         calls: Vec::new(),
         finish_reason: Some(FinishReason::Stop),
@@ -63,6 +65,7 @@ fn truncated_first_turn_with_calls_is_not_executed_before_retry() {
     let store = SessionStore::load(&SessionId::parse("trunc-calls-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let truncated_with_call = LlmResult {
+        thinking: String::new(),
         text: "plan".into(),
         calls: vec![ToolCall {
             id: "c1".into(),
@@ -124,6 +127,7 @@ fn mid_work_truncation_after_tool_calls_stays_fatal() {
     let store = SessionStore::load(&SessionId::parse("trunc-mid-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c1".into(),
@@ -171,6 +175,7 @@ fn retried_turn_can_continue_into_tool_work() {
     let store = SessionStore::load(&SessionId::parse("trunc-tool-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
             id: "c1".into(),

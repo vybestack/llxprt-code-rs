@@ -15,6 +15,9 @@ fn main() {
         println!("{}", cli::json(&outcome, &session_hint));
         std::process::exit(cli::exit_code(&outcome));
     }
+    if render_transcript(&args) {
+        return;
+    }
     if args.oauth_login {
         match cli::local_oauth_login() {
             Ok(()) => println!(
@@ -46,6 +49,7 @@ fn main() {
         },
         None => None,
     };
+    let transcript = !args.emit.is_empty();
     let mut outcome = cli::run_profiled(args, profiler.clone());
     let mut summary = None;
     if let Some(profiler) = profiler {
@@ -68,10 +72,27 @@ fn main() {
     let value = cli::json(&outcome, &session_hint);
     let code = cli::exit_code(&outcome);
     println!("{value}");
-    if let Some(summary) = summary {
+    if let Some(summary) = summary.filter(|_| !transcript) {
         eprintln!("{}", summary.stderr_line());
     }
     std::process::exit(code);
+}
+
+fn render_transcript(args: &cli::Args) -> bool {
+    if let Some(llxprt_code_rs::transcript::Command::Transcript(options)) = &args.command {
+        match options.render() {
+            Ok(output) => print!("{output}"),
+            Err(error) => {
+                let code = error.code as i32;
+                let error = cli::AppError::new(error.code, error.key, error.message);
+                println!("{}", cli::json(&Err(error), &options.session));
+                std::process::exit(code);
+            }
+        }
+        true
+    } else {
+        false
+    }
 }
 
 fn outcome_class(outcome: &Result<cli::RunOutcome, cli::AppError>) -> &'static str {

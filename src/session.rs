@@ -46,6 +46,8 @@ pub(crate) mod records;
 pub use context_persist::ToolResultProjection;
 pub use records::{BranchRecord, Lifecycle, RoundRecord, SessionState, ToolCallRecord};
 mod log;
+mod output_ownership;
+pub(crate) use output_ownership::validate_diagnostic_destination;
 mod replay;
 mod reserve;
 mod snapshot;
@@ -317,6 +319,14 @@ impl SessionStore {
             operation_metrics: Mutex::new(StoreMetrics::default()),
             context: Mutex::new(None),
         })
+    }
+
+    /// Read current-format transcript state without creating or repairing any file.
+    pub fn read_transcript_at(
+        session: &SessionId,
+        config_root: &Path,
+    ) -> Result<SessionState, StoreError> {
+        snapshot::read_transcript(session, config_root)
     }
 
     /// Open (or create) the store for a session.

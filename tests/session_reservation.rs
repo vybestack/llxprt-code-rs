@@ -33,6 +33,7 @@ impl ChatBackend for CountingBackend {
         Box::pin(async move {
             *self.calls.lock().unwrap() += 1;
             Ok(LlmResult {
+                thinking: String::new(),
                 usage: LlmUsage::default(),
                 text: "done".to_string(),
                 calls: Vec::new(),
