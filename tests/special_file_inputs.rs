@@ -41,6 +41,34 @@ fn mkfifo(path: &std::path::Path) {
     assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
 }
 
+/// Path to `target` relative to the current directory.
+///
+/// `sockaddr_un::sun_path` is bounded, so a long confined test root cannot be
+/// passed to `bind` verbatim. Binding through the equivalent relative path
+/// creates the node at the same absolute keyfile path with a short argument.
+fn relative_socket_path(target: &std::path::Path) -> std::path::PathBuf {
+    let cwd = std::env::current_dir().unwrap();
+    let from: Vec<_> = cwd.components().collect();
+    let to: Vec<_> = target.components().collect();
+    let common = from
+        .iter()
+        .zip(&to)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = std::path::PathBuf::new();
+    for _ in common..from.len() {
+        relative.push("..");
+    }
+    for component in &to[common..] {
+        relative.push(component.as_os_str());
+    }
+    assert!(
+        relative.as_os_str().len() < 100,
+        "relative socket path is still too long: {relative:?}"
+    );
+    relative
+}
+
 fn write_profile(path: &std::path::Path, keyfile: Option<&std::path::Path>) {
     let auth = match keyfile {
         Some(path) => serde_json::json!({"auth-keyfile": path}),
@@ -104,11 +132,7 @@ fn profile_and_keyfile_special_entries_fail_without_blocking() {
         .success());
 
     let socket = temp.path().join("key-socket");
-    // Retain an absolute keyfile, but use a cwd-relative bind path when the
-    // confined test root exceeds sockaddr_un's pathname limit.
-    let cwd = std::env::current_dir().unwrap();
-    let bind_path = socket.strip_prefix(&cwd).unwrap_or(&socket);
-    let _listener = std::os::unix::net::UnixListener::bind(bind_path).unwrap();
+    let _listener = std::os::unix::net::UnixListener::bind(relative_socket_path(&socket)).unwrap();
     write_profile(&profiles.join("keysocket.json"), Some(&socket));
     assert!(
         !run_bounded(command(temp.path(), "keysocket", "key-socket"))
