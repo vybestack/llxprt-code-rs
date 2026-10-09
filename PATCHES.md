@@ -78,7 +78,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `715a5681c2836676c8c10d667c4fd6e47c818a7262316112e7ee5aa16b45ceb3`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `1b207b5b30dcef6238692659b0671cab14e4cea312c1c4599de237925997fca5`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -371,3 +371,27 @@ lifecycle matrix cases, bodies, completion/error, no-replay, cancellation and
 backpressure assertions are unchanged. The distinct stalled/cancelled and
 intentionally truncated-body producers remain unchanged. This is source-bound
 CI fixture remediation, not a new transport feature or broad-review restart.
+
+## Patch 16 - Responses tool lifecycle integrity (#331)
+(`vendor/serdes-ai-responses/src/client/lifecycle.rs`, `Lifecycle::validate`;
+`vendor/serdes-ai-responses/src/client/mod.rs`, `read_ws_events` and `run_http_stream`)
+
+Each transport attempt owns one validator before translation discards wire identity
+and completion fields. Output starts bind a unique item ID to a contiguous output
+index. Function argument deltas and done events must target that active function
+item, not just its index. Argument-done, output-item-done and terminal output must
+corroborate the exact accumulated delta bytes, item ID, call ID, tool name and
+completed status. Duplicate, missing, out-of-order or contradictory tool completion
+evidence is a nonretryable `ModelError::InvalidResponse`; no accepted request is
+replayed and no done field replaces, reparses or repairs the delta bytes. WebSocket
+failures discard the poisoned connection and continuation state. SSE completion
+remains withheld until the existing DONE/trailing-frame/EOF checks pass.
+
+Public loopback tests exercise folded requests and streaming calls over SSE and
+WebSocket, with checked full-witness writes and empty replay windows. Root adapter
+regressions cover both issue witnesses, completion identity/status/argument
+contradictions and lifecycle ordering. Existing interleaved tools, reasoning,
+fragmented UTF-8, malformed-object admission, raw empty-object whitespace,
+cancellation and SSE terminal gates remain intact. The forced-context producer
+now emits a genuine empty in-progress start followed by delta and done boundaries;
+its context recovery and tool-count assertions are unchanged.

@@ -234,3 +234,109 @@ async fn connection_limit_error_reconnects_on_a_fresh_socket() {
     assert_eq!(text_of(&response), "ok");
     server.await.unwrap();
 }
+
+mod tool_lifecycle;
+
+async fn tool_server(
+    events: Vec<StreamEvent>,
+) -> (OpenResponsesModel, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut ws = accept_ws(&listener).await;
+        let _ = read_turn(&mut ws).await;
+        // Queue the complete semantic witness in one checked flush; rejection
+        // must not race the producer's later success evidence.
+        for event in events {
+            ws.feed(Message::Text(serde_json::to_string(&event).unwrap().into()))
+                .await
+                .unwrap();
+        }
+        ws.flush().await.unwrap();
+        let deadline = tokio::time::sleep(std::time::Duration::from_millis(150));
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                _ = &mut deadline => break,
+                connection = listener.accept() => panic!("request replay on new connection: {connection:?}"),
+                frame = ws.next() => match frame {
+                    Some(Ok(Message::Text(_))) => panic!("request replay on accepted socket"),
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {},
+                    _ => { tokio::select! {
+                        _ = &mut deadline => break,
+                        connection = listener.accept() => panic!("request replay after close: {connection:?}"),
+                    } }
+                }
+            }
+        }
+    });
+    (
+        OpenResponsesModel::new("fixture", format!("ws://{addr}/responses")),
+        server,
+    )
+}
+
+#[tokio::test]
+async fn tool_lifecycle_contradictions_fail_folded_and_public_ws_without_replay() {
+    for case in ["item", "done", "terminal"] {
+        for streaming in [false, true] {
+            let (model, server) = tool_server(tool_lifecycle::events(Some(case))).await;
+            if streaming {
+                let mut stream = model
+                    .request_stream(&[user_turn("tool")], &settings(), &params())
+                    .await
+                    .unwrap();
+                let mut errors = 0;
+                while let Some(event) = stream.next().await {
+                    match event {
+                        Ok(event) => assert!(!matches!(
+                            event,
+                            serdes_ai_core::messages::ModelResponseStreamEvent::StreamComplete(_)
+                        )),
+                        Err(error) => {
+                            errors += 1;
+                            assert!(matches!(
+                                error,
+                                serdes_ai_models::ModelError::InvalidResponse(_)
+                            ));
+                            assert!(!error.is_retryable());
+                            assert!(!error.to_string().contains("SECRET"));
+                        }
+                    }
+                }
+                assert_eq!(errors, 1);
+            } else {
+                let error = model
+                    .request(&[user_turn("tool")], &settings(), &params())
+                    .await
+                    .unwrap_err();
+                assert!(matches!(
+                    error,
+                    serdes_ai_models::ModelError::InvalidResponse(_)
+                ));
+                assert!(!error.is_retryable());
+            }
+            server.await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn consistent_tool_ws_preserves_raw_argument_bytes() {
+    let (model, server) = tool_server(tool_lifecycle::events(None)).await;
+    let response = model
+        .request(&[user_turn("tool")], &settings(), &params())
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .tool_call_parts()
+            .next()
+            .unwrap()
+            .args
+            .to_json_string()
+            .unwrap(),
+        "{} \n"
+    );
+    server.await.unwrap();
+}

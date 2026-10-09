@@ -104,7 +104,11 @@ fn profile_and_keyfile_special_entries_fail_without_blocking() {
         .success());
 
     let socket = temp.path().join("key-socket");
-    let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    // Retain an absolute keyfile, but use a cwd-relative bind path when the
+    // confined test root exceeds sockaddr_un's pathname limit.
+    let cwd = std::env::current_dir().unwrap();
+    let bind_path = socket.strip_prefix(&cwd).unwrap_or(&socket);
+    let _listener = std::os::unix::net::UnixListener::bind(bind_path).unwrap();
     write_profile(&profiles.join("keysocket.json"), Some(&socket));
     assert!(
         !run_bounded(command(temp.path(), "keysocket", "key-socket"))

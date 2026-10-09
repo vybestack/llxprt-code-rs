@@ -518,3 +518,96 @@ async fn valid_nonterminal_lifecycle_remains_supported_in_folded_and_streaming_c
         server.join().unwrap();
     }
 }
+
+mod tool_lifecycle;
+
+#[tokio::test]
+async fn tool_lifecycle_contradictions_fail_folded_and_public_sse_without_replay() {
+    for case in ["item", "done", "terminal"] {
+        let body: String = tool_lifecycle::events(Some(case))
+            .into_iter()
+            .map(wire)
+            .collect();
+        let (model, server) = serve(body.clone().into_bytes());
+        let error = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ModelError::InvalidResponse(_)));
+        assert!(!error.is_retryable());
+        server.join().unwrap();
+        for codex in [false, true] {
+            let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
+            let mut stream = public_stream(&model).await;
+            let mut errors = 0;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(event) => assert!(!matches!(
+                        event,
+                        ModelResponseStreamEvent::StreamComplete(_)
+                    )),
+                    Err(error) => {
+                        errors += 1;
+                        assert!(matches!(error, ModelError::InvalidResponse(_)));
+                        assert!(!error.is_retryable());
+                        assert!(!error.to_string().contains("SECRET"));
+                    }
+                }
+            }
+            assert_eq!(errors, 1);
+            server.join().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn consistent_tool_sse_preserves_raw_bytes_and_terminal_last() {
+    let body: String = tool_lifecycle::events(None).into_iter().map(wire).collect();
+    let (model, server) = serve(body.clone().into_bytes());
+    let response = model
+        .request(
+            &[ModelRequest::default()],
+            &ModelSettings::default(),
+            &ModelRequestParameters::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .tool_call_parts()
+            .next()
+            .unwrap()
+            .args
+            .to_json_string()
+            .unwrap(),
+        "{} \n"
+    );
+    server.join().unwrap();
+    for codex in [false, true] {
+        let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
+        let mut stream = public_stream(&model).await;
+        let mut completed = false;
+        let mut bytes = String::new();
+        while let Some(event) = stream.next().await {
+            assert!(!completed, "event after completion");
+            match event.unwrap() {
+                ModelResponseStreamEvent::PartDelta(delta) => {
+                    if let serdes_ai_core::messages::ModelResponsePartDelta::ToolCall(delta) =
+                        delta.delta
+                    {
+                        bytes.push_str(&delta.args_delta);
+                    }
+                }
+                ModelResponseStreamEvent::StreamComplete(_) => completed = true,
+                _ => {}
+            }
+        }
+        assert!(completed);
+        assert_eq!(bytes, "{} \n");
+        server.join().unwrap();
+    }
+}
