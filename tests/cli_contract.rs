@@ -959,6 +959,89 @@ fn clap_usage_diagnostics_are_sanitized_and_identify_budget_or_error_class() {
     }
 }
 
+/// Issue 272: a recognized option's own parse failure names that option, so a headless
+/// driver reading the envelope can tell which flag failed without Clap's stderr. The
+/// reported name is parser-owned; the rejected value it was compared against is never
+/// reflected.
+#[test]
+fn clap_usage_diagnostics_name_every_recognized_option() {
+    let dir = tempfile::tempdir().unwrap();
+    for (arguments, option) in [
+        (vec!["--emit", "VALUE_SECRET_SENTINEL"], "--emit"),
+        (
+            vec!["--model-params-mode", "VALUE_SECRET_SENTINEL"],
+            "--model-params-mode",
+        ),
+        (vec!["--turn", "VALUE_SECRET_SENTINEL"], "--turn"),
+        (
+            vec!["--max-tool-calls", "VALUE_SECRET_SENTINEL"],
+            "--max-tool-calls",
+        ),
+    ] {
+        let out = bin()
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args(arguments.clone())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{arguments:?}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(parsed["error"]["code"], "usage");
+        let message = parsed["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains(option),
+            "{arguments:?} should name {option}, got {message:?}"
+        );
+        assert!(
+            !stdout.contains("VALUE_SECRET_SENTINEL"),
+            "usage diagnostic reflected the rejected value: {stdout}"
+        );
+    }
+}
+
+/// Issue 272: the documented `=`-free unlimited spelling must reach the resolver rather
+/// than failing argument parsing, and must resolve to exactly the same configuration as
+/// the equals spelling. `--print-config` proves this without any provider traffic.
+#[test]
+fn issue272_separated_unlimited_budget_matches_equals_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("issue272-unlimited.json");
+    std::fs::write(
+        &profile,
+        r#"{"provider":"openai","model":"issue272-fixture",
+            "ephemeralSettings":{"base-url":"http://127.0.0.1:1/v1"}}"#,
+    )
+    .unwrap();
+
+    let run = |budget: &[&str]| {
+        let mut command = bin();
+        command
+            .env("LLXPRT_CONFIG_DIR", dir.path())
+            .args([
+                "--profile-load",
+                profile.to_str().unwrap(),
+                "--session",
+                "issue272",
+                "--print-config",
+            ])
+            .args(budget);
+        command.output().unwrap()
+    };
+
+    let separated = run(&["--max-tool-calls", "-1"]);
+    assert_eq!(separated.status.code(), Some(0), "{separated:?}");
+    let resolved = stdout_json(&separated);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["value"], -1);
+    assert_eq!(resolved["budgets"]["max_tool_calls"]["source"], "cli");
+
+    let equals = run(&["--max-tool-calls=-1"]);
+    assert_eq!(equals.status.code(), Some(0), "{equals:?}");
+    assert_eq!(
+        equals.stdout, separated.stdout,
+        "the documented separated spelling must resolve exactly like the equals form"
+    );
+}
+
 /// CLI flag validation ordering (issue 60): an invalid `--max-tool-calls` or
 /// `--turn-time` is a usage error (exit 2) that must be reported **before** any
 /// profile resolution or credential access. The named profile here does not exist
