@@ -611,3 +611,79 @@ async fn consistent_tool_sse_preserves_raw_bytes_and_terminal_last() {
         server.join().unwrap();
     }
 }
+
+#[tokio::test]
+async fn live_codex_wire_shapes_complete_in_folded_and_public_sse_calls() {
+    for done_only in [false, true] {
+        let expected = tool_lifecycle::live_arguments(done_only);
+        let body = tool_lifecycle::live(done_only).as_bytes().to_vec();
+        let (model, server) = serve(body.clone());
+        let response = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap();
+        let folded: Vec<String> = response
+            .tool_call_parts()
+            .map(|part| part.args.to_json_string().unwrap())
+            .collect();
+        assert_eq!(folded, expected);
+        server.join().unwrap();
+        for codex in [false, true] {
+            let (model, server) = serve_http(body.clone(), codex, 0);
+            let mut stream = public_stream(&model).await;
+            let mut streamed = vec![String::new(); expected.len()];
+            let mut completed = false;
+            while let Some(event) = stream.next().await {
+                assert!(!completed, "event after completion");
+                match event.unwrap() {
+                    ModelResponseStreamEvent::PartDelta(delta) => {
+                        if let serdes_ai_core::messages::ModelResponsePartDelta::ToolCall(call) =
+                            delta.delta
+                        {
+                            streamed[delta.index].push_str(&call.args_delta);
+                        }
+                    }
+                    ModelResponseStreamEvent::StreamComplete(_) => completed = true,
+                    _ => {}
+                }
+            }
+            assert!(completed);
+            assert_eq!(streamed, expected);
+            server.join().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn live_codex_wire_contradictions_still_fail_without_replay() {
+    for (done_only, case) in [
+        (false, "done"),
+        (false, "item"),
+        (true, "done"),
+        (true, "item"),
+        (true, "terminal"),
+    ] {
+        let body: String = tool_lifecycle::live_events(done_only, Some(case))
+            .into_iter()
+            .map(wire)
+            .collect();
+        let (model, server) = serve(body.into_bytes());
+        let error = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ModelError::InvalidResponse(_)) && !error.is_retryable(),
+            "done_only={done_only} case={case}: {error:?}"
+        );
+        server.join().unwrap();
+    }
+}

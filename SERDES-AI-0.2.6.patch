@@ -25969,12 +25969,22 @@ index 9993fc0..b5dcd7e 100644
                  tools: None,
 diff --git a/vendor/serdes-ai-responses/src/client/lifecycle.rs b/vendor/serdes-ai-responses/src/client/lifecycle.rs
 new file mode 100644
-index 0000000..92d3060
+index 0000000..45d03c3
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/src/client/lifecycle.rs
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,221 @@
 +//! Per-turn tool lifecycle integrity, checked before wire evidence is discarded.
-+//! Completion objects corroborate delta bytes; they never supply or repair them.
++//!
++//! The live Codex backend sends two shapes that the strict loopback fixtures did
++//! not model, and both are accepted here:
++//! - a call may stream no argument deltas at all and carry its arguments only in
++//!   `function_call_arguments.done` (and the matching `output_item.done`);
++//! - the terminal response may carry `output: []` even though tool items streamed.
++//!
++//! Arguments from `done` are used only when no delta arrived. When deltas did
++//! arrive, `done` and the item must match their exact bytes. A terminal output
++//! that does list a tool item must still agree with the streamed item; omission is
++//! not a contradiction, but disagreement is.
 +use crate::types::{OutputItem, OutputItemStatus, ResponseObject, StreamEvent};
 +use serdes_ai_models::ModelError;
 +use std::collections::BTreeMap;
@@ -25988,6 +25998,7 @@ index 0000000..92d3060
 +struct Item {
 +    start: OutputItem,
 +    arguments: String,
++    saw_delta: bool,
 +    arguments_done: bool,
 +    ended: bool,
 +}
@@ -25998,7 +26009,15 @@ index 0000000..92d3060
 +}
 +
 +impl Lifecycle {
-+    pub(super) fn validate(&mut self, event: &StreamEvent) -> Result<(), ModelError> {
++    /// Check one wire event. When a call supplied its arguments only in
++    /// `function_call_arguments.done`, returns the equivalent argument delta that
++    /// must be translated immediately before `event`, because translation
++    /// otherwise drops `done` and the call would reach the consumer empty.
++    pub(super) fn validate(
++        &mut self,
++        event: &StreamEvent,
++    ) -> Result<Option<StreamEvent>, ModelError> {
++        let mut adopted = None;
 +        match event {
 +            StreamEvent::OutputItemAdded {
 +                output_index, item, ..
@@ -26016,18 +26035,28 @@ index 0000000..92d3060
 +                    return Err(invalid("argument delta after arguments done"));
 +                }
 +                item.arguments.push_str(delta);
++                item.saw_delta = true;
 +            }
 +            StreamEvent::FunctionCallArgumentsDone {
++                sequence_number,
 +                output_index,
 +                item_id,
 +                arguments,
-+                ..
 +            } => {
 +                let item = self.active_call(*output_index, item_id)?;
-+                if item.arguments_done || item.arguments != *arguments {
++                if item.arguments_done || (item.saw_delta && item.arguments != *arguments) {
 +                    return Err(invalid("duplicate or contradictory arguments done"));
 +                }
 +                item.arguments_done = true;
++                if !item.saw_delta && !arguments.is_empty() {
++                    item.arguments.clone_from(arguments);
++                    adopted = Some(StreamEvent::FunctionCallArgumentsDelta {
++                        sequence_number: *sequence_number,
++                        output_index: *output_index,
++                        item_id: item_id.clone(),
++                        delta: arguments.clone(),
++                    });
++                }
 +            }
 +            StreamEvent::OutputItemDone {
 +                output_index, item, ..
@@ -26038,7 +26067,7 @@ index 0000000..92d3060
 +            | StreamEvent::ResponseIncomplete { response, .. } => self.complete(response)?,
 +            _ => {}
 +        }
-+        Ok(())
++        Ok(adopted)
 +    }
 +
 +    fn start(&mut self, index: u64, start: &OutputItem) -> Result<(), ModelError> {
@@ -26067,6 +26096,7 @@ index 0000000..92d3060
 +            Item {
 +                start: start.clone(),
 +                arguments: String::new(),
++                saw_delta: false,
 +                arguments_done: false,
 +                ended: false,
 +            },
@@ -26115,11 +26145,14 @@ index 0000000..92d3060
 +                if !item.arguments_done || !item.ended {
 +                    return Err(invalid("terminal response before tool completion"));
 +                }
-+                let final_item = usize::try_from(*index)
++                // An omitted terminal item is the live wire shape, not evidence
++                // against the stream; a present one must agree with it.
++                if let Some(final_item) = usize::try_from(*index)
 +                    .ok()
 +                    .and_then(|index| response.output.get(index))
-+                    .ok_or_else(|| invalid("terminal response missing tool item"))?;
-+                item.corroborate(final_item)?;
++                {
++                    item.corroborate(final_item)?;
++                }
 +            }
 +        }
 +        for (index, output) in response.output.iter().enumerate() {
@@ -26162,7 +26195,7 @@ index 0000000..92d3060
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..a9a5c2c 100644
+index f90cc22..7ea9bf0 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -26282,18 +26315,32 @@ index f90cc22..a9a5c2c 100644
      loop {
          let message = match socket.next_message().await {
              Some(Ok(message)) => message,
-@@ -429,6 +472,10 @@ async fn read_ws_events(
+@@ -429,6 +472,11 @@ async fn read_ws_events(
              },
          };
  
-+        if let Err(error) = lifecycle.validate(&event) {
-+            return AttemptOutcome::Failed(error);
-+        }
++        let adopted = match lifecycle.validate(&event) {
++            Ok(adopted) => adopted,
++            Err(error) => return AttemptOutcome::Failed(error),
++        };
 +
          // Capture the terminal response object before translation consumes
          // the event; the terminal model event must be the last one sent.
          let mut terminal: Option<(ResponseObject, FinishReason)> = None;
-@@ -472,6 +519,9 @@ fn build_request(
+@@ -445,7 +493,11 @@ async fn read_ws_events(
+             _ => {}
+         }
+ 
+-        for translated in assembler::translate(event) {
++        for translated in adopted
++            .into_iter()
++            .chain(std::iter::once(event))
++            .flat_map(assembler::translate)
++        {
+             match translated {
+                 Ok(event) => {
+                     if sink.send(event).await.is_err() {
+@@ -472,6 +524,9 @@ fn build_request(
      previous_response_id: Option<String>,
      store: bool,
  ) -> Result<CreateResponseRequest, ModelError> {
@@ -26303,7 +26350,7 @@ index f90cc22..a9a5c2c 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +534,20 @@ fn build_request(
+@@ -484,11 +539,20 @@ fn build_request(
                  .collect(),
          )
      };
@@ -26325,7 +26372,7 @@ index f90cc22..a9a5c2c 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +555,7 @@ fn build_request(
+@@ -496,7 +560,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -26334,7 +26381,7 @@ index f90cc22..a9a5c2c 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -512,35 +571,23 @@ fn build_request(
+@@ -512,35 +576,23 @@ fn build_request(
      })
  }
  
@@ -26380,7 +26427,7 @@ index f90cc22..a9a5c2c 100644
      }
  }
  
-@@ -571,6 +618,9 @@ impl Model for OpenResponsesModel {
+@@ -571,6 +623,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -26390,7 +26437,7 @@ index f90cc22..a9a5c2c 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -587,7 +637,7 @@ impl Model for OpenResponsesModel {
+@@ -587,7 +642,7 @@ impl Model for OpenResponsesModel {
          let settings = settings.clone();
          let params = params.clone();
  
@@ -26399,7 +26446,7 @@ index f90cc22..a9a5c2c 100644
              let result = match inner.transport {
                  Transport::WebSocket => {
                      let mut sink = ChannelSink(&tx);
-@@ -602,11 +652,15 @@ impl Model for OpenResponsesModel {
+@@ -602,11 +657,15 @@ impl Model for OpenResponsesModel {
              if let Err(error) = result {
                  // A failure after events escaped still reaches the caller as
                  // an error item; a failure before that is the only item.
@@ -26417,7 +26464,7 @@ index f90cc22..a9a5c2c 100644
      }
  
      fn profile(&self) -> &ModelProfile {
-@@ -620,7 +674,7 @@ fn response_from_events(
+@@ -620,7 +679,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -26426,7 +26473,7 @@ index f90cc22..a9a5c2c 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -665,6 +719,18 @@ fn response_from_events(
+@@ -665,6 +724,18 @@ fn response_from_events(
          }
      }
  
@@ -26445,7 +26492,7 @@ index f90cc22..a9a5c2c 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +744,45 @@ fn response_from_events(
+@@ -678,7 +749,45 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -26492,7 +26539,7 @@ index f90cc22..a9a5c2c 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -744,7 +848,9 @@ impl OpenResponsesModel {
+@@ -744,7 +853,9 @@ impl OpenResponsesModel {
                      response_tokens: usage.output_tokens,
                      total_tokens: usage.total_tokens,
                      cache_creation_tokens: None,
@@ -26503,7 +26550,7 @@ index f90cc22..a9a5c2c 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,7 +865,24 @@ impl OpenResponsesModel {
+@@ -759,7 +870,24 @@ impl OpenResponsesModel {
      }
  }
  
@@ -26529,7 +26576,7 @@ index f90cc22..a9a5c2c 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,9 +895,7 @@ async fn run_http_stream(
+@@ -772,9 +900,7 @@ async fn run_http_stream(
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -26540,7 +26587,7 @@ index f90cc22..a9a5c2c 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -814,26 +935,54 @@ async fn run_http_stream(
+@@ -814,28 +940,60 @@ async fn run_http_stream(
      };
  
      let mut byte_stream = response.bytes_stream();
@@ -26594,7 +26641,7 @@ index f90cc22..a9a5c2c 100644
 +                    "responses SSE: semantic event after terminal event".to_string(),
 +                ));
 +            }
-+            lifecycle.validate(&event)?;
++            let adopted = lifecycle.validate(&event)?;
              if let StreamEvent::ResponseCompleted { response, .. }
              | StreamEvent::ResponseIncomplete { response, .. } = &event
              {
@@ -26606,9 +26653,16 @@ index f90cc22..a9a5c2c 100644
 +                pending_terminal = Some(event);
 +                continue;
              }
-             for translated in assembler::translate(event) {
+-            for translated in assembler::translate(event) {
++            for translated in adopted
++                .into_iter()
++                .chain(std::iter::once(event))
++                .flat_map(assembler::translate)
++            {
                  match translated {
-@@ -846,14 +995,60 @@ async fn run_http_stream(
+                     Ok(event) => {
+                         tx.send(Ok(event))
+@@ -846,14 +1004,60 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -29620,10 +29674,10 @@ index 85b407e..0000000
 -}
 diff --git a/vendor/serdes-ai-responses/tests/client_sse.rs b/vendor/serdes-ai-responses/tests/client_sse.rs
 new file mode 100644
-index 0000000..3fb0919
+index 0000000..0b182ed
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_sse.rs
-@@ -0,0 +1,613 @@
+@@ -0,0 +1,689 @@
 +//! Owning transport regression: evidence escapes once; terminal errors never replay.
 +use futures::StreamExt;
 +use serdes_ai_core::messages::{ModelRequest, ModelResponseStreamEvent};
@@ -30237,12 +30291,88 @@ index 0000000..3fb0919
 +        server.join().unwrap();
 +    }
 +}
++
++#[tokio::test]
++async fn live_codex_wire_shapes_complete_in_folded_and_public_sse_calls() {
++    for done_only in [false, true] {
++        let expected = tool_lifecycle::live_arguments(done_only);
++        let body = tool_lifecycle::live(done_only).as_bytes().to_vec();
++        let (model, server) = serve(body.clone());
++        let response = model
++            .request(
++                &[ModelRequest::default()],
++                &ModelSettings::default(),
++                &ModelRequestParameters::default(),
++            )
++            .await
++            .unwrap();
++        let folded: Vec<String> = response
++            .tool_call_parts()
++            .map(|part| part.args.to_json_string().unwrap())
++            .collect();
++        assert_eq!(folded, expected);
++        server.join().unwrap();
++        for codex in [false, true] {
++            let (model, server) = serve_http(body.clone(), codex, 0);
++            let mut stream = public_stream(&model).await;
++            let mut streamed = vec![String::new(); expected.len()];
++            let mut completed = false;
++            while let Some(event) = stream.next().await {
++                assert!(!completed, "event after completion");
++                match event.unwrap() {
++                    ModelResponseStreamEvent::PartDelta(delta) => {
++                        if let serdes_ai_core::messages::ModelResponsePartDelta::ToolCall(call) =
++                            delta.delta
++                        {
++                            streamed[delta.index].push_str(&call.args_delta);
++                        }
++                    }
++                    ModelResponseStreamEvent::StreamComplete(_) => completed = true,
++                    _ => {}
++                }
++            }
++            assert!(completed);
++            assert_eq!(streamed, expected);
++            server.join().unwrap();
++        }
++    }
++}
++
++#[tokio::test]
++async fn live_codex_wire_contradictions_still_fail_without_replay() {
++    for (done_only, case) in [
++        (false, "done"),
++        (false, "item"),
++        (true, "done"),
++        (true, "item"),
++        (true, "terminal"),
++    ] {
++        let body: String = tool_lifecycle::live_events(done_only, Some(case))
++            .into_iter()
++            .map(wire)
++            .collect();
++        let (model, server) = serve(body.into_bytes());
++        let error = model
++            .request(
++                &[ModelRequest::default()],
++                &ModelSettings::default(),
++                &ModelRequestParameters::default(),
++            )
++            .await
++            .unwrap_err();
++        assert!(
++            matches!(error, ModelError::InvalidResponse(_)) && !error.is_retryable(),
++            "done_only={done_only} case={case}: {error:?}"
++        );
++        server.join().unwrap();
++    }
++}
 diff --git a/vendor/serdes-ai-responses/tests/client_ws.rs b/vendor/serdes-ai-responses/tests/client_ws.rs
 new file mode 100644
-index 0000000..d98e257
+index 0000000..fde54b4
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_ws.rs
-@@ -0,0 +1,342 @@
+@@ -0,0 +1,383 @@
 +//! Scripted WebSocket tests retained from the live-tested Responses client.
 +
 +use futures::{SinkExt, StreamExt};
@@ -30585,6 +30715,47 @@ index 0000000..d98e257
 +    );
 +    server.await.unwrap();
 +}
++
++#[tokio::test]
++async fn live_codex_wire_shapes_complete_over_ws() {
++    for done_only in [false, true] {
++        let expected = tool_lifecycle::live_arguments(done_only);
++        let (model, server) = tool_server(tool_lifecycle::live_events(done_only, None)).await;
++        let response = model
++            .request(&[user_turn("tool")], &settings(), &params())
++            .await
++            .unwrap();
++        let folded: Vec<String> = response
++            .tool_call_parts()
++            .map(|part| part.args.to_json_string().unwrap())
++            .collect();
++        assert_eq!(folded, expected);
++        server.await.unwrap();
++    }
++}
++
++#[tokio::test]
++async fn live_codex_wire_contradictions_still_fail_over_ws_without_replay() {
++    for (done_only, case) in [
++        (false, "done"),
++        (false, "item"),
++        (true, "done"),
++        (true, "item"),
++        (true, "terminal"),
++    ] {
++        let (model, server) = tool_server(tool_lifecycle::live_events(done_only, Some(case))).await;
++        let error = model
++            .request(&[user_turn("tool")], &settings(), &params())
++            .await
++            .unwrap_err();
++        assert!(
++            matches!(error, serdes_ai_models::ModelError::InvalidResponse(_))
++                && !error.is_retryable(),
++            "done_only={done_only} case={case}: {error:?}"
++        );
++        server.await.unwrap();
++    }
++}
 diff --git a/vendor/serdes-ai-responses/tests/common/mod.rs b/vendor/serdes-ai-responses/tests/common/mod.rs
 deleted file mode 100644
 index 71b9b18..0000000
@@ -30859,17 +31030,166 @@ index c7ba268..0000000
 -    assert_eq!(response.status(), 200);
 -    assert_eq!(response.text().await.unwrap(), "ok");
 -}
+diff --git a/vendor/serdes-ai-responses/tests/tool_lifecycle/live_deltas_empty_terminal.sse b/vendor/serdes-ai-responses/tests/tool_lifecycle/live_deltas_empty_terminal.sse
+new file mode 100644
+index 0000000..fe28d86
+--- /dev/null
++++ b/vendor/serdes-ai-responses/tests/tool_lifecycle/live_deltas_empty_terminal.sse
+@@ -0,0 +1,33 @@
++event: response.created
++data: {"type":"response.created","response":{"id":"resp_live","object":"response","created_at":1791661409,"status":"in_progress","completed_at":null,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[],"parallel_tool_calls":true,"store":false},"sequence_number":0}
++
++event: response.in_progress
++data: {"type":"response.in_progress","response":{"id":"resp_live","object":"response","created_at":1791661409,"status":"in_progress","completed_at":null,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[],"parallel_tool_calls":true,"store":false},"sequence_number":1}
++
++event: response.output_item.added
++data: {"type":"response.output_item.added","item":{"id":"fc_live_0","type":"function_call","status":"in_progress","arguments":"","call_id":"call_live_1","name":"list_directory"},"output_index":0,"sequence_number":2}
++
++event: response.function_call_arguments.delta
++data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_live_0","obfuscation":"REDACTED","output_index":0,"sequence_number":3}
++
++event: response.function_call_arguments.delta
++data: {"type":"response.function_call_arguments.delta","delta":"path","item_id":"fc_live_0","obfuscation":"REDACTED","output_index":0,"sequence_number":4}
++
++event: response.function_call_arguments.delta
++data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_live_0","obfuscation":"REDACTED","output_index":0,"sequence_number":5}
++
++event: response.function_call_arguments.delta
++data: {"type":"response.function_call_arguments.delta","delta":".\"","item_id":"fc_live_0","obfuscation":"REDACTED","output_index":0,"sequence_number":6}
++
++event: response.function_call_arguments.delta
++data: {"type":"response.function_call_arguments.delta","delta":"}","item_id":"fc_live_0","obfuscation":"REDACTED","output_index":0,"sequence_number":7}
++
++event: response.function_call_arguments.done
++data: {"type":"response.function_call_arguments.done","arguments":"{\"path\":\".\"}","item_id":"fc_live_0","output_index":0,"sequence_number":8}
++
++event: response.output_item.done
++data: {"type":"response.output_item.done","item":{"id":"fc_live_0","type":"function_call","status":"completed","arguments":"{\"path\":\".\"}","call_id":"call_live_1","name":"list_directory"},"output_index":0,"sequence_number":9}
++
++event: response.completed
++data: {"type":"response.completed","response":{"id":"resp_live","object":"response","created_at":1791661409,"status":"completed","completed_at":1791661410,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[],"parallel_tool_calls":true,"store":false,"usage":{"input_tokens":817,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":18,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":835}},"sequence_number":10}
++
+diff --git a/vendor/serdes-ai-responses/tests/tool_lifecycle/live_done_only_arguments.sse b/vendor/serdes-ai-responses/tests/tool_lifecycle/live_done_only_arguments.sse
+new file mode 100644
+index 0000000..351a822
+--- /dev/null
++++ b/vendor/serdes-ai-responses/tests/tool_lifecycle/live_done_only_arguments.sse
+@@ -0,0 +1,27 @@
++event: response.created
++data: {"type":"response.created","sequence_number":0,"safety_buffering":false,"response":{"id":"resp_live","object":"response","created_at":1791661432,"status":"in_progress","completed_at":null,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[],"parallel_tool_calls":true,"store":false}}
++
++event: response.in_progress
++data: {"type":"response.in_progress","sequence_number":1,"safety_buffering":false,"response":{"id":"resp_live","object":"response","created_at":1791661432,"status":"in_progress","completed_at":null,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[],"parallel_tool_calls":true,"store":false}}
++
++event: response.output_item.added
++data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"function_call","id":"fc_live_0","call_id":"call_live_1","name":"list_directory","arguments":"","status":"in_progress"}}
++
++event: response.function_call_arguments.done
++data: {"type":"response.function_call_arguments.done","sequence_number":3,"item_id":"fc_live_0","output_index":0,"arguments":"{\"path\": \".\"}"}
++
++event: response.output_item.done
++data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"type":"function_call","id":"fc_live_0","call_id":"call_live_1","name":"list_directory","arguments":"{\"path\": \".\"}","status":"completed"}}
++
++event: response.output_item.added
++data: {"type":"response.output_item.added","sequence_number":5,"output_index":1,"item":{"type":"function_call","id":"fc_live_2","call_id":"call_live_3","name":"read_file","arguments":"","status":"in_progress"}}
++
++event: response.function_call_arguments.done
++data: {"type":"response.function_call_arguments.done","sequence_number":6,"item_id":"fc_live_2","output_index":1,"arguments":"{\"limit\": 1000, \"max_output_bytes\": 10000, \"offset\": 0, \"path\": \"a.txt\"}"}
++
++event: response.output_item.done
++data: {"type":"response.output_item.done","sequence_number":7,"output_index":1,"item":{"type":"function_call","id":"fc_live_2","call_id":"call_live_3","name":"read_file","arguments":"{\"limit\": 1000, \"max_output_bytes\": 10000, \"offset\": 0, \"path\": \"a.txt\"}","status":"completed"}}
++
++event: response.completed
++data: {"type":"response.completed","sequence_number":14,"safety_buffering":false,"response":{"id":"resp_live","object":"response","created_at":1791661432,"status":"completed","completed_at":1791661436,"error":null,"incomplete_details":null,"model":"gpt-6.1-sol","output":[{"type":"function_call","id":"fc_live_0","call_id":"call_live_1","name":"list_directory","arguments":"{\"path\": \".\"}","status":"completed"},{"type":"function_call","id":"fc_live_2","call_id":"call_live_3","name":"read_file","arguments":"{\"limit\": 1000, \"max_output_bytes\": 10000, \"offset\": 0, \"path\": \"a.txt\"}","status":"completed"}],"parallel_tool_calls":true,"store":false,"usage":{"input_tokens":800,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":123,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":923}}}
++
 diff --git a/vendor/serdes-ai-responses/tests/tool_lifecycle/mod.rs b/vendor/serdes-ai-responses/tests/tool_lifecycle/mod.rs
 new file mode 100644
-index 0000000..d31f6a4
+index 0000000..4b8d2cf
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/tool_lifecycle/mod.rs
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,151 @@
 +//! Shared well-formed tool turn; each completion independently corroborates raw bytes.
++//!
++//! Also holds streams captured from the live Codex Responses backend (ids, the
++//! prompt and tool schemas redacted; event order and field shapes untouched):
++//! - `live_deltas_empty_terminal.sse`: arguments stream as deltas and the terminal
++//!   `response.completed` carries `"output": []`.
++//! - `live_done_only_arguments.sse`: no argument deltas at all; the arguments are
++//!   only in `function_call_arguments.done` / `output_item.done`, and the terminal
++//!   output lists the calls.
 +use serde_json::json;
 +use serdes_ai_responses::types::{
-+    CreateResponseRequest, ResponseObject, ResponseStatus, StreamEvent,
++    CreateResponseRequest, OutputItem, ResponseObject, ResponseStatus, StreamEvent,
 +};
++
++const LIVE_DELTAS_EMPTY_TERMINAL: &str = include_str!("live_deltas_empty_terminal.sse");
++const LIVE_DONE_ONLY: &str = include_str!("live_done_only_arguments.sse");
++
++/// Raw SSE bytes of a captured live turn.
++pub fn live(done_only: bool) -> &'static str {
++    if done_only {
++        LIVE_DONE_ONLY
++    } else {
++        LIVE_DELTAS_EMPTY_TERMINAL
++    }
++}
++
++/// The exact argument bytes each captured call carries, in output order.
++pub fn live_arguments(done_only: bool) -> Vec<&'static str> {
++    if done_only {
++        vec![
++            "{\"path\": \".\"}",
++            "{\"limit\": 1000, \"max_output_bytes\": 10000, \"offset\": 0, \"path\": \"a.txt\"}",
++        ]
++    } else {
++        vec!["{\"path\":\".\"}"]
++    }
++}
++
++/// The captured turn as typed events, with one real lifecycle contradiction.
++pub fn live_events(done_only: bool, contradiction: Option<&str>) -> Vec<StreamEvent> {
++    let mut events: Vec<StreamEvent> = live(done_only)
++        .lines()
++        .filter_map(|line| line.strip_prefix("data: "))
++        .map(|line| serde_json::from_str(line).expect("captured event parses"))
++        .collect();
++    let Some(case) = contradiction else {
++        return events;
++    };
++    let mut applied = false;
++    for event in &mut events {
++        match (case, event) {
++            ("done", StreamEvent::FunctionCallArgumentsDone { arguments, .. }) if !applied => {
++                *arguments = "[]".into();
++                applied = true;
++            }
++            (
++                "item",
++                StreamEvent::OutputItemDone {
++                    item: OutputItem::FunctionCall { arguments, .. },
++                    ..
++                },
++            ) if !applied => {
++                *arguments = "[]".into();
++                applied = true;
++            }
++            ("terminal", StreamEvent::ResponseCompleted { response, .. }) => {
++                if let Some(OutputItem::FunctionCall { arguments, .. }) =
++                    response.output.first_mut()
++                {
++                    *arguments = "[]".into();
++                    applied = true;
++                }
++            }
++            _ => {}
++        }
++    }
++    assert!(
++        applied,
++        "contradiction {case} not applicable to this capture"
++    );
++    events
++}
 +
 +pub fn events(contradiction: Option<&str>) -> Vec<StreamEvent> {
 +    let args = "{} \n";
@@ -30929,7 +31249,9 @@ index 0000000..d31f6a4
 +        }
 +        Some("terminal") => {
 +            if let StreamEvent::ResponseCompleted { response, .. } = &mut events[5] {
-+                response.output.clear();
++                if let OutputItem::FunctionCall { arguments, .. } = &mut response.output[0] {
++                    *arguments = "[]".into();
++                }
 +            }
 +        }
 +        None => {}

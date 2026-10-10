@@ -340,3 +340,44 @@ async fn consistent_tool_ws_preserves_raw_argument_bytes() {
     );
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn live_codex_wire_shapes_complete_over_ws() {
+    for done_only in [false, true] {
+        let expected = tool_lifecycle::live_arguments(done_only);
+        let (model, server) = tool_server(tool_lifecycle::live_events(done_only, None)).await;
+        let response = model
+            .request(&[user_turn("tool")], &settings(), &params())
+            .await
+            .unwrap();
+        let folded: Vec<String> = response
+            .tool_call_parts()
+            .map(|part| part.args.to_json_string().unwrap())
+            .collect();
+        assert_eq!(folded, expected);
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn live_codex_wire_contradictions_still_fail_over_ws_without_replay() {
+    for (done_only, case) in [
+        (false, "done"),
+        (false, "item"),
+        (true, "done"),
+        (true, "item"),
+        (true, "terminal"),
+    ] {
+        let (model, server) = tool_server(tool_lifecycle::live_events(done_only, Some(case))).await;
+        let error = model
+            .request(&[user_turn("tool")], &settings(), &params())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, serdes_ai_models::ModelError::InvalidResponse(_))
+                && !error.is_retryable(),
+            "done_only={done_only} case={case}: {error:?}"
+        );
+        server.await.unwrap();
+    }
+}

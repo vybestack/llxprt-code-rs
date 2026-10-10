@@ -9,8 +9,9 @@ could lose a valid object followed by whitespace and could erase a malformed
 concatenated-object prefix before strict host validation. The Codex HTTP compiled
 regressions cover these cases, interleaved calls/reasoning, fragmented UTF-8 and
 JSON, malformed external inputs, typed initialization and request boundaries.
-No JSON repair, request retry, done-event fallback or provider shim is added.
-This controlled current-source defect does not establish the cause of the
+No JSON repair, request retry or provider shim is added. (Patch 17 later adds the
+bounded done-arguments adoption the live backend requires; it is not part of this
+delta.) This controlled current-source defect does not establish the cause of the
 historical empty `read_file` argument failure.
 
 ## Issue 79: stateless prompt-cache routing
@@ -78,7 +79,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `1b207b5b30dcef6238692659b0671cab14e4cea312c1c4599de237925997fca5`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `7d17a4cec5277c736e03b64e3c20da5469fee77d00b1ad7336b6dd2a187872a7`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -379,11 +380,12 @@ CI fixture remediation, not a new transport feature or broad-review restart.
 Each transport attempt owns one validator before translation discards wire identity
 and completion fields. Output starts bind a unique item ID to a contiguous output
 index. Function argument deltas and done events must target that active function
-item, not just its index. Argument-done, output-item-done and terminal output must
-corroborate the exact accumulated delta bytes, item ID, call ID, tool name and
-completed status. Duplicate, missing, out-of-order or contradictory tool completion
-evidence is a nonretryable `ModelError::InvalidResponse`; no accepted request is
-replayed and no done field replaces, reparses or repairs the delta bytes. WebSocket
+item, not just its index. Argument-done, output-item-done and any terminal output
+item must corroborate the exact accumulated delta bytes, item ID, call ID, tool name
+and completed status (Patch 17 refines which evidence is mandatory). Duplicate,
+out-of-order or contradictory tool completion evidence is a nonretryable
+`ModelError::InvalidResponse`; no accepted request is replayed and no done field
+replaces, reparses or repairs delta bytes that arrived. WebSocket
 failures discard the poisoned connection and continuation state. SSE completion
 remains withheld until the existing DONE/trailing-frame/EOF checks pass.
 
@@ -395,3 +397,39 @@ fragmented UTF-8, malformed-object admission, raw empty-object whitespace,
 cancellation and SSE terminal gates remain intact. The forced-context producer
 now emits a genuine empty in-progress start followed by delta and done boundaries;
 its context recovery and tool-count assertions are unchanged.
+
+## Patch 17 - Live Codex wire shapes for tool lifecycle validation (#331, #326)
+(`vendor/serdes-ai-responses/src/client/lifecycle.rs`, `Lifecycle::validate` and
+`Lifecycle::complete`; `vendor/serdes-ai-responses/src/client/mod.rs`,
+`read_ws_events` and `run_http_stream`)
+
+Patch 16 was written against loopback fixtures and rejected every tool turn from the
+live Codex Responses backend (`terminal response missing tool item`). Raw SSE captured
+from `https://chatgpt.com/backend-api/codex` (profile gpt-6.1-sol, filesystem OAuth) shows
+two independent shapes, both well-formed:
+
+- Arguments arrive as `function_call_arguments.delta` events, `done` repeats the same
+  bytes, and the terminal `response.completed` carries `"output": []` even though
+  `function_call` items streamed.
+- No argument deltas arrive at all. `function_call_arguments.done` and
+  `output_item.done` carry the complete arguments and the terminal output lists the
+  calls. The assembler discards `done`, so the pre-Patch-16 client produced a call with
+  `""` arguments (#326: `invalid argument JSON: EOF ... column 0`).
+
+Validation now accepts exactly these shapes. A terminal output that omits a streamed
+tool item is not a contradiction; one that lists the item must still match its id, call
+id, name, arguments and completed status. When no delta arrived for a call, the
+arguments in `function_call_arguments.done` are adopted and the validator returns the
+equivalent argument delta so translation emits it immediately before the done event.
+When deltas did arrive, `done` and `output_item.done` must equal their exact bytes and
+never replace them. Mismatched item id or index, duplicate, out-of-order or missing
+`done` events, and unstarted terminal tool items remain nonretryable
+`ModelError::InvalidResponse`. No JSON is parsed, repaired or normalized, and no request
+is replayed.
+
+Regression fixtures `tests/tool_lifecycle/live_deltas_empty_terminal.sse` and
+`live_done_only_arguments.sse` are the captured event sequences with ids, prompt text
+and tool schemas redacted; SSE (folded and streaming, Codex and plain) and WebSocket
+tests plus the root adapter tests consume them. The former contradiction case that
+cleared the terminal output now mutates a terminal item's arguments instead, because
+clearing the output is valid live wire.

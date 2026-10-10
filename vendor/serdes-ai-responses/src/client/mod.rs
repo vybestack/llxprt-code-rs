@@ -472,9 +472,10 @@ async fn read_ws_events(
             },
         };
 
-        if let Err(error) = lifecycle.validate(&event) {
-            return AttemptOutcome::Failed(error);
-        }
+        let adopted = match lifecycle.validate(&event) {
+            Ok(adopted) => adopted,
+            Err(error) => return AttemptOutcome::Failed(error),
+        };
 
         // Capture the terminal response object before translation consumes
         // the event; the terminal model event must be the last one sent.
@@ -492,7 +493,11 @@ async fn read_ws_events(
             _ => {}
         }
 
-        for translated in assembler::translate(event) {
+        for translated in adopted
+            .into_iter()
+            .chain(std::iter::once(event))
+            .flat_map(assembler::translate)
+        {
             match translated {
                 Ok(event) => {
                     if sink.send(event).await.is_err() {
@@ -974,7 +979,7 @@ async fn run_http_stream(
                     "responses SSE: semantic event after terminal event".to_string(),
                 ));
             }
-            lifecycle.validate(&event)?;
+            let adopted = lifecycle.validate(&event)?;
             if let StreamEvent::ResponseCompleted { response, .. }
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
@@ -984,7 +989,11 @@ async fn run_http_stream(
                 pending_terminal = Some(event);
                 continue;
             }
-            for translated in assembler::translate(event) {
+            for translated in adopted
+                .into_iter()
+                .chain(std::iter::once(event))
+                .flat_map(assembler::translate)
+            {
                 match translated {
                     Ok(event) => {
                         tx.send(Ok(event))

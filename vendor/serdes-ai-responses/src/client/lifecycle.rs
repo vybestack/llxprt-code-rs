@@ -1,5 +1,15 @@
 //! Per-turn tool lifecycle integrity, checked before wire evidence is discarded.
-//! Completion objects corroborate delta bytes; they never supply or repair them.
+//!
+//! The live Codex backend sends two shapes that the strict loopback fixtures did
+//! not model, and both are accepted here:
+//! - a call may stream no argument deltas at all and carry its arguments only in
+//!   `function_call_arguments.done` (and the matching `output_item.done`);
+//! - the terminal response may carry `output: []` even though tool items streamed.
+//!
+//! Arguments from `done` are used only when no delta arrived. When deltas did
+//! arrive, `done` and the item must match their exact bytes. A terminal output
+//! that does list a tool item must still agree with the streamed item; omission is
+//! not a contradiction, but disagreement is.
 use crate::types::{OutputItem, OutputItemStatus, ResponseObject, StreamEvent};
 use serdes_ai_models::ModelError;
 use std::collections::BTreeMap;
@@ -13,6 +23,7 @@ fn invalid(reason: &str) -> ModelError {
 struct Item {
     start: OutputItem,
     arguments: String,
+    saw_delta: bool,
     arguments_done: bool,
     ended: bool,
 }
@@ -23,7 +34,15 @@ pub(super) struct Lifecycle {
 }
 
 impl Lifecycle {
-    pub(super) fn validate(&mut self, event: &StreamEvent) -> Result<(), ModelError> {
+    /// Check one wire event. When a call supplied its arguments only in
+    /// `function_call_arguments.done`, returns the equivalent argument delta that
+    /// must be translated immediately before `event`, because translation
+    /// otherwise drops `done` and the call would reach the consumer empty.
+    pub(super) fn validate(
+        &mut self,
+        event: &StreamEvent,
+    ) -> Result<Option<StreamEvent>, ModelError> {
+        let mut adopted = None;
         match event {
             StreamEvent::OutputItemAdded {
                 output_index, item, ..
@@ -41,18 +60,28 @@ impl Lifecycle {
                     return Err(invalid("argument delta after arguments done"));
                 }
                 item.arguments.push_str(delta);
+                item.saw_delta = true;
             }
             StreamEvent::FunctionCallArgumentsDone {
+                sequence_number,
                 output_index,
                 item_id,
                 arguments,
-                ..
             } => {
                 let item = self.active_call(*output_index, item_id)?;
-                if item.arguments_done || item.arguments != *arguments {
+                if item.arguments_done || (item.saw_delta && item.arguments != *arguments) {
                     return Err(invalid("duplicate or contradictory arguments done"));
                 }
                 item.arguments_done = true;
+                if !item.saw_delta && !arguments.is_empty() {
+                    item.arguments.clone_from(arguments);
+                    adopted = Some(StreamEvent::FunctionCallArgumentsDelta {
+                        sequence_number: *sequence_number,
+                        output_index: *output_index,
+                        item_id: item_id.clone(),
+                        delta: arguments.clone(),
+                    });
+                }
             }
             StreamEvent::OutputItemDone {
                 output_index, item, ..
@@ -63,7 +92,7 @@ impl Lifecycle {
             | StreamEvent::ResponseIncomplete { response, .. } => self.complete(response)?,
             _ => {}
         }
-        Ok(())
+        Ok(adopted)
     }
 
     fn start(&mut self, index: u64, start: &OutputItem) -> Result<(), ModelError> {
@@ -92,6 +121,7 @@ impl Lifecycle {
             Item {
                 start: start.clone(),
                 arguments: String::new(),
+                saw_delta: false,
                 arguments_done: false,
                 ended: false,
             },
@@ -140,11 +170,14 @@ impl Lifecycle {
                 if !item.arguments_done || !item.ended {
                     return Err(invalid("terminal response before tool completion"));
                 }
-                let final_item = usize::try_from(*index)
+                // An omitted terminal item is the live wire shape, not evidence
+                // against the stream; a present one must agree with it.
+                if let Some(final_item) = usize::try_from(*index)
                     .ok()
                     .and_then(|index| response.output.get(index))
-                    .ok_or_else(|| invalid("terminal response missing tool item"))?;
-                item.corroborate(final_item)?;
+                {
+                    item.corroborate(final_item)?;
+                }
             }
         }
         for (index, output) in response.output.iter().enumerate() {
