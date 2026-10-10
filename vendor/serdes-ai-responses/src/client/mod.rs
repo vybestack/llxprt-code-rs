@@ -6,6 +6,7 @@
 //! sends the new input items.
 
 mod assembler;
+mod lifecycle;
 mod sse;
 mod sse_json;
 
@@ -382,7 +383,12 @@ async fn run_ws_turn(
                 session.socket = None;
                 continue;
             }
-            AttemptOutcome::Failed(error) => return Err(error),
+            AttemptOutcome::Failed(error) => {
+                session.socket = None;
+                session.previous_response_id = None;
+                session.sent_requests = 0;
+                return Err(error);
+            }
         }
     }
 
@@ -402,6 +408,7 @@ async fn read_ws_events(
     sink: &mut dyn EventSink,
     streamed_any: &mut bool,
 ) -> AttemptOutcome {
+    let mut lifecycle = lifecycle::Lifecycle::default();
     loop {
         let message = match socket.next_message().await {
             Some(Ok(message)) => message,
@@ -465,6 +472,11 @@ async fn read_ws_events(
             },
         };
 
+        let adopted = match lifecycle.validate(&event) {
+            Ok(adopted) => adopted,
+            Err(error) => return AttemptOutcome::Failed(error),
+        };
+
         // Capture the terminal response object before translation consumes
         // the event; the terminal model event must be the last one sent.
         let mut terminal: Option<(ResponseObject, FinishReason)> = None;
@@ -481,7 +493,11 @@ async fn read_ws_events(
             _ => {}
         }
 
-        for translated in assembler::translate(event) {
+        for translated in adopted
+            .into_iter()
+            .chain(std::iter::once(event))
+            .flat_map(assembler::translate)
+        {
             match translated {
                 Ok(event) => {
                     if sink.send(event).await.is_err() {
@@ -925,6 +941,7 @@ async fn run_http_stream(
 
     let mut byte_stream = response.bytes_stream();
     let mut decoder = sse::Decoder::default();
+    let mut lifecycle = lifecycle::Lifecycle::default();
     let mut terminal_id = None;
     let mut pending_terminal = None;
     let mut done = false;
@@ -962,6 +979,7 @@ async fn run_http_stream(
                     "responses SSE: semantic event after terminal event".to_string(),
                 ));
             }
+            let adopted = lifecycle.validate(&event)?;
             if let StreamEvent::ResponseCompleted { response, .. }
             | StreamEvent::ResponseIncomplete { response, .. } = &event
             {
@@ -971,7 +989,11 @@ async fn run_http_stream(
                 pending_terminal = Some(event);
                 continue;
             }
-            for translated in assembler::translate(event) {
+            for translated in adopted
+                .into_iter()
+                .chain(std::iter::once(event))
+                .flat_map(assembler::translate)
+            {
                 match translated {
                     Ok(event) => {
                         tx.send(Ok(event))
