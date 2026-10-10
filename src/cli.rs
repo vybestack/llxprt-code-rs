@@ -511,7 +511,11 @@ pub fn parse_args_fallback(session_hint: &str) -> Args {
 ///
 /// Clap's normal rendered error contains supplied values, suggestions, and usage text.  The JSON
 /// protocol must not reflect those values (which can be prompts, paths, or credentials), so this
-/// deliberately uses only the structured error class and a whitelist of our option names.
+/// deliberately uses only the structured error class plus, when Clap identified one, the
+/// **parser-owned** spelling of the option at fault: the reported names come from the command
+/// definition itself (see [`recognized_option_spellings`]), never from argv, so echoing one can
+/// never disclose a caller-supplied value.  Every argv mistake that Clap can attribute to an
+/// option therefore names that option; an argument it cannot attribute stays class-only.
 fn sanitized_clap_diagnostic(error: &clap::Error) -> String {
     use clap::error::{ContextKind, ErrorKind};
 
@@ -534,32 +538,43 @@ fn sanitized_clap_diagnostic(error: &clap::Error) -> String {
         | ErrorKind::DisplayVersion => "invalid arguments",
         _ => "invalid arguments",
     };
+    let known = recognized_option_spellings();
     let option = error
         .context()
         .filter(|(kind, _)| matches!(kind, ContextKind::InvalidArg | ContextKind::PriorArg))
-        .find_map(|(_, value)| known_option_name(&value.to_string()));
+        .find_map(|(_, value)| {
+            let text = value.to_string();
+            let name = text.split_whitespace().next()?;
+            known.contains(name).then(|| name.to_string())
+        });
     match option {
         Some(option) => format!("{class} for {option}"),
         None => class.to_string(),
     }
 }
 
-/// Map only parser-owned option spelling to a fixed string; never return Clap context verbatim.
-fn known_option_name(context: &str) -> Option<&'static str> {
-    let name = context.split_whitespace().next()?;
-    match name {
-        "--session" => Some("--session"),
-        "--turn" => Some("--turn"),
-        "--branch" => Some("--branch"),
-        "--profile" => Some("--profile"),
-        "--profile-load" => Some("--profile-load"),
-        "--cwd" => Some("--cwd"),
-        "--prompt" | "-p" => Some("--prompt"),
-        "--mem-profile" => Some("--mem-profile"),
-        "--max-tool-calls" => Some("--max-tool-calls"),
-        "--turn-time" => Some("--turn-time"),
-        _ => None,
+/// Every option spelling this parser owns: long and short, for the top-level command and each
+/// of its subcommands.  The strings come from the command definition, so a match against one is
+/// always a parser-owned name and never a caller-supplied argument value.
+fn recognized_option_spellings() -> std::collections::BTreeSet<String> {
+    fn collect(command: &clap::Command, out: &mut std::collections::BTreeSet<String>) {
+        for argument in command.get_arguments() {
+            if let Some(long) = argument.get_long() {
+                out.insert(format!("--{long}"));
+            }
+            if let Some(short) = argument.get_short() {
+                out.insert(format!("-{short}"));
+            }
+        }
+        for subcommand in command.get_subcommands() {
+            collect(subcommand, out);
+        }
     }
+
+    use clap::CommandFactory;
+    let mut out = std::collections::BTreeSet::new();
+    collect(&Args::command(), &mut out);
+    out
 }
 
 /// Error payload used by `main`.
@@ -833,6 +848,35 @@ mod tests {
             let args = Args::try_parse_from(arguments).unwrap();
             assert_eq!(args.max_tool_calls, Some(expected));
         }
+    }
+
+    /// Issue 272: the diagnostic's option set is derived from the command definition, so it
+    /// is complete without a hand-maintained list, and it can only ever name parser-owned
+    /// spellings. Unknown arguments are never echoed.
+    #[test]
+    fn sanitized_diagnostics_cover_the_whole_command_and_never_echo_argv() {
+        use super::{recognized_option_spellings, sanitized_clap_diagnostic};
+
+        let spellings = recognized_option_spellings();
+        for expected in [
+            "--emit",
+            "--max-tool-calls",
+            "--model-params-mode",
+            "--print-config",
+            "--session",
+            "--turn",
+        ] {
+            assert!(spellings.contains(expected), "missing {expected}");
+        }
+        assert!(!spellings.contains("--SECRET_SENTINEL"));
+        assert!(!spellings.contains("-1"));
+
+        let named = Args::try_parse_from(["llxprt-code-rs", "--emit", "not-a-phase"]).unwrap_err();
+        let message = sanitized_clap_diagnostic(&named);
+        assert!(message.contains("--emit"), "{message:?}");
+
+        let unknown = Args::try_parse_from(["llxprt-code-rs", "--SECRET_SENTINEL"]).unwrap_err();
+        assert_eq!(sanitized_clap_diagnostic(&unknown), "unknown argument");
     }
 
     #[test]
