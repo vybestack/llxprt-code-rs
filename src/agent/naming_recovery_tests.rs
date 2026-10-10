@@ -358,15 +358,28 @@ fn unsafe_or_oversized_names_and_secret_args_stay_fail_closed() {
             args_json: args,
         };
         let agent = CodingAgent::with_backend(
-            Box::new(MockBackend::new(vec![reply(vec![bad])])),
+            Box::new(MockBackend::new(vec![
+                reply(vec![bad.clone()]),
+                reply(vec![bad]),
+            ])),
             cwd.path().into(),
             true,
         )
         .with_secrets(vec![secret.into()]);
         let error = agent.run(&store, &reserved).unwrap_err();
-        assert_eq!(error.key, "model");
+        let expected = if index < 3 {
+            MALFORMED_TOOL_CALL_KEY
+        } else {
+            "model"
+        };
+        assert_eq!(error.key, expected);
         assert!(!error.message.contains(secret));
-        assert_eq!(agent.model_calls(), 1);
+        let expected_calls = if index < 3 { 2 } else { 1 };
+        assert_eq!(agent.model_calls(), expected_calls);
+        if index < 3 {
+            assert_eq!(error.terminal_outcome, Some(MALFORMED_TOOL_CALL_KEY));
+            assert!(error.message.contains("sanitized excerpt="));
+        }
         let state = store.snapshot().unwrap();
         assert!(state.branches[0].rounds.is_empty());
         assert!(!serde_json::to_string(&state).unwrap().contains(secret));

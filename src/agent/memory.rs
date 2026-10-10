@@ -98,6 +98,20 @@ impl super::Turn<'_> {
         rounds: &[RoundRecord],
     ) -> AgentError {
         match failure {
+            RoundFailure::ToolCallRefusal(message) => {
+                let mut error =
+                    self.dead(store, reserved, MALFORMED_TOOL_CALL_KEY, &message, rounds);
+                if error.key == MALFORMED_TOOL_CALL_KEY {
+                    error.terminal_outcome = Some(MALFORMED_TOOL_CALL_KEY);
+                }
+                error
+            }
+            RoundFailure::InvalidToolCall(message) => {
+                self.dead(store, reserved, "invalid-tool-call", &message, rounds)
+            }
+            RoundFailure::FinishReason(message) => {
+                self.dead(store, reserved, "finish-reason", &message, rounds)
+            }
             RoundFailure::Model(message) => self.dead(store, reserved, "model", &message, rounds),
             RoundFailure::ModelTransport(failure) => {
                 let key = failure.transport_key();
