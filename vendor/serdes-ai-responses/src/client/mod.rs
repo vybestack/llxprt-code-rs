@@ -875,6 +875,7 @@ impl OpenResponsesModel {
 /// its progress count in the terminal diagnostic instead of erasing that evidence.
 fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
     match error {
+        ModelError::StreamInterrupted { .. } => ModelError::StreamInterrupted { events },
         ModelError::InvalidResponse(detail) => ModelError::InvalidResponse(format!(
             "{detail}; accumulated {events} stream events (partial response is not completion)"
         )),
@@ -892,8 +893,9 @@ fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
 /// The request is established before any event escapes, so a
 /// `previous_response_not_found` on the status line clears the stale chain
 /// and replays the full input once, mirroring the non-streaming path. Once
-/// the SSE body is being read there is no further replay: replaying after
-/// events escaped would duplicate output.
+/// the SSE body is being read this transport never replays: public stream
+/// events may already have escaped. A typed preterminal transport interruption
+/// lets the host reissue only the folded request, whose partial reply never escaped.
 async fn run_http_stream(
     inner: &Inner,
     messages: &[ModelRequest],
@@ -947,10 +949,14 @@ async fn run_http_stream(
     let mut done = false;
     while let Some(chunk) = byte_stream.next().await {
         let chunk = chunk.map_err(|_| {
-            ModelError::InvalidResponse(
-                "responses SSE: body read failed after request accepted; request not replayed"
-                    .to_string(),
-            )
+            if terminal_id.is_none() {
+                ModelError::StreamInterrupted { events: 0 }
+            } else {
+                ModelError::InvalidResponse(
+                    "responses SSE: body read failed after terminal event; request not replayed"
+                        .to_string(),
+                )
+            }
         })?;
         for byte in chunk {
             let Some(frame) = decoder.byte(byte)? else {
@@ -1027,9 +1033,7 @@ async fn run_http_stream(
         }
         Ok(terminal_id)
     } else {
-        Err(ModelError::InvalidResponse(
-            "sse stream ended without a terminal event".to_string(),
-        ))
+        Err(ModelError::StreamInterrupted { events: 0 })
     }
 }
 

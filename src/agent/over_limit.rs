@@ -125,7 +125,7 @@ impl super::Turn<'_> {
             tools,
             phases.0,
             phases.1,
-            attempt.rounds.len() + 1,
+            (store, reserved, attempt.rounds.len() + 1),
             &attempt.usage,
         ) {
             Ok(reply) => Ok(reply),
@@ -151,7 +151,7 @@ impl super::Turn<'_> {
                     tools,
                     phases.0,
                     phases.1,
-                    attempt.rounds.len() + 1,
+                    (store, reserved, attempt.rounds.len() + 1),
                     &attempt.usage,
                 ) {
                     Ok(reply) => Ok(reply),

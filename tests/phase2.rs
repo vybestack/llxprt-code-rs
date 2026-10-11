@@ -425,7 +425,7 @@ fn u32_max_turn_state_cannot_panic() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
-        version: 2,
+        version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "s9max".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
         cwd_dev: workspace_identity(&cwd).0,
@@ -465,7 +465,7 @@ fn child_of_failed_parent_is_corrupt() {
         b
     };
     let state = SessionState {
-        version: 2,
+        version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "failedparent".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
         cwd_dev: workspace_identity(&cwd).0,
@@ -499,7 +499,7 @@ fn turn1_child_of_turn2_parent_is_corrupt() {
         b
     };
     let st: SessionState = SessionState {
-        version: 2,
+        version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "turn1child2".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
         cwd_dev: workspace_identity(&cwd).0,
@@ -2154,7 +2154,7 @@ fn attempt_overflow_is_a_typed_error() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
-        version: 2,
+        version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "attemptmax".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
         cwd_dev: workspace_identity(&cwd).0,
@@ -2188,7 +2188,7 @@ fn branch_seq_overflow_is_a_typed_error() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
-        version: 2,
+        version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "seqmax".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
         cwd_dev: workspace_identity(&cwd).0,
@@ -2284,6 +2284,7 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle)
         Lifecycle::Completed | Lifecycle::Failed => (0, 0),
     };
     BranchRecord {
+        stream_retries: Vec::new(),
         branch_id: id.to_string(),
         turn,
         attempt,

@@ -256,6 +256,11 @@ pub enum ModelError {
     Authentication(String),
     /// Invalid response from the API.
     InvalidResponse(String),
+    /// SSE transport ended before a terminal event. No complete response was admitted.
+    StreamInterrupted {
+        /// Progress retained by the folded request API; never a completion.
+        events: usize,
+    },
     /// Provider response exceeded the configured byte limit.
     ResponseTooLarge {
         /// Maximum accepted response bytes.
@@ -307,6 +312,10 @@ impl std::fmt::Display for ModelError {
             }
             Self::Authentication(_) => f.write_str("Model authentication failed"),
             Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
+            Self::StreamInterrupted { events } => write!(
+                f,
+                "Model response stream interrupted before terminal event ({events} events)"
+            ),
             Self::ResponseTooLarge { limit } => {
                 write!(f, "Provider response exceeded the {limit}-byte limit")
             }
@@ -372,7 +381,7 @@ impl ModelError {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            ModelError::Timeout => true,
+            ModelError::StreamInterrupted { .. } | ModelError::Timeout => true,
             ModelError::RateLimited { .. } => true,
             ModelError::Connection(_) => true,
             ModelError::Http { status, .. } => *status >= 500,
@@ -587,6 +596,7 @@ mod tests {
             },
             ModelError::Authentication(marker.to_string()),
             ModelError::InvalidResponse(marker.to_string()),
+            ModelError::StreamInterrupted { events: 42 },
             ModelError::ResponseTooLarge { limit: 123 },
             ModelError::NotFound(marker.to_string()),
             ModelError::NotSupported(marker.to_string()),

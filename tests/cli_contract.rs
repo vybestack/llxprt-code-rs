@@ -507,12 +507,13 @@ fn corrupt_parent_turn_max_emits_one_json_error() {
     // validation is never reached; the checked parent.turn + 1 must be a typed
     // corruption instead of an arithmetic panic.
     let payload = serde_json::json!({
-        "version": 2,
+        "version": llxprt_code_rs::session::STORE_VERSION,
         "session_id": "maxover",
         "cwd": null,
         "next_branch_seq": 2,
         "branches": [
             {
+                "stream_retries": [],
                 "branch_id": "b2",
                 "turn": 2,
                 "attempt": 1,
@@ -524,6 +525,7 @@ fn corrupt_parent_turn_max_emits_one_json_error() {
                 "lifecycle": "completed"
             },
             {
+                "stream_retries": [],
                 "branch_id": "b1",
                 "turn": 4294967295u32,
                 "attempt": 1,

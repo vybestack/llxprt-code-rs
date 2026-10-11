@@ -230,7 +230,7 @@ async fn folded_request_deadline_cancels_owning_http_body_without_replay() {
 }
 
 #[tokio::test]
-async fn interrupted_body_is_terminal_nonretryable_not_partial_success() {
+async fn interrupted_body_is_retryable_transport_not_partial_success() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = std::thread::spawn(move || {
@@ -248,12 +248,8 @@ async fn interrupted_body_is_terminal_nonretryable_not_partial_success() {
         )
         .await
         .unwrap_err();
-    assert!(!error.is_retryable());
-    let ModelError::InvalidResponse(detail) = error else {
-        panic!("wrong error")
-    };
-    assert!(detail.contains("body read failed"));
-    assert!(detail.contains("accumulated"));
+    assert!(error.is_retryable());
+    assert!(matches!(error, ModelError::StreamInterrupted { events: 0 }));
     server.join().unwrap();
 }
 
@@ -685,5 +681,41 @@ async fn live_codex_wire_contradictions_still_fail_without_replay() {
             "done_only={done_only} case={case}: {error:?}"
         );
         server.join().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn public_preterminal_transport_loss_emits_progress_then_typed_error_without_replay() {
+    for missing in [0, 999] {
+        let (model, server) = serve_http(progress().into_bytes(), true, missing);
+        let mut stream = model
+            .request_stream(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap();
+        let mut progress_count = 0;
+        let mut interrupted = false;
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(event) => {
+                    assert!(!matches!(
+                        event,
+                        ModelResponseStreamEvent::StreamComplete(_)
+                    ));
+                    progress_count += 1;
+                }
+                Err(error) => {
+                    assert!(matches!(error, ModelError::StreamInterrupted { .. }));
+                    assert!(error.is_retryable());
+                    assert!(stream.next().await.is_none());
+                    interrupted = true;
+                }
+            }
+        }
+        assert!(progress_count > 0 && interrupted);
+        server.join().unwrap(); // fixture checks the replay window stays empty
     }
 }

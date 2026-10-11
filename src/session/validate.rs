@@ -92,6 +92,9 @@ impl SessionState {
         branch: &BranchRecord,
         index: &std::collections::HashMap<&str, usize>,
     ) -> Result<(), StoreError> {
+        for retry in &branch.stream_retries {
+            super::stream_retry::validate(retry)?;
+        }
         self.validate_branch_shape(branch, index)?;
         self.validate_parent_relation(branch, index)?;
         self.validate_branch_lifecycle(branch)?;

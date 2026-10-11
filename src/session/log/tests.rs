@@ -12,6 +12,7 @@ fn branch() -> BranchRecord {
         digest: crate::limits::prompt_digest("hello"),
         lifecycle: Lifecycle::Pending,
         rounds: Vec::new(),
+        stream_retries: Vec::new(),
         summary: String::new(),
         error: String::new(),
         owner: "owner".into(),
@@ -25,7 +26,7 @@ fn reservation() -> Event {
         cwd: Some("/workspace".into()),
         cwd_dev: 1,
         cwd_ino: 1,
-        branch: branch(),
+        branch: Box::new(branch()),
         next_branch_seq: 1,
     }
 }

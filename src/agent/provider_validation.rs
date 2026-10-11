@@ -83,8 +83,13 @@ impl super::Turn<'_> {
         &self,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
+        context: (
+            &crate::session::SessionStore,
+            &crate::session::ReservedRequest,
+            usize,
+        ),
     ) -> Result<LlmResult, RoundFailure> {
-        let first = match self.round_once(requests, tools) {
+        let first = match self.retry_stream(requests, tools, context) {
             Err(RoundFailure::ToolCallRefusal(message)) => message,
             other => return other,
         };
@@ -99,7 +104,7 @@ impl super::Turn<'_> {
                 "{first}; corrective reissue refused by request budget"
             )));
         }
-        match self.round_once(&correction, tools) {
+        match self.retry_stream(&correction, tools, context) {
             Err(RoundFailure::ToolCallRefusal(second)) => Err(RoundFailure::ToolCallRefusal(
                 format!("{first}; one corrective reissue exhausted: {second}"),
             )),

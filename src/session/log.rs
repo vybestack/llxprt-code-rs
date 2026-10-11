@@ -28,7 +28,7 @@ pub(super) enum Event {
         cwd: Option<String>,
         cwd_dev: u64,
         cwd_ino: u64,
-        branch: BranchRecord,
+        branch: Box<BranchRecord>,
         next_branch_seq: u64,
     },
     BranchReclaimed {
@@ -37,6 +37,11 @@ pub(super) enum Event {
         owner: String,
         reserved_at: u64,
         lease_expiry: u64,
+    },
+    StreamRetry {
+        branch_id: String,
+        owner: String,
+        record: StreamRetryRecord,
     },
     LeaseRenewed {
         branch_id: String,

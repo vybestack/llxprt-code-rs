@@ -49,6 +49,29 @@ impl Emitter {
         stderr.flush()
     }
 
+    pub(crate) fn stream_retry(
+        &self,
+        turn: u32,
+        record: &crate::session::StreamRetryRecord,
+    ) -> std::io::Result<()> {
+        if let Some(event) = self.stream_retry_event(turn, record) {
+            Self::write(event)?;
+        }
+        Ok(())
+    }
+
+    fn stream_retry_event(
+        &self,
+        turn: u32,
+        record: &crate::session::StreamRetryRecord,
+    ) -> Option<serde_json::Value> {
+        self.enabled(Emit::All).then(|| {
+            json!({"type":"model_retry","turn":turn,
+            "round":record.round,"retry":record.retry,"delay_ms":record.delay_ms,
+            "events":record.events,"reason":"sse_transport_interrupted"})
+        })
+    }
+
     pub(crate) fn response(
         &mut self,
         turn: u32,

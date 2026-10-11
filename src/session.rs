@@ -15,7 +15,7 @@ use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
-pub const STORE_VERSION: u32 = 2;
+pub const STORE_VERSION: u32 = 3;
 /// Bounded lease for a reservation, in seconds. A `pending` branch whose
 /// `lease_expiry` is in the past may be reclaimed by another process.
 pub const LEASE_SECONDS: u64 = 3600;
@@ -43,8 +43,11 @@ pub(crate) mod context_persist;
 pub(crate) mod context_publish;
 pub(crate) mod context_recover;
 pub(crate) mod records;
+mod stream_retry;
 pub use context_persist::ToolResultProjection;
-pub use records::{BranchRecord, Lifecycle, RoundRecord, SessionState, ToolCallRecord};
+pub use records::{
+    BranchRecord, Lifecycle, RoundRecord, SessionState, StreamRetryRecord, ToolCallRecord,
+};
 mod log;
 mod output_ownership;
 pub(crate) use output_ownership::validate_diagnostic_destination;
@@ -609,6 +612,23 @@ impl SessionStore {
                     .collect()
             }
         }
+    }
+
+    /// Persist retry metadata before sleeping or reissuing; never model input.
+    pub fn record_stream_retry(
+        &self,
+        reserved: &ReservedRequest,
+        record: StreamRetryRecord,
+    ) -> Result<(), StoreError> {
+        self.locked(|| {
+            let state = self.read()?;
+            let branch = self.live_branch(&state, reserved)?;
+            self.append_event(log::Event::StreamRetry {
+                branch_id: branch.branch_id.clone(),
+                owner: reserved.owner.clone(),
+                record,
+            })
+        })
     }
 
     /// Renew the lease of a live reservation by appending one bounded transaction.

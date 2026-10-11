@@ -124,6 +124,10 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
+    fn stream_interruption(&self) -> Option<usize> {
+        self.inner.stream_interruption()
+    }
+
     fn tool_error_prefix(&self) -> &'static str {
         self.inner.tool_error_prefix()
     }
