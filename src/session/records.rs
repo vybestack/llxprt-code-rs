@@ -70,6 +70,15 @@ impl std::fmt::Debug for ToolCallRecord {
     }
 }
 
+/// One scheduled reissue of an interrupted SSE request. No partial reply is stored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamRetryRecord {
+    pub round: usize,
+    pub retry: u8,
+    pub delay_ms: u64,
+    pub events: usize,
+}
+
 /// Lifecycle of one branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,6 +110,8 @@ pub struct BranchRecord {
     /// The complete round history, including the final no-tool response.
     #[serde(default)]
     pub rounds: Vec<RoundRecord>,
+    /// Transport reissues, independent of assistant/tool history.
+    pub stream_retries: Vec<StreamRetryRecord>,
     /// Final plain-text summary (completed branches).
     #[serde(default)]
     pub summary: String,

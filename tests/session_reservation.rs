@@ -127,6 +127,7 @@ fn complete_turn1(st: &SessionStore, prompt: &str, cwd: &Path) -> ReservedReques
 /// Build a completed branch record for a hand-crafted corrupt/chain state.
 fn branch(turn: u32, attempt: u32, id: &str, prompt: &str) -> BranchRecord {
     BranchRecord {
+        stream_retries: Vec::new(),
         branch_id: id.to_string(),
         turn,
         attempt,

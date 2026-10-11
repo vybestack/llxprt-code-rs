@@ -18,6 +18,7 @@ pub(crate) struct ResponsesBackend {
     model_settings: ModelSettings,
     calls: AtomicUsize,
     secrets: Vec<String>,
+    interrupted: std::cell::Cell<Option<usize>>,
 }
 
 impl ResponsesBackend {
@@ -38,6 +39,7 @@ impl ResponsesBackend {
             model_settings,
             calls: AtomicUsize::new(0),
             secrets: Vec::new(),
+            interrupted: std::cell::Cell::new(None),
         }
     }
 
@@ -68,6 +70,9 @@ impl ResponsesBackend {
             }
         }
         .map_err(|error| {
+            if let serdes_ai::models::ModelError::StreamInterrupted { events } = &error {
+                self.interrupted.set(Some(*events));
+            }
             let error = crate::transport::context_length_400(&error).unwrap_or(error);
             let diagnostic = match &error {
                 serdes_ai::models::ModelError::InvalidResponse(detail)
@@ -91,6 +96,10 @@ impl ResponsesBackend {
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn stream_interruption(&self) -> Option<usize> {
+        self.interrupted.get()
+    }
+
     fn tool_error_prefix(&self) -> &'static str {
         match &self.model {
             ResponsesModel::Codex(_) => "tool error: ",
@@ -104,6 +113,7 @@ impl ChatBackend for ResponsesBackend {
         tools: &'a [crate::tools::ToolSpec],
     ) -> crate::adapter::ModelFuture<'a> {
         Box::pin(async move {
+            self.interrupted.set(None);
             self.calls.fetch_add(1, Ordering::SeqCst);
             // Codex HTTP/WebSocket does not apply ModelSettings::timeout itself.
             // This remains a per-request policy, independent of the turn deadline.
@@ -124,6 +134,8 @@ impl ChatBackend for ResponsesBackend {
 
 #[cfg(test)]
 mod cache_tests;
+#[cfg(test)]
+mod stream_retry_tests;
 
 #[cfg(test)]
 pub(super) mod tests {

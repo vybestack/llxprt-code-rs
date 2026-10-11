@@ -18,7 +18,7 @@ pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
     pub(super) started: Instant,
     pub(super) deadline: Option<Instant>,
-    runtime: Option<tokio::runtime::Runtime>,
+    pub(super) runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl std::ops::Deref for Turn<'_> {
@@ -94,6 +94,23 @@ impl<'a> Turn<'a> {
         )
     }
 
+    pub(super) fn retry_delay(&self, delay: std::time::Duration) -> Result<(), RoundFailure> {
+        self.runtime
+            .as_ref()
+            .expect("turn runtime")
+            .block_on(async {
+                match self.deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, tokio::time::sleep(delay))
+                        .await
+                        .map_err(|_| RoundFailure::TurnTime),
+                    None => {
+                        tokio::time::sleep(delay).await;
+                        Ok(())
+                    }
+                }
+            })
+    }
+
     pub(super) fn round_once(
         &self,
         requests: &[serdes_ai::core::ModelRequest],
@@ -117,9 +134,14 @@ impl<'a> Turn<'a> {
                     None => Ok(request.await),
                 }
             })?
-            .map_err(|message| match TransportFailure::from_message(&message) {
-                Some(failure) => RoundFailure::ModelTransport(failure),
-                None => RoundFailure::Model(message),
+            .map_err(|message| {
+                if let Some(events) = self.backend.stream_interruption() {
+                    return RoundFailure::StreamInterrupted(events);
+                }
+                match TransportFailure::from_message(&message) {
+                    Some(failure) => RoundFailure::ModelTransport(failure),
+                    None => RoundFailure::Model(message),
+                }
             })?;
         if let (Some(output), Some(snapshot)) =
             (&self.cache_output, self.backend.cache_observation())

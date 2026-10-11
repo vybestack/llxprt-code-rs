@@ -12521,7 +12521,7 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..0143f41 100644
+index 58b6fc1..a3f087c 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
 @@ -2,13 +2,228 @@
@@ -12765,7 +12765,7 @@ index 58b6fc1..0143f41 100644
      Api {
          /// Error message.
          message: String,
-@@ -27,69 +241,130 @@ pub enum ModelError {
+@@ -27,69 +241,139 @@ pub enum ModelError {
          code: Option<String>,
      },
  
@@ -12792,6 +12792,11 @@ index 58b6fc1..0143f41 100644
 -    #[error("Invalid response: {0}")]
      InvalidResponse(String),
 -
++    /// SSE transport ended before a terminal event. No complete response was admitted.
++    StreamInterrupted {
++        /// Progress retained by the folded request API; never a completion.
++        events: usize,
++    },
 +    /// Provider response exceeded the configured byte limit.
 +    ResponseTooLarge {
 +        /// Maximum accepted response bytes.
@@ -12864,6 +12869,10 @@ index 58b6fc1..0143f41 100644
 +            }
 +            Self::Authentication(_) => f.write_str("Model authentication failed"),
 +            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
++            Self::StreamInterrupted { events } => write!(
++                f,
++                "Model response stream interrupted before terminal event ({events} events)"
++            ),
 +            Self::ResponseTooLarge { limit } => {
 +                write!(f, "Provider response exceeded the {limit}-byte limit")
 +            }
@@ -12925,12 +12934,12 @@ index 58b6fc1..0143f41 100644
  }
  
  impl ModelError {
-@@ -97,14 +372,34 @@ impl ModelError {
+@@ -97,14 +381,34 @@ impl ModelError {
      #[must_use]
      pub fn is_retryable(&self) -> bool {
          match self {
 -            ModelError::Timeout(_) => true,
-+            ModelError::Timeout => true,
++            ModelError::StreamInterrupted { .. } | ModelError::Timeout => true,
              ModelError::RateLimited { .. } => true,
              ModelError::Connection(_) => true,
              ModelError::Http { status, .. } => *status >= 500,
@@ -12961,7 +12970,7 @@ index 58b6fc1..0143f41 100644
      /// Get the retry-after duration if applicable.
      #[must_use]
      pub fn retry_after(&self) -> Option<Duration> {
-@@ -199,18 +494,23 @@ impl ModelError {
+@@ -199,18 +503,23 @@ impl ModelError {
  
  impl From<reqwest::Error> for ModelError {
      fn from(err: reqwest::Error) -> Self {
@@ -12989,7 +12998,7 @@ index 58b6fc1..0143f41 100644
          }
      }
  }
-@@ -224,7 +524,7 @@ mod tests {
+@@ -224,7 +533,7 @@ mod tests {
  
      #[test]
      fn test_is_retryable() {
@@ -12998,7 +13007,7 @@ index 58b6fc1..0143f41 100644
          assert!(ModelError::rate_limited(None).is_retryable());
          assert!(ModelError::Connection("failed".into()).is_retryable());
          assert!(ModelError::http(500, "Server error").is_retryable());
-@@ -244,16 +544,248 @@ mod tests {
+@@ -244,16 +553,249 @@ mod tests {
          let err = ModelError::rate_limited(None);
          assert_eq!(err.retry_after(), None);
  
@@ -13025,7 +13034,10 @@ index 58b6fc1..0143f41 100644
 +        assert!(!display.contains("retry after None"), "display: {display}");
 +    }
 +
-+    #[test]
+     #[test]
+-    fn test_error_display() {
+-        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
+-        assert!(err.to_string().contains("Something went wrong"));
 +    fn public_formatting_hides_external_text_for_every_variant() {
 +        let marker = "provider-secret-marker";
 +        let mut headers = HashMap::new();
@@ -13046,6 +13058,7 @@ index 58b6fc1..0143f41 100644
 +            },
 +            ModelError::Authentication(marker.to_string()),
 +            ModelError::InvalidResponse(marker.to_string()),
++            ModelError::StreamInterrupted { events: 42 },
 +            ModelError::ResponseTooLarge { limit: 123 },
 +            ModelError::NotFound(marker.to_string()),
 +            ModelError::NotSupported(marker.to_string()),
@@ -13146,10 +13159,7 @@ index 58b6fc1..0143f41 100644
 +
 +    /// Every retained status classifies: quota and billing wording wins over the status,
 +    /// 429 is a throttle, 408 and 5xx are retryable, and every other 4xx is permanent.
-     #[test]
--    fn test_error_display() {
--        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
--        assert!(err.to_string().contains("Something went wrong"));
++    #[test]
 +    fn status_classification_covers_retryability_families() {
 +        let cases = [
 +            (429u16, TransportClass::RateLimit),
@@ -26195,7 +26205,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..7ea9bf0 100644
+index f90cc22..d1cbfd9 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -26550,7 +26560,7 @@ index f90cc22..7ea9bf0 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,7 +870,24 @@ impl OpenResponsesModel {
+@@ -759,22 +870,39 @@ impl OpenResponsesModel {
      }
  }
  
@@ -26560,6 +26570,7 @@ index f90cc22..7ea9bf0 100644
 +/// its progress count in the terminal diagnostic instead of erasing that evidence.
 +fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
 +    match error {
++        ModelError::StreamInterrupted { .. } => ModelError::StreamInterrupted { events },
 +        ModelError::InvalidResponse(detail) => ModelError::InvalidResponse(format!(
 +            "{detail}; accumulated {events} stream events (partial response is not completion)"
 +        )),
@@ -26576,7 +26587,15 @@ index f90cc22..7ea9bf0 100644
  ///
  /// The request is established before any event escapes, so a
  /// `previous_response_not_found` on the status line clears the stale chain
-@@ -772,9 +900,7 @@ async fn run_http_stream(
+ /// and replays the full input once, mirroring the non-streaming path. Once
+-/// the SSE body is being read there is no further replay: replaying after
+-/// events escaped would duplicate output.
++/// the SSE body is being read this transport never replays: public stream
++/// events may already have escaped. A typed preterminal transport interruption
++/// lets the host reissue only the folded request, whose partial reply never escaped.
+ async fn run_http_stream(
+     inner: &Inner,
+     messages: &[ModelRequest],
      settings: &ModelSettings,
      params: &ModelRequestParameters,
      tx: &mpsc::Sender<Result<ModelResponseStreamEvent, ModelError>>,
@@ -26587,7 +26606,7 @@ index f90cc22..7ea9bf0 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -814,28 +940,60 @@ async fn run_http_stream(
+@@ -814,28 +942,64 @@ async fn run_http_stream(
      };
  
      let mut byte_stream = response.bytes_stream();
@@ -26605,10 +26624,14 @@ index f90cc22..7ea9bf0 100644
 -            let payload = line.trim_end_matches(['\n', '\r']);
 -            let Some(payload) = payload.strip_prefix("data: ") else {
 +        let chunk = chunk.map_err(|_| {
-+            ModelError::InvalidResponse(
-+                "responses SSE: body read failed after request accepted; request not replayed"
-+                    .to_string(),
-+            )
++            if terminal_id.is_none() {
++                ModelError::StreamInterrupted { events: 0 }
++            } else {
++                ModelError::InvalidResponse(
++                    "responses SSE: body read failed after terminal event; request not replayed"
++                        .to_string(),
++                )
++            }
 +        })?;
 +        for byte in chunk {
 +            let Some(frame) = decoder.byte(byte)? else {
@@ -26662,7 +26685,7 @@ index f90cc22..7ea9bf0 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1004,60 @@ async fn run_http_stream(
+@@ -846,14 +1010,58 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -26693,9 +26716,7 @@ index f90cc22..7ea9bf0 100644
 +        }
 +        Ok(terminal_id)
 +    } else {
-+        Err(ModelError::InvalidResponse(
-+            "sse stream ended without a terminal event".to_string(),
-+        ))
++        Err(ModelError::StreamInterrupted { events: 0 })
 +    }
 +}
 +
@@ -29674,10 +29695,10 @@ index 85b407e..0000000
 -}
 diff --git a/vendor/serdes-ai-responses/tests/client_sse.rs b/vendor/serdes-ai-responses/tests/client_sse.rs
 new file mode 100644
-index 0000000..0b182ed
+index 0000000..d73b3c6
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_sse.rs
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,721 @@
 +//! Owning transport regression: evidence escapes once; terminal errors never replay.
 +use futures::StreamExt;
 +use serdes_ai_core::messages::{ModelRequest, ModelResponseStreamEvent};
@@ -29910,7 +29931,7 @@ index 0000000..0b182ed
 +}
 +
 +#[tokio::test]
-+async fn interrupted_body_is_terminal_nonretryable_not_partial_success() {
++async fn interrupted_body_is_retryable_transport_not_partial_success() {
 +    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 +    let port = listener.local_addr().unwrap().port();
 +    let server = std::thread::spawn(move || {
@@ -29928,12 +29949,8 @@ index 0000000..0b182ed
 +        )
 +        .await
 +        .unwrap_err();
-+    assert!(!error.is_retryable());
-+    let ModelError::InvalidResponse(detail) = error else {
-+        panic!("wrong error")
-+    };
-+    assert!(detail.contains("body read failed"));
-+    assert!(detail.contains("accumulated"));
++    assert!(error.is_retryable());
++    assert!(matches!(error, ModelError::StreamInterrupted { events: 0 }));
 +    server.join().unwrap();
 +}
 +
@@ -30365,6 +30382,42 @@ index 0000000..0b182ed
 +            "done_only={done_only} case={case}: {error:?}"
 +        );
 +        server.join().unwrap();
++    }
++}
++
++#[tokio::test]
++async fn public_preterminal_transport_loss_emits_progress_then_typed_error_without_replay() {
++    for missing in [0, 999] {
++        let (model, server) = serve_http(progress().into_bytes(), true, missing);
++        let mut stream = model
++            .request_stream(
++                &[ModelRequest::default()],
++                &ModelSettings::default(),
++                &ModelRequestParameters::default(),
++            )
++            .await
++            .unwrap();
++        let mut progress_count = 0;
++        let mut interrupted = false;
++        while let Some(item) = stream.next().await {
++            match item {
++                Ok(event) => {
++                    assert!(!matches!(
++                        event,
++                        ModelResponseStreamEvent::StreamComplete(_)
++                    ));
++                    progress_count += 1;
++                }
++                Err(error) => {
++                    assert!(matches!(error, ModelError::StreamInterrupted { .. }));
++                    assert!(error.is_retryable());
++                    assert!(stream.next().await.is_none());
++                    interrupted = true;
++                }
++            }
++        }
++        assert!(progress_count > 0 && interrupted);
++        server.join().unwrap(); // fixture checks the replay window stays empty
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/tests/client_ws.rs b/vendor/serdes-ai-responses/tests/client_ws.rs

@@ -76,7 +76,7 @@ impl Options {
                 }).collect();
                 json!({"turn":branch.turn,"branch_id":branch.branch_id,"attempt":branch.attempt,
                     "parent_branch":branch.parent_branch,"parent_turn":branch.parent_turn,"parent_attempt":branch.parent_attempt,
-                    "prompt":branch.prompt,"lifecycle":branch.lifecycle,"summary":branch.summary,"error":branch.error,"rounds":rounds})
+                    "prompt":branch.prompt,"lifecycle":branch.lifecycle,"summary":branch.summary,"error":branch.error,"rounds":rounds,"model_retries":branch.stream_retries})
             }).collect();
             return Ok(format!(
                 "{}\n",
@@ -95,6 +95,10 @@ impl Options {
                 branch.prompt
             )
             .expect("String write");
+            for retry in &branch.stream_retries {
+                writeln!(output, "  Model retry {} / round {}: SSE transport interrupted ({} events); backoff {}ms",
+                    retry.retry, retry.round, retry.events, retry.delay_ms).expect("String write");
+            }
             for (index, round) in branch.rounds.iter().enumerate() {
                 writeln!(output, "  Round {}\n{}", index + 1, round.assistant)
                     .expect("String write");
