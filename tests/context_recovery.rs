@@ -74,9 +74,9 @@ thread_local! {
 }
 
 /// Per-test configuration root, retained across authenticated reopens.
-/// Thread-bound: a worker calling this allocates a different root, and load_at
-/// creates on demand. Pass the original root explicitly to delegate operations
-/// on the same fixture; independent-fixture workers intentionally self-allocate.
+/// Thread-bound: independent-fixture workers intentionally self-allocate.
+/// Delegated reopens use the source store identity instead of this thread root;
+/// the owning thread must remain alive until those workers release their handles.
 fn root() -> PathBuf {
     ROOT.with(|root| root.path().to_path_buf())
 }
@@ -184,13 +184,13 @@ fn run_bulk_turn(store: &SessionStore, cwd: &Path, name: &str, id: &str) {
     assert_eq!(out.status, "ok", "the attempt completes");
 }
 
-/// Reopens the same session under a fresh store handle, as a later process would.
+/// Reopens the source session, even when delegated to another fixture thread.
 fn reopen(store: &SessionStore) -> SessionStore {
-    SessionStore::load_at(
-        &SessionId::parse(store.session_id.as_str()).unwrap(),
-        &root(),
-    )
-    .expect("reopen store")
+    let sessions = store.session_dir.parent().expect("session namespace");
+    assert_eq!(sessions.file_name().unwrap(), "code-rs-sessions");
+    let config = sessions.parent().expect("source configuration root");
+    SessionStore::load_at(&SessionId::parse(&store.session_id).unwrap(), config)
+        .expect("reopen store")
 }
 
 /// Edits the durable context manifest in place, as an operator-issued update would.

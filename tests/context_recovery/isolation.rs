@@ -186,3 +186,63 @@ fn repeated_executables_reject_stale_pid_identity() {
         }
     }
 }
+
+// A delegated reopen is the same fixture, not an independent worker fixture.
+// Keep the owning test thread alive until the worker releases its store handle.
+#[test]
+fn delegated_reopen_preserves_authenticated_session_identity() {
+    let cwd = workspace();
+    let config = root();
+    let store = store("delegated-recovery");
+    run_bulk_turn(&store, &cwd, "bulk.txt", "c0");
+    let initial = reopen(&store);
+    initial.set_digest_size_floor(1024).unwrap();
+    let expected_spine = page_text(&initial);
+    assert!(!expected_spine.is_empty());
+    let expected_key = std::fs::read(store.session_dir.join("context-vault-key")).unwrap();
+    let expected_dir = store.session_dir.clone();
+
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                assert_ne!(root(), config, "worker owns an independent fixture root");
+                let recovered = reopen(&store);
+                assert_eq!(
+                    recovered.session_dir, expected_dir,
+                    "reopen retains its source root"
+                );
+                recovered.set_digest_size_floor(1024).unwrap();
+                assert_eq!(
+                    page_text(&recovered),
+                    expected_spine,
+                    "authenticated spine survives delegation"
+                );
+                assert_eq!(
+                    std::fs::read(recovered.session_dir.join("context-vault-key")).unwrap(),
+                    expected_key,
+                    "delegation must not mint another vault key"
+                );
+                let wrong = workspace();
+                let error = match reserved(&recovered, None, None, "wrong", &wrong) {
+                    Err(error) => error,
+                    Ok(_) => panic!("delegation must retain the original workspace pin"),
+                };
+                assert!(error.to_string().contains("session is pinned"), "{error}");
+                let request = reserved(&recovered, None, None, "continue", &cwd).unwrap();
+                assert_eq!(
+                    request.turn, 2,
+                    "delegation continues, rather than creating turn one"
+                );
+                let output = agent(Box::new(MockBackend::new(vec![result("done")])), &cwd)
+                    .run(&recovered, &request)
+                    .expect("authenticated continuation on the owning workspace");
+                assert_eq!(output.status, "ok");
+            })
+            .join()
+            .unwrap();
+    });
+    assert!(config.exists(), "the caller retains fixture ownership");
+    let final_store = reopen(&store);
+    final_store.set_digest_size_floor(1024).unwrap();
+    assert_eq!(page_text(&final_store), expected_spine);
+}
