@@ -186,7 +186,7 @@ fn shell_omitted_timeout_enforces_default_and_cleans_up_group() {
         &config,
     );
     assert!(!ok, "omitted timeout must enforce the default: {output}");
-    assert_eq!(output, "command timed out after 1000 ms; output:\n");
+    assert_eq!(output, "command timed out after 1000 ms; partial filesystem effects may remain. Do not treat a created directory as a usable worktree; verify repository identity before destructive Git actions. Preserve this failed attempt; output:\n");
     // The shared runner serializes process groups; exclude time queued behind
     // other tests by measuring from the command's first side effect.
     let started = std::fs::metadata(d.path().join("default-started"))
