@@ -1,11 +1,24 @@
 fn scripted_login(
     responses: Vec<(u16, Value)>,
 ) -> (Protocol, std::thread::JoinHandle<Vec<String>>) {
+    scripted_http(
+        responses
+            .into_iter()
+            .map(|(status, value)| http_response(status, &value.to_string()))
+            .collect(),
+    )
+}
+
+fn http_response(status: u16, body: &str) -> String {
+    format!("HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+}
+
+fn scripted_http(responses: Vec<String>) -> (Protocol, std::thread::JoinHandle<Vec<String>>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let protocol = Protocol::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
     let handle = std::thread::spawn(move || {
         let mut requests = Vec::new();
-        for (status, value) in responses {
+        for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -34,8 +47,7 @@ fn scripted_login(
                 }
             }
             requests.push(String::from_utf8(bytes).unwrap());
-            let body = value.to_string();
-            write!(stream, "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            stream.write_all(response.as_bytes()).unwrap();
         }
         requests
     });
@@ -359,4 +371,87 @@ fn overbound_response_is_terminal() {
         .to_string()
         .contains("byte limit"));
     server.join().unwrap();
+}
+
+#[test]
+fn response_failures_identify_every_stage_without_disclosing_body() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    for (failure_response, diagnostic) in [
+        (http_response(200, "provider-secret-marker"), "invalid OAuth response JSON"),
+        (http_response(503, &"x".repeat(MAX_BYTES + 1)), "OAuth response exceeds byte limit"),
+        ("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nprovider-secret-marker".to_owned(), "OAuth response read failed"),
+    ] {
+        for (prefix, stage, refresh) in [
+            (vec![], "device-code request", false),
+            (vec![http_response(200, &device_response().to_string())], "device authorization polling", false),
+            (vec![http_response(200, &device_response().to_string()), http_response(200, &code_response().to_string())], "authorization-code exchange", false),
+            (vec![], "token refresh", true),
+        ] {
+            let mut responses = prefix;
+            responses.push(failure_response.clone());
+            let count = responses.len();
+            let (protocol, server) = scripted_http(responses);
+            let error = if refresh {
+                runtime.block_on(protocol.refresh(&json!({"refresh_token":"refresh"}), &FixedClock))
+            } else {
+                runtime.block_on(protocol.login(&FixedClock))
+            }.unwrap_err().to_string();
+            assert_eq!(error, format!("local OAuth: {stage}: {diagnostic}"));
+            assert!(!error.contains("provider-secret-marker"));
+            assert_eq!(server.join().unwrap().len(), count);
+        }
+    }
+}
+
+#[test]
+fn supplied_invalid_lifetime_never_uses_jwt_expiry() {
+    for lifetime in [
+        json!(null),
+        json!("3600"),
+        json!(3600.5),
+        json!(-1),
+        json!(0),
+        json!(30),
+        json!(i64::MAX),
+    ] {
+        let mut value = response();
+        value["access_token"] = json!(format!(
+            "a.{}.b",
+            URL_SAFE_NO_PAD.encode(br#"{"exp":5000}"#)
+        ));
+        value["expires_in"] = lifetime;
+        assert!(token_document(value, None, &FixedClock).is_err());
+    }
+}
+
+#[test]
+fn absent_lifetime_requires_valid_integral_future_access_expiry() {
+    for claims in [
+        json!({}),
+        json!({"exp":null}),
+        json!({"exp":"5000"}),
+        json!({"exp":5000.5}),
+        json!({"exp":1030}),
+        json!({"exp":u64::MAX}),
+    ] {
+        let mut value = response();
+        value.as_object_mut().unwrap().remove("expires_in");
+        value["access_token"] = json!(format!(
+            "a.{}.b",
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        ));
+        assert!(token_document(value, None, &FixedClock).is_err());
+    }
+    for access in ["provider-secret-marker", "a.@@.b", "a.eA.b"] {
+        let mut value = response();
+        value.as_object_mut().unwrap().remove("expires_in");
+        value["access_token"] = json!(access);
+        let error = token_document(value, None, &FixedClock)
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains(access));
+    }
 }

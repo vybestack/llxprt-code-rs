@@ -115,16 +115,19 @@ async fn consume(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| failure("OAuth response read failed"))?
+        .map_err(|_| failure(&format!("{stage}: OAuth response read failed")))?
     {
         if chunk.len() > MAX_BYTES.saturating_sub(bytes.len()) {
-            return Err(failure("OAuth response exceeds byte limit"));
+            return Err(failure(&format!(
+                "{stage}: OAuth response exceeds byte limit"
+            )));
         }
         bytes.extend_from_slice(&chunk);
     }
     // Provider error bodies can contain tokens. Surface only status, never their contents.
     let value = if (200..300).contains(&status) {
-        serde_json::from_slice(&bytes).map_err(|_| failure("invalid OAuth response JSON"))?
+        serde_json::from_slice(&bytes)
+            .map_err(|_| failure(&format!("{stage}: invalid OAuth response JSON")))?
     } else {
         Value::Null
     };
