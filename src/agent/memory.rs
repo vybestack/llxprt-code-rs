@@ -131,6 +131,12 @@ impl super::Turn<'_> {
                 self.dead(store, reserved, "model", &failure.diagnostic(), rounds)
                     .with_envelope_code(key)
             }
+            RoundFailure::RateLimitStopped { failure, retries, reason } => {
+                let message = format!("{}; {reason}; retry budget: {retries}/3 used, {} remaining",
+                    failure.diagnostic(), 3 - retries);
+                self.dead(store, reserved, "model", &message, rounds)
+                    .with_envelope_code(failure.transport_key())
+            }
             RoundFailure::TurnTime => self.time_exhausted(store, reserved, rounds),
             RoundFailure::Profiling(error) => error,
             RoundFailure::CacheOutput(error) => self.dead_coded(

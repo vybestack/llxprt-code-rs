@@ -25,6 +25,7 @@ use serde_json::Value as JsonValue;
 
 mod deadline;
 mod provider_validation;
+mod rate_limit;
 mod stream_retry;
 use deadline::Turn;
 mod finish;
@@ -818,6 +819,11 @@ enum RoundFailure {
     InvalidToolCall(String),
     FinishReason(String),
     ModelTransport(TransportFailure),
+    RateLimitStopped {
+        failure: TransportFailure,
+        retries: usize,
+        reason: &'static str,
+    },
     Profiling(AgentError),
     CacheOutput(crate::cache_output::OutputError),
 }

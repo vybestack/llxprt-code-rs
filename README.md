@@ -643,6 +643,22 @@ Related telemetry quantities can be joined by `round_index` and `call_index`:
 | `model_reply_mapped_bytes` | reply token counts | Same reply, mapped bytes versus tokens |
 | `round_index`, `call_index` | round/call identifiers | Same identifiers |
 
+### Retryable HTTP 429 rate limits
+
+The host reissues an identical provider request on classified HTTP 429 `rate-limit`
+failures, with at most **three retries** (four attempts including the original).
+The cap is shared with preterminal Responses stream reissues for that request.
+Backoff uses exponential equal jitter (250–500ms, 500–1000ms, 1000–2000ms), added
+above the provider's `Retry-After` minimum, with each wait bounded to 30 seconds.
+A hint greater than 30 seconds fails explicitly without an early retry. Exhaustion
+keeps exit 5 and `error.code: "model-rate-limit"`; `error.message` states the used
+and remaining retry budget. No alternate provider or model is selected.
+
+Retries remain inside the original `--turn-time` deadline; signal cancellation
+interrupts a wait immediately. Completed tools are not rerun, and a failed 429
+adds neither a model reply nor a tool round to history. Quota/billing 429s,
+permanent errors, and status-free failures are not retried by this policy.
+
 ### Preterminal Responses SSE transport loss
 
 A folded Codex HTTP request whose body transfer fails (or cleanly ends) before a
@@ -652,9 +668,10 @@ request-identity policy. No partial reply, argument bytes or tool calls enter mo
 history or execution. The original turn deadline also bounds the backoff.
 Malformed SSE frames, protocol/lifecycle contradictions, provider error events
 (including quota/auth refusals), and failures after a terminal event still fail fast.
-This policy does not change HTTP 429 handling or retry other provider requests.
+HTTP 429 rate limits use the bounded policy above; other provider failures are not
+retried by this stream-loss policy.
 
-Each scheduled reissue is persisted before sleeping, independently of `--emit`,
+Each scheduled stream-loss reissue is persisted before sleeping, independently of `--emit`,
 and is visible in `transcript --json` as `turns[].model_retries` (`round`, `retry`,
 `delay_ms`, `events`); human look-back output lists the same metadata. `--emit all`
 also emits a value-free `model_retry` event. Exhaustion remains a typed model
