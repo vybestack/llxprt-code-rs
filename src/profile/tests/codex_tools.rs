@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn codex_disabled_tool_aliases_are_validated_and_equivalent() {
+fn codex_disabled_tools_preserve_current_tool_policy() {
     let base: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/profiles/gpt56solhigh.json"
     ))
@@ -17,23 +17,8 @@ fn codex_disabled_tool_aliases_are_validated_and_equivalent() {
         ]
     );
 
-    // A byte-for-byte equal alias duplicates the list without changing it.
-    let mut aliased = base.clone();
-    aliased["ephemeralSettings"]["disabled-tools"] =
-        json!(["google_web_fetch", "google_web_search"]);
-    let parsed = parse_profile_value(&aliased, "gpt56solhigh").unwrap();
-    assert_eq!(parsed.ephemeral.disabled_tools.len(), 2);
-
-    // Differing alias content rejects.
-    let mut differing = base.clone();
-    differing["ephemeralSettings"]["disabled-tools"] = json!(["google_web_fetch"]);
-    assert_eq!(
-        parse_profile_value(&differing, "gpt56solhigh").unwrap_err(),
-        "profile \"gpt56solhigh\": 'disabled-tools' must equal 'tools.disabled' exactly"
-    );
-
     // Registered Rust tools cannot be disabled by profile.
-    for tool in ["run_shell_command", "read_file", "replace"] {
+    for tool in crate::tools::TOOL_CATALOGUE {
         let mut registered = base.clone();
         registered["ephemeralSettings"]["tools.disabled"] = json!([tool]);
         assert_eq!(
@@ -138,14 +123,99 @@ fn codex_disabled_tools_reject_malformed_lists() {
         .contains("'tools.disabled' must be an array"));
 
     let mut non_string = base.clone();
-    non_string["ephemeralSettings"]["disabled-tools"] = json!([3]);
+    non_string["ephemeralSettings"]["tools.disabled"] = json!([3]);
     assert!(parse_profile_value(&non_string, "gpt56solhigh")
         .unwrap_err()
-        .contains("'disabled-tools' entries must be strings"));
+        .contains("'tools.disabled' entries must be strings"));
 
-    let mut unbounded = base.clone();
-    unbounded["ephemeralSettings"]["tools.disabled"] = json!(["x".repeat(65)]);
-    assert!(parse_profile_value(&unbounded, "gpt56solhigh")
-        .unwrap_err()
-        .contains("bounded tool names"));
+    for tool in ["".to_string(), "x".repeat(65), "control\nname".to_string()] {
+        let mut unbounded = base.clone();
+        unbounded["ephemeralSettings"]["tools.disabled"] = json!([tool]);
+        assert!(parse_profile_value(&unbounded, "gpt56solhigh")
+            .unwrap_err()
+            .contains("bounded tool names"));
+    }
+
+    for (tools, expected) in [
+        (None, Vec::<String>::new()),
+        (Some(json!([])), vec![]),
+        (Some(json!(["x".repeat(64)])), vec!["x".repeat(64)]),
+    ] {
+        let mut valid = base.clone();
+        valid["ephemeralSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tools.disabled");
+        if let Some(tools) = tools {
+            valid["ephemeralSettings"]["tools.disabled"] = tools;
+        }
+        let parsed = parse_profile_value(&valid, "gpt56solhigh").unwrap();
+        assert_eq!(parsed.ephemeral.disabled_tools, expected);
+    }
+}
+
+#[test]
+fn codex_removed_tool_spelling_is_an_unknown_key() {
+    let base: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/profiles/gpt56solhigh.json"
+    ))
+    .unwrap();
+    for current in [None, Some(json!([])), Some(json!(["google_web_fetch"]))] {
+        for removed in [
+            json!([]),
+            json!(["google_web_fetch"]),
+            json!(["read_file"]),
+            json!([3]),
+            json!(false),
+        ] {
+            let mut value = base.clone();
+            let settings = value["ephemeralSettings"].as_object_mut().unwrap();
+            settings.remove("tools.disabled");
+            if let Some(current) = &current {
+                settings.insert("tools.disabled".to_string(), current.clone());
+            }
+            settings.insert("disabled-tools".to_string(), removed);
+            assert_eq!(
+                parse_profile_value(&value, "gpt56solhigh").unwrap_err(),
+                "profile \"gpt56solhigh\": unsupported Codex setting 'disabled-tools'"
+            );
+        }
+    }
+}
+
+#[test]
+fn removed_tool_spelling_follows_each_non_codex_parser() {
+    for key in ["disabled-tools", "unowned-tool-setting", "tools.disabled"] {
+        for value in [json!([]), json!(["read_file"]), json!(false)] {
+            for provider in ["openai", "anthropic"] {
+                for discriminator in [
+                    json!({}),
+                    json!({"chat_template_kwargs": {"enable_thinking": true}}),
+                ] {
+                    let profile = json!({
+                        "provider": provider,
+                        "model": "fixture-model",
+                        "modelParams": discriminator,
+                        "ephemeralSettings": {key: value.clone()}
+                    });
+                    let parsed = parse_profile_value(&profile, "unknown").unwrap();
+                    assert_eq!(parsed.ephemeral.unsupported, vec![key.to_string()]);
+                    assert!(parsed.ephemeral.disabled_tools.is_empty());
+                }
+            }
+            for selection in [json!({}), json!({"apiMode": "responses"})] {
+                let mut settings = selection;
+                settings[key] = value.clone();
+                let provider = if settings.get("apiMode").is_some() {
+                    "openai"
+                } else {
+                    "openai-responses"
+                };
+                assert_eq!(
+                    parse_profile_value(&json!({"provider": provider, "model": "fixture-model", "ephemeralSettings": settings}), "unknown").unwrap_err(),
+                    "profile \"unknown\": unsupported OpenAI Responses setting"
+                );
+            }
+        }
+    }
 }
