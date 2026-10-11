@@ -41,9 +41,11 @@ not normal serial scheduling. The existing counters distinguish multiple stores
 inside a fixture; schedule-stable suffixes are not required.
 No production loading, pinning, authentication, migration, retry, or fallback
 behavior changes. A worker calling `root()` gets its own new root, not the
-caller's. Since `load_at` creates on demand, delegated reopens must receive the
-original root explicitly or risk opening an unrelated empty session. The
-concurrency regression intentionally self-allocates independent worker roots.
+caller's. Since `load_at` creates on demand, `reopen` derives the original
+configuration root from the source store's session directory, never the worker
+thread's root. The owning test thread must remain alive until delegated workers
+release their handles. The concurrency regression intentionally self-allocates
+independent worker roots.
 
 ## Deterministic coverage
 
@@ -67,6 +69,10 @@ binary, not a replacement implementation of recovery:
   parent kills and waits its owned, unreaped direct child. These exact children
   use scripted replies and `read_file`, not shell tools or descendant workloads.
   The 10ms polling interval is supervision, not a collision-fix sleep or retry.
+- `delegated_reopen_preserves_authenticated_session_identity` delegates a real
+  bulk-turn reopen to a worker with a different thread-local root. It requires
+  the same session directory, authenticated spine and vault key, rejects the
+  worker's workspace, then continues turn 2 in the original workspace.
 - `concurrent_fixtures_keep_fixed_sessions_independent` starts eight fixtures at
   a barrier with the same session ID. Each runs a real bulk turn, reopens its
   context, rejects a genuinely wrong workspace, and successfully continues in
@@ -140,3 +146,41 @@ A passing ordinary rerun is a baseline observation, never the fix. TempDir clean
 remains intentional; no opt-in retention framework or production policy changes
 are introduced. Non-secret historical checkpoint/spine evidence is retained in
 impl2 artifacts before owned external scratch cleanup.
+
+## Current-main continuation (2026-10-11)
+
+Clean main base: `6d1781c07521d14b3c812edc46309acddc2287a3`.
+This base already includes `4d96e9af81815a7893cf6e31a0f9f1e3740568c9`
+(random per-test roots) and `162b7045` (checkpoint-history regression).
+A native Rust 1.88 offline/locked recovery run passed 31/31 on that clean base;
+this is a baseline observation, not a new fix or proof of the original PID history.
+
+A separately materialized copy of that exact base, with **only** the fixture
+root allocator changed back to the historical PID-based `OnceLock<PathBuf>`,
+reproduced all four seeded cases deterministically: checkpoint, symlink and
+entropy exited 101 with wrong-workspace pin refusals; checkpoint-history exited
+101 at the unchanged assertion with `[0, 0, 1]` versus `[1]`. This is an explicitly
+modified current-main control, not an execution of the unavailable incident diff
+or supplied historical candidate. Production recovery bytes and the delegated
+assertions were not modified. The existing random-root regression passes the
+same seeded cases without adopting stale history. This supports stale fixture
+identity as a sufficient cause of both signatures, without claiming the actual
+incident process lifetime or any unavailable source generation.
+
+The new delegated-reopen test also fails on the unchanged current-main helper:
+the worker opens a different configuration-root/session-ID identity despite
+receiving the source store. Its session-directory equality assertion exits 101.
+The helper now binds reopens to that source identity. The recovery suite passes
+32/32 with the helper fix. Initial context is loaded through the existing public
+`set_digest_size_floor(1024)` seam before reading pages; the test does not bypass
+authentication or inject context state. Production loading, pinning, checkpoint
+publication, artifact authentication and all existing assertions remain unchanged.
+
+Raw command logs, statuses, control-source delta and binary hashes are retained
+under ignored `tmp/issue-194/` in this delivery worktree. They are local evidence,
+not claimed to be available in an extracted source bundle. The historical evidence
+paths above remain historical citations; missing incident/candidate sources are
+not reconstructed or relabeled as originals. This delivery claims fixture-level
+coverage only, not a stock-CLI workload demonstration or a production-policy fix.
+
+Review cycle/result: skipped per Andrew directive 2026-10-09 (no OCR).
