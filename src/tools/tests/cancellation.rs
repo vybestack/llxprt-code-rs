@@ -1,64 +1,95 @@
 //! Cancellation-lifecycle tests split out of the main tools test module so both
 //! files stay under the quality gate's 800 effective-LOC ceiling.
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+mod lifecycle;
+mod owned_helper;
+use owned_helper::OwnedHelper;
 
 const CANCELLATION_CHILD: &str = "LLXPRT_TEST_CANCELLATION_CHILD";
 const LAUNCH_READY: &str = "LLXPRT_TEST_LAUNCH_READY";
 const LAUNCH_SIDE_EFFECT: &str = "LLXPRT_TEST_LAUNCH_SIDE_EFFECT";
 
-fn spawn_cancellation_child() -> std::process::Child {
-    std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "tools::tests::cancellation::cancelling_the_worker_subprocess_helper",
-            "--nocapture",
-        ])
-        .env(CANCELLATION_CHILD, "1")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap()
+fn spawn_cancellation_child() -> OwnedHelper {
+    OwnedHelper::spawn(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::tests::cancellation::cancelling_the_worker_subprocess_helper",
+                "--nocapture",
+            ])
+            .env(CANCELLATION_CHILD, "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null()),
+    )
 }
 
 fn spawn_launch_cancellation_child(
     marker: &std::path::Path,
     side_effect: &std::path::Path,
-) -> std::process::Child {
-    std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "tools::tests::cancellation::cancelling_during_launch_subprocess_helper",
-            "--nocapture",
-        ])
-        .env(LAUNCH_READY, marker)
-        .env(LAUNCH_SIDE_EFFECT, side_effect)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap()
+) -> OwnedHelper {
+    OwnedHelper::spawn(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tools::tests::cancellation::cancelling_during_launch_subprocess_helper",
+                "--nocapture",
+            ])
+            .env(LAUNCH_READY, marker)
+            .env(LAUNCH_SIDE_EFFECT, side_effect)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()),
+    )
 }
 
 /// Read the `"<pgid> [<starttime>]"` line the helper prints once its `run_cmd` registers the
 /// group. The starttime (present on Linux) anchors the cohort identity for the liveness probe.
 fn read_reported_pgid(child: &mut std::process::Child) -> (libc::pid_t, Option<u64>) {
-    use std::io::BufRead;
-    let stdout = child.stdout.take().unwrap();
-    for line in std::io::BufReader::new(stdout).lines() {
-        let line = line.unwrap();
-        // split_whitespace already skips leading/trailing blanks, so no trim() first.
-        let mut parts = line.split_whitespace();
-        if let Some(Ok(pgid)) = parts.next().map(str::parse::<i32>) {
-            assert!(pgid > 0, "helper reported a non-group pgid: {pgid}");
-            // The helper prints 0 when it could not read the leader's stat; treat that as
-            // "cohort unknown" (bare pgrp match) rather than a window no member can satisfy.
-            let starttime = parts
-                .next()
-                .and_then(|token| token.parse::<u64>().ok())
-                .filter(|start| *start > 0);
-            return (pgid, starttime);
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    let mut stdout = child.stdout.take().unwrap();
+    // Nonblocking reads make readiness failure bounded even if the helper remains
+    // alive without publishing. The owned guard must already exist before this read.
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    assert!(flags >= 0);
+    assert_eq!(
+        unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) },
+        0
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut pending = Vec::new();
+    loop {
+        let mut bytes = [0_u8; 256];
+        match stdout.read(&mut bytes) {
+            Ok(0) => panic!("helper exited before reporting its tool pgid"),
+            Ok(count) => pending.extend_from_slice(&bytes[..count]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(error) => panic!("helper readiness read failed: {error}"),
         }
+        while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+            let line = String::from_utf8(pending.drain(..=end).collect()).unwrap();
+            let mut parts = line.split_whitespace();
+            if let Some(Ok(pgid)) = parts.next().map(str::parse::<i32>) {
+                assert!(pgid > 0, "helper reported a non-group pgid: {pgid}");
+                let starttime = parts
+                    .next()
+                    .and_then(|token| token.parse::<u64>().ok())
+                    .filter(|start| *start > 0);
+                return (pgid, starttime);
+            }
+        }
+        assert!(pending.len() < 4096, "unbounded helper readiness output");
+        assert!(
+            Instant::now() < deadline,
+            "helper did not report its tool pgid"
+        );
+        std::thread::sleep(Duration::from_millis(1));
     }
-    panic!("helper exited before reporting its tool pgid");
 }
 
 /// One live (non-zombie) `/proc` member of the group, with the `starttime` field that
@@ -247,7 +278,13 @@ fn cancelling_during_launch_kills_the_unpublished_child_before_exec() {
         unsafe { libc::kill(worker.id() as libc::pid_t, libc::SIGTERM) },
         0
     );
-    assert_eq!(worker.wait().unwrap().code(), Some(143));
+    assert_eq!(
+        worker
+            .wait_until(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .code(),
+        Some(143)
+    );
     #[cfg(target_os = "linux")]
     {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -365,6 +402,8 @@ fn cancelling_the_worker_kills_the_active_tool_group() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    let status = child.wait().unwrap();
+    let status = child
+        .wait_until(Instant::now() + Duration::from_secs(5))
+        .unwrap();
     assert_eq!(status.code(), Some(143));
 }

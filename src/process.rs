@@ -31,6 +31,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 mod ownership;
+#[cfg(test)]
+pub(crate) use ownership::Scope as TestScope;
 mod process_launch;
 #[cfg(test)]
 use process_launch::cfg_launch_test_barrier;
