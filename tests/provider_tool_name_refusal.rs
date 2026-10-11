@@ -66,6 +66,18 @@ fn serve(listener: TcpListener, replies: Vec<Value>) -> Vec<Value> {
 }
 
 fn run(replies: Vec<Value>, expected_code: i32) -> (Value, Vec<Value>, tempfile::TempDir) {
+    run_with_flags(
+        replies,
+        expected_code,
+        &["--max-tool-calls", "4", "--allow-shell"],
+    )
+}
+
+fn run_with_flags(
+    replies: Vec<Value>,
+    expected_code: i32,
+    flags: &[&str],
+) -> (Value, Vec<Value>, tempfile::TempDir) {
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     std::fs::create_dir(root.path().join("profiles")).unwrap();
@@ -92,14 +104,12 @@ fn run(replies: Vec<Value>, expected_code: i32) -> (Value, Vec<Value>, tempfile:
             "name-refusal",
             "--turn-time",
             "5s",
-            "--max-tool-calls",
-            "4",
-            "--allow-shell",
             "-p",
             "Inspect the workspace, then summarize.",
             "--cwd",
         ])
         .arg(root.path())
+        .args(flags)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(expected_code), "{output:?}");
@@ -237,4 +247,192 @@ fn secret_in_later_call_prevents_reissue_and_diagnostic_excerpt() {
     assert!(store(root.path()).snapshot().unwrap().branches[0]
         .rounds
         .is_empty());
+}
+
+// Issue 206 is already integrated on main. These compiled-provider cases pin the
+// original unlimited-budget failure and the capability/batch-admission boundaries.
+#[test]
+fn unknown_name_after_investigation_corrects_to_shell_without_losing_the_turn() {
+    let investigation = (0..41)
+        .map(|index| {
+            tool(
+                &format!("inspect-{index}"),
+                "list_directory",
+                r#"{"path":"."}"#,
+            )
+        })
+        .collect();
+    let args = r#"{"command":"printf corrected > corrected","timeout_seconds":1}"#;
+    let (envelope, requests, root) = run_with_flags(
+        vec![
+            completion("Investigating", investigation),
+            completion("", vec![tool("typo", "run_socket_command", args)]),
+            completion("", vec![tool("corrected", "run_shell_command", args)]),
+            completion("Corrected in the same turn.", vec![]),
+        ],
+        0,
+        &["--max-tool-calls=-1", "--allow-shell"],
+    );
+    assert_eq!(envelope["status"], "ok");
+    assert_eq!(envelope["summary"], "Corrected in the same turn.");
+    assert_eq!(envelope["turn"], 1);
+    assert_eq!(envelope["attempt"], 1);
+    assert_eq!(envelope["tool_calls"], 43);
+    assert_eq!(envelope["declared_tool_calls"], -1);
+    assert_eq!(envelope["budget_exhausted"], false);
+    assert_eq!(requests.len(), 4);
+    let messages = requests[2]["messages"].as_array().unwrap();
+    let failure = messages.last().unwrap();
+    assert_eq!(failure["role"], "tool");
+    assert_eq!(failure["tool_call_id"], "typo");
+    let wire = failure["content"].as_str().unwrap();
+    let content = wire.strip_prefix("Error: ").unwrap();
+    assert!(content.contains("unknown or disabled tool run_socket_command"));
+    assert!(content.contains("available:"));
+    assert!(content.contains("run_shell_command"));
+    assert!(content.len() <= envelope["output_caps"]["tool"].as_u64().unwrap() as usize);
+    assert!(!requests[2]
+        .to_string()
+        .contains("previous tool-call reply was refused"));
+    assert_eq!(
+        std::fs::read(root.path().join("corrected")).unwrap(),
+        b"corrected"
+    );
+    let state = store(root.path()).snapshot().unwrap();
+    let branch = &state.branches[0];
+    assert_eq!(branch.lifecycle, Lifecycle::Completed);
+    assert_eq!(branch.rounds[0].calls.len(), 41);
+    let bad = &branch.rounds[1].calls[0];
+    assert_eq!(
+        (&*bad.id, &*bad.name, &*bad.args),
+        ("typo", "run_socket_command", args)
+    );
+    assert_eq!((bad.ok, bad.refused), (false, false));
+    assert_eq!(bad.result, content);
+    assert!(bad.result_live.is_empty());
+    assert!(branch.rounds[2].calls[0].ok);
+}
+
+#[test]
+fn disabled_shell_returns_bounded_failure_and_cannot_execute_under_unlimited_budget() {
+    let (envelope, requests, root) = run_with_flags(
+        vec![
+            completion(
+                "",
+                vec![tool(
+                    "disabled",
+                    "run_shell_command",
+                    r#"{"command":"touch must-not-exist","timeout_seconds":1}"#,
+                )],
+            ),
+            completion("", vec![tool("safe", "list_directory", r#"{"path":"."}"#)]),
+            completion("Done safely.", vec![]),
+        ],
+        0,
+        &["--max-tool-calls=-1", "--max-tool-output", "128"],
+    );
+    assert_eq!(envelope["status"], "ok");
+    assert_eq!(envelope["tool_calls"], 2);
+    assert!(!root.path().join("must-not-exist").exists());
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|spec| spec["function"]["name"] != "run_shell_command"));
+    let messages = requests[1]["messages"].as_array().unwrap();
+    let failure = messages.last().unwrap();
+    assert_eq!(failure["role"], "tool");
+    assert_eq!(failure["tool_call_id"], "disabled");
+    let wire = failure["content"].as_str().unwrap();
+    let content = wire.strip_prefix("Error: ").unwrap();
+    assert!(content.contains("unknown or disabled tool run_shell_command"));
+    assert!(content.len() <= 128);
+    assert!(wire.len() <= 128 + "Error: ".len());
+    assert!(!content.contains("touch"));
+    assert!(!content
+        .split("available: ")
+        .nth(1)
+        .unwrap()
+        .contains("run_shell_command"));
+    let state = store(root.path()).snapshot().unwrap();
+    assert_eq!(state.branches[0].lifecycle, Lifecycle::Completed);
+    let bad = &state.branches[0].rounds[0].calls[0];
+    assert_eq!((bad.ok, bad.refused), (false, false));
+    assert_eq!(bad.result, content);
+}
+
+#[test]
+fn repeated_unknown_names_consume_the_existing_call_budget() {
+    let (envelope, requests, root) = run_with_flags(
+        vec![
+            completion("", vec![tool("one", "run_socket_command", "{}")]),
+            completion(
+                "",
+                vec![
+                    tool("two", "run_socket_command", "{}"),
+                    tool(
+                        "three",
+                        "write_file",
+                        r#"{"path":"must-not-exist","content":"bad"}"#,
+                    ),
+                ],
+            ),
+            completion("Budget exhausted.", vec![]),
+        ],
+        0,
+        &["--max-tool-calls", "2"],
+    );
+    assert_eq!(envelope["tool_calls"], 2);
+    assert_eq!(envelope["budget_exhausted"], true);
+    assert_eq!(requests.len(), 3);
+    assert!(!root.path().join("must-not-exist").exists());
+    let messages = requests[2]["messages"].as_array().unwrap();
+    let results = messages
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[1]["tool_call_id"], "two");
+    assert!(results[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("unknown or disabled"));
+    assert_eq!(results[2]["tool_call_id"], "three");
+    assert!(results[2]["content"]
+        .as_str()
+        .unwrap()
+        .contains("tool-call budget exhausted"));
+    let state = store(root.path()).snapshot().unwrap();
+    let calls = &state.branches[0].rounds[1].calls;
+    assert_eq!((calls[0].ok, calls[0].refused), (false, false));
+    assert_eq!((calls[1].ok, calls[1].refused), (false, true));
+}
+
+#[test]
+fn malformed_unknown_call_refuses_whole_provider_batch_before_any_side_effect() {
+    for args in ["not json", "[]", "null"] {
+        let (envelope, requests, root) = run_with_flags(
+            vec![completion(
+                "",
+                vec![
+                    tool(
+                        "write",
+                        "write_file",
+                        r#"{"path":"must-not-exist","content":"bad"}"#,
+                    ),
+                    tool("bad", "run_socket_command", args),
+                ],
+            )],
+            5,
+            &["--max-tool-calls=-1", "--allow-shell"],
+        );
+        assert_eq!(envelope["status"], "error");
+        assert_eq!(envelope["error"]["code"], "invalid-tool-call");
+        assert_eq!(requests.len(), 1);
+        assert!(!root.path().join("must-not-exist").exists());
+        let state = store(root.path()).snapshot().unwrap();
+        assert_eq!(state.branches[0].lifecycle, Lifecycle::Failed);
+        assert!(state.branches[0].rounds.is_empty());
+    }
 }
