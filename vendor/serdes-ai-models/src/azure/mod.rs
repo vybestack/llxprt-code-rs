@@ -66,7 +66,7 @@ impl AzureOpenAIModel {
         let _api_version = api_version.into(); // TODO: Include in URL query params
 
         // Construct the Azure-specific URL
-        let base_url = format!("{}/openai/deployments/{}", endpoint, deployment_name);
+        let base_url = format!("{endpoint}/openai/deployments/{deployment_name}");
 
         // Create inner model with Azure URL
         // Note: Azure uses api-key header instead of Authorization: Bearer

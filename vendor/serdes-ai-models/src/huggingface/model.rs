@@ -132,7 +132,7 @@ impl HuggingFaceModel {
                                 .collect::<Vec<_>>()
                                 .join("\n"),
                         };
-                        prompt.push_str(&format!("<|user|>\n{}\n", text));
+                        prompt.push_str(&format!("<|user|>\n{text}\n"));
                     }
                     ModelRequestPart::ToolReturn(tr) => {
                         prompt.push_str(&format!("<|tool|>\n{}\n", tr.content.to_string_content()));
@@ -143,7 +143,7 @@ impl HuggingFaceModel {
                     ModelRequestPart::BuiltinToolReturn(builtin) => {
                         let content_str = serde_json::to_string(&builtin.content)
                             .unwrap_or_else(|_| builtin.content_type().to_string());
-                        prompt.push_str(&format!("<|tool|>\n{}\n", content_str));
+                        prompt.push_str(&format!("<|tool|>\n{content_str}\n"));
                     }
                     ModelRequestPart::ModelResponse(response) => {
                         // Add assistant response for proper alternation
@@ -154,7 +154,7 @@ impl HuggingFaceModel {
                             }
                         }
                         if !text_content.is_empty() {
-                            prompt.push_str(&format!("<|assistant|>\n{}\n", text_content));
+                            prompt.push_str(&format!("<|assistant|>\n{text_content}\n"));
                         }
                     }
                 }

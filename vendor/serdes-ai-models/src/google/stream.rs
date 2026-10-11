@@ -306,7 +306,7 @@ mod tests {
     use futures::StreamExt;
 
     fn make_chunk(json: &str) -> Bytes {
-        Bytes::from(format!("{}\n", json))
+        Bytes::from(format!("{json}\n"))
     }
 
     #[tokio::test]
@@ -319,8 +319,7 @@ mod tests {
         let event = parser.next().await.unwrap().unwrap();
         assert!(
             matches!(event, ModelResponseStreamEvent::PartStart(_)),
-            "Expected PartStart, got {:?}",
-            event
+            "Expected PartStart, got {event:?}"
         );
     }
 
@@ -360,8 +359,7 @@ mod tests {
 
         assert!(
             events.len() >= 2,
-            "Expected at least 2 events, got {:?}",
-            events
+            "Expected at least 2 events, got {events:?}"
         );
     }
 

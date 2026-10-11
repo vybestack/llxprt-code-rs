@@ -244,6 +244,25 @@ pub(super) fn json_event_count(stream: &str) -> usize {
         .split("\r\n\r\n")
         .filter_map(|frame| frame.strip_prefix("data: "))
         .filter(|payload| *payload != "[DONE]")
-        .map(|payload| serde_json::from_str::<serde_json::Value>(payload).unwrap())
+        .inspect(|payload| {
+            serde_json::from_str::<serde_json::Value>(payload).unwrap();
+        })
         .count()
+}
+
+#[test]
+fn json_event_count_validates_and_counts_data_frames() {
+    let stream = concat!(
+        ": keepalive\r\n\r\n",
+        "data: {\"type\":\"response.created\"}\r\n\r\n",
+        "data: {\"type\":\"response.completed\"}\r\n\r\n",
+        "data: [DONE]\r\n\r\n",
+    );
+    assert_eq!(json_event_count(stream), 2);
+}
+
+#[test]
+#[should_panic]
+fn json_event_count_rejects_malformed_json() {
+    json_event_count("data: {malformed\r\n\r\ndata: [DONE]\r\n\r\n");
 }

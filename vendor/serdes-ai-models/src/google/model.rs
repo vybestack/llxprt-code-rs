@@ -86,7 +86,7 @@ impl GoogleModel {
         let profile = Self::profile_for_model(&model_name);
 
         Self {
-            base_url: format!("https://{}-aiplatform.googleapis.com", location),
+            base_url: format!("https://{location}-aiplatform.googleapis.com"),
             model_name,
             client: crate::no_redirect_client(),
             api_key: None,
@@ -531,8 +531,7 @@ impl GoogleModel {
         if let Some(feedback) = &resp.prompt_feedback {
             if let Some(reason) = &feedback.block_reason {
                 return Err(ModelError::ContentFiltered(format!(
-                    "Prompt blocked: {}",
-                    reason
+                    "Prompt blocked: {reason}"
                 )));
             }
         }

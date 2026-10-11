@@ -1,5 +1,20 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 316: all-feature model test fixtures
+
+The OAuth SSE fixture counter validates each JSON data frame with `inspect`
+before counting; it still excludes keepalives and `[DONE]` and panics on malformed
+JSON. Focused regressions cover both valid counting and malformed JSON rejection.
+The ChatGPT and Claude Code endpoint-redaction fixtures initialize their configured
+URLs with struct update syntax instead of reassigning default fields. Their existing
+redaction assertions remain unchanged. The all-feature MSRV lane also requires captured format arguments in the
+retained Google, Ollama, Azure, HuggingFace, Claude Code and Antigravity model
+code and Google stream fixtures. Those mechanical spelling changes preserve the
+formatted bytes. No production behavior, dependency, compatibility, or
+upstream-identity changes are intended.
+CI retains the OpenAI-only gates and additionally runs direct all-target/all-feature
+model Clippy with `-D warnings` and the all-feature model tests on MSRV and stable.
+
 ## Issue 336: preterminal SSE transport interruptions
 
 The Responses client reports body-transfer loss and clean EOF before a terminal
@@ -90,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `8dc0fc9c9249e75036eb16e0962ce5b1566cd5072b19514aad60d1889556f54e`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `06c2cbdc67a971322e8c75d2c2228200ee1e15d66f6ab19f396b5e0fb5f2a30f`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

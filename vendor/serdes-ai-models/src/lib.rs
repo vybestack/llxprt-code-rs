@@ -929,10 +929,14 @@ mod credential_debug_tests {
         let mut antigravity = crate::antigravity::AntigravityConfig::default();
         antigravity.endpoint = format!("https://{MARKER}.invalid/?secret={MARKER}");
         antigravity.fallback_endpoints = vec![antigravity.endpoint.clone()];
-        let mut chatgpt = crate::chatgpt_oauth::ChatGptConfig::default();
-        chatgpt.api_base_url = antigravity.endpoint.clone();
-        let mut claude = crate::claude_code_oauth::ClaudeCodeConfig::default();
-        claude.api_base_url = antigravity.endpoint.clone();
+        let chatgpt = crate::chatgpt_oauth::ChatGptConfig {
+            api_base_url: antigravity.endpoint.clone(),
+            ..Default::default()
+        };
+        let claude = crate::claude_code_oauth::ClaudeCodeConfig {
+            api_base_url: antigravity.endpoint.clone(),
+            ..Default::default()
+        };
         let ollama = crate::ollama::OllamaModel::new("model").with_base_url(&antigravity.endpoint);
 
         for rendered in [

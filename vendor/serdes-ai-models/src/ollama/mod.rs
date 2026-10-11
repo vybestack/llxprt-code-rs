@@ -343,7 +343,7 @@ impl OllamaModel {
                 parts.push(ModelResponsePart::ToolCall(ToolCallPart {
                     tool_name: tc.function.name,
                     args: serdes_ai_core::messages::ToolCallArgs::Json(tc.function.arguments),
-                    tool_call_id: Some(format!("call_{}", idx)),
+                    tool_call_id: Some(format!("call_{idx}")),
                     id: None,
                     provider_details: None,
                 }));

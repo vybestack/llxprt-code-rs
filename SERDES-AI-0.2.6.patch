@@ -7797,7 +7797,7 @@ index 90bb06a..5eb2d6d 100644
  
      #[test]
 diff --git a/vendor/serdes-ai-models/src/antigravity/model.rs b/vendor/serdes-ai-models/src/antigravity/model.rs
-index c98b56f..9ef7c6d 100644
+index c98b56f..ae13904 100644
 --- a/vendor/serdes-ai-models/src/antigravity/model.rs
 +++ b/vendor/serdes-ai-models/src/antigravity/model.rs
 @@ -31,7 +31,7 @@ You are pair programming with a USER to solve their coding task. The task may re
@@ -7849,6 +7849,15 @@ index c98b56f..9ef7c6d 100644
              .timeout(Duration::from_secs(180))
              .build()
              .expect("Failed to build HTTP client")
+@@ -157,7 +162,7 @@ impl AntigravityModel {
+         headers.insert(
+             AUTHORIZATION,
+             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
+-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
++                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
+         );
+         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+         // Use Antigravity headers (same as CLIProxy/Vibeproxy)
 @@ -442,7 +447,7 @@ impl AntigravityModel {
      /// Convert API response to model response.
      fn convert_response(&self, response: AntigravityResponse) -> ModelResponse {
@@ -8124,6 +8133,19 @@ index 2f1ead6..1b05b36 100644
  impl Default for AntigravityConfig {
      fn default() -> Self {
          Self {
+diff --git a/vendor/serdes-ai-models/src/azure/mod.rs b/vendor/serdes-ai-models/src/azure/mod.rs
+index ccb748f..21f96a2 100644
+--- a/vendor/serdes-ai-models/src/azure/mod.rs
++++ b/vendor/serdes-ai-models/src/azure/mod.rs
+@@ -66,7 +66,7 @@ impl AzureOpenAIModel {
+         let _api_version = api_version.into(); // TODO: Include in URL query params
+ 
+         // Construct the Azure-specific URL
+-        let base_url = format!("{}/openai/deployments/{}", endpoint, deployment_name);
++        let base_url = format!("{endpoint}/openai/deployments/{deployment_name}");
+ 
+         // Create inner model with Azure URL
+         // Note: Azure uses api-key header instead of Authorization: Bearer
 diff --git a/vendor/serdes-ai-models/src/bedrock/mod.rs b/vendor/serdes-ai-models/src/bedrock/mod.rs
 deleted file mode 100644
 index 8f64887..0000000
@@ -11142,10 +11164,10 @@ index 0000000..b3ed50a
 +}
 diff --git a/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs
 new file mode 100644
-index 0000000..4b11bd4
+index 0000000..00ea7dc
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,268 @@
 +use super::*;
 +use serdes_ai_core::messages::{SystemPromptPart, UserPromptPart};
 +use serdes_ai_core::{ModelRequest, ModelRequestPart, ModelResponse};
@@ -11392,8 +11414,27 @@ index 0000000..4b11bd4
 +        .split("\r\n\r\n")
 +        .filter_map(|frame| frame.strip_prefix("data: "))
 +        .filter(|payload| *payload != "[DONE]")
-+        .map(|payload| serde_json::from_str::<serde_json::Value>(payload).unwrap())
++        .inspect(|payload| {
++            serde_json::from_str::<serde_json::Value>(payload).unwrap();
++        })
 +        .count()
++}
++
++#[test]
++fn json_event_count_validates_and_counts_data_frames() {
++    let stream = concat!(
++        ": keepalive\r\n\r\n",
++        "data: {\"type\":\"response.created\"}\r\n\r\n",
++        "data: {\"type\":\"response.completed\"}\r\n\r\n",
++        "data: [DONE]\r\n\r\n",
++    );
++    assert_eq!(json_event_count(stream), 2);
++}
++
++#[test]
++#[should_panic]
++fn json_event_count_rejects_malformed_json() {
++    json_event_count("data: {malformed\r\n\r\ndata: [DONE]\r\n\r\n");
 +}
 diff --git a/vendor/serdes-ai-models/src/chatgpt_oauth/tests/request.rs b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/request.rs
 new file mode 100644
@@ -12059,7 +12100,7 @@ index 541c112..2980293 100644
 +    }
 +}
 diff --git a/vendor/serdes-ai-models/src/claude_code_oauth/model.rs b/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
-index 61e49cb..21c01f1 100644
+index 61e49cb..55f2b88 100644
 --- a/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
 +++ b/vendor/serdes-ai-models/src/claude_code_oauth/model.rs
 @@ -29,7 +29,7 @@ const TOOL_PREFIX: &str = "cp_";
@@ -12111,6 +12152,15 @@ index 61e49cb..21c01f1 100644
              .timeout(Duration::from_secs(180))
              .build()
              .expect("Failed to build HTTP client")
+@@ -186,7 +191,7 @@ impl ClaudeCodeOAuthModel {
+     /// Used to prepend user-provided system prompts to the first user message.
+     fn prepend_to_content(&self, content: ClaudeContent, prefix: &str) -> ClaudeContent {
+         match content {
+-            ClaudeContent::Text(text) => ClaudeContent::Text(format!("{}\n\n{}", prefix, text)),
++            ClaudeContent::Text(text) => ClaudeContent::Text(format!("{prefix}\n\n{text}")),
+             ClaudeContent::Blocks(mut blocks) => {
+                 // Prepend as a text block at the beginning
+                 blocks.insert(
 @@ -373,11 +378,16 @@ impl ClaudeCodeOAuthModel {
              }
          }
@@ -12141,6 +12191,23 @@ index 61e49cb..21c01f1 100644
              message_count = messages.len(),
              "ClaudeCodeOAuth: making request"
          );
+@@ -492,14 +501,14 @@ impl Model for ClaudeCodeOAuthModel {
+         headers.insert(
+             AUTHORIZATION,
+             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
+-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
++                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
+         );
+         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+         headers.insert(
+             HeaderName::from_static("anthropic-version"),
+             HeaderValue::from_str(&self.config.anthropic_version)
+-                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
++                .map_err(|e| ModelError::api(format!("Invalid version header: {e}")))?,
+         );
+         headers.insert(
+             HeaderName::from_static("anthropic-beta"),
 @@ -528,21 +537,12 @@ impl Model for ClaudeCodeOAuthModel {
  
          if !status.is_success() {
@@ -12175,6 +12242,23 @@ index 61e49cb..21c01f1 100644
              message_count = messages.len(),
              "ClaudeCodeOAuth: making streaming request"
          );
+@@ -577,14 +576,14 @@ impl Model for ClaudeCodeOAuthModel {
+         headers.insert(
+             AUTHORIZATION,
+             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
+-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
++                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
+         );
+         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+         headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+         headers.insert(
+             HeaderName::from_static("anthropic-version"),
+             HeaderValue::from_str(&self.config.anthropic_version)
+-                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
++                .map_err(|e| ModelError::api(format!("Invalid version header: {e}")))?,
+         );
+         headers.insert(
+             HeaderName::from_static("anthropic-beta"),
 @@ -613,24 +612,15 @@ impl Model for ClaudeCodeOAuthModel {
  
          if !status.is_success() {
@@ -13347,7 +13431,7 @@ index 3e91b26..8e9a275 100644
  
          let call_count1 = model1.call_count.clone();
 diff --git a/vendor/serdes-ai-models/src/google/model.rs b/vendor/serdes-ai-models/src/google/model.rs
-index e93c5c0..fc05acb 100644
+index e93c5c0..594db20 100644
 --- a/vendor/serdes-ai-models/src/google/model.rs
 +++ b/vendor/serdes-ai-models/src/google/model.rs
 @@ -20,7 +20,7 @@ use serdes_ai_tools::ToolDefinition;
@@ -13385,9 +13469,12 @@ index e93c5c0..fc05acb 100644
              api_key: Some(api_key.into()),
              project_id: None,
              location: None,
-@@ -78,7 +88,7 @@ impl GoogleModel {
+@@ -76,9 +86,9 @@ impl GoogleModel {
+         let profile = Self::profile_for_model(&model_name);
+ 
          Self {
-             base_url: format!("https://{}-aiplatform.googleapis.com", location),
+-            base_url: format!("https://{}-aiplatform.googleapis.com", location),
++            base_url: format!("https://{location}-aiplatform.googleapis.com"),
              model_name,
 -            client: Client::new(),
 +            client: crate::no_redirect_client(),
@@ -13408,7 +13495,17 @@ index e93c5c0..fc05acb 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -581,13 +584,18 @@ impl GoogleModel {
+@@ -528,8 +531,7 @@ impl GoogleModel {
+         if let Some(feedback) = &resp.prompt_feedback {
+             if let Some(reason) = &feedback.block_reason {
+                 return Err(ModelError::ContentFiltered(format!(
+-                    "Prompt blocked: {}",
+-                    reason
++                    "Prompt blocked: {reason}"
+                 )));
+             }
+         }
+@@ -581,13 +583,18 @@ impl GoogleModel {
              }
          }
  
@@ -13434,7 +13531,7 @@ index e93c5c0..fc05acb 100644
          });
  
          let usage = resp.usage_metadata.map(|u| RequestUsage {
-@@ -612,24 +620,8 @@ impl GoogleModel {
+@@ -612,24 +619,8 @@ impl GoogleModel {
      }
  
      /// Handle API error response.
@@ -13461,7 +13558,7 @@ index e93c5c0..fc05acb 100644
      }
  }
  
-@@ -675,14 +667,11 @@ impl Model for GoogleModel {
+@@ -675,14 +666,11 @@ impl Model for GoogleModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -13478,7 +13575,7 @@ index e93c5c0..fc05acb 100644
  
          self.parse_response(resp)
      }
-@@ -708,11 +697,11 @@ impl Model for GoogleModel {
+@@ -708,11 +696,11 @@ impl Model for GoogleModel {
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -13493,7 +13590,7 @@ index e93c5c0..fc05acb 100644
  
          Ok(Box::pin(parser))
 diff --git a/vendor/serdes-ai-models/src/google/stream.rs b/vendor/serdes-ai-models/src/google/stream.rs
-index 8d72a17..d32f719 100644
+index 8d72a17..1e6bf56 100644
 --- a/vendor/serdes-ai-models/src/google/stream.rs
 +++ b/vendor/serdes-ai-models/src/google/stream.rs
 @@ -23,6 +23,7 @@ pin_project! {
@@ -13626,7 +13723,14 @@ index 8d72a17..d32f719 100644
                              }
                          }
                      }
-@@ -296,7 +312,7 @@ mod tests {
+@@ -290,28 +306,27 @@ mod tests {
+     use futures::StreamExt;
+ 
+     fn make_chunk(json: &str) -> Bytes {
+-        Bytes::from(format!("{}\n", json))
++        Bytes::from(format!("{json}\n"))
+     }
+ 
      #[tokio::test]
      async fn test_parse_text_response() {
          let chunk = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}"#;
@@ -13635,7 +13739,15 @@ index 8d72a17..d32f719 100644
          let stream = stream::iter(bytes);
          let mut parser = GoogleStreamParser::new(stream);
  
-@@ -311,7 +327,7 @@ mod tests {
+         let event = parser.next().await.unwrap().unwrap();
+         assert!(
+             matches!(event, ModelResponseStreamEvent::PartStart(_)),
+-            "Expected PartStart, got {:?}",
+-            event
++            "Expected PartStart, got {event:?}"
+         );
+     }
+ 
      #[tokio::test]
      async fn test_parse_function_call() {
          let chunk = r#"{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"search","args":{"q":"rust"}}}]}}]}"#;
@@ -13644,7 +13756,7 @@ index 8d72a17..d32f719 100644
          let stream = stream::iter(bytes);
          let mut parser = GoogleStreamParser::new(stream);
  
-@@ -330,7 +346,10 @@ mod tests {
+@@ -330,7 +345,10 @@ mod tests {
      async fn test_parse_with_finish() {
          let chunk1 = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}"#;
          let chunk2 = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":" World"}]},"finishReason":"STOP"}]}"#;
@@ -13656,8 +13768,13 @@ index 8d72a17..d32f719 100644
          let stream = stream::iter(bytes);
          let mut parser = GoogleStreamParser::new(stream);
  
-@@ -345,4 +364,22 @@ mod tests {
-             events
+@@ -341,8 +359,25 @@ mod tests {
+ 
+         assert!(
+             events.len() >= 2,
+-            "Expected at least 2 events, got {:?}",
+-            events
++            "Expected at least 2 events, got {events:?}"
          );
      }
 +
@@ -13777,7 +13894,7 @@ index 62774e7..d64c2fe 100644
      pub fn llama_70b(api_key: impl Into<String>) -> Self {
          Self::new("llama-3.1-70b-versatile", api_key)
 diff --git a/vendor/serdes-ai-models/src/huggingface/model.rs b/vendor/serdes-ai-models/src/huggingface/model.rs
-index 2807447..e8467f8 100644
+index 2807447..78a78fc 100644
 --- a/vendor/serdes-ai-models/src/huggingface/model.rs
 +++ b/vendor/serdes-ai-models/src/huggingface/model.rs
 @@ -20,7 +20,7 @@ pub const HF_INFERENCE_URL: &str = "https://api-inference.huggingface.co/models"
@@ -13828,6 +13945,33 @@ index 2807447..e8467f8 100644
      /// Set a custom profile.
      #[must_use]
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
+@@ -129,7 +132,7 @@ impl HuggingFaceModel {
+                                 .collect::<Vec<_>>()
+                                 .join("\n"),
+                         };
+-                        prompt.push_str(&format!("<|user|>\n{}\n", text));
++                        prompt.push_str(&format!("<|user|>\n{text}\n"));
+                     }
+                     ModelRequestPart::ToolReturn(tr) => {
+                         prompt.push_str(&format!("<|tool|>\n{}\n", tr.content.to_string_content()));
+@@ -140,7 +143,7 @@ impl HuggingFaceModel {
+                     ModelRequestPart::BuiltinToolReturn(builtin) => {
+                         let content_str = serde_json::to_string(&builtin.content)
+                             .unwrap_or_else(|_| builtin.content_type().to_string());
+-                        prompt.push_str(&format!("<|tool|>\n{}\n", content_str));
++                        prompt.push_str(&format!("<|tool|>\n{content_str}\n"));
+                     }
+                     ModelRequestPart::ModelResponse(response) => {
+                         // Add assistant response for proper alternation
+@@ -151,7 +154,7 @@ impl HuggingFaceModel {
+                             }
+                         }
+                         if !text_content.is_empty() {
+-                            prompt.push_str(&format!("<|assistant|>\n{}\n", text_content));
++                            prompt.push_str(&format!("<|assistant|>\n{text_content}\n"));
+                         }
+                     }
+                 }
 @@ -200,7 +203,7 @@ impl HuggingFaceModel {
                  d.finish_reason.as_ref().map(|r| match r.as_str() {
                      "length" => FinishReason::Length,
@@ -14006,7 +14150,7 @@ index 2807447..e8467f8 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..b298f3e 100644
+index 8dd0e9e..ddedfd0 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -14469,7 +14613,7 @@ index 8dd0e9e..b298f3e 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +874,75 @@ pub fn build_model_extended(
+@@ -796,17 +874,79 @@ pub fn build_model_extended(
                  model
              };
  
@@ -14537,10 +14681,14 @@ index 8dd0e9e..b298f3e 100644
 +        let mut antigravity = crate::antigravity::AntigravityConfig::default();
 +        antigravity.endpoint = format!("https://{MARKER}.invalid/?secret={MARKER}");
 +        antigravity.fallback_endpoints = vec![antigravity.endpoint.clone()];
-+        let mut chatgpt = crate::chatgpt_oauth::ChatGptConfig::default();
-+        chatgpt.api_base_url = antigravity.endpoint.clone();
-+        let mut claude = crate::claude_code_oauth::ClaudeCodeConfig::default();
-+        claude.api_base_url = antigravity.endpoint.clone();
++        let chatgpt = crate::chatgpt_oauth::ChatGptConfig {
++            api_base_url: antigravity.endpoint.clone(),
++            ..Default::default()
++        };
++        let claude = crate::claude_code_oauth::ClaudeCodeConfig {
++            api_base_url: antigravity.endpoint.clone(),
++            ..Default::default()
++        };
 +        let ollama = crate::ollama::OllamaModel::new("model").with_base_url(&antigravity.endpoint);
 +
 +        for rendered in [
@@ -14771,7 +14919,7 @@ index e7d0aca..6334242 100644
          });
  
 diff --git a/vendor/serdes-ai-models/src/ollama/mod.rs b/vendor/serdes-ai-models/src/ollama/mod.rs
-index 97d1a2d..1e6fe0e 100644
+index 97d1a2d..a67f673 100644
 --- a/vendor/serdes-ai-models/src/ollama/mod.rs
 +++ b/vendor/serdes-ai-models/src/ollama/mod.rs
 @@ -44,7 +44,7 @@ use serdes_ai_core::{
@@ -14827,6 +14975,15 @@ index 97d1a2d..1e6fe0e 100644
      /// Set a custom profile.
      pub fn with_profile(mut self, profile: ModelProfile) -> Self {
          self.profile = profile;
+@@ -336,7 +343,7 @@ impl OllamaModel {
+                 parts.push(ModelResponsePart::ToolCall(ToolCallPart {
+                     tool_name: tc.function.name,
+                     args: serdes_ai_core::messages::ToolCallArgs::Json(tc.function.arguments),
+-                    tool_call_id: Some(format!("call_{}", idx)),
++                    tool_call_id: Some(format!("call_{idx}")),
+                     id: None,
+                     provider_details: None,
+                 }));
 @@ -344,11 +351,18 @@ impl OllamaModel {
          }
  
