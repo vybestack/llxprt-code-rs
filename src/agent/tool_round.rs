@@ -37,6 +37,22 @@ impl super::Turn<'_> {
             calls: Vec::new(),
         };
         self.execute_calls(config, attempt, &mut round, &calls, store, reserved)?;
+        for call in &skipped {
+            self.observations
+                .borrow_mut()
+                .push_tool(crate::telemetry::ToolExecution {
+                    round: attempt.rounds.len() as u64 + 1,
+                    name: if known_tool(&call.name, self.allow_shell) {
+                        call.name.clone()
+                    } else {
+                        "unregistered".into()
+                    },
+                    exit_class: "budget-refused".into(),
+                    wall_ms: 0,
+                    output_bytes: 0,
+                    truncated: false,
+                });
+        }
         refuse_over_budget(self.max_tool_calls, attempt, &mut round, &skipped);
         let emitted_prefix = calls.len();
         attempt.rounds.push(round);

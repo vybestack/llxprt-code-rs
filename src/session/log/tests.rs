@@ -2,6 +2,7 @@ use super::*;
 
 fn branch() -> BranchRecord {
     BranchRecord {
+        telemetry: None,
         branch_id: "b1".into(),
         turn: 1,
         attempt: 1,

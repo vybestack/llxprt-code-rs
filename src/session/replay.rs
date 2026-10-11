@@ -18,6 +18,22 @@ pub(super) fn apply_batch(state: &mut SessionState, batch: &EventBatch) -> Resul
 
 fn apply_event(state: &mut SessionState, event: &Event) -> Result<(), StoreError> {
     match event {
+        Event::Telemetry {
+            branch_id,
+            owner,
+            telemetry,
+        } => {
+            let branch = state
+                .branches
+                .iter_mut()
+                .find(|b| &b.branch_id == branch_id)
+                .ok_or_else(|| corrupt("telemetry names unknown branch"))?;
+            if &branch.owner != owner || !telemetry.valid() {
+                return Err(corrupt("invalid telemetry owner or payload"));
+            }
+            branch.telemetry = Some(*telemetry.clone());
+            Ok(())
+        }
         Event::BranchReserved {
             cwd,
             cwd_dev,
@@ -145,6 +161,7 @@ fn reclaim(
     branch.owner = owner.to_string();
     branch.reserved_at = reserved_at;
     branch.lease_expiry = lease_expiry;
+    branch.telemetry = None;
     branch.rounds.clear();
     branch.stream_retries.clear();
     branch.summary.clear();

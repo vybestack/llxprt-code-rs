@@ -122,10 +122,13 @@ fn profile_error(
 ) -> cli::AppError {
     let mut app = cli::AppError::profiling(error);
     app.session_status = Some(status.into_boxed_str());
-    app.retry_attempts = match outcome {
-        Ok(run) => Some(Box::new(run.run.retry_attempts)),
-        Err(error) => error.retry_attempts.as_deref().copied().map(Box::new),
-    };
+    app.observations = Some(Box::new(cli::FailureObservations {
+        telemetry: None,
+        retry_attempts: match outcome {
+            Ok(run) => Some(run.run.retry_attempts),
+            Err(error) => error.retry_attempts(),
+        },
+    }));
     app
 }
 

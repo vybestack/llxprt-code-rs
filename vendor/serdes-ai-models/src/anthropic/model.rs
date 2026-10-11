@@ -607,7 +607,9 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
         if !response.status().is_success() {
             let detail = crate::response::transport_detail(response).await?;
@@ -645,7 +647,9 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
         if !response.status().is_success() {
             let detail = crate::response::transport_detail(response).await?;

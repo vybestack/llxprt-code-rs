@@ -2284,6 +2284,7 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle)
         Lifecycle::Completed | Lifecycle::Failed => (0, 0),
     };
     BranchRecord {
+        telemetry: None,
         stream_retries: Vec::new(),
         branch_id: id.to_string(),
         turn,

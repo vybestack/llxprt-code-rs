@@ -84,6 +84,7 @@ async fn send_completed_turn(ws: &mut FakeWs, id: &str, request: &CreateResponse
         }],
     }];
     response.usage = Some(ResponseUsage {
+        output_tokens_details: None,
         input_tokens: Some(1),
         input_tokens_details: None,
         output_tokens: Some(1),

@@ -65,6 +65,9 @@ pub enum Envelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OkEnvelope {
+    /// Strict, versioned observations; setup failures may have none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -101,6 +104,9 @@ pub struct OkEnvelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorEnvelope {
+    /// Strict, versioned observations; setup failures may have none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -148,6 +154,7 @@ impl Envelope {
         message: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: code.into(),
@@ -168,6 +175,7 @@ impl Envelope {
         session_status: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: "mem-profile".into(),

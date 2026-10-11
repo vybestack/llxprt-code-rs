@@ -80,6 +80,9 @@ impl ResponsesBackend {
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn streams_response(&self) -> bool {
+        matches!(self.model, ResponsesModel::Codex(_))
+    }
     fn stream_interruption(&self) -> Option<usize> {
         self.interrupted.get()
     }
@@ -124,6 +127,8 @@ impl ChatBackend for ResponsesBackend {
 mod cache_tests;
 #[cfg(test)]
 mod stream_retry_tests;
+#[cfg(test)]
+mod telemetry_tests;
 #[cfg(test)]
 mod transport_tests;
 
@@ -354,6 +359,7 @@ pub(super) mod tests {
     /// Provider-reported usage shared by each synthetic completed turn.
     fn codex_fixture_usage() -> serdes_ai_responses::types::ResponseUsage {
         serdes_ai_responses::types::ResponseUsage {
+            output_tokens_details: None,
             input_tokens: Some(11),
             input_tokens_details: Some(serdes_ai_responses::types::InputTokensDetails {
                 cached_tokens: Some(6),

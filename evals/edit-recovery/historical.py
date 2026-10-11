@@ -179,6 +179,7 @@ def grade(dest):
         'invalid_partial_round_access_removed']) and not result['unexpected_changes'] and not result['new_files'] and all(g['exit'] == 0 for g in result['gates'])
     result['execution_integrity'] = 'requires retained call trace and independent scenario/provenance assessment; never inferred from exit zero'
     save(dest / 'grade.json', result)
+    return result
 
 
 def main():
@@ -199,7 +200,8 @@ def main():
     elif args.action == 'run':
         live(dest, args.binary.resolve(), args.profile.resolve())
     else:
-        grade(dest)
+        # A zero status certifies only this structural/test screen, not acceptance.
+        raise SystemExit(0 if grade(dest)['structural_and_test_pass'] else 1)
 
 
 if __name__ == '__main__':

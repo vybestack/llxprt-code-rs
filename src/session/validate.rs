@@ -92,6 +92,9 @@ impl SessionState {
         branch: &BranchRecord,
         index: &std::collections::HashMap<&str, usize>,
     ) -> Result<(), StoreError> {
+        if branch.telemetry.as_ref().is_some_and(|t| !t.valid()) {
+            return Err(StoreError::Corrupt("invalid branch telemetry".into()));
+        }
         for retry in &branch.stream_retries {
             super::stream_retry::validate(retry)?;
         }

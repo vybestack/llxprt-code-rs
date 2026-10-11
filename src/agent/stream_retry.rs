@@ -9,8 +9,13 @@ impl Turn<'_> {
         context: (&SessionStore, &ReservedRequest, usize),
     ) -> Result<LlmResult, RoundFailure> {
         let (store, reserved, round) = context;
+        if self.telemetry_round.replace(round) != round {
+            self.telemetry_attempt.set(0);
+        }
         for retry in 0..=super::rate_limit::MAX_RETRIES {
-            let events = match self.round_once(requests, tools, retry > 0) {
+            let result = self.round_once(requests, tools, retry > 0);
+            self.persist_observations(store, reserved)?;
+            let events = match result {
                 Err(RoundFailure::StreamInterrupted(events))
                     if retry < super::rate_limit::MAX_RETRIES =>
                 {
@@ -21,7 +26,13 @@ impl Turn<'_> {
                         && (failure.kind != crate::transport::TransportKind::RateLimit
                             || failure.status == Some(429)) =>
                 {
-                    self.rate_limit_delay(store, reserved, failure, retry)?;
+                    let started = std::time::Instant::now();
+                    let result = self.rate_limit_delay(store, reserved, failure.clone(), retry);
+                    if !matches!(result, Err(RoundFailure::TransportRetryStopped { .. })) {
+                        self.observed_retry(Some(&failure), started.elapsed());
+                        self.persist_observations(store, reserved)?;
+                    }
+                    result?;
                     continue;
                 }
                 other => return other,
@@ -45,7 +56,11 @@ impl Turn<'_> {
                 .expect("transcript mutex poisoned")
                 .stream_retry(reserved.turn, &record)
                 .map_err(RoundFailure::RetryTranscript)?;
-            self.retry_delay(std::time::Duration::from_millis(record.delay_ms))?;
+            let started = std::time::Instant::now();
+            let result = self.retry_delay(std::time::Duration::from_millis(record.delay_ms));
+            self.observed_retry(None, started.elapsed());
+            self.persist_observations(store, reserved)?;
+            result?;
         }
         unreachable!("last attempt returns its result")
     }

@@ -761,6 +761,7 @@ fn cli_and_harness_share_one_prompt_digest() {
             session_dir: std::path::PathBuf::from("/config/code-rs-sessions/s"),
             output_caps: crate::agent::OutputCaps::default(),
             run: CompletedRun {
+                telemetry: None,
                 turn: 1,
                 attempt: 1,
                 branch_id: "b1".into(),
