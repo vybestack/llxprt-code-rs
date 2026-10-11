@@ -242,3 +242,6 @@ fn agent_error(error: crate::agent::AgentError) -> AppError {
     }
     app
 }
+
+#[cfg(test)]
+mod shell_policy_tests;
