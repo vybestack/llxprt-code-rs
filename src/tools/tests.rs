@@ -13,6 +13,7 @@ mod path_safety;
 mod read_recovery;
 mod redaction;
 mod shell;
+mod worktree;
 
 fn cfg(root: &std::path::Path) -> ToolConfig {
     let ws = WorkspaceCap::open(root).unwrap();

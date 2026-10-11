@@ -72,7 +72,7 @@ pub(super) fn shell_tool(
     };
     let framing = if o.timed_out {
         format!(
-            "command timed out after {} ms{}; output:\n",
+            "command timed out after {} ms{}; partial filesystem effects may remain. Do not treat a created directory as a usable worktree; verify repository identity before destructive Git actions. Preserve this failed attempt; output:\n",
             timeout.map_or(0, |timeout| timeout.as_millis()),
             clamp_note,
         )
@@ -89,9 +89,9 @@ pub(super) fn shell_tool(
             None => format!("command was killed by a signal{clamp_note}; output:\n"),
         }
     };
-    let bounded = if clamped {
+    let bounded = if clamped || o.timed_out {
         // Reserve the diagnostic before truncating payload; large output must not
-        // displace the requested/effective timeout disclosure. Tiny budgets still
+        // displace timeout safety guidance or the requested/effective disclosure. Tiny budgets still
         // bound the framing itself, just like every other tool diagnostic.
         let framing = truncate(&framing, max_output);
         let payload = truncate(combined.trim_end(), max_output - framing.len());
