@@ -126,6 +126,7 @@ pub fn hidden_grader_checks(scenario: &str) -> &'static [(&'static str, HiddenGr
     }
 }
 
+mod cargo_fixture;
 mod targets;
 use targets::intended_cargo_targets;
 mod basic;
@@ -384,7 +385,15 @@ fn materialize_sources(ws: &crate::tools::WorkspaceCap, destination: &Path) -> b
         let Some(parent) = path.parent() else {
             return false;
         };
-        if std::fs::create_dir_all(parent).is_err() || std::fs::write(path, source.text).is_err() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return false;
+        }
+        let written = if path.file_name().is_some_and(|name| name == "Cargo.toml") {
+            cargo_fixture::write_manifest(destination, &source.text)
+        } else {
+            std::fs::write(path, source.text).is_ok()
+        };
+        if !written {
             return false;
         }
     }
@@ -649,7 +658,7 @@ fn probe_crypto_removal(
     if std::fs::create_dir_all(base.join("tests")).is_err() {
         return RemovalProbe::Inconclusive;
     }
-    if std::fs::write(base.join("Cargo.toml"), pruned).is_err() {
+    if !cargo_fixture::write_manifest(base, &pruned) {
         return RemovalProbe::Inconclusive;
     }
     if std::fs::write(base.join("tests/contract.rs"), contract_tests(name)).is_err() {
@@ -659,19 +668,14 @@ fn probe_crypto_removal(
 }
 
 fn run_removal_command(program: &str, base: &Path) -> RemovalProbe {
-    let outcome = process::run_cmd(CmdSpec {
-        program: program.to_string(),
-        args: vec!["test".to_string(), "--offline".to_string()],
-        cwd: Some(base.to_path_buf()),
-        cwd_fd: None,
-        env_add: Vec::new(),
-        timeout: Some(CONSUMER_TIMEOUT),
-        max_output: PROBE_MAX_OUTPUT,
-    });
-    match outcome {
-        Ok(outcome) => classify_probe(&outcome),
-        Err(_) => RemovalProbe::Inconclusive,
+    let Some(outcome) = cargo_fixture::run(program, base, PROBE_MAX_OUTPUT) else {
+        return RemovalProbe::Inconclusive;
+    };
+    let probe = classify_probe(&outcome);
+    if probe == RemovalProbe::Inconclusive {
+        eprintln!("{}", cargo_fixture::diagnostic(base, &outcome));
     }
+    probe
 }
 
 fn removal_probe_proves_crypto(probe: RemovalProbe) -> bool {
@@ -709,7 +713,7 @@ fn build_and_test_consumer(base: &std::path::Path, ws: &std::path::Path, name: &
     if std::fs::create_dir_all(base.join("tests")).is_err() {
         return false;
     }
-    if std::fs::write(base.join("Cargo.toml"), manifest).is_err() {
+    if !cargo_fixture::write_manifest(base, &manifest) {
         return false;
     }
     if std::fs::write(base.join("tests/contract.rs"), tests).is_err() {
@@ -728,19 +732,14 @@ fn build_and_test_consumer(base: &std::path::Path, ws: &std::path::Path, name: &
     {
         return false;
     }
-    let o = match process::run_cmd(CmdSpec {
-        program: "cargo".to_string(),
-        args: vec!["test".to_string(), "--offline".to_string()],
-        cwd: Some(base.to_path_buf()),
-        cwd_fd: None,
-        env_add: Vec::new(),
-        timeout: Some(CONSUMER_TIMEOUT),
-        max_output: CONSUMER_MAX_OUTPUT,
-    }) {
-        Ok(o) => o,
-        Err(_) => return false,
+    let Some(outcome) = cargo_fixture::run("cargo", base, CONSUMER_MAX_OUTPUT) else {
+        return false;
     };
-    o.status == Some(0) && !o.timed_out
+    let passed = outcome.status == Some(0) && !outcome.timed_out;
+    if !passed {
+        eprintln!("{}", cargo_fixture::diagnostic(base, &outcome));
+    }
+    passed
 }
 
 /// The result of running one verification command.

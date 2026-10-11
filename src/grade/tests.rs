@@ -657,6 +657,7 @@ fn symlinked_required_file_is_not_present() {
         0.0
     );
 }
+mod fixtures;
 mod flow;
 
 #[test]
