@@ -162,7 +162,7 @@ impl AntigravityModel {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
+                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         // Use Antigravity headers (same as CLIProxy/Vibeproxy)

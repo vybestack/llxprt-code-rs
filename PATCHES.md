@@ -7,8 +7,11 @@ before counting; it still excludes keepalives and `[DONE]` and panics on malform
 JSON. Focused regressions cover both valid counting and malformed JSON rejection.
 The ChatGPT and Claude Code endpoint-redaction fixtures initialize their configured
 URLs with struct update syntax instead of reassigning default fields. Their existing
-redaction assertions remain unchanged. These are test-only lint repairs, with no
-production behavior, dependency, compatibility, or upstream-identity changes.
+redaction assertions remain unchanged. The all-feature MSRV lane also requires captured format arguments in the
+retained Google, Ollama, Azure, HuggingFace, Claude Code and Antigravity model
+code and Google stream fixtures. Those mechanical spelling changes preserve the
+formatted bytes. No production behavior, dependency, compatibility, or
+upstream-identity changes are intended.
 CI retains the OpenAI-only gates and additionally runs direct all-target/all-feature
 model Clippy with `-D warnings` and the all-feature model tests on MSRV and stable.
 
@@ -91,7 +94,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `038a8b8e8466bdc752c27be676d5fe81f893e4f453d76bcbbf620d3c7d02971b`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `629e9e0f23b4c24a99b8c3553b3ca8d8d268fae854f16e8cc390cb9d443edee6`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

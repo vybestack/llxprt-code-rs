@@ -191,7 +191,7 @@ impl ClaudeCodeOAuthModel {
     /// Used to prepend user-provided system prompts to the first user message.
     fn prepend_to_content(&self, content: ClaudeContent, prefix: &str) -> ClaudeContent {
         match content {
-            ClaudeContent::Text(text) => ClaudeContent::Text(format!("{}\n\n{}", prefix, text)),
+            ClaudeContent::Text(text) => ClaudeContent::Text(format!("{prefix}\n\n{text}")),
             ClaudeContent::Blocks(mut blocks) => {
                 // Prepend as a text block at the beginning
                 blocks.insert(
@@ -501,14 +501,14 @@ impl Model for ClaudeCodeOAuthModel {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
+                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(
             HeaderName::from_static("anthropic-version"),
             HeaderValue::from_str(&self.config.anthropic_version)
-                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
+                .map_err(|e| ModelError::api(format!("Invalid version header: {e}")))?,
         );
         headers.insert(
             HeaderName::from_static("anthropic-beta"),
@@ -576,14 +576,14 @@ impl Model for ClaudeCodeOAuthModel {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", self.access_token))
-                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
+                .map_err(|e| ModelError::api(format!("Invalid auth header: {e}")))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         headers.insert(
             HeaderName::from_static("anthropic-version"),
             HeaderValue::from_str(&self.config.anthropic_version)
-                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
+                .map_err(|e| ModelError::api(format!("Invalid version header: {e}")))?,
         );
         headers.insert(
             HeaderName::from_static("anthropic-beta"),
