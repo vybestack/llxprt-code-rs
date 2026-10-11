@@ -16876,10 +16876,10 @@ index 5a4761d..e8950e4 100644
  }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..63d853a
+index 0000000..3e18f1a
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,551 @@
+@@ -0,0 +1,575 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
 +use crate::error::{ModelError, ModelResult};
@@ -17075,6 +17075,18 @@ index 0000000..63d853a
 +}
 +
 +/// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
++#[cfg(any(
++    test,
++    feature = "antigravity",
++    feature = "chatgpt-oauth",
++    feature = "claude-code-oauth",
++    feature = "cohere",
++    feature = "google",
++    feature = "huggingface",
++    feature = "mistral",
++    feature = "ollama",
++    feature = "openrouter"
++))]
 +pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<String> {
 +    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
 +    std::str::from_utf8(&bytes)
@@ -17146,6 +17158,18 @@ index 0000000..63d853a
 +}
 +
 +/// Convert a provider status to a typed, value-free diagnostic.
++#[cfg(any(
++    test,
++    feature = "antigravity",
++    feature = "chatgpt-oauth",
++    feature = "claude-code-oauth",
++    feature = "cohere",
++    feature = "google",
++    feature = "huggingface",
++    feature = "mistral",
++    feature = "ollama",
++    feature = "openrouter"
++))]
 +pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
 +    match status {
 +        401 | 403 => ModelError::auth("provider authentication failed"),

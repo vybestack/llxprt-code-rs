@@ -193,6 +193,18 @@ pub(crate) async fn json<T: DeserializeOwned>(response: reqwest::Response) -> Mo
 }
 
 /// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<String> {
     let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
     std::str::from_utf8(&bytes)
@@ -264,6 +276,18 @@ fn retry_after_at(
 }
 
 /// Convert a provider status to a typed, value-free diagnostic.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
     match status {
         401 | 403 => ModelError::auth("provider authentication failed"),
