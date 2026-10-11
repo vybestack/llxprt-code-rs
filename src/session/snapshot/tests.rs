@@ -9,7 +9,7 @@ fn reservation_event(prompt: &str) -> log::Event {
         cwd: Some("/workspace".into()),
         cwd_dev: 1,
         cwd_ino: 1,
-        branch: BranchRecord {
+        branch: Box::new(BranchRecord {
             branch_id: "b1".into(),
             turn: 1,
             attempt: 1,
@@ -20,12 +20,13 @@ fn reservation_event(prompt: &str) -> log::Event {
             digest: crate::limits::prompt_digest(prompt),
             lifecycle: Lifecycle::Pending,
             rounds: Vec::new(),
+            stream_retries: Vec::new(),
             summary: String::new(),
             error: String::new(),
             owner: "owner".into(),
             reserved_at: 1,
             lease_expiry: 2,
-        },
+        }),
         next_branch_seq: 1,
     }
 }

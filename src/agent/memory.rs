@@ -56,9 +56,10 @@ impl super::Turn<'_> {
         tools: &[crate::tools::ToolSpec],
         before: &'static str,
         after: &'static str,
-        round_index: usize,
+        context: (&SessionStore, &ReservedRequest, usize),
         usage: &TurnUsage,
     ) -> Result<LlmResult, RoundFailure> {
+        let round_index = context.2;
         self.update_profile_usage(usage);
         let call_index = self.backend.request_calls();
         let data = crate::memory_profile::EventData {
@@ -72,7 +73,7 @@ impl super::Turn<'_> {
         };
         self.profile(before, data)
             .map_err(RoundFailure::Profiling)?;
-        let result = self.round(requests, tools);
+        let result = self.round(requests, tools, context);
         let mapped = result
             .as_ref()
             .ok()
@@ -98,6 +99,18 @@ impl super::Turn<'_> {
         rounds: &[RoundRecord],
     ) -> AgentError {
         match failure {
+            RoundFailure::StreamInterrupted(events) => self.dead(
+                store, reserved, "model",
+                &format!("responses SSE transport interrupted before terminal event; accumulated {events} stream events (partial response is not completion); 3 retries exhausted"),
+                rounds,
+            ),
+            RoundFailure::RetryStore(error) => self.dead_coded(
+                store, reserved, crate::envelope::Code::Session,
+                "session", &error.to_string(), rounds,
+            ),
+            RoundFailure::RetryTranscript(error) => self.dead(
+                store, reserved, "transcript", &error.to_string(), rounds,
+            ),
             RoundFailure::ToolCallRefusal(message) => {
                 let mut error =
                     self.dead(store, reserved, MALFORMED_TOOL_CALL_KEY, &message, rounds);

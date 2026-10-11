@@ -25,6 +25,7 @@ use serde_json::Value as JsonValue;
 
 mod deadline;
 mod provider_validation;
+mod stream_retry;
 use deadline::Turn;
 mod finish;
 mod in_flight;
@@ -808,6 +809,9 @@ enum ToolCallFailure {
 }
 
 enum RoundFailure {
+    StreamInterrupted(usize),
+    RetryStore(crate::session::StoreError),
+    RetryTranscript(std::io::Error),
     TurnTime,
     Model(String),
     ToolCallRefusal(String),

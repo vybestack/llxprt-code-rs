@@ -46,6 +46,19 @@ for response continuation. Codex sends neither a session header nor a retention 
 See [stateless prompt caching](prompt-caching.md) for prefix invariants and truthful usage
 accounting. Provider/model selection and the configured context/reasoning policy are unchanged.
 
+## Disabled tool settings (issue 253)
+
+Codex accepts only `tools.disabled`: a string array of nonempty names, at most
+64 bytes per name, without control characters. Registered Rust tools cannot be
+disabled; unregistered host tool names remain accepted no-ops. Omission or an
+empty array means no disabled tools. `disabled-tools` is not parsed or translated,
+even beside an equal `tools.disabled` array: it is an unknown ephemeral key.
+Codex and OpenAI Responses reject it during profile parsing; Chat (including the
+dsflash variant) and Anthropic retain unsupported-key metadata and refuse it at
+backend construction. No provider's unknown-key acceptance is broadened.
+Sibling alias-normalization records in the inventory describe the captured
+TypeScript inputs, not aliases accepted by this Rust runtime.
+
 ## Codex configured budgets and reasoning (issue 274)
 
 Codex `context-limit` is a positive JSON integer, preserved as the agent's configured

@@ -108,6 +108,12 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Typed preterminal SSE interruption from the most recent request only.
+    /// Implementations clear this before every call; ordinary errors never set it.
+    fn stream_interruption(&self) -> Option<usize> {
+        None
+    }
+
     /// Latest successful completion and cumulative provider-reported cache usage.
     /// This does not emit output or infer counters from request flags.
     fn cache_observation(&self) -> Option<crate::cache_output::Snapshot> {

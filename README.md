@@ -642,3 +642,25 @@ Related telemetry quantities can be joined by `round_index` and `call_index`:
 | `executed_tool_calls` | per-round call counts | Same calls, run total versus per-round count |
 | `model_reply_mapped_bytes` | reply token counts | Same reply, mapped bytes versus tokens |
 | `round_index`, `call_index` | round/call identifiers | Same identifiers |
+
+### Preterminal Responses SSE transport loss
+
+A folded Codex HTTP request whose body transfer fails (or cleanly ends) before a
+terminal event is reissued at most **three times**, with **250ms, 500ms and 1000ms**
+backoff. Each reissue uses the same history, tool schemas, backend and existing
+request-identity policy. No partial reply, argument bytes or tool calls enter model
+history or execution. The original turn deadline also bounds the backoff.
+Malformed SSE frames, protocol/lifecycle contradictions, provider error events
+(including quota/auth refusals), and failures after a terminal event still fail fast.
+This policy does not change HTTP 429 handling or retry other provider requests.
+
+Each scheduled reissue is persisted before sleeping, independently of `--emit`,
+and is visible in `transcript --json` as `turns[].model_retries` (`round`, `retry`,
+`delay_ms`, `events`); human look-back output lists the same metadata. `--emit all`
+also emits a value-free `model_retry` event. Exhaustion remains a typed model
+failure, never partial success. Retry evidence survives a failed turn or process
+exit; a fresh process does not resume an interrupted model request.
+
+This adds required retry metadata to the **session store version 3** format.
+Earlier store versions are refused; start a fresh session. No old-format reader
+or migration path is provided. The stdout envelope format is unchanged.

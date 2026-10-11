@@ -58,14 +58,14 @@ impl super::Turn<'_> {
             output_bytes: 0,
             total_calls: 0,
         };
-        let first = match self.opening_round(requests, tools, &usage) {
+        let first = match self.opening_round(requests, tools, &usage, (store, reserved, 1)) {
             Ok(reply) => reply,
             Err(RoundFailure::Model(first)) if is_context_limit_error(&first) => {
                 if !self.compact_provider_context(reserved, requests, &[]) {
                     return Err(self.provider_context_unchanged_dead(store, reserved, &first, &[]));
                 }
                 self.check_request_budget(store, reserved, requests, tools, &[])?;
-                match self.opening_round(requests, tools, &usage) {
+                match self.opening_round(requests, tools, &usage, (store, reserved, 1)) {
                     Ok(reply) => reply,
                     Err(RoundFailure::Model(second)) if is_context_limit_error(&second) => {
                         return Err(self.provider_context_limit_dead(
@@ -88,7 +88,7 @@ impl super::Turn<'_> {
         self.check_request_budget(store, reserved, requests, tools, &[])?;
         self.renew(store, reserved)?;
         let second = self
-            .opening_round(requests, tools, &usage)
+            .opening_round(requests, tools, &usage, (store, reserved, 1))
             .map_err(|failure| self.round_failure(store, reserved, failure, &[]))?;
         if is_output_truncation(&second) {
             return Err(self.exhausted_retry(store, reserved));
@@ -102,13 +102,14 @@ impl super::Turn<'_> {
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
         usage: &TurnUsage,
+        context: (&SessionStore, &ReservedRequest, usize),
     ) -> Result<LlmResult, RoundFailure> {
         self.profiled_round(
             requests,
             tools,
             "model_call_before",
             "model_call_after",
-            1,
+            context,
             usage,
         )
     }

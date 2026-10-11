@@ -134,3 +134,25 @@ fn resolved_cap_is_enforced_without_partial_result_or_hidden_charge() {
         .is_none());
     assert_eq!(off.output_bytes, 0);
 }
+
+#[test]
+fn stream_retry_emission_is_structured_opt_in_and_value_free() {
+    let record = crate::session::StreamRetryRecord {
+        round: 2,
+        retry: 1,
+        delay_ms: 250,
+        events: 19,
+    };
+    assert!(Emitter::default().stream_retry_event(3, &record).is_none());
+    assert!(Emitter::new(vec![Emit::Text])
+        .stream_retry_event(3, &record)
+        .is_none());
+    let event = Emitter::new(vec![Emit::All])
+        .stream_retry_event(3, &record)
+        .unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"type":"model_retry","turn":3,"round":2,
+        "retry":1,"delay_ms":250,"events":19,"reason":"sse_transport_interrupted"})
+    );
+}

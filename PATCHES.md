@@ -15,6 +15,17 @@ upstream-identity changes are intended.
 CI retains the OpenAI-only gates and additionally runs direct all-target/all-feature
 model Clippy with `-D warnings` and the all-feature model tests on MSRV and stable.
 
+## Issue 336: preterminal SSE transport interruptions
+
+The Responses client reports body-transfer loss and clean EOF before a terminal
+event as `ModelError::StreamInterrupted { events }`. The folded request retains the
+progress count but releases no partial completion; the public stream still emits
+its already-delivered progress once and never replays itself. Body failures after
+a terminal event, malformed frames and lifecycle contradictions remain non-retryable
+invalid responses. Provider error events keep their existing fail-fast verdicts.
+The host owns the three-reissue backoff and durable transcript evidence; no request
+identity, profile/model selection, HTTP headers or continuation policy changes.
+
 ## Issue 326: preserve raw streamed tool arguments
 
 `ToolCallPartDelta::apply` now distinguishes the typed initial empty-object
@@ -94,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `629e9e0f23b4c24a99b8c3553b3ca8d8d268fae854f16e8cc390cb9d443edee6`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `06c2cbdc67a971322e8c75d2c2228200ee1e15d66f6ab19f396b5e0fb5f2a30f`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

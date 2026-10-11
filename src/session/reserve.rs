@@ -394,6 +394,7 @@ impl SessionStore {
             digest: crate::limits::prompt_digest(input.prompt),
             lifecycle: Lifecycle::Pending,
             rounds: Vec::new(),
+            stream_retries: Vec::new(),
             summary: String::new(),
             error: String::new(),
             owner: input.lease.owner.clone(),
@@ -405,7 +406,7 @@ impl SessionStore {
             cwd: state.cwd.clone(),
             cwd_dev: state.cwd_dev,
             cwd_ino: state.cwd_ino,
-            branch,
+            branch: Box::new(branch),
             next_branch_seq: seq,
         })?;
         Ok(branch_id)

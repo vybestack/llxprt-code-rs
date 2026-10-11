@@ -32,6 +32,16 @@ fn apply_event(state: &mut SessionState, event: &Event) -> Result<(), StoreError
             reserved_at,
             lease_expiry,
         } => reclaim(state, branch_id, prompt, owner, *reserved_at, *lease_expiry),
+        Event::StreamRetry {
+            branch_id,
+            owner,
+            record,
+        } => {
+            let branch = pending(state, branch_id, owner)?;
+            super::stream_retry::validate(record)?;
+            branch.stream_retries.push(record.clone());
+            Ok(())
+        }
         Event::LeaseRenewed {
             branch_id,
             owner,
@@ -136,6 +146,7 @@ fn reclaim(
     branch.reserved_at = reserved_at;
     branch.lease_expiry = lease_expiry;
     branch.rounds.clear();
+    branch.stream_retries.clear();
     branch.summary.clear();
     branch.error.clear();
     Ok(())

@@ -70,3 +70,17 @@ test('pure renderer preserves the actual Chat and Codex HTTP cache contract', ()
   assert.match(paragraph, /stateless prompt caching/);
   assert.doesNotMatch(paragraph, /Codex WebSocket/);
 });
+
+test('removed tool spelling is rejected, not classified as a host alias', () => {
+  const table = buildClassificationTable();
+  const removed = table.find((row) => row.key === 'disabled-tools');
+  assert.equal(removed.classification, 'rejected');
+  assert.match(removed.note, /unknown ephemeral key/);
+  const current = table.find((row) => row.key === 'tools.disabled');
+  assert.match(current.note, /Codex bounded string array; registered Rust tools reject/);
+  const paragraph = (markdown) => markdown.split('## Disabled tool settings (issue 253)\n\n')[1]
+    ?.split('\n\n## ')[0];
+  assert.ok(paragraph(doc));
+  assert.equal(paragraph(renderMarkdown(artifact)), paragraph(doc));
+  assert.match(paragraph(doc), /not parsed or translated/);
+});

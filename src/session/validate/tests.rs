@@ -8,6 +8,7 @@ fn valid_state() -> SessionState {
         cwd_dev: 0,
         cwd_ino: 0,
         branches: vec![BranchRecord {
+            stream_retries: Vec::new(),
             branch_id: "b1".to_string(),
             turn: 1,
             attempt: 1,
@@ -281,4 +282,27 @@ fn persisted_tool_name_grammar_applies_to_charged_and_refused_failures() {
             assert!(corruption_message(&state).contains("tool name exceeds its byte cap"));
         }
     }
+}
+
+#[test]
+fn stream_retry_records_reject_invalid_shape_and_prior_store_version() {
+    for (round, retry, delay_ms) in [(0, 1, 250), (1, 0, 250), (1, 4, 2000), (1, 1, 251)] {
+        let mut state = valid_state();
+        state.branches[0].stream_retries.push(StreamRetryRecord {
+            round,
+            retry,
+            delay_ms,
+            events: 0,
+        });
+        assert!(state.validate().is_err());
+    }
+    let mut state = valid_state();
+    state.version = 2;
+    assert!(state.validate().is_err());
+    let mut serialized = serde_json::to_value(valid_state()).unwrap();
+    serialized["branches"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("stream_retries");
+    assert!(serde_json::from_value::<SessionState>(serialized).is_err());
 }
