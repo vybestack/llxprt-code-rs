@@ -14,6 +14,7 @@ fn success_envelope_bytes_are_pinned() {
             turn: 16777216,
         },
         run: CompletedRun {
+            telemetry: None,
             turn: 2,
             attempt: 1,
             branch_id: "branch-\"snow-雪".into(),

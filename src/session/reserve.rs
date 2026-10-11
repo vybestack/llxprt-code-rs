@@ -46,6 +46,7 @@ impl SessionStore {
         cwd: &Path,
         workspace: &crate::tools::WorkspaceCap,
     ) -> Result<ReservedRequest, StoreError> {
+        self.begin_reservation_observation();
         let canonical = cwd
             .canonicalize()
             .map_err(|error| StoreError::Invalid(format!("resolve workspace: {error}")))?;
@@ -55,7 +56,7 @@ impl SessionStore {
                 "workspace identity changed before reservation".to_string(),
             ));
         }
-        self.locked(|| {
+        let result = self.locked(|| {
             self.start_request_locked(
                 requested_turn,
                 branch,
@@ -63,7 +64,9 @@ impl SessionStore {
                 &canonical,
                 workspace.identity(),
             )
-        })
+        });
+        self.reservation_observed(&result);
+        result
     }
 
     fn start_request_locked(
@@ -257,6 +260,10 @@ impl SessionStore {
                 record.branch_id
             )));
         }
+        self.observations
+            .lock()
+            .expect("store observations mutex")
+            .reservation = "stale-reclaim".into();
         let branch_id = record.branch_id.clone();
         let turn = record.turn;
         let attempt = record.attempt;
@@ -384,6 +391,7 @@ impl SessionStore {
             .transpose()?
             .unwrap_or(1);
         let branch = BranchRecord {
+            telemetry: None,
             branch_id: branch_id.clone(),
             turn: input.target,
             attempt,

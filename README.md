@@ -678,6 +678,16 @@ also emits a value-free `model_retry` event. Exhaustion remains a typed model
 failure, never partial success. Retry evidence survives a failed turn or process
 exit; a fresh process does not resume an interrupted model request.
 
-This adds required retry metadata to the **session store version 3** format.
+This adds required retry metadata to the **session store version 4** format.
 Earlier store versions are refused; start a fresh session. No old-format reader
 or migration path is provided. The stdout envelope format is unchanged.
+
+
+### Turn telemetry
+
+Agent success and terminal failure envelopes include a strict `telemetry` object
+(version 1). See [the telemetry contract](docs/telemetry.md) for clock boundaries,
+nullable provider counters, bounded detail, retries, cache accounting and durable
+branch observations. `--telemetry-output PATH` additionally publishes private,
+create-only JSONL model-call records followed by a turn record. The destination
+must be outside the session store; existing files and symlinks are refused.

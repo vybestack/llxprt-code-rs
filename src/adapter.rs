@@ -36,6 +36,7 @@ pub struct LlmUsage {
     pub request_tokens: Option<u64>,
     pub response_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
     pub cache_creation_tokens: Option<u64>,
     pub cache_read_tokens: Option<u64>,
 }
@@ -87,6 +88,11 @@ impl LlmResult {
                 request_tokens: u.request_tokens,
                 response_tokens: u.response_tokens,
                 total_tokens: u.total_tokens,
+                reasoning_tokens: u
+                    .details
+                    .as_ref()
+                    .and_then(|d| d.get("reasoning_tokens"))
+                    .and_then(serde_json::Value::as_u64),
                 cache_creation_tokens: u.cache_creation_tokens,
                 cache_read_tokens: u.cache_read_tokens,
             });
@@ -108,6 +114,10 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Whether response body events arrive during generation (rather than final JSON).
+    fn streams_response(&self) -> bool {
+        false
+    }
     /// Typed preterminal SSE interruption from the most recent request only.
     /// Implementations clear this before every call; ordinary errors never set it.
     fn stream_interruption(&self) -> Option<usize> {

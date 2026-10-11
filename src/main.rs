@@ -120,7 +120,7 @@ fn profile_error(
     status: String,
 ) -> cli::AppError {
     let mut app = cli::AppError::profiling(error);
-    app.session_status = Some(status);
+    app.session_status = Some(status.into());
     app
 }
 

@@ -15,7 +15,7 @@ use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
-pub const STORE_VERSION: u32 = 3;
+pub const STORE_VERSION: u32 = 4;
 /// Bounded lease for a reservation, in seconds. A `pending` branch whose
 /// `lease_expiry` is in the past may be reclaimed by another process.
 pub const LEASE_SECONDS: u64 = 3600;
@@ -44,6 +44,7 @@ pub(crate) mod context_publish;
 pub(crate) mod context_recover;
 pub(crate) mod records;
 mod stream_retry;
+mod telemetry;
 pub use context_persist::ToolResultProjection;
 pub use records::{
     BranchRecord, Lifecycle, RoundRecord, SessionState, StreamRetryRecord, ToolCallRecord,
@@ -167,6 +168,7 @@ pub struct SessionStore {
     lock: Mutex<()>,
     cache: Mutex<Option<snapshot::LoadedStore>>,
     operation_metrics: Mutex<StoreMetrics>,
+    observations: Mutex<telemetry::Observations>,
     pub(crate) context: Mutex<Option<context_persist::ContextState>>,
 }
 
@@ -320,6 +322,7 @@ impl SessionStore {
             lock: Mutex::new(()),
             cache: Mutex::new(None),
             operation_metrics: Mutex::new(StoreMetrics::default()),
+            observations: Mutex::new(telemetry::Observations::default()),
             context: Mutex::new(None),
         })
     }
@@ -393,7 +396,16 @@ impl SessionStore {
     /// Hold the exclusive lock for a bounded critical section. `f` must not call another locked
     /// method.
     fn locked<T>(&self, f: impl FnOnce() -> Result<T, StoreError>) -> Result<T, StoreError> {
-        self.locked_with_timeout(SESSION_LOCK_TIMEOUT, f)
+        let (result, operation) = crate::telemetry::store_io::capture(|| {
+            self.locked_with_timeout(SESSION_LOCK_TIMEOUT, f)
+        });
+        let mut observations = self.observations.lock().expect("store observations mutex");
+        if observations.operations.len() < crate::telemetry::MAX_RECORDS {
+            observations.operations.push(operation);
+        } else {
+            observations.dropped = observations.dropped.saturating_add(1);
+        }
+        result
     }
 
     fn locked_with_timeout<T>(
@@ -441,6 +453,10 @@ impl SessionStore {
         }
         let loaded = cache.as_ref().expect("session cache initialized");
         let input = loaded.cursor.offset.saturating_sub(before);
+        self.observations
+            .lock()
+            .expect("store observations mutex")
+            .repaired_tail |= loaded.repaired_tail;
         self.add_profile_metrics(input, 0);
         Ok(loaded.state.clone())
     }

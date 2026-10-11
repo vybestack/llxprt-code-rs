@@ -39,6 +39,9 @@ pub(crate) const MAX_STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 async fn read_bounded(mut response: reqwest::Response, limit: usize) -> ModelResult<Vec<u8>> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(ModelError::from)? {
+        if !chunk.is_empty() {
+            crate::telemetry::first_body();
+        }
         let next = bytes
             .len()
             .checked_add(chunk.len())

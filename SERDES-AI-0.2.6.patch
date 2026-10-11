@@ -7287,7 +7287,7 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..8228ad5 100644
+index 0d35170..43d8fa2 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
 @@ -18,10 +18,11 @@ use serdes_ai_core::{
@@ -7451,7 +7451,14 @@ index 0d35170..8228ad5 100644
      }
  }
  
-@@ -630,14 +626,11 @@ impl Model for AnthropicModel {
+@@ -625,19 +621,18 @@ impl Model for AnthropicModel {
+             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
+         }
+ 
++        crate::telemetry::request_sent();
+         let response = request.json(&body).send().await?;
++        crate::telemetry::headers();
+ 
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7468,7 +7475,14 @@ index 0d35170..8228ad5 100644
  
          self.parse_response(resp)
      }
-@@ -673,11 +666,11 @@ impl Model for AnthropicModel {
+@@ -668,16 +663,18 @@ impl Model for AnthropicModel {
+             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
+         }
+ 
++        crate::telemetry::request_sent();
+         let response = request.json(&body).send().await?;
++        crate::telemetry::headers();
+ 
          let status = response.status().as_u16();
          if !response.status().is_success() {
              let headers = response.headers().clone();
@@ -7482,7 +7496,7 @@ index 0d35170..8228ad5 100644
          let parser = AnthropicStreamParser::new(byte_stream);
  
          Ok(Box::pin(parser))
-@@ -767,6 +760,29 @@ mod tests {
+@@ -767,6 +764,29 @@ mod tests {
          assert_eq!(request.messages.len(), 1);
          assert_eq!(request.temperature, Some(0.7));
          assert!(request.stream.is_none());
@@ -7512,7 +7526,7 @@ index 0d35170..8228ad5 100644
      }
  
      #[test]
-@@ -822,8 +838,8 @@ mod tests {
+@@ -822,8 +842,8 @@ mod tests {
              stop_reason: Some("end_turn".to_string()),
              stop_sequence: None,
              usage: AnthropicUsage {
@@ -14150,7 +14164,7 @@ index 2807447..78a78fc 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..ddedfd0 100644
+index 8dd0e9e..c4c7dc7 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -14169,10 +14183,11 @@ index 8dd0e9e..ddedfd0 100644
  //! - `azure`: Azure OpenAI support
  //! - `full`: Enable all providers
  //!
-@@ -59,11 +57,73 @@
+@@ -59,11 +57,74 @@
  #![deny(unsafe_code)]
  
  pub mod error;
++pub mod telemetry;
 +
 +#[cfg(any(
 +    feature = "anthropic",
@@ -14243,7 +14258,7 @@ index 8dd0e9e..ddedfd0 100644
  // Provider modules (feature-gated)
  
  /// OpenAI models (GPT-4, GPT-4o, o1, etc.).
-@@ -96,11 +156,6 @@ pub mod mistral;
+@@ -96,11 +157,6 @@ pub mod mistral;
  #[cfg_attr(docsrs, doc(cfg(feature = "ollama")))]
  pub mod ollama;
  
@@ -14255,7 +14270,7 @@ index 8dd0e9e..ddedfd0 100644
  /// Azure OpenAI models.
  #[cfg(feature = "azure")]
  #[cfg_attr(docsrs, doc(cfg(feature = "azure")))]
-@@ -162,7 +217,10 @@ pub use antigravity::AntigravityModel;
+@@ -162,7 +218,10 @@ pub use antigravity::AntigravityModel;
  pub mod mock;
  
  // Re-exports
@@ -14267,7 +14282,7 @@ index 8dd0e9e..ddedfd0 100644
  pub use fallback::{FallbackModel, RetryOn};
  pub use mock::{FunctionModel, MockModel, TestModel};
  pub use model::{
-@@ -198,9 +256,6 @@ pub use mistral::MistralModel;
+@@ -198,9 +257,6 @@ pub use mistral::MistralModel;
  #[cfg(feature = "ollama")]
  pub use ollama::OllamaModel;
  
@@ -14277,7 +14292,7 @@ index 8dd0e9e..ddedfd0 100644
  /// Prelude for common imports.
  pub mod prelude {
      pub use crate::{
-@@ -232,9 +287,6 @@ pub mod prelude {
+@@ -232,9 +288,6 @@ pub mod prelude {
      #[cfg(feature = "ollama")]
      pub use crate::ollama::OllamaModel;
  
@@ -14287,7 +14302,7 @@ index 8dd0e9e..ddedfd0 100644
      #[cfg(feature = "openrouter")]
      pub use crate::openrouter::OpenRouterModel;
  
-@@ -271,8 +323,6 @@ pub mod prelude {
+@@ -271,8 +324,6 @@ pub mod prelude {
  /// ```
  #[cfg(feature = "openai")]
  pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -14296,7 +14311,7 @@ index 8dd0e9e..ddedfd0 100644
      let (provider, model_name) = if identifier.contains(':') {
          let parts: Vec<&str> = identifier.splitn(2, ':').collect();
          (parts[0], parts[1])
-@@ -285,7 +335,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -285,7 +336,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "openai")]
              {
                  let model = OpenAIChatModel::from_env(model_name)?;
@@ -14305,7 +14320,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -298,7 +348,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -298,7 +349,7 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
              #[cfg(feature = "anthropic")]
              {
                  let model = AnthropicModel::from_env(model_name)?;
@@ -14314,7 +14329,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -310,41 +360,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
+@@ -310,41 +361,35 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
          #[cfg(feature = "groq")]
          "groq" => {
              let model = GroqModel::from_env(model_name)?;
@@ -14363,7 +14378,7 @@ index 8dd0e9e..ddedfd0 100644
          ))),
      }
  }
-@@ -368,8 +412,6 @@ pub fn build_model_with_config(
+@@ -368,8 +413,6 @@ pub fn build_model_with_config(
      base_url: Option<&str>,
      timeout: Option<std::time::Duration>,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -14372,7 +14387,7 @@ index 8dd0e9e..ddedfd0 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -392,7 +434,7 @@ pub fn build_model_with_config(
+@@ -392,7 +435,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -14381,7 +14396,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -423,7 +465,7 @@ pub fn build_model_with_config(
+@@ -423,7 +466,7 @@ pub fn build_model_with_config(
                      model
                  };
  
@@ -14390,7 +14405,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -444,7 +486,7 @@ pub fn build_model_with_config(
+@@ -444,7 +487,7 @@ pub fn build_model_with_config(
              // GroqModel doesn't have with_base_url/with_timeout
              let _ = (base_url, timeout);
  
@@ -14399,7 +14414,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -466,7 +508,7 @@ pub fn build_model_with_config(
+@@ -466,7 +509,7 @@ pub fn build_model_with_config(
                  model
              };
  
@@ -14408,7 +14423,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -481,7 +523,7 @@ pub fn build_model_with_config(
+@@ -481,7 +524,7 @@ pub fn build_model_with_config(
              // Ollama doesn't use API keys or timeouts in the same way
              let _ = (api_key, timeout);
  
@@ -14417,7 +14432,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -507,12 +549,11 @@ pub fn build_model_with_config(
+@@ -507,12 +550,11 @@ pub fn build_model_with_config(
  
              let _ = timeout; // Google model doesn't have with_timeout
  
@@ -14433,7 +14448,7 @@ index 8dd0e9e..ddedfd0 100644
          ))),
      }
  }
-@@ -533,13 +574,51 @@ mod tests {
+@@ -533,13 +575,51 @@ mod tests {
          let result = build_model_with_config("unknown", "model", None, None, None);
          assert!(result.is_err());
      }
@@ -14486,7 +14501,7 @@ index 8dd0e9e..ddedfd0 100644
  pub struct ExtendedModelConfig {
      /// API key (overrides environment variable)
      pub api_key: Option<String>,
-@@ -557,6 +636,21 @@ pub struct ExtendedModelConfig {
+@@ -557,6 +637,21 @@ pub struct ExtendedModelConfig {
      pub reasoning_effort: Option<String>,
  }
  
@@ -14508,7 +14523,7 @@ index 8dd0e9e..ddedfd0 100644
  impl ExtendedModelConfig {
      /// Create a new empty config
      pub fn new() -> Self {
-@@ -628,8 +722,11 @@ pub fn build_model_extended(
+@@ -628,8 +723,11 @@ pub fn build_model_extended(
      model_name: &str,
      config: ExtendedModelConfig,
  ) -> ModelResult<std::sync::Arc<dyn Model>> {
@@ -14522,7 +14537,7 @@ index 8dd0e9e..ddedfd0 100644
      match provider {
          "openai" | "gpt" => {
              #[cfg(feature = "openai")]
-@@ -654,13 +751,13 @@ pub fn build_model_extended(
+@@ -654,13 +752,13 @@ pub fn build_model_extended(
  
                  // TODO: Add reasoning_effort support when available in OpenAIChatModel
  
@@ -14542,7 +14557,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "openai"))]
              {
-@@ -698,13 +795,7 @@ pub fn build_model_extended(
+@@ -698,13 +796,7 @@ pub fn build_model_extended(
                      model
                  };
  
@@ -14557,7 +14572,7 @@ index 8dd0e9e..ddedfd0 100644
              }
              #[cfg(not(feature = "anthropic"))]
              {
-@@ -716,19 +807,18 @@ pub fn build_model_extended(
+@@ -716,19 +808,18 @@ pub fn build_model_extended(
          }
          #[cfg(feature = "groq")]
          "groq" => {
@@ -14583,7 +14598,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "mistral")]
          "mistral" => {
-@@ -750,13 +840,7 @@ pub fn build_model_extended(
+@@ -750,13 +841,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -14598,7 +14613,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "ollama")]
          "ollama" => {
-@@ -768,13 +852,7 @@ pub fn build_model_extended(
+@@ -768,13 +853,7 @@ pub fn build_model_extended(
                  model
              };
  
@@ -14613,7 +14628,7 @@ index 8dd0e9e..ddedfd0 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +874,79 @@ pub fn build_model_extended(
+@@ -796,17 +875,79 @@ pub fn build_model_extended(
                  model
              };
  
@@ -15048,7 +15063,7 @@ index 97d1a2d..a67f673 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..d04c7e2 100644
+index 9471b5b..1fcbb1b 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -15253,7 +15268,19 @@ index 9471b5b..d04c7e2 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -436,42 +512,18 @@ impl OpenAIChatModel {
+@@ -421,7 +497,10 @@ impl OpenAIChatModel {
+             total_tokens: Some(u.total_tokens),
+             cache_creation_tokens: None,
+             cache_read_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
+-            details: None,
++            details: u
++                .completion_tokens_details
++                .and_then(|d| d.reasoning_tokens)
++                .map(|n| serde_json::json!({"reasoning_tokens": n})),
+         });
+ 
+         Ok(ModelResponse {
+@@ -436,42 +515,18 @@ impl OpenAIChatModel {
          })
      }
  
@@ -15306,7 +15333,7 @@ index 9471b5b..d04c7e2 100644
      }
  }
  
-@@ -499,12 +551,16 @@ impl Model for OpenAIChatModel {
+@@ -499,12 +554,16 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15325,7 +15352,13 @@ index 9471b5b..d04c7e2 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -517,17 +573,14 @@ impl Model for OpenAIChatModel {
+@@ -513,21 +572,20 @@ impl Model for OpenAIChatModel {
+             request = request.header("OpenAI-Project", project);
+         }
+ 
++        crate::telemetry::request_sent();
+         let response = request.json(&body).send().await?;
++        crate::telemetry::headers();
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -15349,7 +15382,7 @@ index 9471b5b..d04c7e2 100644
      }
  
      async fn request_stream(
-@@ -540,12 +593,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +598,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15367,7 +15400,13 @@ index 9471b5b..d04c7e2 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -558,14 +614,14 @@ impl Model for OpenAIChatModel {
+@@ -554,18 +615,20 @@ impl Model for OpenAIChatModel {
+             request = request.header("OpenAI-Project", project);
+         }
+ 
++        crate::telemetry::request_sent();
+         let response = request.json(&body).send().await?;
++        crate::telemetry::headers();
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -15388,7 +15427,7 @@ index 9471b5b..d04c7e2 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +638,61 @@ mod tests {
+@@ -582,6 +645,61 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -15450,7 +15489,7 @@ index 9471b5b..d04c7e2 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +772,125 @@ mod tests {
+@@ -661,4 +779,125 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15604,7 +15643,7 @@ index c1e00c9..34b9981 100644
  
  /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..4d41228 100644
+index 9384750..e35935f 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -18,8 +18,7 @@ use reqwest::Client;
@@ -16242,7 +16281,13 @@ index 9384750..4d41228 100644
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
-@@ -1145,14 +1251,11 @@ impl Model for OpenAIResponsesModel {
+@@ -1141,18 +1247,17 @@ impl Model for OpenAIResponsesModel {
+             request = request.header("OpenAI-Project", project);
+         }
+ 
++        crate::telemetry::request_sent();
+         let response = request.json(&body).send().await?;
++        crate::telemetry::headers();
  
          let status = response.status().as_u16();
          if !response.status().is_success() {
@@ -16259,7 +16304,7 @@ index 9384750..4d41228 100644
  
          self.process_response(resp)
      }
-@@ -1266,22 +1369,178 @@ mod tests {
+@@ -1266,22 +1371,178 @@ mod tests {
  
      #[test]
      fn test_response_input_serialization() {
@@ -16842,10 +16887,10 @@ index 5a4761d..e8950e4 100644
  }
 diff --git a/vendor/serdes-ai-models/src/response.rs b/vendor/serdes-ai-models/src/response.rs
 new file mode 100644
-index 0000000..922fc9c
+index 0000000..7abb2a5
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/response.rs
-@@ -0,0 +1,519 @@
+@@ -0,0 +1,522 @@
 +//! Bounded HTTP response-body handling shared by provider models.
 +
 +use crate::error::{ModelError, ModelResult};
@@ -16887,6 +16932,9 @@ index 0000000..922fc9c
 +async fn read_bounded(mut response: reqwest::Response, limit: usize) -> ModelResult<Vec<u8>> {
 +    let mut bytes = Vec::new();
 +    while let Some(chunk) = response.chunk().await.map_err(ModelError::from)? {
++        if !chunk.is_empty() {
++            crate::telemetry::first_body();
++        }
 +        let next = bytes
 +            .len()
 +            .checked_add(chunk.len())
@@ -17364,6 +17412,116 @@ index 0000000..922fc9c
 +            ));
 +        }
 +    }
++}
+diff --git a/vendor/serdes-ai-models/src/telemetry.rs b/vendor/serdes-ai-models/src/telemetry.rs
+new file mode 100644
+index 0000000..094d69a
+--- /dev/null
++++ b/vendor/serdes-ai-models/src/telemetry.rs
+@@ -0,0 +1,104 @@
++//! Request-local monotonic transport observations. No endpoint or payload is retained.
++use std::sync::{Arc, Mutex};
++use std::time::Instant;
++
++/// Transport facts for the current invocation only.
++#[derive(Clone, Debug, Default)]
++pub struct Observation {
++    /// Time to response headers (connect plus provider queue); not generation time.
++    pub headers_ms: Option<u64>,
++    /// Time to first nonempty response body chunk or WebSocket text frame.
++    pub first_body_ms: Option<u64>,
++    /// Elapsed time to the terminal streamed completion, not EOF or host parsing.
++    pub completed_ms: Option<u64>,
++    /// Provider-reported reasoning tokens, when present on SSE completion.
++    pub reasoning_tokens: Option<u64>,
++    /// Provider-reported total tokens, when present on SSE completion.
++    pub total_tokens: Option<u64>,
++}
++
++/// A per-request collector explicitly propagated to transport reader tasks.
++#[derive(Clone)]
++pub struct Collector {
++    started: Arc<Mutex<Option<Instant>>>,
++    observation: Arc<Mutex<Observation>>,
++}
++
++tokio::task_local! { static CURRENT: Collector; }
++
++impl Default for Collector {
++    fn default() -> Self {
++        Self {
++            started: Arc::new(Mutex::new(None)),
++            observation: Arc::new(Mutex::new(Observation::default())),
++        }
++    }
++}
++
++impl Collector {
++    /// Scope collection to this future; dropping a cancelled future leaves facts readable.
++    pub async fn scope<F: std::future::Future>(&self, future: F) -> F::Output {
++        CURRENT.scope(self.clone(), future).await
++    }
++    /// Read the collector without resetting it.
++    pub fn snapshot(&self) -> Observation {
++        self.observation
++            .lock()
++            .expect("transport observation mutex")
++            .clone()
++    }
++}
++
++/// Clone the current collector for a spawned reader, if collection was requested.
++pub fn current() -> Option<Collector> {
++    CURRENT.try_with(Clone::clone).ok()
++}
++
++fn update(f: impl FnOnce(&mut Observation, u64)) {
++    let _ = CURRENT.try_with(|collector| {
++        let started = *collector.started.lock().expect("transport clock mutex");
++        let Some(started) = started else {
++            return;
++        };
++        let elapsed = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
++        f(
++            &mut collector
++                .observation
++                .lock()
++                .expect("transport observation mutex"),
++            elapsed,
++        );
++    });
++}
++
++/// Start the wire clock immediately before send/connect, excluding request assembly.
++pub fn request_sent() {
++    let _ = CURRENT.try_with(|collector| {
++        collector
++            .started
++            .lock()
++            .expect("transport clock mutex")
++            .get_or_insert_with(Instant::now);
++    });
++}
++
++/// Mark the first received response headers.
++pub fn headers() {
++    update(|o, elapsed| {
++        o.headers_ms.get_or_insert(elapsed);
++    });
++}
++/// Mark the first nonempty response body chunk/frame, never empty/control frames.
++pub fn first_body() {
++    update(|o, elapsed| {
++        o.first_body_ms.get_or_insert(elapsed);
++    });
++}
++/// Retain terminal SSE usage that the folded stream event cannot represent.
++pub fn completed_usage(total: Option<u64>, reasoning: Option<u64>) {
++    update(|o, elapsed| {
++        o.completed_ms = Some(elapsed);
++        o.total_tokens = total;
++        o.reasoning_tokens = reasoning;
++    });
 +}
 diff --git a/vendor/serdes-ai-output/Cargo.lock b/vendor/serdes-ai-output/Cargo.lock
 index b306f5b..307f1b9 100644
@@ -26076,7 +26234,7 @@ index 5bc1e9f..0000000
 -    Ok(())
 -}
 diff --git a/vendor/serdes-ai-responses/src/client/assembler.rs b/vendor/serdes-ai-responses/src/client/assembler.rs
-index 9993fc0..b5dcd7e 100644
+index 9993fc0..a1a7e62 100644
 --- a/vendor/serdes-ai-responses/src/client/assembler.rs
 +++ b/vendor/serdes-ai-responses/src/client/assembler.rs
 @@ -137,7 +137,11 @@ pub(super) fn stream_complete(
@@ -26108,9 +26266,11 @@ index 9993fc0..b5dcd7e 100644
      )
  }
  
-@@ -213,6 +214,9 @@ mod tests {
+@@ -212,7 +213,11 @@ mod tests {
+         let response = ResponseObject {
              id: "resp_1".into(),
              usage: Some(ResponseUsage {
++                output_tokens_details: None,
                  input_tokens: Some(7),
 +                input_tokens_details: Some(crate::types::InputTokensDetails {
 +                    cached_tokens: Some(5),
@@ -26118,7 +26278,7 @@ index 9993fc0..b5dcd7e 100644
                  output_tokens: Some(4),
                  total_tokens: Some(11),
              }),
-@@ -227,6 +231,7 @@ mod tests {
+@@ -227,6 +232,7 @@ mod tests {
                  assert_eq!(complete.finish_reason, FinishReason::Stop);
                  assert_eq!(complete.input_tokens, Some(7));
                  assert_eq!(complete.output_tokens, Some(4));
@@ -26126,7 +26286,7 @@ index 9993fc0..b5dcd7e 100644
              }
              other => panic!("expected stream complete, got {other:?}"),
          }
-@@ -240,6 +245,7 @@ mod tests {
+@@ -240,6 +246,7 @@ mod tests {
              "gpt-4o",
              &CreateResponseRequest {
                  model: "gpt-4o".into(),
@@ -26362,7 +26522,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..d1cbfd9 100644
+index f90cc22..ca3486a 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -26460,7 +26620,30 @@ index f90cc22..d1cbfd9 100644
      /// Configure reasoning (effort/summary) for every turn.
      #[must_use]
      pub fn with_reasoning(mut self, reasoning: ReasoningSettings) -> Self {
-@@ -346,7 +383,12 @@ async fn run_ws_turn(
+@@ -288,6 +325,7 @@ async fn run_ws_turn(
+     let mut last_cause: Option<String> = None;
+ 
+     for _attempt in 0..MAX_ATTEMPTS {
++        serdes_ai_models::telemetry::request_sent();
+         // Reconnect if needed. A fresh socket means a fresh server-side
+         // session, so continuation state from the old socket is void.
+         if session.socket.is_none() {
+@@ -333,6 +371,14 @@ async fn run_ws_turn(
+ 
+         match outcome.expect("outcome set") {
+             AttemptOutcome::Finished(response, _reason) => {
++                serdes_ai_models::telemetry::completed_usage(
++                    response.usage.as_ref().and_then(|u| u.total_tokens),
++                    response
++                        .usage
++                        .as_ref()
++                        .and_then(|u| u.output_tokens_details.as_ref())
++                        .and_then(|d| d.reasoning_tokens),
++                );
+                 session.previous_response_id = Some(response.id.clone());
+                 session.sent_requests = messages.len();
+                 return Ok(*response);
+@@ -346,7 +392,12 @@ async fn run_ws_turn(
                  session.socket = None;
                  continue;
              }
@@ -26474,7 +26657,7 @@ index f90cc22..d1cbfd9 100644
          }
      }
  
-@@ -366,6 +408,7 @@ async fn read_ws_events(
+@@ -366,6 +417,7 @@ async fn read_ws_events(
      sink: &mut dyn EventSink,
      streamed_any: &mut bool,
  ) -> AttemptOutcome {
@@ -26482,7 +26665,21 @@ index f90cc22..d1cbfd9 100644
      loop {
          let message = match socket.next_message().await {
              Some(Ok(message)) => message,
-@@ -429,6 +472,11 @@ async fn read_ws_events(
+@@ -393,7 +445,12 @@ async fn read_ws_events(
+             }
+         };
+         let text = match message {
+-            WsStreamMessage::Text(text) => text,
++            WsStreamMessage::Text(text) => {
++                if !text.is_empty() {
++                    serdes_ai_models::telemetry::first_body();
++                }
++                text
++            }
+             WsStreamMessage::Close => {
+                 if !*streamed_any {
+                     tracing::warn!("close frame before any event; reconnecting");
+@@ -429,6 +486,11 @@ async fn read_ws_events(
              },
          };
  
@@ -26494,7 +26691,7 @@ index f90cc22..d1cbfd9 100644
          // Capture the terminal response object before translation consumes
          // the event; the terminal model event must be the last one sent.
          let mut terminal: Option<(ResponseObject, FinishReason)> = None;
-@@ -445,7 +493,11 @@ async fn read_ws_events(
+@@ -445,7 +507,11 @@ async fn read_ws_events(
              _ => {}
          }
  
@@ -26507,7 +26704,7 @@ index f90cc22..d1cbfd9 100644
              match translated {
                  Ok(event) => {
                      if sink.send(event).await.is_err() {
-@@ -472,6 +524,9 @@ fn build_request(
+@@ -472,6 +538,9 @@ fn build_request(
      previous_response_id: Option<String>,
      store: bool,
  ) -> Result<CreateResponseRequest, ModelError> {
@@ -26517,7 +26714,7 @@ index f90cc22..d1cbfd9 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +539,20 @@ fn build_request(
+@@ -484,11 +553,20 @@ fn build_request(
                  .collect(),
          )
      };
@@ -26539,7 +26736,7 @@ index f90cc22..d1cbfd9 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +560,7 @@ fn build_request(
+@@ -496,7 +574,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -26548,7 +26745,7 @@ index f90cc22..d1cbfd9 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -512,35 +576,23 @@ fn build_request(
+@@ -512,35 +590,23 @@ fn build_request(
      })
  }
  
@@ -26594,7 +26791,7 @@ index f90cc22..d1cbfd9 100644
      }
  }
  
-@@ -571,6 +623,9 @@ impl Model for OpenResponsesModel {
+@@ -571,6 +637,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -26604,7 +26801,7 @@ index f90cc22..d1cbfd9 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -587,7 +642,7 @@ impl Model for OpenResponsesModel {
+@@ -587,7 +656,7 @@ impl Model for OpenResponsesModel {
          let settings = settings.clone();
          let params = params.clone();
  
@@ -26613,7 +26810,7 @@ index f90cc22..d1cbfd9 100644
              let result = match inner.transport {
                  Transport::WebSocket => {
                      let mut sink = ChannelSink(&tx);
-@@ -602,11 +657,15 @@ impl Model for OpenResponsesModel {
+@@ -602,11 +671,15 @@ impl Model for OpenResponsesModel {
              if let Err(error) = result {
                  // A failure after events escaped still reaches the caller as
                  // an error item; a failure before that is the only item.
@@ -26631,7 +26828,7 @@ index f90cc22..d1cbfd9 100644
      }
  
      fn profile(&self) -> &ModelProfile {
-@@ -620,7 +679,7 @@ fn response_from_events(
+@@ -620,7 +693,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -26640,7 +26837,18 @@ index f90cc22..d1cbfd9 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -665,6 +724,18 @@ fn response_from_events(
+@@ -654,8 +727,8 @@ fn response_from_events(
+                     request_tokens: complete.input_tokens,
+                     response_tokens: complete.output_tokens,
+                     total_tokens: match (complete.input_tokens, complete.output_tokens) {
+-                        (Some(input), Some(output)) => Some(input + output),
+-                        (input, output) => input.or(output),
++                        (Some(input), Some(output)) => input.checked_add(output),
++                        _ => None,
+                     },
+                     cache_creation_tokens: complete.cache_creation_tokens,
+                     cache_read_tokens: complete.cache_read_tokens,
+@@ -665,6 +738,18 @@ fn response_from_events(
          }
      }
  
@@ -26659,7 +26867,7 @@ index f90cc22..d1cbfd9 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +749,45 @@ fn response_from_events(
+@@ -678,7 +763,50 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -26677,8 +26885,13 @@ index f90cc22..d1cbfd9 100644
 +        let messages: Vec<ModelRequest> = messages.to_vec();
 +        let settings = settings.clone();
 +        let params = params.clone();
++        let collector = serdes_ai_models::telemetry::current();
 +        let task = tokio::spawn(async move {
-+            run_http_stream(&inner, &messages, &settings, &params, &tx).await
++            let future = run_http_stream(&inner, &messages, &settings, &params, &tx);
++            match collector {
++                Some(collector) => collector.scope(future).await,
++                None => future.await,
++            }
 +        });
 +        let _abort = AbortOnDrop(task.abort_handle());
 +        let mut events = Vec::new();
@@ -26706,7 +26919,22 @@ index f90cc22..d1cbfd9 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -744,7 +853,9 @@ impl OpenResponsesModel {
+@@ -704,12 +832,14 @@ impl OpenResponsesModel {
+             for (name, value) in &inner.headers {
+                 http = http.header(name, value);
+             }
++            serdes_ai_models::telemetry::request_sent();
+             let response = http
+                 .send()
+                 .await
+                 .map_err(|e| ModelError::Connection(e.to_string()))?;
+ 
+             if !response.status().is_success() {
++                serdes_ai_models::telemetry::headers();
+                 let status = response.status().as_u16();
+                 let body = response.text().await.unwrap_or_default();
+                 let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
+@@ -744,7 +874,9 @@ impl OpenResponsesModel {
                      response_tokens: usage.output_tokens,
                      total_tokens: usage.total_tokens,
                      cache_creation_tokens: None,
@@ -26717,7 +26945,7 @@ index f90cc22..d1cbfd9 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,22 +870,39 @@ impl OpenResponsesModel {
+@@ -759,22 +891,39 @@ impl OpenResponsesModel {
      }
  }
  
@@ -26763,7 +26991,20 @@ index f90cc22..d1cbfd9 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -814,28 +942,64 @@ async fn run_http_stream(
+@@ -792,10 +941,12 @@ async fn run_http_stream(
+         for (name, value) in &inner.headers {
+             http = http.header(name, value);
+         }
++        serdes_ai_models::telemetry::request_sent();
+         let response = http
+             .send()
+             .await
+             .map_err(|e| ModelError::Connection(e.to_string()))?;
++        serdes_ai_models::telemetry::headers();
+         if response.status().is_success() {
+             break response;
+         }
+@@ -814,28 +965,75 @@ async fn run_http_stream(
      };
  
      let mut byte_stream = response.bytes_stream();
@@ -26790,6 +27031,9 @@ index f90cc22..d1cbfd9 100644
 +                )
 +            }
 +        })?;
++        if !chunk.is_empty() {
++            serdes_ai_models::telemetry::first_body();
++        }
 +        for byte in chunk {
 +            let Some(frame) = decoder.byte(byte)? else {
                  continue;
@@ -26830,6 +27074,14 @@ index f90cc22..d1cbfd9 100644
 +                terminal_id = Some(response.id.clone());
 +                // Completion is a verdict, not progress. Keep it private until
 +                // the remaining body, DONE ordering and EOF all validate.
++                serdes_ai_models::telemetry::completed_usage(
++                    response.usage.as_ref().and_then(|u| u.total_tokens),
++                    response
++                        .usage
++                        .as_ref()
++                        .and_then(|u| u.output_tokens_details.as_ref())
++                        .and_then(|d| d.reasoning_tokens),
++                );
 +                pending_terminal = Some(event);
 +                continue;
              }
@@ -26842,7 +27094,7 @@ index f90cc22..d1cbfd9 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1010,58 @@ async fn run_http_stream(
+@@ -846,14 +1044,58 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -28888,7 +29140,7 @@ index 35bba05..0000000
 -    }
 -}
 diff --git a/vendor/serdes-ai-responses/src/types.rs b/vendor/serdes-ai-responses/src/types.rs
-index 806f448..953a356 100644
+index 806f448..e9016dd 100644
 --- a/vendor/serdes-ai-responses/src/types.rs
 +++ b/vendor/serdes-ai-responses/src/types.rs
 @@ -24,6 +24,10 @@ pub struct CreateResponseRequest {
@@ -28902,7 +29154,7 @@ index 806f448..953a356 100644
      /// Conversation input: a plain string or a list of input items.
      #[serde(default)]
      pub input: ResponseInput,
-@@ -650,9 +654,20 @@ pub struct IncompleteDetails {
+@@ -650,9 +654,31 @@ pub struct IncompleteDetails {
      pub reason: String,
  }
  
@@ -28914,16 +29166,27 @@ index 806f448..953a356 100644
 +    pub cached_tokens: Option<u64>,
 +}
 +
++/// Provider-reported output token details.
++#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
++pub struct OutputTokensDetails {
++    /// Reasoning tokens, absent when not reported.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub reasoning_tokens: Option<u64>,
++}
++
  /// Token usage reported on a response.
  #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
  pub struct ResponseUsage {
++    /// Output token details, absent when not reported.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub output_tokens_details: Option<OutputTokensDetails>,
 +    /// Provider-reported input cache details, absent when not reported.
 +    #[serde(default, skip_serializing_if = "Option::is_none")]
 +    pub input_tokens_details: Option<InputTokensDetails>,
      /// Input (prompt) tokens.
      #[serde(default, skip_serializing_if = "Option::is_none")]
      pub input_tokens: Option<u64>,
-@@ -1133,6 +1148,7 @@ mod tests {
+@@ -1133,6 +1159,7 @@ mod tests {
                  "gpt-4o",
                  &CreateResponseRequest {
                      model: "gpt-4o".into(),
@@ -30579,10 +30842,10 @@ index 0000000..d73b3c6
 +}
 diff --git a/vendor/serdes-ai-responses/tests/client_ws.rs b/vendor/serdes-ai-responses/tests/client_ws.rs
 new file mode 100644
-index 0000000..fde54b4
+index 0000000..4b21122
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_ws.rs
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,384 @@
 +//! Scripted WebSocket tests retained from the live-tested Responses client.
 +
 +use futures::{SinkExt, StreamExt};
@@ -30669,6 +30932,7 @@ index 0000000..fde54b4
 +        }],
 +    }];
 +    response.usage = Some(ResponseUsage {
++        output_tokens_details: None,
 +        input_tokens: Some(1),
 +        input_tokens_details: None,
 +        output_tokens: Some(1),

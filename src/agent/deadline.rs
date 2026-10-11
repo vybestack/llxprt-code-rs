@@ -16,6 +16,9 @@ const RUNTIME_SHUTDOWN_BOUND: std::time::Duration = std::time::Duration::from_mi
 /// detached instead of delaying the terminal envelope.
 pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
+    pub(super) observations: std::cell::RefCell<crate::telemetry::Telemetry>,
+    pub(super) telemetry_round: std::cell::Cell<usize>,
+    pub(super) telemetry_attempt: std::cell::Cell<u64>,
     pub(super) started: Instant,
     pub(super) deadline: Option<Instant>,
     pub(super) runtime: Option<tokio::runtime::Runtime>,
@@ -68,6 +71,9 @@ impl<'a> Turn<'a> {
         };
         Ok(Self {
             agent,
+            observations: Default::default(),
+            telemetry_round: std::cell::Cell::new(1),
+            telemetry_attempt: std::cell::Cell::new(0),
             started,
             deadline,
             runtime: Some(runtime),
@@ -116,12 +122,21 @@ impl<'a> Turn<'a> {
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
     ) -> Result<LlmResult, RoundFailure> {
+        self.observed_round(requests, tools)
+    }
+
+    pub(super) fn round_once_inner(
+        &self,
+        requests: &[serdes_ai::core::ModelRequest],
+        tools: &[crate::tools::ToolSpec],
+        collector: &serdes_ai::models::telemetry::Collector,
+    ) -> Result<LlmResult, RoundFailure> {
         let result = self
             .runtime
             .as_ref()
             .expect("the turn runtime outlives every provider round")
             .block_on(async {
-                let request = self.backend.request(requests, tools);
+                let request = collector.scope(self.backend.request(requests, tools));
                 match self.deadline {
                     Some(deadline) => {
                         if Instant::now() >= deadline {
@@ -143,15 +158,6 @@ impl<'a> Turn<'a> {
                     None => RoundFailure::Model(message),
                 }
             })?;
-        if let (Some(output), Some(snapshot)) =
-            (&self.cache_output, self.backend.cache_observation())
-        {
-            output
-                .publish(&snapshot)
-                .map_err(RoundFailure::CacheOutput)?;
-        }
-        // Bound and validate the reply before it can join any transcript or usage total.
-        provider_validation::validate(&result, &self.secrets)?;
         Ok(result)
     }
 }
