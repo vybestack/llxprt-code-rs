@@ -6,6 +6,24 @@ use serde_json::json;
 use std::time::Duration;
 
 #[test]
+fn historical_grade_cli_propagates_preservation_and_cargo_failures() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = std::process::Command::new("python3")
+        .arg(root.join("evals/edit-recovery/test_grade_cli.py"))
+        .current_dir(root)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("python3 is required by the source-bundle and release gates");
+    assert!(
+        output.status.success(),
+        "historical grade CLI regression failed: {}\nstdout: {}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
 fn block_as_whole_file_write_succeeds_but_destroys_preservation() {
     let cwd = tempfile::tempdir().unwrap();
     let original = "use std::sync::Mutex;\n#[test]\nfn kept() {}\n#[test]\nfn target() { assert_eq!(1, 1); }\n";

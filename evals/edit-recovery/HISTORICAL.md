@@ -72,6 +72,15 @@ and full phase2 results. Its `structural_and_test_pass` is **not semantic accept
 a vacuous passing test is still unacceptable. The fixture has deliberately flexible
 scenario requirements rather than one textual answer oracle.
 
+The `grade` CLI writes `grade.json` before returning: exit 0 means only
+`structural_and_test_pass` is true; exit 1 means this screen rejected the trial.
+Unchanged source, a block written as the whole file, lost imports/tests, unrelated
+changes, added files, compilation failure and phase2 failure must never produce
+exit 0. Even a zero status still requires the independent semantic, trace and
+recovery-provenance assessment below. `test_grade_cli.py` exercises these status
+boundaries with a disclosed fake Cargo executable; it does not replace actual
+Cargo gates or certify any historical/model trial.
+
 Inspect the final function for sixteen budget-filling reads followed by a valid
 side-effecting call, exact output-cap error, failed lifecycle, appropriate TEST
 context, no invented tool-budget notice and a direct execution witness. Then use
