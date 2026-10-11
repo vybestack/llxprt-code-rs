@@ -17,14 +17,14 @@ fn reported_bytes(message: &str, prefix: &str, suffix: &str) -> usize {
 
 // Materialization creates timestamps whose serialized lengths can vary. Read the
 // agent's own totals, then check every excess/reduction against those exact values.
-fn reported_estimates(message: &str) -> (usize, usize) {
+pub(super) fn reported_estimates(message: &str) -> (usize, usize) {
     (
         reported_bytes(message, "estimated request would be ", " bytes"),
         reported_bytes(message, "after one compaction attempt, still ", " bytes"),
     )
 }
 
-fn assert_measurements(message: &str, before: usize, after: usize, budget: usize) {
+pub(super) fn assert_measurements(message: &str, before: usize, after: usize, budget: usize) {
     assert!(before >= after);
     assert!(after > budget);
     assert!(message.contains(&format!("estimated request would be {before} bytes")));

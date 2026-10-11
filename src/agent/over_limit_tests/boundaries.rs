@@ -168,13 +168,13 @@ fn multibyte_prompt_and_system_mass_are_noncompactable() {
         if system {
             agent.prompt_notes = Some("界".repeat(25_000));
         }
-        let original = request_total_bytes(
-            &agent.materialize_requests(&reserved),
-            &crate::tools::tool_specs(false),
-        );
         let error = agent.run(&store, &reserved).unwrap_err();
+        let (before, after) = diagnostics::reported_estimates(&error.message);
+        assert_eq!(before, after);
+        assert!(after > mass.len());
+        diagnostics::assert_measurements(&error.message, before, after, 30_000);
         assert_eq!(error.key, "context-limit");
-        assert!(error.message.contains(&format!("still {original} bytes")));
+        assert!(error.message.contains("no eligible history"));
         assert_eq!(agent.model_calls(), 0);
     }
 }
