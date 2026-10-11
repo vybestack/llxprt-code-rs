@@ -7,6 +7,7 @@ import sys
 import time
 
 from bundle_publication import gone
+from bundle_witness import wait_pid
 
 
 def run(root, xtask, temporary):
@@ -30,12 +31,14 @@ def run(root, xtask, temporary):
         }[boundary]
         peer.write_text('#!' + sys.executable + '\n' + f'''
 import os, pathlib, signal, subprocess, sys, time
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
+from bundle_witness import publish_pid
 if not ({selection}): os.execv({real!r}, [{real!r}] + sys.argv[1:])
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)'])
-pathlib.Path(os.environ['DESCENDANT']).write_text(str(child.pid))
-pathlib.Path(os.environ['GROUP']).write_text(str(os.getpgrp()))
-pathlib.Path(os.environ['READY']).write_text(str(os.getpid()))
+publish_pid(os.environ['DESCENDANT'], child.pid)
+publish_pid(os.environ['GROUP'], os.getpgrp())
+publish_pid(os.environ['READY'], os.getpid())
 while True: time.sleep(.01)
 ''')
         peer.chmod(0o700)
@@ -54,10 +57,9 @@ while True: time.sleep(.01)
         try:
             try:
                 # Wait for semantic helper entry before measuring cancellation.
-                startup = time.monotonic() + 120
-                while not ready.exists() and process.poll() is None and time.monotonic() < startup:
-                    time.sleep(.01)
-                assert ready.exists(), "release helper boundary was not reached"
+                helper_pid = wait_pid(ready, process, timeout=120)
+                descendant_pid = wait_pid(descendant, process)
+                group_pid = wait_pid(group, process)
             except AssertionError:
                 process.terminate()
                 stdout, stderr = process.communicate(timeout=5)
@@ -68,7 +70,7 @@ while True: time.sleep(.01)
             elapsed = time.monotonic() - started
             assert elapsed < 3, (boundary, elapsed, stderr)
             assert process.returncode == 1 and b'release command cancelled' in stderr, (boundary, stdout, stderr)
-            for witness in [ready, descendant, group]: gone(int(witness.read_text()))
+            for pid in [helper_pid, descendant_pid, group_pid]: gone(pid)
             assert unowned.poll() is None, 'cleanup signalled an unowned process'
             assert not list(scratch.iterdir()), (boundary, list(scratch.iterdir()))
             assert stale.read_bytes() == b'previous release must survive cancellation'
