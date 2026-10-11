@@ -41,6 +41,8 @@ impl AnthropicBackend {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
+        // Measure only the provider call: no tool execution or idle gap is included.
+        let started = std::time::Instant::now();
         let response = self
             .model
             .request(
@@ -57,7 +59,12 @@ impl AnthropicBackend {
                         format!("{error}: {detail}")
                     }
                     _ => match crate::transport::TransportFailure::from_model_error(&error) {
-                        Some(failure) => failure.diagnostic(),
+                        Some(mut failure) => {
+                            failure.observation.provider_call_ms = Some(
+                                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                            );
+                            failure.diagnostic()
+                        }
                         None => error.to_string(),
                     },
                 }
@@ -82,3 +89,6 @@ impl ChatBackend for AnthropicBackend {
         self.calls.load(Ordering::SeqCst)
     }
 }
+
+#[cfg(test)]
+mod tests;

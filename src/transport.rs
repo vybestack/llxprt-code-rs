@@ -9,6 +9,9 @@
 //! detail is value-free by construction, and any retained body prefix is bounded again
 //! here and scrubbed by the caller before it reaches stdout or the session store.
 
+mod observation;
+pub use observation::RequestObservation;
+
 use std::time::Duration;
 
 /// The bounded diagnostic prefix retained from a provider response body. The provider
@@ -105,6 +108,8 @@ pub struct TransportFailure {
     pub body_bytes: usize,
     /// The provider's `Retry-After` hint, when one was sent.
     pub retry_after: Option<Duration>,
+    /// Value-free cause and measured provider-call timing when available.
+    pub observation: Box<RequestObservation>,
 }
 
 /// Recognize a provider's HTTP 400 context-window refusal from its bounded body.
@@ -208,6 +213,7 @@ impl TransportFailure {
             body_prefix,
             body_bytes,
             retry_after,
+            observation: Box::default(),
         })
     }
 
@@ -225,6 +231,14 @@ impl TransportFailure {
             body_prefix: detail.body_prefix.clone(),
             body_bytes: detail.body_bytes,
             retry_after: detail.retry_after,
+            observation: Box::new(RequestObservation {
+                cause: if status.is_none() {
+                    Some(detail.terminal_cause)
+                } else {
+                    None
+                },
+                provider_call_ms: None,
+            }),
         }
     }
 
@@ -247,6 +261,7 @@ impl TransportFailure {
                 body_prefix: None,
                 body_bytes: 0,
                 retry_after: None,
+                observation: Box::default(),
             })
         })
     }
@@ -320,6 +335,7 @@ impl TransportFailure {
             body_prefix,
             body_bytes,
             retry_after,
+            observation: Box::new(RequestObservation::from_fields(fields)?),
         })
     }
 
@@ -363,6 +379,7 @@ impl TransportFailure {
         if let Some(url_class) = self.url_class {
             out.push_str(&format!(", url {url_class}"));
         }
+        self.observation.render(&mut out);
         let verdict = if self.kind.is_retryable() {
             "retryable"
         } else {
@@ -458,6 +475,7 @@ mod tests {
             },
             body_bytes: body.len(),
             retry_after,
+            observation: Box::default(),
         }
     }
 
@@ -470,6 +488,7 @@ mod tests {
             body_prefix: None,
             body_bytes: 0,
             retry_after: None,
+            observation: Box::default(),
         }
     }
 

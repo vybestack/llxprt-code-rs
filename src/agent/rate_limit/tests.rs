@@ -45,6 +45,7 @@ fn failure(status: u16, kind: crate::transport::TransportKind, seconds: u64) -> 
         body_prefix: None,
         body_bytes: 0,
         retry_after: Some(Duration::from_secs(seconds)),
+        observation: Default::default(),
     }
     .diagnostic()
 }
