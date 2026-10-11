@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 
+from bundle_witness import wait_pid
+
 
 def load(path):
     spec = importlib.util.spec_from_file_location('bundle_publish', path)
@@ -288,20 +290,20 @@ def cancellation(publisher, temporary):
         source.write_bytes(b'private verified candidate')
         # These are hostile test payloads, not release orchestration implementations.
         verifier = root / 'blocking-verifier.sh'
-        verifier.write_text('#!/usr/bin/env bash\nset -euo pipefail\n' + ("trap '' TERM\n" if deadline else '') + "(trap '' TERM; while :; do sleep 300; done) &\n" + f'echo $! > {str(pid_file)!r}\n' + ('while :; do sleep 300; done\n' if deadline else 'wait\n'))
+        verifier.write_text('#!/usr/bin/env bash\nset -euo pipefail\n' + ("trap '' TERM\n" if deadline else '') + "(trap '' TERM; while :; do sleep 300; done) &\n" + f'echo $! > {str(pid_file) + ".pending"!r}\nmv -- {str(pid_file) + ".pending"!r} {str(pid_file)!r}\n' + ('while :; do sleep 300; done\n' if deadline else 'wait\n'))
         verifier.chmod(0o700)
         env = {**os.environ}
         if deadline: env['LLXPRT_SOURCE_VERIFY_TIMEOUT_SECONDS'] = '5'
         process = subprocess.Popen([sys.executable, publisher, str(source), str(destination), '--', str(verifier)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            wait_file(pid_file, process)
+            pid = wait_pid(pid_file, process)
             if not deadline: process.send_signal(signal.SIGTERM)
             _, stderr = process.communicate(timeout=20)
             assert process.returncode != 0 and not destination.exists()
             if deadline:
                 assert b'source-bundle verifier timed out' in stderr and not source.exists()
                 assert not list(root.glob('.llxprt-publish.*'))
-            gone(int(pid_file.read_text()))
+            gone(pid)
         finally:
             if process.poll() is None:
                 process.kill(); process.wait()

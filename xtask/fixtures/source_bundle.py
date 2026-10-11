@@ -12,6 +12,7 @@ import tempfile
 from bundle_archives import malformed, matching
 import bundle_publication
 import bundle_cancellation
+import bundle_witness
 
 ROOT = Path(__file__).resolve().parents[2]
 XTASK = sys.argv[1]
@@ -249,6 +250,7 @@ if not moved.exists():
 
 
 def main():
+    bundle_witness.tests()
     with tempfile.TemporaryDirectory(prefix='llxprt-bundle-verifier.') as temporary:
         tmp = Path(temporary).resolve()
         marker = tmp / 'outside-marker'
