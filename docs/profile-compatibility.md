@@ -246,11 +246,15 @@ Duplicate definitions:
 | `stream-first-response-timeout-ms` | number |  | registry-entries-3.ts |
 | `kimi.experimental-video` | boolean |  | registry-entries-3.ts |
 
-Shell timeout compatibility: `shell-default-timeout-seconds` and
-`shell-max-timeout-seconds` are host-applied positive integer seconds. They default to
-120 seconds; the finite maximum is 7200 seconds (the task/session timeout policy
-ceiling), and the default may not exceed the maximum. A requested per-call timeout
-above the configured maximum is clamped and reports its requested and effective values.
+Shell timeout policy for **non-Codex Chat, Anthropic and Responses**:
+`shell-default-timeout-seconds` and `shell-max-timeout-seconds` are applied by the
+Rust shell executor as positive integer seconds through 7200. Each defaults to
+120 seconds, and the default may not exceed the maximum; `-1` rejects for these
+providers. A requested per-call timeout above the configured maximum is clamped
+and reports its requested and effective values. **Codex** instead uses the
+independently validated, optionally disabled policy documented above: `-1` disables
+one setting and a default above the maximum is capped, not rejected. Neither
+provider policy reassigns request or turn deadlines.
 
 ## In-scope installed profile disposition (46 fixtures)
 
