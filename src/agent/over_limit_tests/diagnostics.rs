@@ -3,7 +3,30 @@
 use super::*;
 use crate::agent::over_limit::request_total_bytes;
 
-fn assert_measurements(message: &str, before: usize, after: usize, budget: usize) {
+fn reported_bytes(message: &str, prefix: &str, suffix: &str) -> usize {
+    message
+        .split_once(prefix)
+        .expect("diagnostic must name the measured quantity")
+        .1
+        .split_once(suffix)
+        .expect("diagnostic must name the byte unit")
+        .0
+        .parse()
+        .expect("diagnostic must report an integer byte count")
+}
+
+// Materialization creates timestamps whose serialized lengths can vary. Read the
+// agent's own totals, then check every excess/reduction against those exact values.
+pub(super) fn reported_estimates(message: &str) -> (usize, usize) {
+    (
+        reported_bytes(message, "estimated request would be ", " bytes"),
+        reported_bytes(message, "after one compaction attempt, still ", " bytes"),
+    )
+}
+
+pub(super) fn assert_measurements(message: &str, before: usize, after: usize, budget: usize) {
+    assert!(before >= after);
+    assert!(after > budget);
     assert!(message.contains(&format!("estimated request would be {before} bytes")));
     assert!(message.contains(&format!(
         "{} bytes over the {budget}-byte heuristic guard",
@@ -19,6 +42,46 @@ fn assert_measurements(message: &str, before: usize, after: usize, budget: usize
     assert!(message.contains("tool results="));
     assert!(message.contains("tool schemas="));
     assert!(message.contains("no request sent"));
+    let retained: usize = [
+        "system/instructions=",
+        "prompts/notices=",
+        "tool results=",
+        "assistant/call framing=",
+        "fixed/request/part overhead=",
+        "tool schemas=",
+    ]
+    .iter()
+    .map(|prefix| {
+        reported_bytes(
+            message,
+            prefix,
+            if *prefix == "tool schemas=" { ";" } else { "," },
+        )
+    })
+    .sum();
+    assert_eq!(retained, after);
+}
+
+#[test]
+fn measurement_assertions_reject_inconsistent_reported_numbers() {
+    let message = "estimated request would be 40000 bytes (10000 bytes over the 30000-byte heuristic guard); after one compaction attempt, still 35000 bytes (5000 bytes over guard); reduced by 5000 bytes; retained estimated bytes: system/instructions=1000, prompts/notices=30000, tool results=0, assistant/call framing=1000, fixed/request/part overhead=1000, tool schemas=2000; no request sent";
+    let check = |message: &str| {
+        let (before, after) = reported_estimates(message);
+        assert_measurements(message, before, after, 30_000);
+    };
+    check(message);
+    for (old, new) in [
+        ("would be 40000", "would be 40001"),
+        ("still 35000", "still 35001"),
+        ("(10000 bytes over", "(10001 bytes over"),
+        ("(5000 bytes over", "(5001 bytes over"),
+        ("reduced by 5000", "reduced by 4999"),
+        ("tool schemas=2000", "tool schemas=2001"),
+    ] {
+        let corrupted = message.replace(old, new);
+        assert_ne!(corrupted, message);
+        assert!(std::panic::catch_unwind(|| check(&corrupted)).is_err());
+    }
 }
 
 #[test]
@@ -31,12 +94,12 @@ fn no_eligible_history_reports_actual_excess_and_retained_prompt() {
         false,
     )
     .with_context_limit(Some(10_000));
-    let requests = agent.materialize_requests(&reserved);
-    let tools = crate::tools::tool_specs(false);
-    let before = request_total_bytes(&requests, &tools);
     let error = agent.run(&store, &reserved).unwrap_err();
+    let (before, after) = reported_estimates(&error.message);
+    assert_eq!(before, after);
+    assert!(after > prompt.len());
     assert_eq!(error.key, "context-limit");
-    assert_measurements(&error.message, before, before, 30_000);
+    assert_measurements(&error.message, before, after, 30_000);
     assert!(error
         .message
         .contains("no eligible history or observed tool results could be removed"));
@@ -56,11 +119,10 @@ fn reduced_but_oversized_preflight_names_both_estimates() {
     )
     .with_context_limit(Some(10_000));
     let turn = Turn::new(&agent).unwrap();
-    let tools = crate::tools::tool_specs(false);
-    let before = request_total_bytes(&agent.materialize_requests(&reserved), &tools);
     let error = turn.preflight_recovery(&store, &mut reserved).unwrap_err();
-    let after = request_total_bytes(&agent.materialize_requests(&reserved), &tools);
+    let (before, after) = reported_estimates(&error.message);
     assert!(after < before);
+    assert!(after > reserved.prompt.len());
     assert_eq!(error.key, "context-limit");
     assert_measurements(&error.message, before, after, 30_000);
     assert!(error
