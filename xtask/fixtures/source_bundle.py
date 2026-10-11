@@ -150,11 +150,23 @@ def builder_cases(root, tmp):
     clean_copy(root, fixture)
     attribute = git(fixture, 'check-attr', 'text', '--', 'registry-vendor/core-foundation-0.10.1/Cargo.toml').stdout
     assert attribute.endswith(b': text: unset\n')
+    # Issue #267: exercise ignored scratch in the full builder, not just its
+    # commit-derived listing. A tracked tmp/ would make this a source-root test.
+    assert not git(fixture, 'ls-tree', '-r', '--name-only', 'HEAD', '--', 'tmp').stdout
+    scratch = fixture / 'tmp' / '.bundle-verifier-ignored-scratch' / '.cargo-ok'
+    scratch.parent.mkdir(parents=True)
+    scratch.touch()
+    git(fixture, 'check-ignore', '-q', '--', scratch)
+    assert not git(fixture, 'status', '--porcelain', '--untracked-files=all').stdout
     output = tmp / 'clean-output'
     output.mkdir()
     task(fixture, 'build', output / 'source.tar.gz', env=pass_env)
     assert list(output.iterdir()) == [output / 'source.tar.gz']
     members = archive_members(output / 'source.tar.gz')
+    # archive_members consumes the whole archive: an early matching member
+    # cannot SIGPIPE a tar listing and silently make this assertion fail open.
+    assert not any(member == 'bundle/tmp' or member.startswith('bundle/tmp/') for member in members)
+    assert scratch.is_file(), 'the builder must tolerate scratch, not remove it'
     for member in ['.gitattributes', 'project-plans', 'project-plans/issue1', 'project-plans/issue1/PLAN.md']:
         assert 'bundle/' + member in members
     task(fixture, 'verify', output / 'source.tar.gz')
