@@ -24,6 +24,7 @@ use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 use serde_json::Value as JsonValue;
 
 mod deadline;
+mod provider_validation;
 use deadline::Turn;
 mod finish;
 mod in_flight;
@@ -57,8 +58,8 @@ mod tool_validation;
 pub use crate::tools::known_tool;
 use tool_validation::validate_calls;
 
-/// Stable error key and terminal outcome for a zero-call reply that structurally
-/// resembles tool-call syntax (issue 146).
+/// Stable error key and terminal outcome for malformed tool-call syntax (issue 146)
+/// or an invalid provider tool-name field after one corrective reissue (issue 310).
 pub const MALFORMED_TOOL_CALL_KEY: &str = "malformed_tool_call";
 /// Terminal outcome for a first-completion output truncation whose one bounded re-issue
 /// also truncated (issue 153). The failure keeps the `finish-reason` error key and its
@@ -143,10 +144,7 @@ pub use error::AgentError;
 mod helpers;
 use crate::transport::TransportFailure;
 pub(crate) use helpers::budget_notice;
-use helpers::{
-    final_summary_request, refuse_over_budget, split_over_budget, tool_call_record,
-    validate_provider_result,
-};
+use helpers::{final_summary_request, refuse_over_budget, split_over_budget, tool_call_record};
 mod config;
 pub use config::{coding_system_prompt, round_limit_message};
 
@@ -812,6 +810,9 @@ enum ToolCallFailure {
 enum RoundFailure {
     TurnTime,
     Model(String),
+    ToolCallRefusal(String),
+    InvalidToolCall(String),
+    FinishReason(String),
     ModelTransport(TransportFailure),
     Profiling(AgentError),
     CacheOutput(crate::cache_output::OutputError),

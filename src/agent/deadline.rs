@@ -94,7 +94,7 @@ impl<'a> Turn<'a> {
         )
     }
 
-    pub(super) fn round(
+    pub(super) fn round_once(
         &self,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
@@ -129,7 +129,7 @@ impl<'a> Turn<'a> {
                 .map_err(RoundFailure::CacheOutput)?;
         }
         // Bound and validate the reply before it can join any transcript or usage total.
-        validate_provider_result(&result, &self.secrets).map_err(RoundFailure::Model)?;
+        provider_validation::validate(&result, &self.secrets)?;
         Ok(result)
     }
 }
