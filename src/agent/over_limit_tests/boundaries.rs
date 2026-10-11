@@ -4,7 +4,7 @@ use super::*;
 use crate::agent::over_limit::request_total_bytes;
 use crate::session::{HistoryTurn, ToolCallRecord};
 
-fn admitted_round(store: &SessionStore, id: &str, text: &str) -> RoundRecord {
+pub(super) fn admitted_round(store: &SessionStore, id: &str, text: &str) -> RoundRecord {
     let projection = store.compact_tool_result("read_file", text).unwrap();
     RoundRecord {
         assistant: format!("Observed {id}"),
@@ -20,7 +20,7 @@ fn admitted_round(store: &SessionStore, id: &str, text: &str) -> RoundRecord {
     }
 }
 
-fn append_live(requests: &mut Vec<serdes_ai::core::ModelRequest>, round: &RoundRecord) {
+pub(super) fn append_live(requests: &mut Vec<serdes_ai::core::ModelRequest>, round: &RoundRecord) {
     let start = requests.len();
     requests.extend(crate::adapter::persisted_round_requests(round));
     for (request, call) in requests[start + 1..].iter_mut().zip(&round.calls) {

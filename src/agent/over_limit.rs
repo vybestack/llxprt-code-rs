@@ -1,6 +1,9 @@
 //! One-shot preservation-oriented history compaction for context recovery.
 
 pub(super) mod content;
+mod diagnostics;
+
+use diagnostics::over_limit_message;
 
 use crate::session::HistoryTurn;
 
@@ -67,16 +70,6 @@ pub(crate) fn request_total_bytes(
         .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
 }
 
-/// Stable one-shot recovery diagnostic naming both measured attempts.
-pub(crate) fn over_limit_message(
-    original: usize,
-    after: usize,
-    context_limit: Option<u64>,
-) -> String {
-    let budget = crate::agent::materialization_budget(context_limit);
-    format!("estimated request would be {original} bytes over the {budget}-byte heuristic guard; after one compaction attempt, still {after} bytes")
-}
-
 use super::{AttemptState, RoundFailure};
 use crate::agent::{AgentError, LlmResult};
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
@@ -101,11 +94,7 @@ impl super::Turn<'_> {
                 store,
                 reserved,
                 "context-limit",
-                &over_limit_message(
-                    original,
-                    request_total_bytes(&requests, &tools),
-                    self.context_limit,
-                ),
+                &over_limit_message(original, &requests, &tools, self.context_limit),
                 &[],
             ));
         }
@@ -249,11 +238,7 @@ impl super::Turn<'_> {
                 store,
                 reserved,
                 "context-limit",
-                &over_limit_message(
-                    original,
-                    request_total_bytes(requests, tools),
-                    self.context_limit,
-                ),
+                &over_limit_message(original, requests, tools, self.context_limit),
                 rounds,
             ));
         }
