@@ -51,8 +51,14 @@ runs fresh native verifiers for:
 - normal verification completion after the existing launch cancellation;
 - assertion failure while the launch helper is parked (actual verifier exit 101);
 - helper wait timeout followed by owner cleanup;
-- SIGTERM cancellation of the initiating verifier without unwinding;
+- SIGTERM cancellation of the initiating verifier without unwinding, including
+  a deliberately inherited blocked SIGTERM mask;
 - SIGKILL of the initiating verifier without unwinding.
+
+The fresh verifier explicitly installs default TERM delivery and unblocks TERM;
+exec alone preserves inherited signal masks and ignored dispositions. This pins
+the cancellation fixture semantics under extracted release gates as well as
+direct Cargo invocations.
 
 Each case publishes and retains the worker, helper-scope leader, pre-exec child and
 tool-scope leader IDs before the verifier can exit. The outer test checks all four

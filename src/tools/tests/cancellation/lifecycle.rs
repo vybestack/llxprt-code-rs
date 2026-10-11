@@ -55,8 +55,12 @@ fn launch_helper_lifecycle_leaves_no_owned_processes() {
     ] {
         let root = tempfile::tempdir().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        // Release/extracted gates can inherit a blocked TERM. Pin that condition
+        // explicitly; the verifier must arrange its own cancellation delivery.
+        block_verifier_term(&mut command);
         let mut verifier = OwnedHelper::spawn(
-            Command::new(std::env::current_exe().unwrap())
+            command
                 .args(["--exact", VERIFIER_TEST, "--nocapture"])
                 .env(VERIFIER_ROOT, root.path())
                 .env(VERIFIER_MODE, mode)
@@ -104,6 +108,7 @@ fn launch_verifier_helper() {
     let Some(root) = std::env::var_os(VERIFIER_ROOT) else {
         return;
     };
+    configure_verifier_term();
     let root = std::path::PathBuf::from(root);
     let mode = std::env::var(VERIFIER_MODE).unwrap();
     let mut worker =
@@ -154,5 +159,44 @@ fn cancellation_signal(mode: &str) -> i32 {
         libc::SIGTERM
     } else {
         libc::SIGKILL
+    }
+}
+
+fn block_verifier_term(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // Safety: signal-mask syscalls only, in this fixture's post-fork child.
+    unsafe {
+        command.pre_exec(|| {
+            let mut blocked: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut blocked);
+            libc::sigaddset(&mut blocked, libc::SIGTERM);
+            let error = libc::pthread_sigmask(libc::SIG_BLOCK, &blocked, std::ptr::null_mut());
+            if error != 0 {
+                return Err(std::io::Error::from_raw_os_error(error));
+            }
+            Ok(())
+        });
+    }
+}
+
+fn configure_verifier_term() {
+    // The verifier models an initiating gate, not a runtime worker: TERM must
+    // exit without unwinding. Exec retains masks and ignored dispositions, so
+    // install the intended default action and unblock in this fresh process.
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = libc::SIG_DFL;
+        libc::sigemptyset(&mut action.sa_mask);
+        assert_eq!(
+            libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut()),
+            0
+        );
+        let mut signals: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut signals);
+        libc::sigaddset(&mut signals, libc::SIGTERM);
+        assert_eq!(
+            libc::pthread_sigmask(libc::SIG_UNBLOCK, &signals, std::ptr::null_mut()),
+            0
+        );
     }
 }
