@@ -436,3 +436,6 @@ fn malformed_unknown_call_refuses_whole_provider_batch_before_any_side_effect() 
         assert!(state.branches[0].rounds.is_empty());
     }
 }
+
+#[path = "provider_tool_name_refusal/placeholder.rs"]
+mod placeholder;

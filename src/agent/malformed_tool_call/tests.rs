@@ -11,6 +11,8 @@ fn ordinary_prose_never_fires() {
         "Consider a < b comparison before calling search_file_content.",
         "The model emitted </DSML/parameter> in an earlier run.",
         "See the docs for <tooling> and <parameters> in the README.",
+        "The tool_called_placeholder marker is not a native call.",
+        "<tool_called_placeholder_example> is an unrelated tag.",
         "",
         "   \n  ",
     ] {
@@ -134,4 +136,24 @@ fn zero_call_tail_counts_trailing_call_free_rounds() {
         zero_call_tail(&[bare("a"), with_calls, bare("b"), bare("c")]),
         2
     );
+}
+
+/// Issue 251: placeholders are tool-shaped text, never native calls or successful work.
+#[test]
+fn placeholder_tags_fail_only_without_parsed_calls() {
+    for text in [
+        "I'll start by verifying the checkout state and understanding the project.\n\n<tool_called_placeholder>\n</tool_called_placeholder>",
+        "<tool_called_placeholder />",
+        "</tool_called_placeholder>",
+        "<tool_called_placeholder name=\"private-argument\">",
+    ] {
+        for allow_shell in [false, true] {
+            let (trigger, message) = classify(text, 0, allow_shell).expect("placeholder refused");
+            assert_eq!(trigger, Trigger::TagBlock);
+            assert!(!message.contains("tool_called_placeholder"));
+            assert!(!message.contains("private-argument"));
+            assert!(message.contains(&format!("{} bytes", text.len())));
+            assert_eq!(classify(text, 1, allow_shell), None);
+        }
+    }
 }

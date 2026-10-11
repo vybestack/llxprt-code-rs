@@ -3,14 +3,15 @@
 //!
 //! A reply that parses to zero calls is usually an honest final answer, so the detector
 //! only fires on structurally tag-shaped text: an angle-bracket delimited block whose
-//! name is a known invoke/parameter wrapper or a known tool name, or a stray DSML
-//! close delimiter (`</｜DSML｜...>`). Prose that merely mentions a tool name in a
+//! name is a known invoke/parameter/placeholder wrapper or a known tool name, or a
+//! stray DSML close delimiter (`</｜DSML｜...>`). Prose that merely mentions a tool name in a
 //! sentence never fires, because a bare word is not a tag.
 
 /// Known wrapper tag names models use when they emit a tool call as pseudo-XML text.
-const WRAPPER_TAGS: [&str; 6] = [
+const WRAPPER_TAGS: [&str; 7] = [
     "tool_call",
     "tool_calls",
+    "tool_called_placeholder",
     "function_call",
     "function_calls",
     "invoke",
