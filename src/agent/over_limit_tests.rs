@@ -2,6 +2,7 @@
 
 mod accounting;
 mod boundaries;
+mod diagnostics;
 mod effective_compaction;
 mod findings;
 
