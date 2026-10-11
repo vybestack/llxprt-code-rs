@@ -135,6 +135,13 @@ pub struct TransportDetail {
 }
 
 impl TransportDetail {
+    /// Read bounded provider status facts without replacing a received refusal
+    /// with a diagnostic-body transport error.
+    #[cfg(any(feature = "openai", feature = "anthropic"))]
+    pub async fn from_response(response: reqwest::Response) -> Result<Self, ModelError> {
+        crate::response::transport_detail(response).await
+    }
+
     /// Derive the retryability class from the origin, the status, and the bounded body.
     pub fn classify(&self) -> TransportClass {
         match self.origin {

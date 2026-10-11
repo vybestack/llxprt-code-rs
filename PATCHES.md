@@ -459,3 +459,25 @@ and tool schemas redacted; SSE (folded and streaming, Codex and plain) and WebSo
 tests plus the root adapter tests consume them. The former contradiction case that
 cleared the terminal output now mutates a terminal item's arguments instead, because
 clearing the output is valid live wire.
+
+## Patch 18 - request retry facts (#49)
+
+OpenAI chat, Anthropic Messages and Responses HTTP (streaming and nonstreaming)
+share bounded structured error-body extraction.
+Anthropic now retains status, bounded body prefix and Retry-After so quota refusals
+remain nonretryable instead of being flattened to generic throttles. A received
+HTTP error status survives a diagnostic-body transport failure (notably a 401
+whose body times out); oversized diagnostic bodies still fail their existing
+protocol cap. Retry-After accepts delta seconds and HTTP dates via the already
+shipped chrono dependency, preserving subsecond minimum waits. The host adapter
+carries these facts as `BackendError::Transport` into the single bounded turn-owned
+retry loop; provider diagnostic prose never authorizes a retry. Public vendored
+error formatting remains value-free. No new dependency or second retry policy is
+introduced.
+Responses HTTP uses the additive typed `TransportDetail::from_response` reader
+instead of flattening status/error bodies, retaining Retry-After and preserving
+its existing previous-response recovery. The host still recognizes typed 400
+context-window refusals before retry classification.
+Responses HTTP applies ModelSettings::timeout through the body; the host timer
+remains only for WebSocket. This removes the competing deadline that could erase
+an already-received permanent status when diagnostic-body reading times out.

@@ -41,7 +41,7 @@ fn read_body(stream: &mut std::net::TcpStream) -> Value {
 fn serve(listener: std::net::TcpListener, unknown: bool, fail: bool) -> Vec<Value> {
     listener.set_nonblocking(true).unwrap();
     let mut requests = Vec::new();
-    for round in 0..2 {
+    for round in 0..if fail { 5 } else { 2 } {
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut stream = loop {
             match listener.accept() {
@@ -55,7 +55,7 @@ fn serve(listener: std::net::TcpListener, unknown: bool, fail: bool) -> Vec<Valu
         };
         stream.set_nonblocking(false).unwrap();
         requests.push(read_body(&mut stream));
-        if fail && round == 1 {
+        if fail && round >= 1 {
             let body = "private-owner-key provider failure";
             write!(
                 stream,
@@ -263,10 +263,13 @@ fn later_provider_failure_retains_completed_call_usage_and_bounded_scrubbed_erro
         .arg(work.path().join("cache.jsonl"))
         .output()
         .unwrap();
-    assert_eq!(server.join().unwrap().len(), 2);
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(requests[1..].iter().all(|request| request == &requests[1]));
     assert_eq!(output.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(envelope["error"]["code"], "model-transient-server");
+    assert_eq!(envelope["error"]["retry_attempts"], 3);
     assert!(envelope["error"]["message"].as_str().unwrap().len() < 4096);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("private-owner-key"));
     let events = jsonl(&output.stderr);

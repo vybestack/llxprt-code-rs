@@ -386,7 +386,7 @@ mod tests {
                         calls: Vec::new(),
                         finish_reason: Some(serdes_ai::core::messages::FinishReason::Stop),
                     }),
-                    2 => Err("fixture terminal failure".to_string()),
+                    2 => Err("fixture terminal failure".into()),
                     _ => std::future::pending().await,
                 }
             })
@@ -416,7 +416,7 @@ mod tests {
             assert_eq!(reply.usage.cache_read_tokens, Some(60));
             assert_eq!(observed.request_calls(), 1);
             assert_eq!(
-                observed.request(&[], &[]).await.unwrap_err(),
+                observed.request(&[], &[]).await.unwrap_err().to_string(),
                 "fixture terminal failure"
             );
             assert_eq!(observed.request_calls(), 2);

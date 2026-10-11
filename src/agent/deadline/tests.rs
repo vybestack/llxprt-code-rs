@@ -44,7 +44,7 @@ impl ChatBackend for Script {
                 .pop_front()
                 .expect("script exhausted");
             tokio::time::sleep(reply.delay).await;
-            reply.result
+            reply.result.map_err(Into::into)
         })
     }
 

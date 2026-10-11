@@ -10,15 +10,16 @@ impl Turn<'_> {
     ) -> Result<LlmResult, RoundFailure> {
         let (store, reserved, round) = context;
         for retry in 0..=super::rate_limit::MAX_RETRIES {
-            let events = match self.round_once(requests, tools) {
+            let events = match self.round_once(requests, tools, retry > 0) {
                 Err(RoundFailure::StreamInterrupted(events))
                     if retry < super::rate_limit::MAX_RETRIES =>
                 {
                     events
                 }
                 Err(RoundFailure::ModelTransport(failure))
-                    if failure.kind == crate::transport::TransportKind::RateLimit
-                        && failure.status == Some(429) =>
+                    if failure.kind.is_retryable()
+                        && (failure.kind != crate::transport::TransportKind::RateLimit
+                            || failure.status == Some(429)) =>
                 {
                     self.rate_limit_delay(store, reserved, failure, retry)?;
                     continue;

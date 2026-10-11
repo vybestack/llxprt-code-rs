@@ -196,6 +196,12 @@ impl OpenResponsesModel {
         }
     }
 
+    /// Whether HTTP owns the complete request timeout (headers and body).
+    #[must_use]
+    pub fn uses_http(&self) -> bool {
+        self.inner.transport == Transport::Http
+    }
+
     /// Override the transport inferred from the URL scheme.
     ///
     /// Builder methods must be called before the model is shared (used to
@@ -813,15 +819,16 @@ impl OpenResponsesModel {
             for (name, value) in &inner.headers {
                 http = http.header(name, value);
             }
-            let response = http
-                .send()
-                .await
-                .map_err(|e| ModelError::Connection(e.to_string()))?;
+            if let Some(timeout) = settings.timeout {
+                http = http.timeout(timeout);
+            }
+            let response = http.send().await.map_err(ModelError::from)?;
 
             if !response.status().is_success() {
-                let status = response.status().as_u16();
-                let body = response.text().await.unwrap_or_default();
-                let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
+                let detail =
+                    serdes_ai_models::error::TransportDetail::from_response(response).await?;
+                let body = detail.body_prefix.as_deref().unwrap_or("");
+                let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(body)
                     .ok()
                     .map(|envelope| envelope.error.code)
                     .unwrap_or_default();
@@ -830,13 +837,16 @@ impl OpenResponsesModel {
                     session.sent_requests = 0;
                     continue;
                 }
-                return Err(ModelError::http(status, format!("{code}: {body}")));
+                return Err(ModelError::Transport(detail));
             }
 
-            let object: ResponseObject = response
-                .json()
-                .await
-                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
+            let object: ResponseObject = response.json().await.map_err(|error| {
+                if error.is_timeout() || error.is_body() {
+                    ModelError::from(error)
+                } else {
+                    ModelError::InvalidResponse("responses HTTP: invalid response JSON".into())
+                }
+            })?;
             session.previous_response_id = Some(object.id.clone());
             session.sent_requests = messages.len();
             return Ok(ModelResponse {
@@ -920,16 +930,16 @@ async fn run_http_stream(
         for (name, value) in &inner.headers {
             http = http.header(name, value);
         }
-        let response = http
-            .send()
-            .await
-            .map_err(|e| ModelError::Connection(e.to_string()))?;
+        if let Some(timeout) = settings.timeout {
+            http = http.timeout(timeout);
+        }
+        let response = http.send().await.map_err(ModelError::from)?;
         if response.status().is_success() {
             break response;
         }
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
+        let detail = serdes_ai_models::error::TransportDetail::from_response(response).await?;
+        let body = detail.body_prefix.as_deref().unwrap_or("");
+        let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(body)
             .ok()
             .map(|envelope| envelope.error.code)
             .unwrap_or_default();
@@ -938,7 +948,7 @@ async fn run_http_stream(
             session.sent_requests = 0;
             continue;
         }
-        return Err(ModelError::http(status, format!("{code}: {body}")));
+        return Err(ModelError::Transport(detail));
     };
 
     let mut byte_stream = response.bytes_stream();

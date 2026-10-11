@@ -108,7 +108,7 @@ fn ok_env(success: &str) -> OkEnvelope {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p"),
     }))
     .unwrap()
@@ -130,7 +130,7 @@ fn ok_envelope_contract_passes() {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p"),
     }))
     .unwrap();
@@ -168,7 +168,7 @@ fn previous_adversarial_envelope_ok_false() {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p")
     });
     let text = serde_json::to_string(&json).unwrap();
@@ -218,7 +218,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p"),
     });
     good["exit"] = serde_json::json!(0);
@@ -238,7 +238,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p"),
         "error": { "code": "x", "message": "y" },
     });
@@ -531,7 +531,7 @@ fn trailing_or_multiple_json_is_rejected_by_parse() {
         "tool_calls": 3,
         "declared_tool_calls": 16,
         "budget_exhausted": false,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": crate::agent::prompt_digest("p")
     });
     let padded = format!("  {full}  ");
@@ -774,6 +774,7 @@ fn cli_and_harness_share_one_prompt_digest() {
                 zero_call_tail: 1,
                 terminal_outcome: None,
                 replayed: false,
+                retry_attempts: 0,
             },
         };
         assert_eq!(
@@ -785,7 +786,7 @@ fn cli_and_harness_share_one_prompt_digest() {
         let env: Envelope = serde_json::from_value(serde_json::json!({
             "session_id": "s", "session_dir": "/tmp/sessions/s",
             "turn": 1, "attempt": 1, "branch_id": "b1", "branch": false,
-            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1,
+            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1, "retry_attempts": 0,
             "prompt_digest": digest,
         }))
         .unwrap();

@@ -5,7 +5,7 @@ use serdes_ai::models::Model as _;
 use serdes_ai::ModelSettings;
 use serdes_ai_responses::client::OpenResponsesModel;
 
-use crate::adapter::{schema_for, ChatBackend, LlmResult};
+use crate::adapter::{schema_for, BackendError, ChatBackend, LlmResult};
 use crate::model::SerdeAiParams;
 
 enum ResponsesModel {
@@ -52,7 +52,7 @@ impl ResponsesBackend {
         &self,
         requests: &[ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, BackendError> {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
@@ -73,23 +73,7 @@ impl ResponsesBackend {
             if let serdes_ai::models::ModelError::StreamInterrupted { events } = &error {
                 self.interrupted.set(Some(*events));
             }
-            let error = crate::transport::context_length_400(&error).unwrap_or(error);
-            let diagnostic = match &error {
-                serdes_ai::models::ModelError::InvalidResponse(detail)
-                | serdes_ai::models::ModelError::Network(detail) => format!("{error}: {detail}"),
-                serdes_ai::models::ModelError::Api { message, code }
-                    if code
-                        .as_deref()
-                        .is_some_and(|code| code.starts_with("sse_provider_")) =>
-                {
-                    message.clone()
-                }
-                _ => match crate::transport::TransportFailure::from_model_error(&error) {
-                    Some(failure) => failure.diagnostic(),
-                    None => error.to_string(),
-                },
-            };
-            crate::redact::scrub_and_bound_diagnostic(&diagnostic)
+            BackendError::from_model(error)
         })?;
         Ok(LlmResult::from_response(&response, &self.secrets))
     }
@@ -115,12 +99,16 @@ impl ChatBackend for ResponsesBackend {
         Box::pin(async move {
             self.interrupted.set(None);
             self.calls.fetch_add(1, Ordering::SeqCst);
-            // Codex HTTP/WebSocket does not apply ModelSettings::timeout itself.
-            // This remains a per-request policy, independent of the turn deadline.
-            match self.model_settings.timeout {
+            // HTTP applies its own timeout through the body, retaining received
+            // status on diagnostic-read failure. Only WebSocket needs a host timer.
+            let host_timer = match &self.model {
+                ResponsesModel::Codex(model) if !model.uses_http() => self.model_settings.timeout,
+                _ => None,
+            };
+            match host_timer {
                 Some(limit) => tokio::time::timeout(limit, self.request_async(requests, tools))
                     .await
-                    .map_err(|_| "responses request exceeded the configured timeout".to_string())
+                    .map_err(|_| BackendError::from_model(serdes_ai::models::ModelError::Timeout))
                     .and_then(|result| result),
                 None => self.request_async(requests, tools).await,
             }
@@ -136,6 +124,8 @@ impl ChatBackend for ResponsesBackend {
 mod cache_tests;
 #[cfg(test)]
 mod stream_retry_tests;
+#[cfg(test)]
+mod transport_tests;
 
 #[cfg(test)]
 pub(super) mod tests {
@@ -161,8 +151,8 @@ pub(super) mod tests {
             .expect_err("invalid test endpoint must fail");
 
         assert_eq!(backend.request_calls(), 1);
-        assert!(!error.contains("Bearer"));
-        assert!(!error.contains("chatgpt-account-id"));
+        assert!(!error.to_string().contains("Bearer"));
+        assert!(!error.to_string().contains("chatgpt-account-id"));
     }
 
     #[test]
@@ -198,7 +188,11 @@ pub(super) mod tests {
             started.elapsed() < std::time::Duration::from_secs(4),
             "turn must end via the bound, not the socket"
         );
-        assert_eq!(error, "responses request exceeded the configured timeout");
+        let BackendError::Transport(failure) = error else {
+            panic!("expected typed timeout: {error}");
+        };
+        assert_eq!(failure.kind, crate::transport::TransportKind::Connectivity);
+        assert_eq!(failure.origin, "timeout");
         assert_eq!(backend.request_calls(), 1);
     }
 
@@ -546,7 +540,10 @@ Connection: close
         let error = test_runtime()
             .block_on(backend.request(&[ModelRequest::default()], &[]))
             .expect_err("JSON body cannot fold into a codex turn");
-        assert!(error.contains("responses SSE"), "unexpected error: {error}");
+        assert!(
+            error.to_string().contains("responses SSE"),
+            "unexpected error: {error}"
+        );
         server.join().expect("server");
     }
 }

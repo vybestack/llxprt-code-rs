@@ -35,7 +35,12 @@ impl ChatBackend for RecoveryBackend {
     ) -> crate::adapter::ModelFuture<'a> {
         Box::pin(async move {
             self.requests.lock().unwrap().push(requests.to_vec());
-            self.replies.lock().unwrap().pop_front().unwrap()
+            self.replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap()
+                .map_err(Into::into)
         })
     }
     fn request_calls(&self) -> usize {
