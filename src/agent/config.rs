@@ -12,7 +12,9 @@ pub fn coding_system_prompt(
     tool_budget: Option<usize>,
 ) -> String {
     let shell_note = if shell_on {
-        "You may run shells and install nothing outside the workspace. Shell commands run with the general user's privileges and can execute arbitrary code, so keep every command confined to this project and never exfiltrate data."
+        "You may run shells and install nothing outside the workspace. Shell commands run with the general user's privileges and can execute arbitrary code, so keep every command confined to this project and never exfiltrate data.
+
+Git worktree safety: worktree creation requires confirmed terminal success; a timeout or nonzero exit may leave an incomplete directory. Directory existence or a successful git -C command is not proof of a usable worktree: Git can discover an enclosing repository. Before any destructive Git action (reset, merge, clean, checkout, or similar), require the destination's .git entry (file or directory), compare git -C <destination> rev-parse --show-toplevel with the canonical destination, verify --git-common-dir identifies the intended repository, and verify the expected branch and HEAD. If any check fails or creation has no confirmed success, stop; do not act in the enclosing root or reset an existing worktree. Retry creation only in a fresh destination with an adequate timeout within the existing policy, then repeat identity checks. Preserve failed attempts and captured output. Record root HEAD and status before starting, preserve tracked deletions and untracked files, and verify restoration if an accidental operation occurred. Never hide a failure through a bypass; do not expand permissions."
     } else {
         "Shell execution is disabled; edit files directly and do not invoke the shell tool."
     };
@@ -128,6 +130,30 @@ impl super::CodingAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_prompt_requires_terminal_success_and_exact_worktree_identity() {
+        let prompt = coding_system_prompt(std::path::Path::new("/workspace"), "", true, Some(16));
+        for required in [
+            "confirmed terminal success",
+            "Git can discover an enclosing repository",
+            ".git entry (file or directory)",
+            "git -C <destination> rev-parse --show-toplevel",
+            "canonical destination",
+            "--git-common-dir",
+            "expected branch and HEAD",
+            "reset, merge, clean, checkout",
+            "Preserve failed attempts",
+            "tracked deletions and untracked files",
+            "do not expand permissions",
+        ] {
+            assert!(prompt.contains(required), "missing {required}: {prompt}");
+        }
+        let disabled =
+            coding_system_prompt(std::path::Path::new("/workspace"), "", false, Some(16));
+        assert!(!disabled.contains("git -C"));
+        assert!(disabled.contains("Shell execution is disabled"));
+    }
 
     #[test]
     fn round_limit_message_names_the_effective_cap() {
