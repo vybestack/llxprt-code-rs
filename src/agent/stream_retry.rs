@@ -1,4 +1,4 @@
-//! Host-owned SSE reissues. Partial responses never reach tools or model history.
+//! Host-owned transport reissues. Failed/partial responses never reach tools or history.
 use super::*;
 
 impl Turn<'_> {
@@ -9,14 +9,25 @@ impl Turn<'_> {
         context: (&SessionStore, &ReservedRequest, usize),
     ) -> Result<LlmResult, RoundFailure> {
         let (store, reserved, round) = context;
-        for retry in 0..=3 {
+        for retry in 0..=super::rate_limit::MAX_RETRIES {
             let events = match self.round_once(requests, tools) {
-                Err(RoundFailure::StreamInterrupted(events)) if retry < 3 => events,
+                Err(RoundFailure::StreamInterrupted(events))
+                    if retry < super::rate_limit::MAX_RETRIES =>
+                {
+                    events
+                }
+                Err(RoundFailure::ModelTransport(failure))
+                    if failure.kind == crate::transport::TransportKind::RateLimit
+                        && failure.status == Some(429) =>
+                {
+                    self.rate_limit_delay(store, reserved, failure, retry)?;
+                    continue;
+                }
                 other => return other,
             };
             let record = crate::session::StreamRetryRecord {
                 round,
-                retry: retry + 1,
+                retry: u8::try_from(retry + 1).expect("retry cap fits u8"),
                 delay_ms: 250 * (1 << retry),
                 events,
             };
