@@ -518,3 +518,172 @@ async fn valid_nonterminal_lifecycle_remains_supported_in_folded_and_streaming_c
         server.join().unwrap();
     }
 }
+
+mod tool_lifecycle;
+
+#[tokio::test]
+async fn tool_lifecycle_contradictions_fail_folded_and_public_sse_without_replay() {
+    for case in ["item", "done", "terminal"] {
+        let body: String = tool_lifecycle::events(Some(case))
+            .into_iter()
+            .map(wire)
+            .collect();
+        let (model, server) = serve(body.clone().into_bytes());
+        let error = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ModelError::InvalidResponse(_)));
+        assert!(!error.is_retryable());
+        server.join().unwrap();
+        for codex in [false, true] {
+            let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
+            let mut stream = public_stream(&model).await;
+            let mut errors = 0;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(event) => assert!(!matches!(
+                        event,
+                        ModelResponseStreamEvent::StreamComplete(_)
+                    )),
+                    Err(error) => {
+                        errors += 1;
+                        assert!(matches!(error, ModelError::InvalidResponse(_)));
+                        assert!(!error.is_retryable());
+                        assert!(!error.to_string().contains("SECRET"));
+                    }
+                }
+            }
+            assert_eq!(errors, 1);
+            server.join().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn consistent_tool_sse_preserves_raw_bytes_and_terminal_last() {
+    let body: String = tool_lifecycle::events(None).into_iter().map(wire).collect();
+    let (model, server) = serve(body.clone().into_bytes());
+    let response = model
+        .request(
+            &[ModelRequest::default()],
+            &ModelSettings::default(),
+            &ModelRequestParameters::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .tool_call_parts()
+            .next()
+            .unwrap()
+            .args
+            .to_json_string()
+            .unwrap(),
+        "{} \n"
+    );
+    server.join().unwrap();
+    for codex in [false, true] {
+        let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
+        let mut stream = public_stream(&model).await;
+        let mut completed = false;
+        let mut bytes = String::new();
+        while let Some(event) = stream.next().await {
+            assert!(!completed, "event after completion");
+            match event.unwrap() {
+                ModelResponseStreamEvent::PartDelta(delta) => {
+                    if let serdes_ai_core::messages::ModelResponsePartDelta::ToolCall(delta) =
+                        delta.delta
+                    {
+                        bytes.push_str(&delta.args_delta);
+                    }
+                }
+                ModelResponseStreamEvent::StreamComplete(_) => completed = true,
+                _ => {}
+            }
+        }
+        assert!(completed);
+        assert_eq!(bytes, "{} \n");
+        server.join().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn live_codex_wire_shapes_complete_in_folded_and_public_sse_calls() {
+    for done_only in [false, true] {
+        let expected = tool_lifecycle::live_arguments(done_only);
+        let body = tool_lifecycle::live(done_only).as_bytes().to_vec();
+        let (model, server) = serve(body.clone());
+        let response = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap();
+        let folded: Vec<String> = response
+            .tool_call_parts()
+            .map(|part| part.args.to_json_string().unwrap())
+            .collect();
+        assert_eq!(folded, expected);
+        server.join().unwrap();
+        for codex in [false, true] {
+            let (model, server) = serve_http(body.clone(), codex, 0);
+            let mut stream = public_stream(&model).await;
+            let mut streamed = vec![String::new(); expected.len()];
+            let mut completed = false;
+            while let Some(event) = stream.next().await {
+                assert!(!completed, "event after completion");
+                match event.unwrap() {
+                    ModelResponseStreamEvent::PartDelta(delta) => {
+                        if let serdes_ai_core::messages::ModelResponsePartDelta::ToolCall(call) =
+                            delta.delta
+                        {
+                            streamed[delta.index].push_str(&call.args_delta);
+                        }
+                    }
+                    ModelResponseStreamEvent::StreamComplete(_) => completed = true,
+                    _ => {}
+                }
+            }
+            assert!(completed);
+            assert_eq!(streamed, expected);
+            server.join().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn live_codex_wire_contradictions_still_fail_without_replay() {
+    for (done_only, case) in [
+        (false, "done"),
+        (false, "item"),
+        (true, "done"),
+        (true, "item"),
+        (true, "terminal"),
+    ] {
+        let body: String = tool_lifecycle::live_events(done_only, Some(case))
+            .into_iter()
+            .map(wire)
+            .collect();
+        let (model, server) = serve(body.into_bytes());
+        let error = model
+            .request(
+                &[ModelRequest::default()],
+                &ModelSettings::default(),
+                &ModelRequestParameters::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ModelError::InvalidResponse(_)) && !error.is_retryable(),
+            "done_only={done_only} case={case}: {error:?}"
+        );
+        server.join().unwrap();
+    }
+}

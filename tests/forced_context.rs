@@ -116,13 +116,22 @@ fn server(listener: TcpListener, captured: Arc<Mutex<Vec<Value>>>, reject_twice:
         let body = if status == 200 {
             let mut events = String::new();
             for (output_index, item) in body["output"].as_array().unwrap().iter().enumerate() {
-                events.push_str(&format!("data: {}\n\n",json!({"type":"response.output_item.added","output_index":output_index,"item":item,"sequence_number":output_index+1})));
+                let mut start = item.clone();
+                start["status"] = json!("in_progress");
+                if item["type"] == "function_call" {
+                    start["arguments"] = json!("");
+                }
+                events.push_str(&format!("data: {}\n\n",json!({"type":"response.output_item.added","output_index":output_index,"item":start,"sequence_number":output_index+1})));
                 let delta = if item["type"] == "function_call" {
                     json!({"type":"response.function_call_arguments.delta","output_index":output_index,"item_id":item["id"],"delta":item["arguments"],"sequence_number":2})
                 } else {
                     json!({"type":"response.output_text.delta","output_index":output_index,"content_index":0,"item_id":item["id"],"delta":item["content"][0]["text"],"sequence_number":2})
                 };
                 events.push_str(&format!("data: {delta}\n\n"));
+                if item["type"] == "function_call" {
+                    events.push_str(&format!("data: {}\n\n", json!({"type":"response.function_call_arguments.done","output_index":output_index,"item_id":item["id"],"arguments":item["arguments"],"sequence_number":3})));
+                }
+                events.push_str(&format!("data: {}\n\n", json!({"type":"response.output_item.done","output_index":output_index,"item":item,"sequence_number":4})));
             }
             events.push_str(&format!(
                 "data: {}\n\n",
