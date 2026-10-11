@@ -53,6 +53,7 @@ pub use request_budget::{
 
 pub(crate) mod malformed_tool_call;
 mod memory;
+mod one_command;
 mod request_budget;
 mod summary;
 mod tool_round;
@@ -407,6 +408,7 @@ impl Turn<'_> {
         store: &SessionStore,
         reserved: &mut ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        let mission = self.mission_command(store, reserved)?.map(str::to_owned);
         let requests = self.preflight_recovery(store, reserved)?;
         self.profile(
             "requests_materialized",
@@ -416,11 +418,17 @@ impl Turn<'_> {
                 ..Default::default()
             },
         )?;
-        let tools = crate::tools::tool_specs(self.allow_shell);
+        let mut tools = crate::tools::tool_specs(self.allow_shell);
+        if mission.is_some() {
+            tools.retain(|tool| tool.name == "run_shell_command");
+        }
         let config = self
             .tools_config(self.allow_shell)
             .map_err(|error| self.dead(store, reserved, "workspace", &error, &[]))?;
         let mut attempt = self.begin_attempt(store, reserved, requests, &tools)?;
+        if let Some(command) = mission {
+            return self.run_one_command(store, reserved, &command, &config, attempt);
+        }
         self.run_tool_rounds(store, reserved, &tools, &config, &mut attempt)?;
         self.check_time_limit(store, reserved, &attempt.rounds)?;
         let summary = self.resolve_summary(store, reserved, &tools, &mut attempt)?;
