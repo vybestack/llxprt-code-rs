@@ -61,7 +61,7 @@ The accepted top-level keys are `version`, `provider`, `model`, `modelParams`, `
 
 `modelParams.chat_template_kwargs` structurally selects dsflash Chat. Profile names do not select variants. `shell-replacement: true` does not grant shell authority. Only `--allow-shell` does.
 
-`max_tokens` aliases `maxOutputTokens`; both forms must agree when present. Omitted or false `include-folder-structure` accepts, while true rejects. `tool-format` accepts `auto` and `openai` for current targets. Empty `tools.allowed` means no policy; nonempty allowlists reject. `disabled-tools` aliases `tools.disabled`, and dual forms must parse identically.
+`max_tokens` aliases `maxOutputTokens`; both forms must agree when present. Omitted or false `include-folder-structure` accepts, while true rejects. `tool-format` accepts `auto` and `openai` for current targets. Empty `tools.allowed` means no policy; nonempty allowlists reject. Codex accepts only `tools.disabled` as a bounded string array; registered Rust tools cannot be disabled. The removed `disabled-tools` spelling is an unknown ephemeral key, not a tool policy.
 
 ## Codex request policy
 

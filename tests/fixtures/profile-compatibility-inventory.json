@@ -4289,13 +4289,13 @@
       "key": "tools.disabled",
       "classification": "host-applied",
       "owner": "common",
-      "note": "exact bounded string array; disabled-tools alias"
+      "note": "Codex bounded string array; registered Rust tools reject; other loaders treat as unknown"
     },
     {
       "key": "disabled-tools",
-      "classification": "host-applied",
+      "classification": "rejected",
       "owner": "common",
-      "note": "alias of tools.disabled; equality required"
+      "note": "removed spelling; unknown ephemeral key under each provider loader"
     },
     {
       "key": "tools.allowed",

@@ -337,7 +337,7 @@ pub struct EphemeralSettings {
     /// non-streaming Chat Completions, so the value is never forwarded and never
     /// selects a transport mode; any other spelling rejects at parse time.
     pub streaming: Option<String>,
-    /// Validated `tools.disabled` entries (deprecated `disabled-tools` alias merged).
+    /// Validated `tools.disabled` entries.
     /// Registered Rust tools never appear here (the parser rejects them); the names
     /// that remain refer to host-side tools this runtime does not register.
     pub disabled_tools: Vec<String>,
