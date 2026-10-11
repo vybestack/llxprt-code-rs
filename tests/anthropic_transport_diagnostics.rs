@@ -11,7 +11,12 @@ fn accept(listener: &TcpListener) -> (TcpStream, std::net::SocketAddr) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         match listener.accept() {
-            Ok(connection) => return connection,
+            Ok(connection) => {
+                // macOS may inherit the listener's nonblocking mode. Fixture reads
+                // use bounded blocking I/O, independent of accept polling.
+                connection.0.set_nonblocking(false).unwrap();
+                return connection;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 assert!(
                     std::time::Instant::now() < deadline,
