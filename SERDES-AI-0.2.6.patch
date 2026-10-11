@@ -11142,10 +11142,10 @@ index 0000000..b3ed50a
 +}
 diff --git a/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs
 new file mode 100644
-index 0000000..4b11bd4
+index 0000000..00ea7dc
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/mod.rs
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,268 @@
 +use super::*;
 +use serdes_ai_core::messages::{SystemPromptPart, UserPromptPart};
 +use serdes_ai_core::{ModelRequest, ModelRequestPart, ModelResponse};
@@ -11392,8 +11392,27 @@ index 0000000..4b11bd4
 +        .split("\r\n\r\n")
 +        .filter_map(|frame| frame.strip_prefix("data: "))
 +        .filter(|payload| *payload != "[DONE]")
-+        .map(|payload| serde_json::from_str::<serde_json::Value>(payload).unwrap())
++        .inspect(|payload| {
++            serde_json::from_str::<serde_json::Value>(payload).unwrap();
++        })
 +        .count()
++}
++
++#[test]
++fn json_event_count_validates_and_counts_data_frames() {
++    let stream = concat!(
++        ": keepalive\r\n\r\n",
++        "data: {\"type\":\"response.created\"}\r\n\r\n",
++        "data: {\"type\":\"response.completed\"}\r\n\r\n",
++        "data: [DONE]\r\n\r\n",
++    );
++    assert_eq!(json_event_count(stream), 2);
++}
++
++#[test]
++#[should_panic]
++fn json_event_count_rejects_malformed_json() {
++    json_event_count("data: {malformed\r\n\r\ndata: [DONE]\r\n\r\n");
 +}
 diff --git a/vendor/serdes-ai-models/src/chatgpt_oauth/tests/request.rs b/vendor/serdes-ai-models/src/chatgpt_oauth/tests/request.rs
 new file mode 100644
@@ -13996,7 +14015,7 @@ index 2807447..e8467f8 100644
          Ok(Box::pin(mapped))
      }
 diff --git a/vendor/serdes-ai-models/src/lib.rs b/vendor/serdes-ai-models/src/lib.rs
-index 8dd0e9e..b298f3e 100644
+index 8dd0e9e..ddedfd0 100644
 --- a/vendor/serdes-ai-models/src/lib.rs
 +++ b/vendor/serdes-ai-models/src/lib.rs
 @@ -11,7 +11,6 @@
@@ -14459,7 +14478,7 @@ index 8dd0e9e..b298f3e 100644
          }
          #[cfg(feature = "google")]
          "google" | "gemini" => {
-@@ -796,17 +874,75 @@ pub fn build_model_extended(
+@@ -796,17 +874,79 @@ pub fn build_model_extended(
                  model
              };
  
@@ -14527,10 +14546,14 @@ index 8dd0e9e..b298f3e 100644
 +        let mut antigravity = crate::antigravity::AntigravityConfig::default();
 +        antigravity.endpoint = format!("https://{MARKER}.invalid/?secret={MARKER}");
 +        antigravity.fallback_endpoints = vec![antigravity.endpoint.clone()];
-+        let mut chatgpt = crate::chatgpt_oauth::ChatGptConfig::default();
-+        chatgpt.api_base_url = antigravity.endpoint.clone();
-+        let mut claude = crate::claude_code_oauth::ClaudeCodeConfig::default();
-+        claude.api_base_url = antigravity.endpoint.clone();
++        let chatgpt = crate::chatgpt_oauth::ChatGptConfig {
++            api_base_url: antigravity.endpoint.clone(),
++            ..Default::default()
++        };
++        let claude = crate::claude_code_oauth::ClaudeCodeConfig {
++            api_base_url: antigravity.endpoint.clone(),
++            ..Default::default()
++        };
 +        let ollama = crate::ollama::OllamaModel::new("model").with_base_url(&antigravity.endpoint);
 +
 +        for rendered in [
