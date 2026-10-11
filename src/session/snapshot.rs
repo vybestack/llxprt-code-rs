@@ -491,6 +491,7 @@ fn write_temp_rename(
     super::fchmod(file.as_raw_fd(), 0o600)?;
     file.write_all(bytes)
         .map_err(|_| StoreError::Io("write session artifact failed".into()))?;
+    crate::telemetry::store_io::artifact(name, bytes.len(), true);
     file.sync_all()
         .map_err(|_| StoreError::Io("sync session artifact failed".into()))?;
     dir.local_rename(temp, name)
@@ -560,6 +561,7 @@ fn read_optional(dir: &openat::Dir, name: &str, cap: usize) -> Result<Option<Vec
     file.take(cap as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| StoreError::Io("read session artifact failed".into()))?;
+    crate::telemetry::store_io::artifact(name, bytes.len(), false);
     if bytes.len() > cap {
         return Err(StoreError::Corrupt(
             "session artifact exceeds its byte cap".into(),

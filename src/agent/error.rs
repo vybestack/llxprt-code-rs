@@ -2,6 +2,8 @@ use crate::session::StoreError;
 
 /// An error surfaced to the CLI.
 pub struct AgentError {
+    /// Observations for this invocation, absent before a turn exists.
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     pub key: &'static str,
     pub message: String,
     pub code: crate::envelope::Code,
@@ -24,6 +26,7 @@ impl AgentError {
             message: msg.into(),
             envelope_code: None,
             terminal_outcome: None,
+            telemetry: None,
         }
     }
 
@@ -41,6 +44,7 @@ impl AgentError {
             message: error.to_string(),
             envelope_code: None,
             terminal_outcome: None,
+            telemetry: None,
         }
     }
 }

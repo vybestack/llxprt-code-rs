@@ -325,6 +325,7 @@ async fn run_ws_turn(
     let mut last_cause: Option<String> = None;
 
     for _attempt in 0..MAX_ATTEMPTS {
+        serdes_ai_models::telemetry::request_sent();
         // Reconnect if needed. A fresh socket means a fresh server-side
         // session, so continuation state from the old socket is void.
         if session.socket.is_none() {
@@ -370,6 +371,14 @@ async fn run_ws_turn(
 
         match outcome.expect("outcome set") {
             AttemptOutcome::Finished(response, _reason) => {
+                serdes_ai_models::telemetry::completed_usage(
+                    response.usage.as_ref().and_then(|u| u.total_tokens),
+                    response
+                        .usage
+                        .as_ref()
+                        .and_then(|u| u.output_tokens_details.as_ref())
+                        .and_then(|d| d.reasoning_tokens),
+                );
                 session.previous_response_id = Some(response.id.clone());
                 session.sent_requests = messages.len();
                 return Ok(*response);
@@ -436,7 +445,12 @@ async fn read_ws_events(
             }
         };
         let text = match message {
-            WsStreamMessage::Text(text) => text,
+            WsStreamMessage::Text(text) => {
+                if !text.is_empty() {
+                    serdes_ai_models::telemetry::first_body();
+                }
+                text
+            }
             WsStreamMessage::Close => {
                 if !*streamed_any {
                     tracing::warn!("close frame before any event; reconnecting");
@@ -713,8 +727,8 @@ fn response_from_events(
                     request_tokens: complete.input_tokens,
                     response_tokens: complete.output_tokens,
                     total_tokens: match (complete.input_tokens, complete.output_tokens) {
-                        (Some(input), Some(output)) => Some(input + output),
-                        (input, output) => input.or(output),
+                        (Some(input), Some(output)) => input.checked_add(output),
+                        _ => None,
                     },
                     cache_creation_tokens: complete.cache_creation_tokens,
                     cache_read_tokens: complete.cache_read_tokens,
@@ -762,8 +776,13 @@ impl OpenResponsesModel {
         let messages: Vec<ModelRequest> = messages.to_vec();
         let settings = settings.clone();
         let params = params.clone();
+        let collector = serdes_ai_models::telemetry::current();
         let task = tokio::spawn(async move {
-            run_http_stream(&inner, &messages, &settings, &params, &tx).await
+            let future = run_http_stream(&inner, &messages, &settings, &params, &tx);
+            match collector {
+                Some(collector) => collector.scope(future).await,
+                None => future.await,
+            }
         });
         let _abort = AbortOnDrop(task.abort_handle());
         let mut events = Vec::new();
@@ -813,12 +832,14 @@ impl OpenResponsesModel {
             for (name, value) in &inner.headers {
                 http = http.header(name, value);
             }
+            serdes_ai_models::telemetry::request_sent();
             let response = http
                 .send()
                 .await
                 .map_err(|e| ModelError::Connection(e.to_string()))?;
 
             if !response.status().is_success() {
+                serdes_ai_models::telemetry::headers();
                 let status = response.status().as_u16();
                 let body = response.text().await.unwrap_or_default();
                 let code = serde_json::from_str::<crate::error::HttpErrorEnvelope>(&body)
@@ -920,10 +941,12 @@ async fn run_http_stream(
         for (name, value) in &inner.headers {
             http = http.header(name, value);
         }
+        serdes_ai_models::telemetry::request_sent();
         let response = http
             .send()
             .await
             .map_err(|e| ModelError::Connection(e.to_string()))?;
+        serdes_ai_models::telemetry::headers();
         if response.status().is_success() {
             break response;
         }
@@ -958,6 +981,9 @@ async fn run_http_stream(
                 )
             }
         })?;
+        if !chunk.is_empty() {
+            serdes_ai_models::telemetry::first_body();
+        }
         for byte in chunk {
             let Some(frame) = decoder.byte(byte)? else {
                 continue;
@@ -992,6 +1018,14 @@ async fn run_http_stream(
                 terminal_id = Some(response.id.clone());
                 // Completion is a verdict, not progress. Keep it private until
                 // the remaining body, DONE ordering and EOF all validate.
+                serdes_ai_models::telemetry::completed_usage(
+                    response.usage.as_ref().and_then(|u| u.total_tokens),
+                    response
+                        .usage
+                        .as_ref()
+                        .and_then(|u| u.output_tokens_details.as_ref())
+                        .and_then(|d| d.reasoning_tokens),
+                );
                 pending_terminal = Some(event);
                 continue;
             }

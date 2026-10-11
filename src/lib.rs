@@ -24,6 +24,7 @@ pub mod redact;
 mod safe_file;
 pub mod session;
 pub mod settings;
+pub mod telemetry;
 pub mod tools;
 pub mod transcript;
 pub mod transport;

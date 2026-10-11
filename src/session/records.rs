@@ -92,6 +92,8 @@ pub enum Lifecycle {
 /// branch continues: the branch it was forked from, plus that parent's turn and attempt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchRecord {
+    /// Per-call observations, never materialized as model context.
+    pub telemetry: Option<crate::telemetry::Telemetry>,
     /// Globally unique branch id, allocated from a checked counter.
     pub branch_id: String,
     /// 1-based turn number within the session.

@@ -497,7 +497,10 @@ impl OpenAIChatModel {
             total_tokens: Some(u.total_tokens),
             cache_creation_tokens: None,
             cache_read_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
-            details: None,
+            details: u
+                .completion_tokens_details
+                .and_then(|d| d.reasoning_tokens)
+                .map(|n| serde_json::json!({"reasoning_tokens": n})),
         });
 
         Ok(ModelResponse {
@@ -569,7 +572,9 @@ impl Model for OpenAIChatModel {
             request = request.header("OpenAI-Project", project);
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
@@ -610,7 +615,9 @@ impl Model for OpenAIChatModel {
             request = request.header("OpenAI-Project", project);
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
         let status = response.status().as_u16();
         if !response.status().is_success() {

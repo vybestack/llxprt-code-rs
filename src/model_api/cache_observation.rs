@@ -124,6 +124,9 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
+    fn streams_response(&self) -> bool {
+        self.inner.streams_response()
+    }
     fn stream_interruption(&self) -> Option<usize> {
         self.inner.stream_interruption()
     }

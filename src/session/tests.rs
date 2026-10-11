@@ -72,6 +72,7 @@ fn session_lock_timeout_does_not_execute_or_mutate_and_later_recovers() {
         lock: Mutex::new(()),
         cache: Mutex::new(None),
         operation_metrics: Mutex::new(StoreMetrics::default()),
+        observations: Mutex::new(telemetry::Observations::default()),
         context: Mutex::new(None),
     };
     let mut holder = std::process::Command::new(std::env::current_exe().unwrap())

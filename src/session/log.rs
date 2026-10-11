@@ -24,6 +24,11 @@ pub(super) struct EventBatch {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum Event {
+    Telemetry {
+        branch_id: String,
+        owner: String,
+        telemetry: Box<crate::telemetry::Telemetry>,
+    },
     BranchReserved {
         cwd: Option<String>,
         cwd_dev: u64,
@@ -182,6 +187,7 @@ pub(super) fn replay_read_mode(
     writable: bool,
 ) -> Result<ReplayResult, StoreError> {
     let bytes = read_replay_bytes(file, &cursor)?;
+    crate::telemetry::store_io::artifact("segment.log", bytes.len(), false);
     let base_offset = cursor.offset;
     let mut at = 0usize;
     let mut repaired = false;
@@ -351,6 +357,7 @@ pub(super) fn append_frame(
             frame.batch.txn_id
         ))
     })?;
+    crate::telemetry::store_io::artifact("segment.log", frame.bytes.len(), true);
     file.sync_all().map_err(|_| {
         StoreError::Io(format!(
             "sync session transaction {} failed",

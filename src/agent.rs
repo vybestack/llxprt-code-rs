@@ -27,6 +27,7 @@ mod deadline;
 mod provider_validation;
 mod rate_limit;
 mod stream_retry;
+mod telemetry;
 use deadline::Turn;
 mod finish;
 mod in_flight;
@@ -74,6 +75,8 @@ pub use truncation::is_output_truncation;
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
 pub struct CompletedRun {
+    /// Observations for this invocation, absent before a turn exists.
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     pub turn: u32,
     pub attempt: u32,
     pub branch_id: String,
@@ -344,6 +347,7 @@ impl CodingAgent {
 
     fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
         CompletedRun {
+            telemetry: None,
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
@@ -391,12 +395,34 @@ impl CodingAgent {
                     ..Default::default()
                 },
             )?;
-            return Ok(self.replayed_run(&reserved));
+            let mut run = self.replayed_run(&reserved);
+            let mut telemetry = crate::telemetry::Telemetry::default();
+            store.observe_store(&mut telemetry);
+            run.telemetry = Some(Box::new(telemetry));
+            return Ok(run);
         }
         match Turn::new(self) {
-            Ok(turn) => turn.run_reserved(store, &mut reserved),
+            Ok(turn) => {
+                turn.observations.borrow_mut().materialized_history_bytes =
+                    estimate_history_bytes(&reserved.history) as u64;
+                let mut result = turn.run_reserved(store, &mut reserved);
+                let telemetry = turn.snapshot_observations(store);
+                if let Err(error) = store.record_telemetry(&reserved, &telemetry) {
+                    result = Err(AgentError::from_store(error));
+                }
+                match &mut result {
+                    Ok(run) => run.telemetry = Some(Box::new(telemetry)),
+                    Err(error) => error.telemetry = Some(Box::new(telemetry)),
+                }
+                result
+            }
             Err(error) => {
-                Err(self.dead_coded(store, &reserved, error.code, error.key, &error.message, &[]))
+                let mut error =
+                    self.dead_coded(store, &reserved, error.code, error.key, &error.message, &[]);
+                let mut telemetry = crate::telemetry::Telemetry::default();
+                store.observe_store(&mut telemetry);
+                error.telemetry = Some(Box::new(telemetry));
+                Err(error)
             }
         }
     }
@@ -522,6 +548,7 @@ impl Turn<'_> {
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
+        let tool_started = std::time::Instant::now();
         let (ok, raw_text) = if known_tool(&call.name, self.allow_shell) {
             crate::tools::execute_tool_with_limit(
                 &self.cwd,
@@ -539,6 +566,13 @@ impl Turn<'_> {
                 ),
             )
         };
+        self.observe_tool(
+            attempt.rounds.len() + 1,
+            call,
+            ok,
+            &raw_text,
+            tool_started.elapsed(),
+        );
         let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
         attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
@@ -700,6 +734,7 @@ impl Turn<'_> {
             Some(self.started.elapsed()),
         )?;
         Ok(CompletedRun {
+            telemetry: None,
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),

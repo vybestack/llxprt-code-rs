@@ -84,6 +84,10 @@ pub struct Args {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["oauth_login", "print_config"])]
     pub cache_observations: Option<PathBuf>,
 
+    /// Write per-call telemetry and the terminal turn to a create-only private JSONL file.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["oauth_login", "print_config"])]
+    pub telemetry_output: Option<PathBuf>,
+
     /// Stream phase-sampled process RSS events to a create-only JSONL file (default off).
     #[arg(long, value_name = "PATH")]
     pub mem_profile: Option<PathBuf>,
@@ -160,6 +164,13 @@ pub struct Args {
 /// consuming stdin. Call this at the common CLI boundary before dispatching runtime
 /// or `--print-config`.
 pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if args.command.is_some() && args.telemetry_output.is_some() {
+        return Err(AppError::new(
+            Code::Usage,
+            "telemetry-output-mode",
+            "--telemetry-output is available only for agent turns",
+        ));
+    }
     if args.command.is_some() && args.cache_observations.is_some() {
         return Err(AppError::new(
             Code::Usage,
@@ -383,6 +394,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 format!("{} | preserved: {spans}", o.run.summary)
             };
             Envelope::Ok(OkEnvelope {
+                telemetry: o.run.telemetry.clone(),
                 session_id: o.session.id.clone(),
                 session_dir: o.session_dir.display().to_string(),
                 turn: u64::from(o.run.turn),
@@ -404,12 +416,18 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 terminal_outcome: declared.terminal_outcome,
             })
         }
-        Err(error) if error.code == Code::Profiling => Envelope::profiling_error(
-            error_session_id,
-            error.message.clone(),
-            error.profiling_stage.unwrap_or("sample"),
-            error.session_status.as_deref().unwrap_or("ok"),
-        ),
+        Err(error) if error.code == Code::Profiling => {
+            let mut envelope = Envelope::profiling_error(
+                error_session_id,
+                error.message.clone(),
+                error.profiling_stage.unwrap_or("sample"),
+                error.session_status.as_deref().unwrap_or("ok"),
+            );
+            if let Envelope::Error(detail) = &mut envelope {
+                detail.telemetry = error.telemetry.clone();
+            }
+            envelope
+        }
         Err(error) => {
             let mut envelope = Envelope::error(
                 error_session_id,
@@ -417,6 +435,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 error.message.clone(),
             );
             if let Envelope::Error(detail) = &mut envelope {
+                detail.telemetry = error.telemetry.clone();
                 if let Some(outcome) = error.terminal_outcome {
                     detail.error.terminal_outcome = Some(outcome.to_string());
                 }
@@ -579,11 +598,13 @@ fn recognized_option_spellings() -> std::collections::BTreeSet<String> {
 
 /// Error payload used by `main`.
 pub struct AppError {
+    /// Observations for this invocation, absent before a turn exists.
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     pub code: Code,
     pub key: &'static str,
     pub message: String,
     pub profiling_stage: Option<&'static str>,
-    pub session_status: Option<String>,
+    pub session_status: Option<Box<str>>,
     /// The stable envelope `error.code` token. `None` means [`Self::key`] is already the
     /// envelope token. A model transport failure carries its finer `model-<class>`
     /// transport key here (for example `model-quota-exhausted`) while [`Self::key`] stays
@@ -609,6 +630,7 @@ impl AppError {
             session_status: None,
             envelope_code: None,
             terminal_outcome: None,
+            telemetry: None,
         }
     }
 
@@ -632,6 +654,7 @@ impl AppError {
             session_status: Some("ok".into()),
             envelope_code: None,
             terminal_outcome: None,
+            telemetry: None,
         }
     }
 }

@@ -1247,7 +1247,9 @@ impl Model for OpenAIResponsesModel {
             request = request.header("OpenAI-Project", project);
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
