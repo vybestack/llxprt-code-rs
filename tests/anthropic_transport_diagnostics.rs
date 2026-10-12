@@ -142,7 +142,9 @@ fn accepted_loss(head: &'static [u8], origin: &str, cause: &str, session_id: &st
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), session_id);
-    server.join().unwrap();
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(out.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(envelope["status"], "error");
@@ -208,7 +210,9 @@ fn local_request_timeout_is_not_classified_as_incomplete_message() {
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), "issue191-timeout");
-    server.join().unwrap();
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(out.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(envelope["error"]["code"], "model-connectivity");
@@ -263,7 +267,9 @@ fn controlled_implementation_mission_completes_and_its_edits_and_tests_are_inspe
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), "issue191-controlled-mission");
-    server.join().unwrap();
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(
         out.status.code(),
         Some(0),
