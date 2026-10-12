@@ -1,4 +1,4 @@
-//! Opt-in live transcript. Reasoning is live-only, never part of session storage.
+//! Default readable thinking and optional text/call/result live transcript.
 mod lookback;
 #[cfg(test)]
 mod tests;
@@ -39,7 +39,9 @@ impl Emitter {
     }
 
     fn enabled(&self, category: Emit) -> bool {
-        self.categories.contains(&Emit::All) || self.categories.contains(&category)
+        category == Emit::Thinking
+            || self.categories.contains(&Emit::All)
+            || self.categories.contains(&category)
     }
 
     fn write(value: serde_json::Value) -> std::io::Result<()> {

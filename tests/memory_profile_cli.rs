@@ -44,9 +44,8 @@ fn config_failure_still_finalizes_a_well_ordered_profile() {
         assert_eq!(event["seq"], (index + 1) as u64);
         assert!(event["rss_bytes"].as_u64().unwrap() > 0);
     }
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .starts_with("mem-profile:"));
+    // Thinking is the default JSONL stderr channel; profiling retains its private file.
+    assert!(output.stderr.is_empty());
 }
 
 #[test]

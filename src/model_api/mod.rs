@@ -18,3 +18,5 @@ pub(crate) type PlatformCredentialSource = macos_keychain::MacOsCredentialSource
 
 #[cfg(test)]
 mod tests;
+
+mod reasoning;

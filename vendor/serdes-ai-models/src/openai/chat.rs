@@ -210,6 +210,7 @@ impl OpenAIChatModel {
 
     fn convert_system_prompt(&self, sys: &SystemPromptPart) -> ChatMessage {
         ChatMessage {
+            reasoning_content: None,
             role: "system".to_string(),
             content: Some(MessageContent::Text(sys.content.clone())),
             name: None,
@@ -220,6 +221,7 @@ impl OpenAIChatModel {
 
     fn convert_user_prompt(&self, user: &UserPromptPart) -> ChatMessage {
         ChatMessage {
+            reasoning_content: None,
             role: "user".to_string(),
             content: Some(self.convert_user_content(&user.content)),
             name: None,
@@ -264,6 +266,7 @@ impl OpenAIChatModel {
     fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ChatMessage {
         let content = tool_ret.content.to_string_content();
         ChatMessage {
+            reasoning_content: None,
             role: "tool".to_string(),
             content: Some(MessageContent::Text(content)),
             name: None,
@@ -274,6 +277,7 @@ impl OpenAIChatModel {
 
     fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ChatMessage {
         ChatMessage {
+            reasoning_content: None,
             role: "user".to_string(),
             content: Some(MessageContent::Text(retry.content.message().to_string())),
             name: None,
@@ -284,6 +288,7 @@ impl OpenAIChatModel {
 
     /// Convert a ModelResponse to an assistant ChatMessage.
     pub fn convert_response_to_message(&self, resp: &ModelResponse) -> ChatMessage {
+        let mut reasoning_content = None;
         let mut content_parts = Vec::new();
         let mut tool_calls = Vec::new();
 
@@ -302,8 +307,10 @@ impl OpenAIChatModel {
                         },
                     });
                 }
-                ModelResponsePart::Thinking(_) => {
-                    // Thinking parts not sent back to OpenAI
+                ModelResponsePart::Thinking(thinking) => {
+                    reasoning_content
+                        .get_or_insert_with(String::new)
+                        .push_str(&thinking.content);
                 }
                 ModelResponsePart::File(_) => {
                     // File parts not sent back to OpenAI
@@ -319,6 +326,7 @@ impl OpenAIChatModel {
         let content = Some(MessageContent::Text(content_parts.join("")));
 
         ChatMessage {
+            reasoning_content,
             role: "assistant".to_string(),
             content,
             name: None,

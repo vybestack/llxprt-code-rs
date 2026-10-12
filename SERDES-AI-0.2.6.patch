@@ -15089,7 +15089,7 @@ index 97d1a2d..a67f673 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..1fcbb1b 100644
+index 9471b5b..b37a4d1 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -15220,7 +15220,68 @@ index 9471b5b..1fcbb1b 100644
          self
      }
  
-@@ -338,6 +393,7 @@ impl OpenAIChatModel {
+@@ -155,6 +210,7 @@ impl OpenAIChatModel {
+ 
+     fn convert_system_prompt(&self, sys: &SystemPromptPart) -> ChatMessage {
+         ChatMessage {
++            reasoning_content: None,
+             role: "system".to_string(),
+             content: Some(MessageContent::Text(sys.content.clone())),
+             name: None,
+@@ -165,6 +221,7 @@ impl OpenAIChatModel {
+ 
+     fn convert_user_prompt(&self, user: &UserPromptPart) -> ChatMessage {
+         ChatMessage {
++            reasoning_content: None,
+             role: "user".to_string(),
+             content: Some(self.convert_user_content(&user.content)),
+             name: None,
+@@ -209,6 +266,7 @@ impl OpenAIChatModel {
+     fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ChatMessage {
+         let content = tool_ret.content.to_string_content();
+         ChatMessage {
++            reasoning_content: None,
+             role: "tool".to_string(),
+             content: Some(MessageContent::Text(content)),
+             name: None,
+@@ -219,6 +277,7 @@ impl OpenAIChatModel {
+ 
+     fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ChatMessage {
+         ChatMessage {
++            reasoning_content: None,
+             role: "user".to_string(),
+             content: Some(MessageContent::Text(retry.content.message().to_string())),
+             name: None,
+@@ -229,6 +288,7 @@ impl OpenAIChatModel {
+ 
+     /// Convert a ModelResponse to an assistant ChatMessage.
+     pub fn convert_response_to_message(&self, resp: &ModelResponse) -> ChatMessage {
++        let mut reasoning_content = None;
+         let mut content_parts = Vec::new();
+         let mut tool_calls = Vec::new();
+ 
+@@ -247,8 +307,10 @@ impl OpenAIChatModel {
+                         },
+                     });
+                 }
+-                ModelResponsePart::Thinking(_) => {
+-                    // Thinking parts not sent back to OpenAI
++                ModelResponsePart::Thinking(thinking) => {
++                    reasoning_content
++                        .get_or_insert_with(String::new)
++                        .push_str(&thinking.content);
+                 }
+                 ModelResponsePart::File(_) => {
+                     // File parts not sent back to OpenAI
+@@ -264,6 +326,7 @@ impl OpenAIChatModel {
+         let content = Some(MessageContent::Text(content_parts.join("")));
+ 
+         ChatMessage {
++            reasoning_content,
+             role: "assistant".to_string(),
+             content,
+             name: None,
+@@ -338,6 +401,7 @@ impl OpenAIChatModel {
              ResponseFormat::json_schema("output", schema_value, true)
          });
  
@@ -15228,7 +15289,7 @@ index 9471b5b..1fcbb1b 100644
          ChatCompletionRequest {
              model: self.model_name.clone(),
              messages,
-@@ -364,10 +420,17 @@ impl OpenAIChatModel {
+@@ -364,10 +428,17 @@ impl OpenAIChatModel {
              },
              logprobs: None,
              top_logprobs: None,
@@ -15246,7 +15307,7 @@ index 9471b5b..1fcbb1b 100644
      fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
          let choice = resp
              .choices
-@@ -375,6 +438,12 @@ impl OpenAIChatModel {
+@@ -375,6 +446,12 @@ impl OpenAIChatModel {
              .next()
              .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
  
@@ -15259,7 +15320,7 @@ index 9471b5b..1fcbb1b 100644
          let mut parts = Vec::new();
  
          // Check for refusal
-@@ -397,22 +466,29 @@ impl OpenAIChatModel {
+@@ -397,22 +474,29 @@ impl OpenAIChatModel {
  
          if let Some(tool_calls) = choice.message.tool_calls {
              for tc in tool_calls {
@@ -15294,7 +15355,7 @@ index 9471b5b..1fcbb1b 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -421,7 +497,10 @@ impl OpenAIChatModel {
+@@ -421,7 +505,10 @@ impl OpenAIChatModel {
              total_tokens: Some(u.total_tokens),
              cache_creation_tokens: None,
              cache_read_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
@@ -15306,7 +15367,7 @@ index 9471b5b..1fcbb1b 100644
          });
  
          Ok(ModelResponse {
-@@ -436,42 +515,18 @@ impl OpenAIChatModel {
+@@ -436,42 +523,18 @@ impl OpenAIChatModel {
          })
      }
  
@@ -15359,7 +15420,7 @@ index 9471b5b..1fcbb1b 100644
      }
  }
  
-@@ -499,12 +554,16 @@ impl Model for OpenAIChatModel {
+@@ -499,12 +562,16 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15378,7 +15439,7 @@ index 9471b5b..1fcbb1b 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -513,21 +572,20 @@ impl Model for OpenAIChatModel {
+@@ -513,21 +580,20 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -15408,7 +15469,7 @@ index 9471b5b..1fcbb1b 100644
      }
  
      async fn request_stream(
-@@ -540,12 +598,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +606,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15426,7 +15487,7 @@ index 9471b5b..1fcbb1b 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -554,18 +615,20 @@ impl Model for OpenAIChatModel {
+@@ -554,18 +623,20 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -15453,7 +15514,7 @@ index 9471b5b..1fcbb1b 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +645,61 @@ mod tests {
+@@ -582,6 +653,61 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -15515,7 +15576,7 @@ index 9471b5b..1fcbb1b 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +779,125 @@ mod tests {
+@@ -661,4 +787,125 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15669,7 +15730,7 @@ index c1e00c9..34b9981 100644
  
  /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..dc804de 100644
+index 9384750..bc4ecfc 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -18,8 +18,7 @@ use reqwest::Client;
@@ -15718,7 +15779,16 @@ index 9384750..dc804de 100644
  }
  
  /// Reasoning effort level for reasoning models.
-@@ -217,14 +245,29 @@ pub struct ResponsesApiRequest {
+@@ -181,6 +209,8 @@ impl Serialize for TruncationMode {
+ /// Request body for the Responses API.
+ #[derive(Debug, Clone, Serialize)]
+ pub struct ResponsesApiRequest {
++    /// Explicit stateless encrypted reasoning request.
++    pub include: Vec<String>,
+     /// Model to use.
+     pub model: String,
+     /// Input messages/content.
+@@ -217,14 +247,29 @@ pub struct ResponsesApiRequest {
      /// User identifier for tracking.
      #[serde(skip_serializing_if = "Option::is_none")]
      pub user: Option<String>,
@@ -15729,11 +15799,11 @@ index 9384750..dc804de 100644
 +    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub text: Option<ResponseTextConfig>,
 +    /// Stable prompt-cache identity.
-     #[serde(skip_serializing_if = "Option::is_none")]
--    pub store: Option<bool>,
++    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub prompt_cache_key: Option<String>,
 +    /// Prompt-cache retention policy.
-+    #[serde(skip_serializing_if = "Option::is_none")]
+     #[serde(skip_serializing_if = "Option::is_none")]
+-    pub store: Option<bool>,
 +    pub prompt_cache_retention: Option<PromptCacheRetention>,
      /// Metadata for the request.
      #[serde(skip_serializing_if = "Option::is_none")]
@@ -15750,7 +15820,7 @@ index 9384750..dc804de 100644
  /// Reasoning configuration.
  #[derive(Debug, Clone, Serialize)]
  pub struct ReasoningConfig {
-@@ -246,27 +289,57 @@ pub struct TruncationConfig {
+@@ -246,27 +291,61 @@ pub struct TruncationConfig {
  
  /// Input item for the Responses API.
  #[derive(Debug, Clone, Serialize)]
@@ -15764,18 +15834,16 @@ index 9384750..dc804de 100644
 -    /// Assistant message (for multi-turn).
 -    #[serde(rename = "assistant")]
 -    Assistant {
++    /// Original reasoning item, including encrypted content and metadata.
++    Reasoning(JsonValue),
 +    /// User or assistant message.
 +    Message {
 +        role: ResponseInputRole,
          content: ResponseInputContent,
--        #[serde(skip_serializing_if = "Option::is_none")]
+         #[serde(skip_serializing_if = "Option::is_none")]
 -        reasoning_id: Option<String>,
-     },
--    /// Tool output.
--    #[serde(rename = "tool")]
--    Tool {
--        tool_call_id: String,
--        content: String,
++        phase: Option<String>,
++    },
 +    /// A prior assistant function call.
 +    FunctionCall {
 +        #[serde(rename = "type")]
@@ -15783,7 +15851,12 @@ index 9384750..dc804de 100644
 +        call_id: String,
 +        name: String,
 +        arguments: String,
-+    },
+     },
+-    /// Tool output.
+-    #[serde(rename = "tool")]
+-    Tool {
+-        tool_call_id: String,
+-        content: String,
 +    /// Output that matches a prior assistant function call.
 +    FunctionCallOutput {
 +        #[serde(rename = "type")]
@@ -15822,7 +15895,85 @@ index 9384750..dc804de 100644
  /// Content for response input.
  #[derive(Debug, Clone, Serialize)]
  #[serde(untagged)]
-@@ -647,7 +720,7 @@ pub struct OutputTokensDetails {
+@@ -476,7 +555,7 @@ pub struct ResponseError {
+ }
+ 
+ /// Output item from the Responses API.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(tag = "type")]
+ #[allow(missing_docs)]
+ pub enum ResponseOutputItem {
+@@ -486,6 +565,9 @@ pub enum ResponseOutputItem {
+         id: String,
+         #[serde(default)]
+         summary: Vec<ReasoningSummaryItem>,
++        encrypted_content: Option<String>,
++        #[serde(flatten)]
++        extra: serde_json::Map<String, JsonValue>,
+         status: Option<String>,
+     },
+     /// Text message output.
+@@ -494,6 +576,7 @@ pub enum ResponseOutputItem {
+         id: String,
+         role: String,
+         content: Vec<MessageContentItem>,
++        phase: Option<String>,
+         status: Option<String>,
+     },
+     /// Function tool call.
+@@ -549,16 +632,20 @@ pub enum ResponseOutputItem {
+ }
+ 
+ /// Reasoning summary item.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(tag = "type")]
+ #[allow(missing_docs)]
+ pub enum ReasoningSummaryItem {
+     #[serde(rename = "summary_text")]
+-    Text { text: String },
++    Text {
++        text: String,
++        #[serde(flatten)]
++        extra: serde_json::Map<String, JsonValue>,
++    },
+ }
+ 
+ /// Message content item.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(tag = "type")]
+ #[allow(missing_docs)]
+ pub enum MessageContentItem {
+@@ -573,7 +660,7 @@ pub enum MessageContentItem {
+ }
+ 
+ /// Code interpreter result.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(tag = "type")]
+ #[allow(missing_docs)]
+ pub enum CodeInterpreterResult {
+@@ -586,7 +673,7 @@ pub enum CodeInterpreterResult {
+ }
+ 
+ /// File search result.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[allow(missing_docs)]
+ pub struct FileSearchResult {
+     pub file_id: String,
+@@ -596,7 +683,7 @@ pub struct FileSearchResult {
+ }
+ 
+ /// Image generation result.
+-#[derive(Debug, Clone, Deserialize)]
++#[derive(Debug, Clone, Serialize, Deserialize)]
+ #[allow(missing_docs)]
+ pub struct ImageGenerationResult {
+     pub image: Option<String>, // base64 or URL
+@@ -647,7 +734,7 @@ pub struct OutputTokensDetails {
  ///
  /// let response = model.request(&messages, &settings, &params).await?;
  /// ```
@@ -15831,7 +15982,7 @@ index 9384750..dc804de 100644
  pub struct OpenAIResponsesModel {
      model_name: String,
      client: Client,
-@@ -660,6 +733,16 @@ pub struct OpenAIResponsesModel {
+@@ -660,6 +747,16 @@ pub struct OpenAIResponsesModel {
      default_settings: OpenAIResponsesModelSettings,
  }
  
@@ -15848,7 +15999,7 @@ index 9384750..dc804de 100644
  impl OpenAIResponsesModel {
      /// Create a new OpenAI Responses model.
      pub fn new(model_name: impl Into<String>, api_key: impl Into<String>) -> Self {
-@@ -668,7 +751,11 @@ impl OpenAIResponsesModel {
+@@ -668,7 +765,11 @@ impl OpenAIResponsesModel {
  
          Self {
              model_name,
@@ -15861,7 +16012,7 @@ index 9384750..dc804de 100644
              api_key: api_key.into(),
              base_url: "https://api.openai.com/v1".to_string(),
              organization: None,
-@@ -729,13 +816,6 @@ impl OpenAIResponsesModel {
+@@ -729,13 +830,6 @@ impl OpenAIResponsesModel {
          self
      }
  
@@ -15875,7 +16026,7 @@ index 9384750..dc804de 100644
      /// Set the default timeout.
      #[must_use]
      pub fn with_timeout(mut self, timeout: Duration) -> Self {
-@@ -761,77 +841,88 @@ impl OpenAIResponsesModel {
+@@ -761,77 +855,90 @@ impl OpenAIResponsesModel {
          }
      }
  
@@ -15903,6 +16054,7 @@ index 9384750..dc804de 100644
 -                        inputs.push(self.convert_user_prompt(user));
 -                    }
 +                    ModelRequestPart::UserPrompt(user) => inputs.push(ResponseInput::Message {
++                        phase: None,
 +                        role: ResponseInputRole::User,
 +                        content: self.convert_user_content(&user.content)?,
 +                    }),
@@ -15935,6 +16087,7 @@ index 9384750..dc804de 100644
                          });
                      }
 +                    ModelRequestPart::RetryPrompt(retry) => inputs.push(ResponseInput::Message {
++                        phase: None,
 +                        role: ResponseInputRole::User,
 +                        content: ResponseInputContent::Text(retry.content.message().to_string()),
 +                    }),
@@ -16000,7 +16153,7 @@ index 9384750..dc804de 100644
              UserContentPart::Image { image } => {
                  let url = match image {
                      ImageContent::Url(u) => u.url.clone(),
-@@ -843,62 +934,50 @@ impl OpenAIResponsesModel {
+@@ -843,62 +950,65 @@ impl OpenAIResponsesModel {
                          )
                      }
                  };
@@ -16050,12 +16203,15 @@ index 9384750..dc804de 100644
 -                }
 -                ModelResponsePart::Thinking(_) => {
 -                    // Thinking parts are not sent back
--                }
--                ModelResponsePart::File(_) => {
--                    // Files are not sent back
 +                ModelResponsePart::Text(text) => inputs.push(ResponseInput::Message {
 +                    role: ResponseInputRole::Assistant,
 +                    content: ResponseInputContent::Text(text.content.clone()),
++                    phase: text
++                        .provider_details
++                        .as_ref()
++                        .and_then(|d| d.get("phase"))
++                        .and_then(|v| v.as_str())
++                        .map(str::to_owned),
 +                }),
 +                ModelResponsePart::ToolCall(call) => {
 +                    let call_id = required_call_id(call.tool_call_id.as_deref())?;
@@ -16069,9 +16225,20 @@ index 9384750..dc804de 100644
 +                        arguments: call.args.to_json_string()?,
 +                    });
                  }
+-                ModelResponsePart::File(_) => {
+-                    // Files are not sent back
++                ModelResponsePart::Thinking(thinking) => {
++                    let item = thinking
++                        .provider_details
++                        .as_ref()
++                        .and_then(|d| d.get("reasoning_item"))
++                        .ok_or_else(|| {
++                            ModelError::api("missing original Responses reasoning item")
++                        })?;
++                    inputs.push(ResponseInput::Reasoning(item.clone()));
+                 }
 -                ModelResponsePart::BuiltinToolCall(_) => {
 -                    // Builtin tool calls are not sent back
-+                ModelResponsePart::Thinking(_) => {}
 +                ModelResponsePart::File(_) | ModelResponsePart::BuiltinToolCall(_) => {
 +                    return Err(ModelError::api(
 +                        "unsupported assistant output in Responses transcript",
@@ -16094,7 +16261,7 @@ index 9384750..dc804de 100644
      }
  
      /// Convert tool definitions to Responses API format.
-@@ -926,8 +1005,8 @@ impl OpenAIResponsesModel {
+@@ -926,8 +1036,8 @@ impl OpenAIResponsesModel {
          settings: &ModelSettings,
          params: &ModelRequestParameters,
          stream: bool,
@@ -16105,16 +16272,17 @@ index 9384750..dc804de 100644
  
          let tools = if params.tools.is_empty() {
              None
-@@ -951,7 +1030,7 @@ impl OpenAIResponsesModel {
+@@ -951,7 +1061,8 @@ impl OpenAIResponsesModel {
              .truncation
              .map(|t| TruncationConfig { truncation_type: t });
  
 -        ResponsesApiRequest {
 +        Ok(ResponsesApiRequest {
++            include: vec!["reasoning.encrypted_content".into()],
              model: self.model_name.clone(),
              input,
              instructions,
-@@ -965,30 +1044,44 @@ impl OpenAIResponsesModel {
+@@ -965,55 +1076,105 @@ impl OpenAIResponsesModel {
              service_tier: self.default_settings.service_tier,
              truncation,
              user: None,
@@ -16160,6 +16328,14 @@ index 9384750..dc804de 100644
 +        let mut seen_call_ids = std::collections::BTreeSet::new();
  
          for output in resp.output {
++            let reasoning_item = if matches!(output, ResponseOutputItem::Reasoning { .. }) {
++                Some(
++                    serde_json::to_value(&output)
++                        .map_err(|_| ModelError::api("reasoning item serialization failed"))?,
++                )
++            } else {
++                None
++            };
              match output {
 -                ResponseOutputItem::Reasoning { id, summary, .. } => {
 -                    // Convert reasoning to ThinkingPart
@@ -16167,17 +16343,36 @@ index 9384750..dc804de 100644
 +                    id,
 +                    summary,
 +                    status,
++                    ..
 +                } => {
 +                    require_completed_status(status.as_deref())?;
                      let content: String = summary
                          .iter()
                          .map(|s| match s {
-@@ -1004,7 +1097,16 @@ impl OpenAIResponsesModel {
+-                            ReasoningSummaryItem::Text { text } => text.as_str(),
++                            ReasoningSummaryItem::Text { text, .. } => text.as_str(),
+                         })
+                         .collect::<Vec<_>>()
+                         .join("\n");
+ 
+-                    if !content.is_empty() {
++                    {
++                        let mut details = serde_json::Map::new();
++                        details.insert(
++                            "reasoning_item".into(),
++                            reasoning_item.expect("reasoning item"),
++                        );
+                         let thinking = ThinkingPart::new(content)
++                            .with_provider_details(details)
+                             .with_id(&id)
+                             .with_provider_name("openai");
                          parts.push(ModelResponsePart::Thinking(thinking));
                      }
                  }
 -                ResponseOutputItem::Message { content, .. } => {
 +                ResponseOutputItem::Message {
++                    phase,
++                    id,
 +                    role,
 +                    content,
 +                    status,
@@ -16190,8 +16385,17 @@ index 9384750..dc804de 100644
                      for item in content {
                          match item {
                              MessageContentItem::Text { text, .. } => {
-@@ -1012,8 +1114,10 @@ impl OpenAIResponsesModel {
-                                     parts.push(ModelResponsePart::Text(TextPart::new(text)));
+                                 if !text.is_empty() {
+-                                    parts.push(ModelResponsePart::Text(TextPart::new(text)));
++                                    let mut part = TextPart::new(text).with_id(&id);
++                                    if let Some(phase) = &phase {
++                                        part = part.with_provider_details(
++                                            [(String::from("phase"), serde_json::json!(phase))]
++                                                .into_iter()
++                                                .collect(),
++                                        );
++                                    }
++                                    parts.push(ModelResponsePart::Text(part));
                                  }
                              }
 -                            MessageContentItem::Refusal { refusal } => {
@@ -16203,7 +16407,7 @@ index 9384750..dc804de 100644
                              }
                          }
                      }
-@@ -1022,32 +1126,39 @@ impl OpenAIResponsesModel {
+@@ -1022,32 +1183,39 @@ impl OpenAIResponsesModel {
                      call_id,
                      name,
                      arguments,
@@ -16253,7 +16457,7 @@ index 9384750..dc804de 100644
          };
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -1076,31 +1187,21 @@ impl OpenAIResponsesModel {
+@@ -1076,31 +1244,21 @@ impl OpenAIResponsesModel {
              kind: "response".to_string(),
          })
      }
@@ -16297,7 +16501,7 @@ index 9384750..dc804de 100644
  }
  
  #[async_trait]
-@@ -1123,7 +1224,7 @@ impl Model for OpenAIResponsesModel {
+@@ -1123,7 +1281,7 @@ impl Model for OpenAIResponsesModel {
          settings: &ModelSettings,
          params: &ModelRequestParameters,
      ) -> Result<ModelResponse, ModelError> {
@@ -16306,7 +16510,7 @@ index 9384750..dc804de 100644
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
-@@ -1141,18 +1242,16 @@ impl Model for OpenAIResponsesModel {
+@@ -1141,18 +1299,16 @@ impl Model for OpenAIResponsesModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -16330,12 +16534,13 @@ index 9384750..dc804de 100644
  
          self.process_response(resp)
      }
-@@ -1266,22 +1365,178 @@ mod tests {
+@@ -1266,22 +1422,179 @@ mod tests {
  
      #[test]
      fn test_response_input_serialization() {
 -        let input = ResponseInput::User {
 +        let input = ResponseInput::Message {
++            phase: None,
 +            role: ResponseInputRole::User,
              content: ResponseInputContent::Text("Hello".to_string()),
          };
@@ -16670,7 +16875,7 @@ index 69518dd..f21e77b 100644
          let stream = stream::iter(bytes);
          let mut parser = OpenAIStreamParser::new(stream);
 diff --git a/vendor/serdes-ai-models/src/openai/types.rs b/vendor/serdes-ai-models/src/openai/types.rs
-index 51c81fd..3be48d2 100644
+index 51c81fd..83b9fda 100644
 --- a/vendor/serdes-ai-models/src/openai/types.rs
 +++ b/vendor/serdes-ai-models/src/openai/types.rs
 @@ -4,6 +4,7 @@
@@ -16734,8 +16939,50 @@ index 51c81fd..3be48d2 100644
          }
      }
  }
+@@ -99,6 +139,9 @@ impl ChatCompletionRequest {
+ /// Chat message.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct ChatMessage {
++    /// Unmodified provider-exposed reasoning for compatible Chat continuation.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub reasoning_content: Option<String>,
+     /// Role of the message author.
+     pub role: String,
+     /// Message content.
+@@ -119,6 +162,7 @@ impl ChatMessage {
+     /// Create a system message.
+     pub fn system(content: impl Into<String>) -> Self {
+         Self {
++            reasoning_content: None,
+             role: "system".to_string(),
+             content: Some(MessageContent::Text(content.into())),
+             name: None,
+@@ -130,6 +174,7 @@ impl ChatMessage {
+     /// Create a user message.
+     pub fn user(content: impl Into<String>) -> Self {
+         Self {
++            reasoning_content: None,
+             role: "user".to_string(),
+             content: Some(MessageContent::Text(content.into())),
+             name: None,
+@@ -141,6 +186,7 @@ impl ChatMessage {
+     /// Create an assistant message.
+     pub fn assistant(content: impl Into<String>) -> Self {
+         Self {
++            reasoning_content: None,
+             role: "assistant".to_string(),
+             content: Some(MessageContent::Text(content.into())),
+             name: None,
+@@ -152,6 +198,7 @@ impl ChatMessage {
+     /// Create a tool response message.
+     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+         Self {
++            reasoning_content: None,
+             role: "tool".to_string(),
+             content: Some(MessageContent::Text(content.into())),
+             name: None,
 diff --git a/vendor/serdes-ai-models/src/openrouter/model.rs b/vendor/serdes-ai-models/src/openrouter/model.rs
-index 5a4761d..e8950e4 100644
+index 5a4761d..3021890 100644
 --- a/vendor/serdes-ai-models/src/openrouter/model.rs
 +++ b/vendor/serdes-ai-models/src/openrouter/model.rs
 @@ -18,7 +18,7 @@ use std::time::Duration;
@@ -16787,7 +17034,23 @@ index 5a4761d..e8950e4 100644
      /// Determine profile based on model name.
      fn profile_for_model(model: &str) -> ModelProfile {
          // Check for reasoning models
-@@ -315,21 +318,23 @@ impl OpenRouterModel {
+@@ -124,6 +127,7 @@ impl OpenRouterModel {
+                 req.parts.iter().map(|part| match part {
+                     ModelRequestPart::SystemPrompt(sys) => ChatMessage::system(&sys.content),
+                     ModelRequestPart::UserPrompt(user) => ChatMessage {
++                        reasoning_content: None,
+                         role: "user".into(),
+                         name: None,
+                         tool_calls: None,
+@@ -178,6 +182,7 @@ impl OpenRouterModel {
+                             }
+                         }
+                         ChatMessage {
++                            reasoning_content: None,
+                             role: "assistant".into(),
+                             content: if text_content.is_empty() {
+                                 None
+@@ -315,21 +320,23 @@ impl OpenRouterModel {
          }
          if let Some(tcs) = choice.message.tool_calls {
              for tc in tcs {
@@ -16820,7 +17083,7 @@ index 5a4761d..e8950e4 100644
          });
          let usage = resp.usage.map(|u| RequestUsage {
              request_tokens: Some(u.prompt_tokens),
-@@ -352,18 +357,8 @@ impl OpenRouterModel {
+@@ -352,18 +359,8 @@ impl OpenRouterModel {
          })
      }
  
@@ -16841,7 +17104,7 @@ index 5a4761d..e8950e4 100644
      }
  }
  
-@@ -391,7 +386,7 @@ impl OpenRouterModel {
+@@ -391,7 +388,7 @@ impl OpenRouterModel {
          let response = req.json(body).send().await?;
          if !response.status().is_success() {
              let status = response.status().as_u16();
@@ -16850,7 +17113,7 @@ index 5a4761d..e8950e4 100644
              return Err(self.handle_error(status, &body));
          }
          Ok(response)
-@@ -420,10 +415,7 @@ impl Model for OpenRouterModel {
+@@ -420,10 +417,7 @@ impl Model for OpenRouterModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -16862,7 +17125,7 @@ index 5a4761d..e8950e4 100644
          self.parse_response(resp)
      }
  
-@@ -437,7 +429,9 @@ impl Model for OpenRouterModel {
+@@ -437,7 +431,9 @@ impl Model for OpenRouterModel {
          let response = self
              .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
              .await?;
@@ -16873,7 +17136,7 @@ index 5a4761d..e8950e4 100644
      }
  }
  
-@@ -466,4 +460,37 @@ mod tests {
+@@ -466,4 +462,37 @@ mod tests {
          );
          assert!(body.get("provider").is_some() && body.get("transforms").is_some());
      }
@@ -26316,10 +26579,64 @@ index 5bc1e9f..0000000
 -    Ok(())
 -}
 diff --git a/vendor/serdes-ai-responses/src/client/assembler.rs b/vendor/serdes-ai-responses/src/client/assembler.rs
-index 9993fc0..a1a7e62 100644
+index 9993fc0..25d0f14 100644
 --- a/vendor/serdes-ai-responses/src/client/assembler.rs
 +++ b/vendor/serdes-ai-responses/src/client/assembler.rs
-@@ -137,7 +137,11 @@ pub(super) fn stream_complete(
+@@ -28,10 +28,37 @@ pub(super) fn translate(event: StreamEvent) -> Vec<Result<ModelResponseStreamEve
+             ))]
+         }
+ 
+-        StreamEvent::OutputItemDone { output_index, .. } => {
+-            vec![Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent::new(
++        StreamEvent::OutputItemDone {
++            output_index, item, ..
++        } => {
++            // Completed metadata supplements streamed content; replacing the part
++            // would erase verbatim deltas (including raw tool argument spacing).
++            let part = crate::convert::parts_from_output(&[item]).remove(0);
++            let delta = match part {
++                ModelResponsePart::Thinking(t) => {
++                    Some(ModelResponsePartDelta::Thinking(ThinkingPartDelta {
++                        content_delta: String::new(),
++                        signature_delta: None,
++                        provider_name: None,
++                        provider_details: t.provider_details,
++                    }))
++                }
++                ModelResponsePart::Text(t) => Some(ModelResponsePartDelta::Text(TextPartDelta {
++                    content_delta: String::new(),
++                    provider_details: t.provider_details,
++                })),
++                _ => None,
++            };
++            let mut events = Vec::new();
++            if let Some(delta) = delta {
++                events.push(Ok(ModelResponseStreamEvent::PartDelta(
++                    PartDeltaEvent::new(output_index as usize, delta),
++                )));
++            }
++            events.push(Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent::new(
+                 output_index as usize,
+-            )))]
++            ))));
++            events
+         }
+ 
+         StreamEvent::ContentPartAdded { .. } | StreamEvent::ContentPartDone { .. } => Vec::new(),
+@@ -109,8 +136,10 @@ pub(super) fn translate(event: StreamEvent) -> Vec<Result<ModelResponseStreamEve
+ /// The initial part for an output item.
+ pub(super) fn part_from_item(item: &OutputItem) -> ModelResponsePart {
+     match item {
+-        OutputItem::Message { .. } => ModelResponsePart::Text(TextPart::new("")),
+-        OutputItem::Reasoning { .. } => ModelResponsePart::Thinking(ThinkingPart::new("")),
++        OutputItem::Message { id, .. } => ModelResponsePart::Text(TextPart::new("").with_id(id)),
++        OutputItem::Reasoning { id, .. } => {
++            ModelResponsePart::Thinking(ThinkingPart::new("").with_id(id))
++        }
+         OutputItem::FunctionCall { name, call_id, .. } => {
+             ModelResponsePart::ToolCall(ToolCallPart {
+                 tool_name: name.clone(),
+@@ -137,7 +166,11 @@ pub(super) fn stream_complete(
          input_tokens,
          output_tokens,
          cache_creation_tokens: None,
@@ -26332,7 +26649,7 @@ index 9993fc0..a1a7e62 100644
      }
  }
  
-@@ -147,13 +151,10 @@ pub(super) fn failure(response: &ResponseObject) -> ModelError {
+@@ -147,13 +180,10 @@ pub(super) fn failure(response: &ResponseObject) -> ModelError {
      let code = body
          .map(|error| error.code.clone())
          .unwrap_or_else(|| "response_failed".to_string());
@@ -26348,7 +26665,15 @@ index 9993fc0..a1a7e62 100644
      )
  }
  
-@@ -212,7 +213,11 @@ mod tests {
+@@ -165,6 +195,7 @@ mod tests {
+     #[test]
+     fn item_add_starts_parts() {
+         let message = OutputItem::Message {
++            phase: None,
+             id: "msg_1".into(),
+             role: "assistant".to_string(),
+             status: OutputItemStatus::InProgress,
+@@ -212,7 +243,11 @@ mod tests {
          let response = ResponseObject {
              id: "resp_1".into(),
              usage: Some(ResponseUsage {
@@ -26360,7 +26685,7 @@ index 9993fc0..a1a7e62 100644
                  output_tokens: Some(4),
                  total_tokens: Some(11),
              }),
-@@ -227,6 +232,7 @@ mod tests {
+@@ -227,6 +262,7 @@ mod tests {
                  assert_eq!(complete.finish_reason, FinishReason::Stop);
                  assert_eq!(complete.input_tokens, Some(7));
                  assert_eq!(complete.output_tokens, Some(4));
@@ -26368,7 +26693,7 @@ index 9993fc0..a1a7e62 100644
              }
              other => panic!("expected stream complete, got {other:?}"),
          }
-@@ -240,6 +246,7 @@ mod tests {
+@@ -240,6 +276,7 @@ mod tests {
              "gpt-4o",
              &CreateResponseRequest {
                  model: "gpt-4o".into(),
@@ -26604,7 +26929,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..312a711 100644
+index f90cc22..78fef54 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -26840,7 +27165,14 @@ index f90cc22..312a711 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -512,35 +596,23 @@ fn build_request(
+@@ -506,41 +590,29 @@ fn build_request(
+         metadata: None,
+         user: None,
+         truncation: None,
+-        include: None,
++        include: Some(vec!["reasoning.encrypted_content".into()]),
+         text: None,
+         service_tier: None,
      })
  }
  
@@ -26943,10 +27275,32 @@ index f90cc22..312a711 100644
                      },
                      cache_creation_tokens: complete.cache_creation_tokens,
                      cache_read_tokens: complete.cache_read_tokens,
-@@ -665,6 +744,18 @@ fn response_from_events(
+@@ -665,6 +744,40 @@ fn response_from_events(
          }
      }
  
++    // Completed summary arrays are the readable source when supplied. Their
++    // private original representation stays in details even when empty; an
++    // empty array does not erase readable deltas or encrypted continuation.
++    for part in &mut parts {
++        if let ModelResponsePart::Thinking(thinking) = part {
++            if let Some(summary) = thinking
++                .provider_details
++                .as_ref()
++                .and_then(|d| d.get("summary"))
++                .and_then(|v| v.as_array())
++            {
++                if !summary.is_empty() {
++                    thinking.content = summary
++                        .iter()
++                        .filter_map(|v| v.get("text").and_then(|v| v.as_str()))
++                        .collect::<Vec<_>>()
++                        .join("\n");
++                }
++            }
++        }
++    }
++
 +    // The responses wire has no tool-call finish reason: a completed
 +    // response whose output contains calls is a tool-call turn, so the
 +    // folded parts decide (mirrors the sibling openai client).
@@ -26962,7 +27316,7 @@ index f90cc22..312a711 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +769,50 @@ fn response_from_events(
+@@ -678,7 +791,50 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -27014,7 +27368,7 @@ index f90cc22..312a711 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -704,15 +838,18 @@ impl OpenResponsesModel {
+@@ -704,15 +860,18 @@ impl OpenResponsesModel {
              for (name, value) in &inner.headers {
                  http = http.header(name, value);
              }
@@ -27040,7 +27394,7 @@ index f90cc22..312a711 100644
                      .ok()
                      .map(|envelope| envelope.error.code)
                      .unwrap_or_default();
-@@ -721,13 +858,16 @@ impl OpenResponsesModel {
+@@ -721,13 +880,16 @@ impl OpenResponsesModel {
                      session.sent_requests = 0;
                      continue;
                  }
@@ -27062,7 +27416,7 @@ index f90cc22..312a711 100644
              session.previous_response_id = Some(object.id.clone());
              session.sent_requests = messages.len();
              return Ok(ModelResponse {
-@@ -744,7 +884,9 @@ impl OpenResponsesModel {
+@@ -744,7 +906,9 @@ impl OpenResponsesModel {
                      response_tokens: usage.output_tokens,
                      total_tokens: usage.total_tokens,
                      cache_creation_tokens: None,
@@ -27073,7 +27427,7 @@ index f90cc22..312a711 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,22 +901,39 @@ impl OpenResponsesModel {
+@@ -759,22 +923,39 @@ impl OpenResponsesModel {
      }
  }
  
@@ -27119,7 +27473,7 @@ index f90cc22..312a711 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -792,16 +951,18 @@ async fn run_http_stream(
+@@ -792,16 +973,18 @@ async fn run_http_stream(
          for (name, value) in &inner.headers {
              http = http.header(name, value);
          }
@@ -27145,7 +27499,7 @@ index f90cc22..312a711 100644
              .ok()
              .map(|envelope| envelope.error.code)
              .unwrap_or_default();
-@@ -810,32 +971,79 @@ async fn run_http_stream(
+@@ -810,32 +993,79 @@ async fn run_http_stream(
              session.sent_requests = 0;
              continue;
          }
@@ -27240,7 +27594,7 @@ index f90cc22..312a711 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1054,58 @@ async fn run_http_stream(
+@@ -846,14 +1076,58 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -27759,6 +28113,143 @@ index 0000000..dc32043
 +        deserializer.deserialize_any(UniqueVisitor)
 +    }
 +}
+diff --git a/vendor/serdes-ai-responses/src/convert.rs b/vendor/serdes-ai-responses/src/convert.rs
+index 6b4a9c5..7fc323e 100644
+--- a/vendor/serdes-ai-responses/src/convert.rs
++++ b/vendor/serdes-ai-responses/src/convert.rs
+@@ -194,6 +194,12 @@ fn response_parts_to_items(response: &ModelResponse) -> Vec<InputItem> {
+         .iter()
+         .filter_map(|part| match part {
+             ModelResponsePart::Text(text) => Some(InputItem::Typed(TypedInputItem::Message {
++                phase: text
++                    .provider_details
++                    .as_ref()
++                    .and_then(|d| d.get("phase"))
++                    .and_then(|v| v.as_str())
++                    .map(str::to_owned),
+                 role: InputRole::Assistant,
+                 content: Some(InputMessageContent::Parts(vec![
+                     InputContentPart::OutputText {
+@@ -209,9 +215,26 @@ fn response_parts_to_items(response: &ModelResponse) -> Vec<InputItem> {
+                     .and_then(|value| value.as_str())
+                     .map(str::to_string);
+                 Some(InputItem::Typed(TypedInputItem::Reasoning {
+-                    id: None,
+-                    summary: vec![SummaryTextItem::new(thinking.content.clone())],
++                    id: thinking.id.clone(),
++                    summary: thinking
++                        .provider_details
++                        .as_ref()
++                        .and_then(|d| d.get("summary"))
++                        .and_then(|v| serde_json::from_value(v.clone()).ok())
++                        .unwrap_or_default(),
+                     encrypted_content,
++                    extra: thinking
++                        .provider_details
++                        .as_ref()
++                        .map(|d| {
++                            d.iter()
++                                .filter(|(k, _)| {
++                                    k.as_str() != "summary" && k.as_str() != "encrypted_content"
++                                })
++                                .map(|(k, v)| (k.clone(), v.clone()))
++                                .collect()
++                        })
++                        .unwrap_or_default(),
+                 }))
+             }
+             ModelResponsePart::ToolCall(call) => {
+@@ -239,7 +262,9 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
+     output
+         .iter()
+         .map(|item| match item {
+-            OutputItem::Message { content, .. } => {
++            OutputItem::Message {
++                content, id, phase, ..
++            } => {
+                 let text = content
+                     .iter()
+                     .map(|part| match part {
+@@ -248,9 +273,22 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
+                     })
+                     .collect::<Vec<_>>()
+                     .join("");
+-                ModelResponsePart::Text(TextPart::new(text))
++                let mut part = TextPart::new(text).with_id(id);
++                if let Some(phase) = phase {
++                    part = part.with_provider_details(
++                        [(String::from("phase"), serde_json::json!(phase))]
++                            .into_iter()
++                            .collect(),
++                    );
++                }
++                ModelResponsePart::Text(part)
+             }
+-            OutputItem::Reasoning { summary, .. } => {
++            OutputItem::Reasoning {
++                id,
++                summary,
++                encrypted_content,
++                extra,
++            } => {
+                 let text = summary
+                     .iter()
+                     .map(|part| part.text.as_str())
+@@ -259,7 +297,19 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
+                         "
+ ",
+                     );
+-                ModelResponsePart::Thinking(ThinkingPart::new(text))
++                let mut details = extra.clone();
++                details.insert(
++                    "summary".into(),
++                    serde_json::to_value(summary).expect("summary serialization"),
++                );
++                if let Some(encrypted) = encrypted_content {
++                    details.insert("encrypted_content".into(), serde_json::json!(encrypted));
++                }
++                ModelResponsePart::Thinking(
++                    ThinkingPart::new(text)
++                        .with_id(id)
++                        .with_provider_details(details),
++                )
+             }
+             OutputItem::FunctionCall {
+                 name,
+@@ -268,7 +318,7 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
+                 ..
+             } => ModelResponsePart::ToolCall(ToolCallPart {
+                 tool_name: name.clone(),
+-                args: ToolCallArgs::from(arguments.as_str()),
++                args: ToolCallArgs::String(arguments.clone()),
+                 tool_call_id: Some(call_id.clone()),
+                 id: None,
+                 provider_details: None,
+@@ -399,7 +449,7 @@ pub fn input_to_history(
+                 flush_tool_returns(&mut history, &mut pending);
+                 push_message_role(&mut history, role, content.as_ref())?;
+             }
+-            InputItem::Typed(TypedInputItem::Message { role, content }) => {
++            InputItem::Typed(TypedInputItem::Message { role, content, .. }) => {
+                 flush_assistant(&mut history, &mut pending);
+                 flush_tool_returns(&mut history, &mut pending);
+                 push_message_role(&mut history, role, content.as_ref())?;
+@@ -606,6 +656,7 @@ pub fn output_items_from_response(response: &ModelResponse) -> Vec<OutputItem> {
+         .iter()
+         .filter_map(|part| match part {
+             ModelResponsePart::Text(text) => Some(OutputItem::Message {
++                phase: None,
+                 id: new_id("msg_"),
+                 role: "assistant".to_string(),
+                 status: OutputItemStatus::Completed,
+@@ -618,6 +669,7 @@ pub fn output_items_from_response(response: &ModelResponse) -> Vec<OutputItem> {
+                 id: new_id("rs_"),
+                 summary: vec![SummaryTextItem::new(thinking.content.clone())],
+                 encrypted_content: None,
++                extra: Default::default(),
+             }),
+             ModelResponsePart::ToolCall(call) => Some(OutputItem::FunctionCall {
+                 id: new_id("fc_"),
 diff --git a/vendor/serdes-ai-responses/src/engine.rs b/vendor/serdes-ai-responses/src/engine.rs
 deleted file mode 100644
 index ffd0e92..0000000
@@ -29286,7 +29777,7 @@ index 35bba05..0000000
 -    }
 -}
 diff --git a/vendor/serdes-ai-responses/src/types.rs b/vendor/serdes-ai-responses/src/types.rs
-index 806f448..e9016dd 100644
+index 806f448..9c2d7bb 100644
 --- a/vendor/serdes-ai-responses/src/types.rs
 +++ b/vendor/serdes-ai-responses/src/types.rs
 @@ -24,6 +24,10 @@ pub struct CreateResponseRequest {
@@ -29300,7 +29791,27 @@ index 806f448..e9016dd 100644
      /// Conversation input: a plain string or a list of input items.
      #[serde(default)]
      pub input: ResponseInput,
-@@ -650,9 +654,31 @@ pub struct IncompleteDetails {
+@@ -138,6 +142,9 @@ pub enum TypedInputItem {
+     Message {
+         /// Message role.
+         role: InputRole,
++        /// Provider assistant phase, when returned.
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        phase: Option<String>,
+         /// Message content: plain string or structured parts.
+         #[serde(default)]
+         content: Option<InputMessageContent>,
+@@ -169,6 +176,9 @@ pub enum TypedInputItem {
+         /// Encrypted reasoning content (Responses-native models).
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         encrypted_content: Option<String>,
++        /// Additional original provider reasoning metadata.
++        #[serde(flatten)]
++        extra: serde_json::Map<String, serde_json::Value>,
+     },
+     /// A reference to a stored item (not resolvable by this server).
+     ItemReference {
+@@ -650,9 +660,31 @@ pub struct IncompleteDetails {
      pub reason: String,
  }
  
@@ -29332,7 +29843,45 @@ index 806f448..e9016dd 100644
      /// Input (prompt) tokens.
      #[serde(default, skip_serializing_if = "Option::is_none")]
      pub input_tokens: Option<u64>,
-@@ -1133,6 +1159,7 @@ mod tests {
+@@ -682,6 +714,9 @@ pub enum OutputItem {
+         status: OutputItemStatus,
+         /// Content parts.
+         content: Vec<OutputContent>,
++        /// Provider assistant phase, when returned.
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        phase: Option<String>,
+     },
+     /// Reasoning produced by the model.
+     Reasoning {
+@@ -692,6 +727,9 @@ pub enum OutputItem {
+         /// Encrypted reasoning content, when the provider supplied it.
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         encrypted_content: Option<String>,
++        /// Additional original provider reasoning metadata.
++        #[serde(flatten)]
++        extra: serde_json::Map<String, serde_json::Value>,
+     },
+     /// A function call the client should execute.
+     FunctionCall {
+@@ -747,6 +785,9 @@ pub struct SummaryTextItem {
+     pub kind: String,
+     /// The summary text.
+     pub text: String,
++    /// Original provider summary metadata.
++    #[serde(flatten)]
++    pub extra: serde_json::Map<String, serde_json::Value>,
+ }
+ 
+ impl SummaryTextItem {
+@@ -756,6 +797,7 @@ impl SummaryTextItem {
+         Self {
+             kind: "summary_text".to_string(),
+             text: text.into(),
++            extra: Default::default(),
+         }
+     }
+ }
+@@ -1133,6 +1175,7 @@ mod tests {
                  "gpt-4o",
                  &CreateResponseRequest {
                      model: "gpt-4o".into(),
@@ -30988,10 +31537,10 @@ index 0000000..d73b3c6
 +}
 diff --git a/vendor/serdes-ai-responses/tests/client_ws.rs b/vendor/serdes-ai-responses/tests/client_ws.rs
 new file mode 100644
-index 0000000..4b21122
+index 0000000..b0092f2
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_ws.rs
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,386 @@
 +//! Scripted WebSocket tests retained from the live-tested Responses client.
 +
 +use futures::{SinkExt, StreamExt};
@@ -31069,6 +31618,7 @@ index 0000000..4b21122
 +    let mut response = ResponseObject::in_progress(id, 0, request.model.clone(), request);
 +    response.status = ResponseStatus::Completed;
 +    response.output = vec![OutputItem::Message {
++        phase: None,
 +        id: format!("msg_{id}"),
 +        role: "assistant".to_string(),
 +        status: serdes_ai_responses::types::OutputItemStatus::Completed,
@@ -31090,6 +31640,7 @@ index 0000000..4b21122
 +            sequence_number: 1,
 +            output_index: 0,
 +            item: OutputItem::Message {
++                phase: None,
 +                id: format!("msg_{id}"),
 +                role: "assistant".to_string(),
 +                status: serdes_ai_responses::types::OutputItemStatus::InProgress,

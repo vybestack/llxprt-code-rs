@@ -33,6 +33,8 @@ fn complete(
             &request,
             prompt,
             &[RoundRecord {
+                thinking: String::new(),
+                continuation: None,
                 assistant: prompt.into(),
                 calls: vec![],
             }],

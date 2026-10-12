@@ -1,7 +1,7 @@
 use super::*;
 
 impl CodingAgent {
-    /// Enable selected live transcript categories. Default agents emit nothing.
+    /// Enable selected live transcript categories. Readable thinking is always enabled.
     pub fn with_emission(mut self, categories: Vec<crate::transcript::Emit>) -> Self {
         self.emitter = std::sync::Mutex::new(crate::transcript::Emitter::new(categories));
         self

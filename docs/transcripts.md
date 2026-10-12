@@ -1,7 +1,8 @@
 # Transcript emission and look-back
 
-Normal agent runs still print exactly one strict JSON envelope on stdout and nothing
-on stderr. Transcript emission is opt-in and does not add envelope fields.
+Normal agent runs print exactly one strict JSON envelope on stdout. Returned readable
+thinking is enabled by default as bounded JSONL on stderr. Other transcript categories
+remain opt-in; none add envelope fields.
 
 ```sh
 llxprt-code-rs --session demo --cwd ws -p 'fix the failing test'
@@ -10,7 +11,8 @@ llxprt-code-rs --session demo --emit thinking,text --emit calls,results -p 'insp
 llxprt-code-rs transcript --session demo --turn 1 --json
 ```
 
-`--emit all` selects all four categories. Each stderr line is a JSON object:
+`--emit all` selects all four categories. `--emit thinking` remains accepted but is no
+longer necessary. Selecting other categories does not turn thinking off. Each stderr line is a JSON object:
 
 | Category | Event type | Payload |
 | --- | --- | --- |
@@ -25,11 +27,32 @@ Calls are visible before execution and results before the next provider request.
 Refused calls have result events too. Transport errors and rejected provider replies
 are still represented by the usual stdout error envelope, not fabricated events.
 
-Reasoning is **live-only**: captured from Responses summaries, Codex reasoning parts,
-and other transports exposing Thinking parts. Chat Completions has no reasoning field;
-`--emit thinking` is a no-op for Chat. Effort prompt notes are not reasoning content.
-No new session fields or older-format readers are introduced. A replay with no new
-model execution produces no live events; use look-back to inspect persisted rounds.
+Readable thinking comes from API-key Responses summaries, Codex summaries, Anthropic
+non-redacted thinking, and compatible Chat `reasoning_content`. A transport returning
+no readable content emits no thinking event. Prompt effort notes, signatures, redacted
+blocks, encrypted reasoning, reasoning IDs and phase metadata are never display text.
+Responses routes request summary `auto` when no explicit summary is configured and
+request `reasoning.encrypted_content` while retaining `store: false`, full input replay,
+and no `previous_response_id`. Effort remains independently profile-selected.
+
+Round records persist the sanitized readable projection separately from private ordered
+provider continuation state. The latter carries signed/redacted Anthropic blocks, original
+Responses summary arrays and encrypted data (even with empty summaries), compatible
+Chat reasoning, and returned assistant phase. It is reattached before matching tool
+outputs, across tool loops, forced summaries and process restarts on the selected lineage.
+A resolved route/model/endpoint change refuses replay before transport. Signed or opaque
+state is never display-truncated, scrubbed, converted into prose or silently discarded.
+Unsafe state containing configured secrets or unsafe readable content fails as a typed
+model error before emission or tools; over-budget state is likewise refused. The exact
+private representation and readable projection both count toward existing assistant,
+request and session limits. This deliberately conservative accounting can refuse a turn
+sooner than text-only accounting.
+
+Store format **5** is the only accepted format: `thinking` and `continuation` are required
+round fields (explicit null continuation for ordinary text-only rounds). No legacy reader,
+migration, compatibility default or alternate replay path exists. Private state lives only
+in the existing protected session store; protect it like other workspace/session data.
+A completed-request replay produces no new live events; use look-back for stored rounds.
 
 Reasoning is scrubbed before the adapter's first truncation, including configured
 secrets crossing a cap or split across provider parts. Emission shares the existing per-turn assistant,
@@ -48,10 +71,9 @@ transport prefix. The prefix counts toward the resolved per-turn emission output
 cannot fit fails emission rather than emitting different model-visible bytes.
 Captures contain workspace data; protect them accordingly.
 Stderr write errors fail the turn rather than silently losing transcript records.
-When emission is enabled, the existing macOS keychain progress notice and optional
+Since thinking emission is enabled by default, the existing macOS keychain progress notice and optional
 memory-profiler stderr summary are suppressed to keep capture strictly JSONL. The
-memory profile file and stdout profiling metadata are unchanged; default runs retain
-their original notices.
+memory profile file and stdout profiling metadata are unchanged.
 
 ## Look-back
 
@@ -61,11 +83,11 @@ llxprt-code-rs transcript --session demo --turn 2 --max-bytes 1024
 llxprt-code-rs transcript --session demo --json | jq '.turns[].rounds[].calls[].result'
 ```
 
-Human output groups turns, branch attempts and rounds, shows text and calls, and caps
-each displayed result at `--max-bytes` (default 4096). The cap never changes stored
+Human output groups turns, branch attempts and rounds, shows thinking, text and calls, and caps
+each displayed thinking span and result at `--max-bytes` (default 4096). The cap never changes stored
 bytes. JSON output is exactly one object with `session_id` and `turns`; each entry has
 `turn`, branch identity and parent lineage, lifecycle, prompt, summary, error and
-`rounds`. Rounds have `round`, `text`, and `calls`; calls use the same payload field
+`rounds`. Rounds have `round`, `thinking`, `text`, and `calls`; calls use the same payload field
 names as live events. JSON is never viewing-truncated. All attempts are included,
 with explicit parent identities so siblings are not mistaken for a single lineage.
 `--turn` selects all attempts at that turn. Missing turns fail with exit 4.
@@ -80,3 +102,13 @@ normal JSON stdout contract, like help/version.
 
 Exit codes: 2 usage, 3 config, 4 session, 5 model, 6 turn. Existing profiling and
 context-runtime exit codes are unchanged.
+
+## Verified scope
+
+Loopback stock-CLI fixtures check wire fields/order for API-key Responses, Anthropic
+and compatible Chat through forced summary, multiple tool rounds, restart and retained
+recovery. A selected Codex HTTP/SSE fixture checks completed-item metadata and empty
+terminal output, with direct vendor suites preserving raw tool arguments and stream
+lifecycle validation. Look-back fixtures compare file bytes, permissions and mtimes.
+These are deterministic contract tests, not live endpoint/model capability evidence.
+No universal provider or model compatibility claim is made.

@@ -209,6 +209,8 @@ impl Serialize for TruncationMode {
 /// Request body for the Responses API.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsesApiRequest {
+    /// Explicit stateless encrypted reasoning request.
+    pub include: Vec<String>,
     /// Model to use.
     pub model: String,
     /// Input messages/content.
@@ -292,10 +294,14 @@ pub struct TruncationConfig {
 #[serde(untagged)]
 #[allow(missing_docs)]
 pub enum ResponseInput {
+    /// Original reasoning item, including encrypted content and metadata.
+    Reasoning(JsonValue),
     /// User or assistant message.
     Message {
         role: ResponseInputRole,
         content: ResponseInputContent,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        phase: Option<String>,
     },
     /// A prior assistant function call.
     FunctionCall {
@@ -549,7 +555,7 @@ pub struct ResponseError {
 }
 
 /// Output item from the Responses API.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum ResponseOutputItem {
@@ -559,6 +565,9 @@ pub enum ResponseOutputItem {
         id: String,
         #[serde(default)]
         summary: Vec<ReasoningSummaryItem>,
+        encrypted_content: Option<String>,
+        #[serde(flatten)]
+        extra: serde_json::Map<String, JsonValue>,
         status: Option<String>,
     },
     /// Text message output.
@@ -567,6 +576,7 @@ pub enum ResponseOutputItem {
         id: String,
         role: String,
         content: Vec<MessageContentItem>,
+        phase: Option<String>,
         status: Option<String>,
     },
     /// Function tool call.
@@ -622,16 +632,20 @@ pub enum ResponseOutputItem {
 }
 
 /// Reasoning summary item.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum ReasoningSummaryItem {
     #[serde(rename = "summary_text")]
-    Text { text: String },
+    Text {
+        text: String,
+        #[serde(flatten)]
+        extra: serde_json::Map<String, JsonValue>,
+    },
 }
 
 /// Message content item.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum MessageContentItem {
@@ -646,7 +660,7 @@ pub enum MessageContentItem {
 }
 
 /// Code interpreter result.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum CodeInterpreterResult {
@@ -659,7 +673,7 @@ pub enum CodeInterpreterResult {
 }
 
 /// File search result.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct FileSearchResult {
     pub file_id: String,
@@ -669,7 +683,7 @@ pub struct FileSearchResult {
 }
 
 /// Image generation result.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct ImageGenerationResult {
     pub image: Option<String>, // base64 or URL
@@ -858,6 +872,7 @@ impl OpenAIResponsesModel {
                         instructions = Some(sys.content.clone());
                     }
                     ModelRequestPart::UserPrompt(user) => inputs.push(ResponseInput::Message {
+                        phase: None,
                         role: ResponseInputRole::User,
                         content: self.convert_user_content(&user.content)?,
                     }),
@@ -878,6 +893,7 @@ impl OpenAIResponsesModel {
                         });
                     }
                     ModelRequestPart::RetryPrompt(retry) => inputs.push(ResponseInput::Message {
+                        phase: None,
                         role: ResponseInputRole::User,
                         content: ResponseInputContent::Text(retry.content.message().to_string()),
                     }),
@@ -956,6 +972,12 @@ impl OpenAIResponsesModel {
                 ModelResponsePart::Text(text) => inputs.push(ResponseInput::Message {
                     role: ResponseInputRole::Assistant,
                     content: ResponseInputContent::Text(text.content.clone()),
+                    phase: text
+                        .provider_details
+                        .as_ref()
+                        .and_then(|d| d.get("phase"))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
                 }),
                 ModelResponsePart::ToolCall(call) => {
                     let call_id = required_call_id(call.tool_call_id.as_deref())?;
@@ -969,7 +991,16 @@ impl OpenAIResponsesModel {
                         arguments: call.args.to_json_string()?,
                     });
                 }
-                ModelResponsePart::Thinking(_) => {}
+                ModelResponsePart::Thinking(thinking) => {
+                    let item = thinking
+                        .provider_details
+                        .as_ref()
+                        .and_then(|d| d.get("reasoning_item"))
+                        .ok_or_else(|| {
+                            ModelError::api("missing original Responses reasoning item")
+                        })?;
+                    inputs.push(ResponseInput::Reasoning(item.clone()));
+                }
                 ModelResponsePart::File(_) | ModelResponsePart::BuiltinToolCall(_) => {
                     return Err(ModelError::api(
                         "unsupported assistant output in Responses transcript",
@@ -1031,6 +1062,7 @@ impl OpenAIResponsesModel {
             .map(|t| TruncationConfig { truncation_type: t });
 
         Ok(ResponsesApiRequest {
+            include: vec!["reasoning.encrypted_content".into()],
             model: self.model_name.clone(),
             input,
             instructions,
@@ -1075,29 +1107,46 @@ impl OpenAIResponsesModel {
         let mut seen_call_ids = std::collections::BTreeSet::new();
 
         for output in resp.output {
+            let reasoning_item = if matches!(output, ResponseOutputItem::Reasoning { .. }) {
+                Some(
+                    serde_json::to_value(&output)
+                        .map_err(|_| ModelError::api("reasoning item serialization failed"))?,
+                )
+            } else {
+                None
+            };
             match output {
                 ResponseOutputItem::Reasoning {
                     id,
                     summary,
                     status,
+                    ..
                 } => {
                     require_completed_status(status.as_deref())?;
                     let content: String = summary
                         .iter()
                         .map(|s| match s {
-                            ReasoningSummaryItem::Text { text } => text.as_str(),
+                            ReasoningSummaryItem::Text { text, .. } => text.as_str(),
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    if !content.is_empty() {
+                    {
+                        let mut details = serde_json::Map::new();
+                        details.insert(
+                            "reasoning_item".into(),
+                            reasoning_item.expect("reasoning item"),
+                        );
                         let thinking = ThinkingPart::new(content)
+                            .with_provider_details(details)
                             .with_id(&id)
                             .with_provider_name("openai");
                         parts.push(ModelResponsePart::Thinking(thinking));
                     }
                 }
                 ResponseOutputItem::Message {
+                    phase,
+                    id,
                     role,
                     content,
                     status,
@@ -1111,7 +1160,15 @@ impl OpenAIResponsesModel {
                         match item {
                             MessageContentItem::Text { text, .. } => {
                                 if !text.is_empty() {
-                                    parts.push(ModelResponsePart::Text(TextPart::new(text)));
+                                    let mut part = TextPart::new(text).with_id(&id);
+                                    if let Some(phase) = &phase {
+                                        part = part.with_provider_details(
+                                            [(String::from("phase"), serde_json::json!(phase))]
+                                                .into_iter()
+                                                .collect(),
+                                        );
+                                    }
+                                    parts.push(ModelResponsePart::Text(part));
                                 }
                             }
                             MessageContentItem::Refusal { .. } => {
@@ -1366,6 +1423,7 @@ mod tests {
     #[test]
     fn test_response_input_serialization() {
         let input = ResponseInput::Message {
+            phase: None,
             role: ResponseInputRole::User,
             content: ResponseInputContent::Text("Hello".to_string()),
         };

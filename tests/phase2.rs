@@ -27,6 +27,7 @@ struct MockBackend {
 
 fn result(text: &str) -> LlmResult {
     LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: text.to_string(),
@@ -246,6 +247,7 @@ fn multi_tool_turn_persists_call_ids_results_and_turn2_replays_roles() {
     let cwd = new_cwd();
     let st = store("s2");
     let round1 = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".to_string(),
@@ -589,6 +591,7 @@ fn length_finish_reason_persists_failed() {
     let st = store("s11");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let truncated = |text: &str| LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: text.to_string(),
@@ -624,6 +627,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
     let st = store("s11-mid");
     let r1 = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: String::new(),
@@ -635,6 +639,7 @@ fn length_finish_reason_after_tool_use_fails_immediately() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let truncated = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "half".to_string(),
@@ -687,6 +692,7 @@ fn empty_id_fails_before_side_effect() {
     let cwd = new_cwd();
     let st = store("s12");
     let bad = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
@@ -713,6 +719,7 @@ fn duplicate_ids_fail() {
     let cwd = new_cwd();
     let st = store("s13");
     let dup = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
@@ -748,6 +755,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
     // default budget is unlimited; caps are opt-in.)
     let mut replies: Vec<LlmResult> = (0..17)
         .map(|i| LlmResult {
+            continuation: None,
             thinking: String::new(),
             usage: LlmUsage::default(),
             text: String::new(),
@@ -760,6 +768,7 @@ fn budget_exhaustion_refuses_excess_and_forces_a_summary() {
         })
         .collect();
     replies.push(LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "wrapped up".into(),
@@ -787,6 +796,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let calls: Vec<LlmResult> = (0..2)
         .map(|i| LlmResult {
+            continuation: None,
             thinking: String::new(),
             usage: LlmUsage::default(),
             text: String::new(),
@@ -800,6 +810,7 @@ fn budget_cap_reached_by_natural_wrapup_reports_exhausted() {
         .collect();
     let mut replies = calls;
     replies.push(LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "all done".into(),
@@ -823,6 +834,7 @@ fn natural_wrapup_below_cap_reports_budget_available() {
     let st = store("s15c");
     let r = reserved(&st, None, None, "P", &cwd).unwrap();
     let call = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: String::new(),
@@ -834,6 +846,7 @@ fn natural_wrapup_below_cap_reports_budget_available() {
         finish_reason: Some(FinishReason::ToolCall),
     };
     let done = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "done".into(),
@@ -856,6 +869,7 @@ fn failed_state_persists_error() {
     let st = store("s15");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let bad = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "".to_string(),
@@ -914,6 +928,7 @@ fn later_round_context_overflow_stops_before_next_call() {
     let framed_len = payload_len + format!("[0..{payload_len} of {payload_len} bytes]\n").len();
     std::fs::write(cwd.join("big.txt"), "y".repeat(payload_len)).unwrap();
     let round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".to_string(),
@@ -1059,6 +1074,7 @@ fn aggregate_assistant_bytes_across_rounds_rejected() {
     let st = store("sagg1");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let big_tool = |id: &str, path: &str, ch: char, n: usize| LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: ch.to_string().repeat(n),
@@ -1094,6 +1110,7 @@ fn aggregate_args_across_rounds_rejected() {
     let st = store("sagg2");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let arg_round = |id: &str, path: &str, ch: char| LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "working".to_string(),
@@ -1152,6 +1169,7 @@ fn multiple_tool_calls_share_remaining_output_budget() {
         })
         .collect();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
@@ -1313,6 +1331,7 @@ fn admitted_live_bytes_are_digest_only_after_authenticated_reopen() {
     let st = store("sauthreopen");
     let r = reserved(&st, None, None, "P1", &cwd).unwrap();
     let round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".to_string(),
@@ -1575,6 +1594,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         .chain([write_ok.clone(), tail.clone(), drain.clone(), refused])
         .collect();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
@@ -1701,6 +1721,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     let ok_reserved = reserved(&ok_st, None, None, "P1", &ok_cwd).unwrap();
     let below: Vec<ToolCall> = reads.chain([write_ok, tail, drain]).collect();
     let below_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "reading".into(),
@@ -1850,6 +1871,7 @@ fn oversized_search_output_is_bounded_before_retention() {
     let st = store("sagg-search-output");
     let reserved = reserved(&st, None, None, "P1", &cwd).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "searching".into(),
@@ -1942,6 +1964,8 @@ fn checkpoint_extends_lease() {
     let before = on_disk_lease(&st, &r);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let rounds = vec![RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: "working".into(),
         calls: vec![ToolCallRecord {
             id: "checkpoint-call".into(),
@@ -1993,6 +2017,8 @@ fn store_publication_releases_resident_live_bytes_without_mutating_agent_rounds(
     let checkpoint_reservation = reserved(&checkpoint_store, None, None, "P1", &cwd).unwrap();
     let rounds = vec![
         RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "working".into(),
             calls: vec![ToolCallRecord {
                 id: "live-completed".into(),
@@ -2005,6 +2031,8 @@ fn store_publication_releases_resident_live_bytes_without_mutating_agent_rounds(
             }],
         },
         RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "done".into(),
             calls: Vec::new(),
         },
@@ -2041,6 +2069,8 @@ fn store_publication_releases_resident_live_bytes_without_mutating_agent_rounds(
     let failed_store = store("live-publication-failed");
     let failed_reservation = reserved(&failed_store, None, None, "P1", &cwd).unwrap();
     let failed_rounds = vec![RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: "working".into(),
         calls: vec![ToolCallRecord {
             id: "live-failed".into(),
@@ -2101,6 +2131,7 @@ fn second_model_call_observes_renewed_lease_after_elapsed_interval() {
     let before = on_disk_lease(&st, &r);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let tool = LlmResult {
+        continuation: None,
         thinking: String::new(),
         usage: LlmUsage::default(),
         text: "next".to_string(),
@@ -2264,6 +2295,8 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str, lifecycle: Lifecycle)
         ),
         Lifecycle::Completed => (
             vec![RoundRecord {
+                thinking: String::new(),
+                continuation: None,
                 assistant: "done".to_string(),
                 calls: Vec::new(),
             }],

@@ -13,6 +13,8 @@ fn fixture(root: &Path) -> (SessionId, PathBuf, Value) {
             &request,
             "done",
             &[RoundRecord {
+                thinking: String::new(),
+                continuation: None,
                 assistant: "done".into(),
                 calls: vec![],
             }],

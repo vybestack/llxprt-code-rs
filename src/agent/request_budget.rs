@@ -58,7 +58,10 @@ pub fn estimate_history_bytes(h: &[crate::session::HistoryTurn]) -> usize {
             .saturating_add(t.prompt.len())
             .saturating_add(t.summary.len());
         for r in &t.rounds {
-            n = n.saturating_add(r.assistant.len());
+            n = n
+                .saturating_add(r.assistant.len())
+                .saturating_add(r.thinking.len())
+                .saturating_add(r.continuation.as_ref().map_or(0, |s| s.bytes()));
             for c in &r.calls {
                 n = n
                     .saturating_add(c.args.len())

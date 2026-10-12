@@ -590,7 +590,7 @@ fn build_request(
         metadata: None,
         user: None,
         truncation: None,
-        include: None,
+        include: Some(vec!["reasoning.encrypted_content".into()]),
         text: None,
         service_tier: None,
     })
@@ -740,6 +740,28 @@ fn response_from_events(
                     cache_read_tokens: complete.cache_read_tokens,
                     details: None,
                 });
+            }
+        }
+    }
+
+    // Completed summary arrays are the readable source when supplied. Their
+    // private original representation stays in details even when empty; an
+    // empty array does not erase readable deltas or encrypted continuation.
+    for part in &mut parts {
+        if let ModelResponsePart::Thinking(thinking) = part {
+            if let Some(summary) = thinking
+                .provider_details
+                .as_ref()
+                .and_then(|d| d.get("summary"))
+                .and_then(|v| v.as_array())
+            {
+                if !summary.is_empty() {
+                    thinking.content = summary
+                        .iter()
+                        .filter_map(|v| v.get("text").and_then(|v| v.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
             }
         }
     }

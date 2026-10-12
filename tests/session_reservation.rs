@@ -33,6 +33,7 @@ impl ChatBackend for CountingBackend {
         Box::pin(async move {
             *self.calls.lock().unwrap() += 1;
             Ok(LlmResult {
+                continuation: None,
                 thinking: String::new(),
                 usage: LlmUsage::default(),
                 text: "done".to_string(),
@@ -116,6 +117,8 @@ fn complete_turn1(st: &SessionStore, prompt: &str, cwd: &Path) -> ReservedReques
         &r,
         "t1",
         &[RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "t1".into(),
             calls: Vec::new(),
         }],
@@ -139,6 +142,8 @@ fn branch(turn: u32, attempt: u32, id: &str, prompt: &str) -> BranchRecord {
         digest: llxprt_code_rs::agent::prompt_digest(prompt),
         lifecycle: Lifecycle::Completed,
         rounds: vec![RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "done".into(),
             calls: Vec::new(),
         }],
@@ -177,6 +182,8 @@ fn set_lease_expiry(store: &SessionStore, branch_id: &str, expiry: u64) {
 
 fn noop_rounds() -> Vec<RoundRecord> {
     vec![RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: "rejected".into(),
         calls: Vec::new(),
     }]
@@ -287,6 +294,8 @@ fn second_store_replays_completed_child_with_no_model_calls() {
         &r2,
         "t2",
         &[RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "t2".into(),
             calls: Vec::new(),
         }],

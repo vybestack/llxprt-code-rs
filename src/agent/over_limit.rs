@@ -17,7 +17,10 @@ pub(crate) fn compact_history(history: &mut [HistoryTurn]) -> bool {
             continue;
         }
         for round in &mut turn.rounds {
-            if round.assistant != turn.summary && !round.assistant.is_empty() {
+            if round.continuation.is_none()
+                && round.assistant != turn.summary
+                && !round.assistant.is_empty()
+            {
                 round.assistant.clear();
                 changed = true;
             }

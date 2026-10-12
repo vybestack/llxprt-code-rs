@@ -72,7 +72,10 @@ pub(crate) fn construct_backend(
         super::cache_observation::InputAccounting::Inclusive
     };
     constructed.backend = Box::new(super::cache_observation::ObservedBackend::new(
-        constructed.backend,
+        Box::new(super::reasoning::BoundBackend::new(
+            constructed.backend,
+            profile,
+        )),
         accounting,
     ));
     Ok(constructed)

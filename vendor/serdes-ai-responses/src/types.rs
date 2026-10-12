@@ -142,6 +142,9 @@ pub enum TypedInputItem {
     Message {
         /// Message role.
         role: InputRole,
+        /// Provider assistant phase, when returned.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase: Option<String>,
         /// Message content: plain string or structured parts.
         #[serde(default)]
         content: Option<InputMessageContent>,
@@ -173,6 +176,9 @@ pub enum TypedInputItem {
         /// Encrypted reasoning content (Responses-native models).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         encrypted_content: Option<String>,
+        /// Additional original provider reasoning metadata.
+        #[serde(flatten)]
+        extra: serde_json::Map<String, serde_json::Value>,
     },
     /// A reference to a stored item (not resolvable by this server).
     ItemReference {
@@ -708,6 +714,9 @@ pub enum OutputItem {
         status: OutputItemStatus,
         /// Content parts.
         content: Vec<OutputContent>,
+        /// Provider assistant phase, when returned.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase: Option<String>,
     },
     /// Reasoning produced by the model.
     Reasoning {
@@ -718,6 +727,9 @@ pub enum OutputItem {
         /// Encrypted reasoning content, when the provider supplied it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         encrypted_content: Option<String>,
+        /// Additional original provider reasoning metadata.
+        #[serde(flatten)]
+        extra: serde_json::Map<String, serde_json::Value>,
     },
     /// A function call the client should execute.
     FunctionCall {
@@ -773,6 +785,9 @@ pub struct SummaryTextItem {
     pub kind: String,
     /// The summary text.
     pub text: String,
+    /// Original provider summary metadata.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl SummaryTextItem {
@@ -782,6 +797,7 @@ impl SummaryTextItem {
         Self {
             kind: "summary_text".to_string(),
             text: text.into(),
+            extra: Default::default(),
         }
     }
 }

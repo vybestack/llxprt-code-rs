@@ -281,12 +281,15 @@ fn now_unix_ms() -> u64 {
 
 /// Mapped bytes in an already-materialized model reply.
 pub fn mapped_reply_bytes(result: &crate::adapter::LlmResult) -> usize {
-    result.calls.iter().fold(result.text.len(), |total, call| {
-        total
-            .saturating_add(call.id.len())
-            .saturating_add(call.name.len())
-            .saturating_add(call.args_json.len())
-    })
+    result
+        .calls
+        .iter()
+        .fold(result.assistant_bytes(), |total, call| {
+            total
+                .saturating_add(call.id.len())
+                .saturating_add(call.name.len())
+                .saturating_add(call.args_json.len())
+        })
 }
 
 #[cfg(test)]

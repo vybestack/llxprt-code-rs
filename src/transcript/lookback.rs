@@ -72,7 +72,7 @@ impl Options {
                         "id":call.id,"name":call.name,"args":call.args,"index":index,"of":round.calls.len(),
                         "ok":call.ok,"refused":call.refused,"result":call.result
                     })).collect();
-                    json!({"round":index+1,"text":round.assistant,"calls":calls})
+                    json!({"round":index+1,"thinking":round.thinking,"text":round.assistant,"calls":calls})
                 }).collect();
                 json!({"turn":branch.turn,"branch_id":branch.branch_id,"attempt":branch.attempt,
                     "parent_branch":branch.parent_branch,"parent_turn":branch.parent_turn,"parent_attempt":branch.parent_attempt,
@@ -102,6 +102,7 @@ impl Options {
             for (index, round) in branch.rounds.iter().enumerate() {
                 writeln!(output, "  Round {}\n{}", index + 1, round.assistant)
                     .expect("String write");
+                render_thinking(&mut output, round, self.max_bytes);
                 for call in &round.calls {
                     let result = crate::redact::truncate_utf8(call.result.clone(), self.max_bytes);
                     writeln!(
@@ -119,5 +120,16 @@ impl Options {
             }
         }
         Ok(output)
+    }
+}
+
+fn render_thinking(output: &mut String, round: &crate::session::RoundRecord, cap: usize) {
+    if !round.thinking.is_empty() {
+        writeln!(
+            output,
+            "    Thinking: {}",
+            crate::redact::truncate_utf8(round.thinking.clone(), cap)
+        )
+        .expect("String write");
     }
 }

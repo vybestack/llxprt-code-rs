@@ -3,10 +3,15 @@
 use super::{LlmResult, RoundFailure};
 
 pub(super) fn validate(result: &LlmResult, secrets: &[String]) -> Result<(), RoundFailure> {
+    if let Some(state) = &result.continuation {
+        state
+            .validate(secrets)
+            .map_err(|e| RoundFailure::Model(e.into()))?;
+    }
     let mapped_bytes = result
         .calls
         .iter()
-        .try_fold(result.text.len(), |total, call| {
+        .try_fold(result.assistant_bytes(), |total, call| {
             total
                 .checked_add(call.id.len())?
                 .checked_add(call.name.len())?

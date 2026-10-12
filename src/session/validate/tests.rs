@@ -21,6 +21,8 @@ fn valid_state() -> SessionState {
             lifecycle: Lifecycle::Completed,
             rounds: vec![
                 RoundRecord {
+                    thinking: String::new(),
+                    continuation: None,
                     assistant: String::new(),
                     calls: vec![ToolCallRecord {
                         id: "call-1".to_string(),
@@ -33,6 +35,8 @@ fn valid_state() -> SessionState {
                     }],
                 },
                 RoundRecord {
+                    thinking: String::new(),
+                    continuation: None,
                     assistant: "done".to_string(),
                     calls: Vec::new(),
                 },
@@ -96,6 +100,8 @@ fn unknown_tools_and_impossible_completed_transcripts_are_rejected() {
     state.branches[0].rounds.insert(
         1,
         RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "impossible early stop".into(),
             calls: Vec::new(),
         },
@@ -132,6 +138,8 @@ fn refused_calls_never_count_as_executed() {
     // constant (byte totals remain the corruption signal).
     state.branches[0].rounds = (0..64)
         .map(|index| RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: String::new(),
             calls: vec![ToolCallRecord {
                 id: format!("round-{index}"),

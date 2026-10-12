@@ -57,6 +57,7 @@ fn reply(seconds: u64, text: &str, calls: Vec<ToolCall>) -> Reply {
     Reply {
         delay: Duration::from_secs(seconds),
         result: Ok(LlmResult {
+            continuation: None,
             thinking: String::new(),
             text: text.into(),
             finish_reason: Some(if calls.is_empty() {
@@ -213,6 +214,8 @@ fn provider_context_retry_does_not_restart_the_clock() {
         branch_id: "prior".into(),
         prompt: "prior prompt".into(),
         rounds: vec![RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "narration".repeat(100),
             calls: vec![],
         }],

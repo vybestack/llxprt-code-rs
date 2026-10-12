@@ -127,6 +127,7 @@ impl OpenRouterModel {
                 req.parts.iter().map(|part| match part {
                     ModelRequestPart::SystemPrompt(sys) => ChatMessage::system(&sys.content),
                     ModelRequestPart::UserPrompt(user) => ChatMessage {
+                        reasoning_content: None,
                         role: "user".into(),
                         name: None,
                         tool_calls: None,
@@ -181,6 +182,7 @@ impl OpenRouterModel {
                             }
                         }
                         ChatMessage {
+                            reasoning_content: None,
                             role: "assistant".into(),
                             content: if text_content.is_empty() {
                                 None

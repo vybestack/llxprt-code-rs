@@ -114,6 +114,8 @@ fn trailing_angle_bracket_never_panics_or_fires() {
 #[test]
 fn zero_call_tail_counts_trailing_call_free_rounds() {
     let with_calls = crate::session::RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: "r".into(),
         calls: vec![crate::session::ToolCallRecord {
             id: "c1".into(),
@@ -126,6 +128,8 @@ fn zero_call_tail_counts_trailing_call_free_rounds() {
         }],
     };
     let bare = |text: &str| crate::session::RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: text.into(),
         calls: Vec::new(),
     };

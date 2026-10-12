@@ -28,10 +28,37 @@ pub(super) fn translate(event: StreamEvent) -> Vec<Result<ModelResponseStreamEve
             ))]
         }
 
-        StreamEvent::OutputItemDone { output_index, .. } => {
-            vec![Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent::new(
+        StreamEvent::OutputItemDone {
+            output_index, item, ..
+        } => {
+            // Completed metadata supplements streamed content; replacing the part
+            // would erase verbatim deltas (including raw tool argument spacing).
+            let part = crate::convert::parts_from_output(&[item]).remove(0);
+            let delta = match part {
+                ModelResponsePart::Thinking(t) => {
+                    Some(ModelResponsePartDelta::Thinking(ThinkingPartDelta {
+                        content_delta: String::new(),
+                        signature_delta: None,
+                        provider_name: None,
+                        provider_details: t.provider_details,
+                    }))
+                }
+                ModelResponsePart::Text(t) => Some(ModelResponsePartDelta::Text(TextPartDelta {
+                    content_delta: String::new(),
+                    provider_details: t.provider_details,
+                })),
+                _ => None,
+            };
+            let mut events = Vec::new();
+            if let Some(delta) = delta {
+                events.push(Ok(ModelResponseStreamEvent::PartDelta(
+                    PartDeltaEvent::new(output_index as usize, delta),
+                )));
+            }
+            events.push(Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent::new(
                 output_index as usize,
-            )))]
+            ))));
+            events
         }
 
         StreamEvent::ContentPartAdded { .. } | StreamEvent::ContentPartDone { .. } => Vec::new(),
@@ -109,8 +136,10 @@ pub(super) fn translate(event: StreamEvent) -> Vec<Result<ModelResponseStreamEve
 /// The initial part for an output item.
 pub(super) fn part_from_item(item: &OutputItem) -> ModelResponsePart {
     match item {
-        OutputItem::Message { .. } => ModelResponsePart::Text(TextPart::new("")),
-        OutputItem::Reasoning { .. } => ModelResponsePart::Thinking(ThinkingPart::new("")),
+        OutputItem::Message { id, .. } => ModelResponsePart::Text(TextPart::new("").with_id(id)),
+        OutputItem::Reasoning { id, .. } => {
+            ModelResponsePart::Thinking(ThinkingPart::new("").with_id(id))
+        }
         OutputItem::FunctionCall { name, call_id, .. } => {
             ModelResponsePart::ToolCall(ToolCallPart {
                 tool_name: name.clone(),
@@ -166,6 +195,7 @@ mod tests {
     #[test]
     fn item_add_starts_parts() {
         let message = OutputItem::Message {
+            phase: None,
             id: "msg_1".into(),
             role: "assistant".to_string(),
             status: OutputItemStatus::InProgress,

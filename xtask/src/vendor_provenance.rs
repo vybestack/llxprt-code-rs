@@ -55,7 +55,7 @@ pub fn run(root: &Path) -> Result {
     checked(&mut python(root, "verify-upstream-evidence.py"))?;
     checked(&mut python(root, "verify-serdes-responses-evidence.py"))?;
     let patch = root.join("SERDES-AI-0.2.6.patch");
-    if digest(&patch)? != "070c70c15dcf9cb7657e03ef938a62fab9193cbc8f88eaf6daca3793460be62e" {
+    if digest(&patch)? != "0698ed512ba9a890b824e08f737ac88a5eb2edb7c9e4d0c60ad11e3562dcfaaf" {
         return Err("retained SerdesAI patch digest mismatch".into());
     }
     documentation(root)?;

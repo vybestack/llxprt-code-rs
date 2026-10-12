@@ -16,6 +16,7 @@ pub(super) fn call(id: &str, name: &str) -> ToolCall {
 pub(super) fn reply(calls: Vec<ToolCall>) -> LlmResult {
     let done = calls.is_empty();
     LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: if done { "done".into() } else { String::new() },
         calls,

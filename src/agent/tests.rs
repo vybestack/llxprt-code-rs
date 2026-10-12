@@ -37,6 +37,7 @@ impl ChatBackend for MockBackend {
                 r
             } else {
                 LlmResult {
+                    continuation: None,
                     thinking: String::new(),
                     text: String::new(),
                     calls: Vec::new(),
@@ -121,6 +122,7 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
     // (the text, not the tool, pre-fills the assistant aggregate) and the forced
     // summary the second call.
     let r1 = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "x".repeat(pre),
         calls: vec![ToolCall {
@@ -133,6 +135,7 @@ fn forced_response_at_exact_remaining_assistant_cap_succeeds() {
         usage: LlmUsage::default(),
     };
     let r2 = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "z".repeat(MAX_TURN_ASSISTANT_BYTES - pre),
         calls: Vec::new(),
@@ -181,6 +184,7 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
         let r = st.start_request(None, None, "P", _r_cwd).unwrap();
         let r = &r;
         let r2 = LlmResult {
+            continuation: None,
             thinking: String::new(),
             text: "é".repeat(MAX_TURN_ASSISTANT_BYTES / "é".len()),
             calls: Vec::new(),
@@ -191,6 +195,7 @@ fn forced_empty_first_round_succeeds_at_exact_remaining_cap() {
         let a = CodingAgent::with_backend(
             Box::new(MockBackend::new(vec![
                 LlmResult {
+                    continuation: None,
                     thinking: String::new(),
                     text: String::new(),
                     calls: Vec::new(),
@@ -226,6 +231,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
     let st = SessionStore::load(&SessionId::parse("fcap-p1").unwrap()).unwrap();
     let pre = MAX_TURN_ASSISTANT_BYTES - 512;
     let rr1 = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "x".repeat(pre),
         calls: vec![ToolCall {
@@ -238,6 +244,7 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
         usage: LlmUsage::default(),
     };
     let rr2 = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "z".repeat(MAX_TURN_ASSISTANT_BYTES - pre + 1),
         calls: Vec::new(),
@@ -304,6 +311,7 @@ fn reflected_secret_in_assistant_text_fails_without_persisting_it() {
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let secret = "accepted-secret-value";
     let reply = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: format!("reflected {secret}"),
         calls: Vec::new(),
@@ -336,6 +344,7 @@ fn reflected_secret_in_tool_args_prevents_tool_side_effect() {
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let secret = "accepted-secret-argument";
     let reply = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -370,6 +379,7 @@ fn oversized_tool_call_id_is_rejected_before_side_effect() {
     let store = SessionStore::load(&SessionId::parse("huge-call-id").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let reply = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -402,6 +412,7 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
     let store = SessionStore::load(&SessionId::parse("secret-tool-output").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -414,6 +425,7 @@ fn tool_output_is_scrubbed_before_model_return_and_persistence() {
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
@@ -442,6 +454,7 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
     let store = SessionStore::load(&SessionId::parse("normal-round-limit").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -454,6 +467,7 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "summary".into(),
         calls: Vec::new(),
@@ -485,6 +499,7 @@ fn forced_summary_counts_already_persisted_rounds() {
     let store = SessionStore::load(&SessionId::parse("forced-round-limit").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -497,6 +512,7 @@ fn forced_summary_counts_already_persisted_rounds() {
         usage: LlmUsage::default(),
     };
     let empty_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: Vec::new(),
@@ -505,6 +521,7 @@ fn forced_summary_counts_already_persisted_rounds() {
         usage: LlmUsage::default(),
     };
     let forced_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "summary".into(),
         calls: Vec::new(),
@@ -538,6 +555,7 @@ fn forced_summary_with_tool_call_markup_fails_the_turn() {
     let store = SessionStore::load(&SessionId::parse("malf-forced-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let empty_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: Vec::new(),
@@ -546,6 +564,7 @@ fn forced_summary_with_tool_call_markup_fails_the_turn() {
         usage: LlmUsage::default(),
     };
     let forced = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "still working\n<tool_call>{\"name\":\"read_file\"}</tool_call>".into(),
         calls: Vec::new(),
@@ -580,6 +599,7 @@ fn forced_summary_in_prose_still_completes_the_turn() {
     let store = SessionStore::load(&SessionId::parse("malf-forced-2").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let empty_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: Vec::new(),
@@ -588,6 +608,7 @@ fn forced_summary_in_prose_still_completes_the_turn() {
         usage: LlmUsage::default(),
     };
     let forced = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "I used read_file to inspect the file, and the work is complete.".into(),
         calls: Vec::new(),
@@ -613,6 +634,7 @@ fn malformed_tool_call_text_fails_the_turn() {
     let store = SessionStore::load(&SessionId::parse("malf-tag-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let malformed = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "<tool_calls><function_calls>read_file</function_calls></tool_calls>".into(),
         calls: Vec::new(),
@@ -647,6 +669,7 @@ fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
     let store = SessionStore::load(&SessionId::parse("malf-dsml-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -659,6 +682,7 @@ fn stray_dsml_fragment_after_tool_use_fails_the_turn() {
         usage: LlmUsage::default(),
     };
     let fragment = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "work finished\n</｜DSML｜parameter>".into(),
         calls: Vec::new(),
@@ -687,6 +711,7 @@ fn normal_wrap_up_keeps_ok_exit_and_reports_zero_call_tail() {
     let store = SessionStore::load(&SessionId::parse("malf-ok-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let reply = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "I used read_file to inspect the file, and the change is complete.".into(),
         calls: Vec::new(),
@@ -715,6 +740,7 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
     let store = SessionStore::load(&SessionId::parse("malf-tail-1").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -727,6 +753,7 @@ fn tool_using_turn_reports_single_trailing_zero_call_round() {
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
@@ -757,6 +784,7 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
     let store = SessionStore::load(&SessionId::parse("in-flight-gone").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
     let tool_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: String::new(),
         calls: vec![ToolCall {
@@ -769,6 +797,7 @@ fn tool_in_flight_marker_is_absent_after_successful_run() {
         usage: LlmUsage::default(),
     };
     let final_round = LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
