@@ -1,6 +1,7 @@
 //! Value-free, strict-schema observations for one process invocation.
 //! Missing provider facts remain null; estimates are explicitly labelled as estimates.
 
+pub mod bounds;
 pub(crate) mod store_io;
 
 use schemars::JsonSchema;
@@ -13,7 +14,7 @@ pub const MAX_RECORDS: usize = 4096;
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Telemetry {
-    #[schemars(range(min = 1, max = 1))]
+    #[schemars(range(min = 2, max = 2))]
     pub version: u8,
     pub turn_wall_ms: u64,
     pub round_count: u64,
@@ -39,7 +40,7 @@ pub struct Telemetry {
 impl Default for Telemetry {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             turn_wall_ms: 0,
             round_count: 0,
             model_calls: 0,
@@ -69,6 +70,8 @@ pub struct ModelCall {
     pub attempt: u64,
     pub request_estimate_bytes: u64,
     pub request_token_estimate: u64,
+    #[serde(deserialize_with = "required_bound")]
+    pub request_bound: Option<bounds::RequestBound>,
     pub wall_ms: u64,
     pub ttft_ms: Option<u64>,
     pub wait_ms: Option<u64>,
@@ -169,12 +172,15 @@ impl Telemetry {
     }
 
     pub(crate) fn valid(&self) -> bool {
-        self.version == 1
+        self.version == 2
             && self.rounds.len() <= MAX_RECORDS
             && self.tools.len() <= MAX_RECORDS
             && self.store_operations.len() <= MAX_RECORDS
             && self.rounds.iter().all(|c| {
-                c.round > 0
+                c.request_bound
+                    .as_ref()
+                    .is_none_or(bounds::RequestBound::valid)
+                    && c.round > 0
                     && c.attempt > 0
                     && c.tok_s.is_none_or(|v| v.is_finite() && v >= 0.0)
                     && c.finish_reason.as_ref().is_none_or(|s| s.len() <= 32)
@@ -194,6 +200,12 @@ impl Telemetry {
 
 pub(crate) fn millis(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn required_bound<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bounds::RequestBound>, D::Error> {
+    Option::deserialize(d)
 }
 
 #[cfg(test)]

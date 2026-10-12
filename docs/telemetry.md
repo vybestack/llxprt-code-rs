@@ -1,7 +1,7 @@
 # Turn telemetry (#17)
 
 The agent's terminal success and failure envelopes carry a `telemetry` object,
-version **1**. Setup failures before reservation may omit it. Replay contains
+version **2**. Setup failures before reservation may omit it. Replay contains
 zero new calls, null usage totals, and the current store/reservation facts—not
 old generation presented as a new request. Existing `turn`, `tool_calls`,
 `declared_tool_calls` and budget semantics are unchanged.
@@ -107,3 +107,12 @@ its production backend/assembler with a delayed SSE test in
 `src/model_api/responses_backend/telemetry_tests.rs`; no production endpoint
 override was added. Public services, billing accuracy and network conditions
 outside these deterministic loopback workloads are not established by those tests.
+
+
+## Request bounds (issue 171)
+
+Telemetry version 2 requires the nullable `request_bound` slot on each call. Session payload
+version 6 rejects previous payload versions through the existing version check; there is no
+old-shape reader. `request_token_estimate` remains the explicitly labelled historical abstract
+byte estimate, not the newly measured wire bound. See `issue-171-request-bounds.md` for exact
+projection, unavailable-tokenizer policy, margin invalidation and acceptance limitations.

@@ -99,6 +99,12 @@ impl super::Turn<'_> {
         rounds: &[RoundRecord],
     ) -> AgentError {
         match failure {
+            RoundFailure::Calibration(error) => self.dead_coded(
+                store, reserved, crate::envelope::Code::Turn, "request-calibration",
+                &error.to_string(), rounds),
+            RoundFailure::RequestBound { limit } => self.dead_coded(
+                store, reserved, crate::envelope::Code::Turn, "request-bound",
+                &format!("calibrated request exceeds context limit {limit}; no request sent"), rounds),
             RoundFailure::StreamInterrupted(events) => self.dead(
                 store, reserved, "model",
                 &format!("responses SSE transport interrupted before terminal event; accumulated {events} stream events (partial response is not completion); 3 retries exhausted"),

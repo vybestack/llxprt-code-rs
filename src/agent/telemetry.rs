@@ -37,7 +37,11 @@ impl Turn<'_> {
         self.telemetry_attempt
             .set(self.telemetry_attempt.get().saturating_add(1));
         let started = std::time::Instant::now();
-        let collector = serdes_ai::models::telemetry::Collector::default();
+        let collector = request_budget::live::collector(
+            self.backend.request_contract(),
+            self.context_limit,
+            &self.calibration.borrow(),
+        );
         let mut result = self.round_once_inner(requests, tools, reattempt, &collector);
         let observed = collector.snapshot();
         let wall = started.elapsed();
@@ -72,7 +76,11 @@ impl Turn<'_> {
                 .map(|(first, completed)| completed.saturating_sub(first));
         }
         self.fill_usage(&mut call, &result);
+        call.request_bound = self
+            .measure_bound(observed.wire.as_deref(), call.input_tokens)
+            .map_err(RoundFailure::Calibration)?;
         result = self.validated_reply(result);
+        result = enforce_calibration(&call, result);
         if let Err(failure) = &result {
             call.outcome = outcome(failure).into();
         }
@@ -230,4 +238,17 @@ fn outcome(failure: &RoundFailure) -> &'static str {
         | RoundFailure::TransportRetryStopped { failure: f, .. } => f.kind.token(),
         _ => "failed",
     }
+}
+
+fn enforce_calibration(
+    call: &ModelCall,
+    result: Result<LlmResult, RoundFailure>,
+) -> Result<LlmResult, RoundFailure> {
+    if let Some(bound) = &call.request_bound {
+        if bound.bounded_input.is_some() && bound.observed_input.is_some() {
+            request_budget::calibration::check_held_out(bound)
+                .map_err(RoundFailure::Calibration)?;
+        }
+    }
+    result
 }

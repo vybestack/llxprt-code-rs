@@ -361,6 +361,8 @@ async fn run_ws_turn(
         tracing::debug!(frame = %serde_json::to_string(&frame).unwrap_or_default(), "sending response.create");
 
         let socket = session.socket.as_mut().expect("socket ensured above");
+        let bytes = serde_json::to_vec(&frame).map_err(ModelError::Serialization)?;
+        serdes_ai_models::telemetry::wire_projection(&bytes)?;
         let mut outcome = match socket.send_json(&frame).await {
             Ok(()) => None,
             Err(e) => Some(if streamed_any {
@@ -856,7 +858,13 @@ impl OpenResponsesModel {
                 build_request(inner, messages, settings, params, skip, previous, true)?;
             request.stream = Some(false);
 
-            let mut http = inner.http.post(&inner.endpoint).json(&request);
+            let bytes = serde_json::to_vec(&request).map_err(ModelError::Serialization)?;
+            serdes_ai_models::telemetry::wire_projection(&bytes)?;
+            let mut http = inner
+                .http
+                .post(&inner.endpoint)
+                .header("Content-Type", "application/json")
+                .body(bytes);
             for (name, value) in &inner.headers {
                 http = http.header(name, value);
             }
@@ -969,7 +977,13 @@ async fn run_http_stream(
         let mut request = build_request(inner, messages, settings, params, skip, previous, true)?;
         request.stream = Some(true);
 
-        let mut http = inner.http.post(&inner.endpoint).json(&request);
+        let bytes = serde_json::to_vec(&request).map_err(ModelError::Serialization)?;
+        serdes_ai_models::telemetry::wire_projection(&bytes)?;
+        let mut http = inner
+            .http
+            .post(&inner.endpoint)
+            .header("Content-Type", "application/json")
+            .body(bytes);
         for (name, value) in &inner.headers {
             http = http.header(name, value);
         }

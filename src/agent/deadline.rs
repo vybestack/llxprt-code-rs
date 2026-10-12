@@ -16,6 +16,7 @@ const RUNTIME_SHUTDOWN_BOUND: std::time::Duration = std::time::Duration::from_mi
 /// detached instead of delaying the terminal envelope.
 pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
+    pub(super) calibration: std::cell::RefCell<Vec<crate::telemetry::bounds::RequestBound>>,
     pub(super) observations: std::cell::RefCell<crate::telemetry::Telemetry>,
     pub(super) telemetry_round: std::cell::Cell<usize>,
     pub(super) telemetry_attempt: std::cell::Cell<u64>,
@@ -72,6 +73,7 @@ impl<'a> Turn<'a> {
         };
         Ok(Self {
             agent,
+            calibration: Default::default(),
             observations: Default::default(),
             telemetry_round: std::cell::Cell::new(1),
             telemetry_attempt: std::cell::Cell::new(0),
@@ -166,6 +168,9 @@ impl<'a> Turn<'a> {
                         RoundFailure::ModelTransport(failure)
                     }
                     crate::adapter::BackendError::Message(message) => RoundFailure::Model(message),
+                    crate::adapter::BackendError::RequestBound { limit } => {
+                        RoundFailure::RequestBound { limit }
+                    }
                 }
             })?;
         Ok(result)

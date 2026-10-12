@@ -607,8 +607,10 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
+        crate::telemetry::wire_projection(&bytes)?;
         crate::telemetry::request_sent();
-        let response = request.json(&body).send().await?;
+        let response = request.body(bytes).send().await?;
         crate::telemetry::headers();
 
         if !response.status().is_success() {
@@ -647,8 +649,10 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
+        crate::telemetry::wire_projection(&bytes)?;
         crate::telemetry::request_sent();
-        let response = request.json(&body).send().await?;
+        let response = request.body(bytes).send().await?;
         crate::telemetry::headers();
 
         if !response.status().is_success() {

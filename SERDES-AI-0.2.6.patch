@@ -7332,7 +7332,7 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..7f6d761 100644
+index 0d35170..2ae3d34 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
 @@ -7,7 +7,6 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
@@ -7513,12 +7513,15 @@ index 0d35170..7f6d761 100644
  }
  
  #[async_trait]
-@@ -625,19 +607,16 @@ impl Model for AnthropicModel {
+@@ -625,19 +607,18 @@ impl Model for AnthropicModel {
              request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
          }
  
+-        let response = request.json(&body).send().await?;
++        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
++        crate::telemetry::wire_projection(&bytes)?;
 +        crate::telemetry::request_sent();
-         let response = request.json(&body).send().await?;
++        let response = request.body(bytes).send().await?;
 +        crate::telemetry::headers();
  
 -        let status = response.status().as_u16();
@@ -7538,12 +7541,15 @@ index 0d35170..7f6d761 100644
  
          self.parse_response(resp)
      }
-@@ -668,16 +647,16 @@ impl Model for AnthropicModel {
+@@ -668,16 +649,18 @@ impl Model for AnthropicModel {
              request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
          }
  
+-        let response = request.json(&body).send().await?;
++        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
++        crate::telemetry::wire_projection(&bytes)?;
 +        crate::telemetry::request_sent();
-         let response = request.json(&body).send().await?;
++        let response = request.body(bytes).send().await?;
 +        crate::telemetry::headers();
  
 -        let status = response.status().as_u16();
@@ -7560,7 +7566,7 @@ index 0d35170..7f6d761 100644
          let parser = AnthropicStreamParser::new(byte_stream);
  
          Ok(Box::pin(parser))
-@@ -767,6 +746,29 @@ mod tests {
+@@ -767,6 +750,29 @@ mod tests {
          assert_eq!(request.messages.len(), 1);
          assert_eq!(request.temperature, Some(0.7));
          assert!(request.stream.is_none());
@@ -7590,7 +7596,7 @@ index 0d35170..7f6d761 100644
      }
  
      #[test]
-@@ -822,8 +824,8 @@ mod tests {
+@@ -822,8 +828,8 @@ mod tests {
              stop_reason: Some("end_turn".to_string()),
              stop_sequence: None,
              usage: AnthropicUsage {
@@ -12683,10 +12689,10 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..bf5738e 100644
+index 58b6fc1..31f7309 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
-@@ -1,14 +1,242 @@
+@@ -1,14 +1,247 @@
  //! Model-related error types.
  
 +pub mod cause;
@@ -12928,12 +12934,17 @@ index 58b6fc1..bf5738e 100644
 +/// Model-related errors. External text remains available in typed fields but is never rendered
 +/// by the standard public formatting contracts.
  pub enum ModelError {
++    /// Host-calibrated admission refused the selected wire before send.
++    RequestBound {
++        /// Declared input/output context ceiling.
++        limit: u64,
++    },
      /// HTTP error from the API.
 -    #[error("HTTP error: {status} - {body}")]
      Http {
          /// HTTP status code.
          status: u16,
-@@ -19,7 +247,6 @@ pub enum ModelError {
+@@ -19,7 +252,6 @@ pub enum ModelError {
      },
  
      /// API-level error.
@@ -12941,7 +12952,7 @@ index 58b6fc1..bf5738e 100644
      Api {
          /// Error message.
          message: String,
-@@ -27,69 +254,139 @@ pub enum ModelError {
+@@ -27,69 +259,140 @@ pub enum ModelError {
          code: Option<String>,
      },
  
@@ -13034,6 +13045,7 @@ index 58b6fc1..bf5738e 100644
 +impl std::fmt::Display for ModelError {
 +    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 +        match self {
++            Self::RequestBound { limit } => write!(f, "calibrated request exceeds context limit {limit}; no request sent"),
 +            Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
 +            Self::Api { .. } => f.write_str("Model API error"),
 +            Self::Timeout => f.write_str("Model request timed out"),
@@ -13110,7 +13122,7 @@ index 58b6fc1..bf5738e 100644
  }
  
  impl ModelError {
-@@ -97,14 +394,34 @@ impl ModelError {
+@@ -97,14 +400,34 @@ impl ModelError {
      #[must_use]
      pub fn is_retryable(&self) -> bool {
          match self {
@@ -13146,7 +13158,7 @@ index 58b6fc1..bf5738e 100644
      /// Get the retry-after duration if applicable.
      #[must_use]
      pub fn retry_after(&self) -> Option<Duration> {
-@@ -199,18 +516,23 @@ impl ModelError {
+@@ -199,18 +522,23 @@ impl ModelError {
  
  impl From<reqwest::Error> for ModelError {
      fn from(err: reqwest::Error) -> Self {
@@ -13174,7 +13186,7 @@ index 58b6fc1..bf5738e 100644
          }
      }
  }
-@@ -224,7 +546,7 @@ mod tests {
+@@ -224,7 +552,7 @@ mod tests {
  
      #[test]
      fn test_is_retryable() {
@@ -13183,7 +13195,7 @@ index 58b6fc1..bf5738e 100644
          assert!(ModelError::rate_limited(None).is_retryable());
          assert!(ModelError::Connection("failed".into()).is_retryable());
          assert!(ModelError::http(500, "Server error").is_retryable());
-@@ -244,16 +566,249 @@ mod tests {
+@@ -244,16 +572,249 @@ mod tests {
          let err = ModelError::rate_limited(None);
          assert_eq!(err.retry_after(), None);
  
@@ -13210,10 +13222,7 @@ index 58b6fc1..bf5738e 100644
 +        assert!(!display.contains("retry after None"), "display: {display}");
 +    }
 +
-     #[test]
--    fn test_error_display() {
--        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
--        assert!(err.to_string().contains("Something went wrong"));
++    #[test]
 +    fn public_formatting_hides_external_text_for_every_variant() {
 +        let marker = "provider-secret-marker";
 +        let mut headers = HashMap::new();
@@ -13335,7 +13344,10 @@ index 58b6fc1..bf5738e 100644
 +
 +    /// Every retained status classifies: quota and billing wording wins over the status,
 +    /// 429 is a throttle, 408 and 5xx are retryable, and every other 4xx is permanent.
-+    #[test]
+     #[test]
+-    fn test_error_display() {
+-        let err = ModelError::api_with_code("Something went wrong", "INVALID_REQUEST");
+-        assert!(err.to_string().contains("Something went wrong"));
 +    fn status_classification_covers_retryability_families() {
 +        let cases = [
 +            (429u16, TransportClass::RateLimit),
@@ -15332,7 +15344,7 @@ index 97d1a2d..a67f673 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..b37a4d1 100644
+index 9471b5b..523c412 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -15682,12 +15694,15 @@ index 9471b5b..b37a4d1 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -513,21 +580,20 @@ impl Model for OpenAIChatModel {
+@@ -513,21 +580,22 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
+-        let response = request.json(&body).send().await?;
++        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
++        crate::telemetry::wire_projection(&bytes)?;
 +        crate::telemetry::request_sent();
-         let response = request.json(&body).send().await?;
++        let response = request.body(bytes).send().await?;
 +        crate::telemetry::headers();
  
          let status = response.status().as_u16();
@@ -15712,7 +15727,7 @@ index 9471b5b..b37a4d1 100644
      }
  
      async fn request_stream(
-@@ -540,12 +606,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +608,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15730,12 +15745,15 @@ index 9471b5b..b37a4d1 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -554,18 +623,20 @@ impl Model for OpenAIChatModel {
+@@ -554,18 +625,22 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
+-        let response = request.json(&body).send().await?;
++        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
++        crate::telemetry::wire_projection(&bytes)?;
 +        crate::telemetry::request_sent();
-         let response = request.json(&body).send().await?;
++        let response = request.body(bytes).send().await?;
 +        crate::telemetry::headers();
  
          let status = response.status().as_u16();
@@ -15757,7 +15775,7 @@ index 9471b5b..b37a4d1 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +653,61 @@ mod tests {
+@@ -582,6 +657,61 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -15819,7 +15837,7 @@ index 9471b5b..b37a4d1 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +787,125 @@ mod tests {
+@@ -661,4 +791,125 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15973,7 +15991,7 @@ index c1e00c9..34b9981 100644
  
  /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..bc4ecfc 100644
+index 9384750..8884492 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -18,8 +18,7 @@ use reqwest::Client;
@@ -16753,12 +16771,15 @@ index 9384750..bc4ecfc 100644
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
-@@ -1141,18 +1299,16 @@ impl Model for OpenAIResponsesModel {
+@@ -1141,18 +1299,18 @@ impl Model for OpenAIResponsesModel {
              request = request.header("OpenAI-Project", project);
          }
  
+-        let response = request.json(&body).send().await?;
++        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
++        crate::telemetry::wire_projection(&bytes)?;
 +        crate::telemetry::request_sent();
-         let response = request.json(&body).send().await?;
++        let response = request.body(bytes).send().await?;
 +        crate::telemetry::headers();
  
 -        let status = response.status().as_u16();
@@ -16777,7 +16798,7 @@ index 9384750..bc4ecfc 100644
  
          self.process_response(resp)
      }
-@@ -1266,22 +1422,179 @@ mod tests {
+@@ -1266,22 +1424,179 @@ mod tests {
  
      #[test]
      fn test_response_input_serialization() {
@@ -18003,16 +18024,16 @@ index 0000000..a389f6c
 +}
 diff --git a/vendor/serdes-ai-models/src/telemetry.rs b/vendor/serdes-ai-models/src/telemetry.rs
 new file mode 100644
-index 0000000..094d69a
+index 0000000..627563b
 --- /dev/null
 +++ b/vendor/serdes-ai-models/src/telemetry.rs
-@@ -0,0 +1,104 @@
-+//! Request-local monotonic transport observations. No endpoint or payload is retained.
+@@ -0,0 +1,151 @@
++//! Request-local transport facts and transient exact send projection.
 +use std::sync::{Arc, Mutex};
 +use std::time::Instant;
 +
 +/// Transport facts for the current invocation only.
-+#[derive(Clone, Debug, Default)]
++#[derive(Clone, Default)]
 +pub struct Observation {
 +    /// Time to response headers (connect plus provider queue); not generation time.
 +    pub headers_ms: Option<u64>,
@@ -18024,6 +18045,8 @@ index 0000000..094d69a
 +    pub reasoning_tokens: Option<u64>,
 +    /// Provider-reported total tokens, when present on SSE completion.
 +    pub total_tokens: Option<u64>,
++    /// Exact serialized send projection; transient and never a diagnostic.
++    pub wire: Option<Vec<u8>>,
 +}
 +
 +/// A per-request collector explicitly propagated to transport reader tasks.
@@ -18031,7 +18054,10 @@ index 0000000..094d69a
 +pub struct Collector {
 +    started: Arc<Mutex<Option<Instant>>>,
 +    observation: Arc<Mutex<Observation>>,
++    wire_gate: Option<Arc<WireGate>>,
 +}
++
++type WireGate = dyn Fn(&[u8]) -> Result<(), crate::ModelError> + Send + Sync;
 +
 +tokio::task_local! { static CURRENT: Collector; }
 +
@@ -18040,11 +18066,22 @@ index 0000000..094d69a
 +        Self {
 +            started: Arc::new(Mutex::new(None)),
 +            observation: Arc::new(Mutex::new(Observation::default())),
++            wire_gate: None,
 +        }
 +    }
 +}
 +
 +impl Collector {
++    /// The host owns admission; the existing render/send path supplies exact bytes.
++    pub fn with_wire_gate(
++        gate: impl Fn(&[u8]) -> Result<(), crate::ModelError> + Send + Sync + 'static,
++    ) -> Self {
++        Self {
++            wire_gate: Some(Arc::new(gate)),
++            ..Self::default()
++        }
++    }
++
 +    /// Scope collection to this future; dropping a cancelled future leaves facts readable.
 +    pub async fn scope<F: std::future::Future>(&self, future: F) -> F::Output {
 +        CURRENT.scope(self.clone(), future).await
@@ -18110,6 +18147,37 @@ index 0000000..094d69a
 +        o.total_tokens = total;
 +        o.reasoning_tokens = reasoning;
 +    });
++}
++
++/// Retain the exact selected send projection before transport, not abstract history.
++/// A continuation can select a suffix; consumers must not count omitted history.
++pub fn wire_projection(bytes: &[u8]) -> Result<(), crate::ModelError> {
++    CURRENT
++        .try_with(|collector| {
++            collector
++                .observation
++                .lock()
++                .expect("transport observation mutex")
++                .wire = Some(bytes.to_vec());
++            match &collector.wire_gate {
++                Some(gate) => gate(bytes),
++                None => Ok(()),
++            }
++        })
++        .unwrap_or(Ok(()))
++}
++
++impl std::fmt::Debug for Observation {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("Observation")
++            .field("headers_ms", &self.headers_ms)
++            .field("first_body_ms", &self.first_body_ms)
++            .field("completed_ms", &self.completed_ms)
++            .field("reasoning_tokens", &self.reasoning_tokens)
++            .field("total_tokens", &self.total_tokens)
++            .field("wire_bytes", &self.wire.as_ref().map(Vec::len))
++            .finish()
++    }
 +}
 diff --git a/vendor/serdes-ai-output/Cargo.lock b/vendor/serdes-ai-output/Cargo.lock
 index b306f5b..307f1b9 100644
@@ -27185,7 +27253,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..78fef54 100644
+index f90cc22..99e851b 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -27304,7 +27372,16 @@ index f90cc22..78fef54 100644
          // Reconnect if needed. A fresh socket means a fresh server-side
          // session, so continuation state from the old socket is void.
          if session.socket.is_none() {
-@@ -333,6 +377,14 @@ async fn run_ws_turn(
+@@ -317,6 +361,8 @@ async fn run_ws_turn(
+         tracing::debug!(frame = %serde_json::to_string(&frame).unwrap_or_default(), "sending response.create");
+ 
+         let socket = session.socket.as_mut().expect("socket ensured above");
++        let bytes = serde_json::to_vec(&frame).map_err(ModelError::Serialization)?;
++        serdes_ai_models::telemetry::wire_projection(&bytes)?;
+         let mut outcome = match socket.send_json(&frame).await {
+             Ok(()) => None,
+             Err(e) => Some(if streamed_any {
+@@ -333,6 +379,14 @@ async fn run_ws_turn(
  
          match outcome.expect("outcome set") {
              AttemptOutcome::Finished(response, _reason) => {
@@ -27319,7 +27396,7 @@ index f90cc22..78fef54 100644
                  session.previous_response_id = Some(response.id.clone());
                  session.sent_requests = messages.len();
                  return Ok(*response);
-@@ -346,7 +398,12 @@ async fn run_ws_turn(
+@@ -346,7 +400,12 @@ async fn run_ws_turn(
                  session.socket = None;
                  continue;
              }
@@ -27333,7 +27410,7 @@ index f90cc22..78fef54 100644
          }
      }
  
-@@ -366,6 +423,7 @@ async fn read_ws_events(
+@@ -366,6 +425,7 @@ async fn read_ws_events(
      sink: &mut dyn EventSink,
      streamed_any: &mut bool,
  ) -> AttemptOutcome {
@@ -27341,7 +27418,7 @@ index f90cc22..78fef54 100644
      loop {
          let message = match socket.next_message().await {
              Some(Ok(message)) => message,
-@@ -393,7 +451,12 @@ async fn read_ws_events(
+@@ -393,7 +453,12 @@ async fn read_ws_events(
              }
          };
          let text = match message {
@@ -27355,7 +27432,7 @@ index f90cc22..78fef54 100644
              WsStreamMessage::Close => {
                  if !*streamed_any {
                      tracing::warn!("close frame before any event; reconnecting");
-@@ -429,6 +492,11 @@ async fn read_ws_events(
+@@ -429,6 +494,11 @@ async fn read_ws_events(
              },
          };
  
@@ -27367,7 +27444,7 @@ index f90cc22..78fef54 100644
          // Capture the terminal response object before translation consumes
          // the event; the terminal model event must be the last one sent.
          let mut terminal: Option<(ResponseObject, FinishReason)> = None;
-@@ -445,7 +513,11 @@ async fn read_ws_events(
+@@ -445,7 +515,11 @@ async fn read_ws_events(
              _ => {}
          }
  
@@ -27380,7 +27457,7 @@ index f90cc22..78fef54 100644
              match translated {
                  Ok(event) => {
                      if sink.send(event).await.is_err() {
-@@ -472,6 +544,9 @@ fn build_request(
+@@ -472,6 +546,9 @@ fn build_request(
      previous_response_id: Option<String>,
      store: bool,
  ) -> Result<CreateResponseRequest, ModelError> {
@@ -27390,7 +27467,7 @@ index f90cc22..78fef54 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +559,20 @@ fn build_request(
+@@ -484,11 +561,20 @@ fn build_request(
                  .collect(),
          )
      };
@@ -27412,7 +27489,7 @@ index f90cc22..78fef54 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +580,7 @@ fn build_request(
+@@ -496,7 +582,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -27421,7 +27498,7 @@ index f90cc22..78fef54 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -506,41 +590,29 @@ fn build_request(
+@@ -506,41 +592,29 @@ fn build_request(
          metadata: None,
          user: None,
          truncation: None,
@@ -27474,7 +27551,7 @@ index f90cc22..78fef54 100644
      }
  }
  
-@@ -571,6 +643,9 @@ impl Model for OpenResponsesModel {
+@@ -571,6 +645,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -27484,7 +27561,7 @@ index f90cc22..78fef54 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -587,7 +662,7 @@ impl Model for OpenResponsesModel {
+@@ -587,7 +664,7 @@ impl Model for OpenResponsesModel {
          let settings = settings.clone();
          let params = params.clone();
  
@@ -27493,7 +27570,7 @@ index f90cc22..78fef54 100644
              let result = match inner.transport {
                  Transport::WebSocket => {
                      let mut sink = ChannelSink(&tx);
-@@ -602,11 +677,15 @@ impl Model for OpenResponsesModel {
+@@ -602,11 +679,15 @@ impl Model for OpenResponsesModel {
              if let Err(error) = result {
                  // A failure after events escaped still reaches the caller as
                  // an error item; a failure before that is the only item.
@@ -27511,7 +27588,7 @@ index f90cc22..78fef54 100644
      }
  
      fn profile(&self) -> &ModelProfile {
-@@ -620,7 +699,7 @@ fn response_from_events(
+@@ -620,7 +701,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -27520,7 +27597,7 @@ index f90cc22..78fef54 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -654,8 +733,8 @@ fn response_from_events(
+@@ -654,8 +735,8 @@ fn response_from_events(
                      request_tokens: complete.input_tokens,
                      response_tokens: complete.output_tokens,
                      total_tokens: match (complete.input_tokens, complete.output_tokens) {
@@ -27531,7 +27608,7 @@ index f90cc22..78fef54 100644
                      },
                      cache_creation_tokens: complete.cache_creation_tokens,
                      cache_read_tokens: complete.cache_read_tokens,
-@@ -665,6 +744,40 @@ fn response_from_events(
+@@ -665,6 +746,40 @@ fn response_from_events(
          }
      }
  
@@ -27572,7 +27649,7 @@ index f90cc22..78fef54 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +791,50 @@ fn response_from_events(
+@@ -678,7 +793,50 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -27624,7 +27701,18 @@ index f90cc22..78fef54 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -704,15 +860,18 @@ impl OpenResponsesModel {
+@@ -700,19 +858,28 @@ impl OpenResponsesModel {
+                 build_request(inner, messages, settings, params, skip, previous, true)?;
+             request.stream = Some(false);
+ 
+-            let mut http = inner.http.post(&inner.endpoint).json(&request);
++            let bytes = serde_json::to_vec(&request).map_err(ModelError::Serialization)?;
++            serdes_ai_models::telemetry::wire_projection(&bytes)?;
++            let mut http = inner
++                .http
++                .post(&inner.endpoint)
++                .header("Content-Type", "application/json")
++                .body(bytes);
              for (name, value) in &inner.headers {
                  http = http.header(name, value);
              }
@@ -27650,7 +27738,7 @@ index f90cc22..78fef54 100644
                      .ok()
                      .map(|envelope| envelope.error.code)
                      .unwrap_or_default();
-@@ -721,13 +880,16 @@ impl OpenResponsesModel {
+@@ -721,13 +888,16 @@ impl OpenResponsesModel {
                      session.sent_requests = 0;
                      continue;
                  }
@@ -27672,7 +27760,7 @@ index f90cc22..78fef54 100644
              session.previous_response_id = Some(object.id.clone());
              session.sent_requests = messages.len();
              return Ok(ModelResponse {
-@@ -744,7 +906,9 @@ impl OpenResponsesModel {
+@@ -744,7 +914,9 @@ impl OpenResponsesModel {
                      response_tokens: usage.output_tokens,
                      total_tokens: usage.total_tokens,
                      cache_creation_tokens: None,
@@ -27683,7 +27771,7 @@ index f90cc22..78fef54 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,22 +923,39 @@ impl OpenResponsesModel {
+@@ -759,22 +931,39 @@ impl OpenResponsesModel {
      }
  }
  
@@ -27729,7 +27817,18 @@ index f90cc22..78fef54 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -792,16 +973,18 @@ async fn run_http_stream(
+@@ -788,20 +977,28 @@ async fn run_http_stream(
+         let mut request = build_request(inner, messages, settings, params, skip, previous, true)?;
+         request.stream = Some(true);
+ 
+-        let mut http = inner.http.post(&inner.endpoint).json(&request);
++        let bytes = serde_json::to_vec(&request).map_err(ModelError::Serialization)?;
++        serdes_ai_models::telemetry::wire_projection(&bytes)?;
++        let mut http = inner
++            .http
++            .post(&inner.endpoint)
++            .header("Content-Type", "application/json")
++            .body(bytes);
          for (name, value) in &inner.headers {
              http = http.header(name, value);
          }
@@ -27755,7 +27854,7 @@ index f90cc22..78fef54 100644
              .ok()
              .map(|envelope| envelope.error.code)
              .unwrap_or_default();
-@@ -810,32 +993,79 @@ async fn run_http_stream(
+@@ -810,32 +1007,79 @@ async fn run_http_stream(
              session.sent_requests = 0;
              continue;
          }
@@ -27850,7 +27949,7 @@ index f90cc22..78fef54 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1076,58 @@ async fn run_http_stream(
+@@ -846,14 +1090,58 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;

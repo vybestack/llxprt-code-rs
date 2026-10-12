@@ -73,7 +73,7 @@ pub(crate) fn request_total_bytes(
         .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
 }
 
-use super::{AttemptState, RoundFailure};
+use super::AttemptState;
 use crate::agent::{AgentError, LlmResult};
 use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 
@@ -121,7 +121,10 @@ impl super::Turn<'_> {
             &attempt.usage,
         ) {
             Ok(reply) => Ok(reply),
-            Err(RoundFailure::Model(first)) if super::is_context_limit_error(&first) => {
+            Err(failure) if failure.context_limit_message().is_some() => {
+                let first = failure
+                    .context_limit_message()
+                    .expect("context limit guard");
                 if !self.compact_provider_context(reserved, &mut attempt.requests, &attempt.rounds)
                 {
                     return Err(self.provider_context_unchanged_dead(
@@ -147,7 +150,10 @@ impl super::Turn<'_> {
                     &attempt.usage,
                 ) {
                     Ok(reply) => Ok(reply),
-                    Err(RoundFailure::Model(second)) if super::is_context_limit_error(&second) => {
+                    Err(failure) if failure.context_limit_message().is_some() => {
+                        let second = failure
+                            .context_limit_message()
+                            .expect("context limit guard");
                         Err(self.provider_context_limit_dead(
                             store,
                             reserved,

@@ -15,7 +15,7 @@ use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
-pub const STORE_VERSION: u32 = 5;
+pub const STORE_VERSION: u32 = 6;
 /// Bounded lease for a reservation, in seconds. A `pending` branch whose
 /// `lease_expiry` is in the past may be reclaimed by another process.
 pub const LEASE_SECONDS: u64 = 3600;

@@ -55,7 +55,7 @@ pub use request_budget::{
 pub(crate) mod malformed_tool_call;
 mod memory;
 mod one_command;
-mod request_budget;
+pub mod request_budget;
 mod summary;
 mod tool_round;
 mod tool_validation;
@@ -453,6 +453,8 @@ impl Turn<'_> {
         store: &SessionStore,
         reserved: &mut ReservedRequest,
     ) -> Result<CompletedRun, AgentError> {
+        self.restore_calibration(store)
+            .map_err(AgentError::from_store)?;
         let mission = self.mission_command(store, reserved)?.map(str::to_owned);
         let requests = self.preflight_recovery(store, reserved)?;
         self.profile(
@@ -879,6 +881,10 @@ enum ToolCallFailure {
 }
 
 enum RoundFailure {
+    Calibration(request_budget::calibration::CalibrationError),
+    RequestBound {
+        limit: u64,
+    },
     StreamInterrupted(usize),
     RetryStore(crate::session::StoreError),
     RetryTranscript(std::io::Error),
@@ -895,6 +901,18 @@ enum RoundFailure {
     },
     Profiling(AgentError),
     CacheOutput(crate::cache_output::OutputError),
+}
+
+impl RoundFailure {
+    fn context_limit_message(&self) -> Option<String> {
+        match self {
+            Self::Model(message) if is_context_limit_error(message) => Some(message.clone()),
+            Self::RequestBound { limit } => {
+                Some(format!("calibrated request exceeds context limit {limit}"))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

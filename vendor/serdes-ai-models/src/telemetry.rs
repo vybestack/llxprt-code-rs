@@ -1,9 +1,9 @@
-//! Request-local monotonic transport observations. No endpoint or payload is retained.
+//! Request-local transport facts and transient exact send projection.
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Transport facts for the current invocation only.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Observation {
     /// Time to response headers (connect plus provider queue); not generation time.
     pub headers_ms: Option<u64>,
@@ -15,6 +15,8 @@ pub struct Observation {
     pub reasoning_tokens: Option<u64>,
     /// Provider-reported total tokens, when present on SSE completion.
     pub total_tokens: Option<u64>,
+    /// Exact serialized send projection; transient and never a diagnostic.
+    pub wire: Option<Vec<u8>>,
 }
 
 /// A per-request collector explicitly propagated to transport reader tasks.
@@ -22,7 +24,10 @@ pub struct Observation {
 pub struct Collector {
     started: Arc<Mutex<Option<Instant>>>,
     observation: Arc<Mutex<Observation>>,
+    wire_gate: Option<Arc<WireGate>>,
 }
+
+type WireGate = dyn Fn(&[u8]) -> Result<(), crate::ModelError> + Send + Sync;
 
 tokio::task_local! { static CURRENT: Collector; }
 
@@ -31,11 +36,22 @@ impl Default for Collector {
         Self {
             started: Arc::new(Mutex::new(None)),
             observation: Arc::new(Mutex::new(Observation::default())),
+            wire_gate: None,
         }
     }
 }
 
 impl Collector {
+    /// The host owns admission; the existing render/send path supplies exact bytes.
+    pub fn with_wire_gate(
+        gate: impl Fn(&[u8]) -> Result<(), crate::ModelError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            wire_gate: Some(Arc::new(gate)),
+            ..Self::default()
+        }
+    }
+
     /// Scope collection to this future; dropping a cancelled future leaves facts readable.
     pub async fn scope<F: std::future::Future>(&self, future: F) -> F::Output {
         CURRENT.scope(self.clone(), future).await
@@ -101,4 +117,35 @@ pub fn completed_usage(total: Option<u64>, reasoning: Option<u64>) {
         o.total_tokens = total;
         o.reasoning_tokens = reasoning;
     });
+}
+
+/// Retain the exact selected send projection before transport, not abstract history.
+/// A continuation can select a suffix; consumers must not count omitted history.
+pub fn wire_projection(bytes: &[u8]) -> Result<(), crate::ModelError> {
+    CURRENT
+        .try_with(|collector| {
+            collector
+                .observation
+                .lock()
+                .expect("transport observation mutex")
+                .wire = Some(bytes.to_vec());
+            match &collector.wire_gate {
+                Some(gate) => gate(bytes),
+                None => Ok(()),
+            }
+        })
+        .unwrap_or(Ok(()))
+}
+
+impl std::fmt::Debug for Observation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Observation")
+            .field("headers_ms", &self.headers_ms)
+            .field("first_body_ms", &self.first_body_ms)
+            .field("completed_ms", &self.completed_ms)
+            .field("reasoning_tokens", &self.reasoning_tokens)
+            .field("total_tokens", &self.total_tokens)
+            .field("wire_bytes", &self.wire.as_ref().map(Vec::len))
+            .finish()
+    }
 }

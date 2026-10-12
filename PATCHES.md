@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `961484338be8d45b94983f03ea0f405385faeefcf3c5265e0725fe590e13b5c9`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `7affaab4554eedd4dd19293e80bfe6d1ff0d05f46e6ce43632c2d10e2b2b4de6`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -527,3 +527,14 @@ and measured latency without replay; a local timeout stays distinct; a truncated
 preserves `unexpected-eof`; a controlled three-tool implementation executes edits and its
 Python tests, independently inspected/rerun. These do not establish the cause of historical
 Z.ai failures or prove a live-provider implementation mission completes.
+
+## Issue 171: exact request-bound wire handoff
+
+The existing request-local transport collector now accepts a host-owned admission callback
+on the actual serialized send bytes. Chat, Messages, OpenAI Responses and Codex HTTP/frame
+paths call it before sending, without changing conversion, continuation selection or retry
+ownership. HTTP sends the exact same byte vector measured by the callback, with JSON content
+type retained. The transient collector payload is omitted from Debug and never persisted;
+the host retains only SHA-256, sizes, contract identity and bound terms. A typed RequestBound
+refusal is not a transport failure and is not eligible for transport retry. No tokenizer
+crate/data, registry dependency, license or cache-observation subsystem is added.

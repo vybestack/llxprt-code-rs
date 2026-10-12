@@ -124,6 +124,15 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
+    fn request_contract(&self) -> Option<crate::telemetry::bounds::RequestContract> {
+        let mut contract = self.inner.request_contract()?;
+        contract.input_accounting = match self.accounting {
+            InputAccounting::Inclusive => "input_includes_cache_reads",
+            InputAccounting::Anthropic => "input_excludes_cache_reads_and_creation",
+        }
+        .into();
+        Some(contract)
+    }
     fn streams_response(&self) -> bool {
         self.inner.streams_response()
     }
