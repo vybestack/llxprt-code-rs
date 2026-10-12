@@ -1,5 +1,5 @@
 diff --git a/vendor/serdes-ai-agent/Cargo.lock b/vendor/serdes-ai-agent/Cargo.lock
-index bbe9c12..b501419 100644
+index bbe9c12..78c38fb 100644
 --- a/vendor/serdes-ai-agent/Cargo.lock
 +++ b/vendor/serdes-ai-agent/Cargo.lock
 @@ -4,43 +4,43 @@ version = 3
@@ -117,9 +117,9 @@ index bbe9c12..b501419 100644
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
++version = "0.10.2"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures",
@@ -815,10 +815,10 @@ index bbe9c12..b501419 100644
  [[package]]
  name = "quinn-proto"
 -version = "0.11.13"
-+version = "0.11.17"
++version = "0.11.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
  dependencies = [
   "bytes",
 - "getrandom 0.3.4",
@@ -4136,7 +4136,7 @@ index f281a40..4251aaf 100644
   "proc-macro2",
   "quote",
 diff --git a/vendor/serdes-ai-models/Cargo.lock b/vendor/serdes-ai-models/Cargo.lock
-index 534e4a8..319d6e9 100644
+index 534e4a8..038f862 100644
 --- a/vendor/serdes-ai-models/Cargo.lock
 +++ b/vendor/serdes-ai-models/Cargo.lock
 @@ -4,33 +4,33 @@ version = 3
@@ -4505,7 +4505,8 @@ index 534e4a8..319d6e9 100644
 -[[package]]
 -name = "aws-smithy-observability"
 -version = "0.2.5"
--source = "registry+https://github.com/rust-lang/crates.io-index"
++version = "1.5.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "4d3f39d5bb871aaf461d59144557f16d5927a5248a983a40654d9cf3b9ba183b"
 -dependencies = [
 - "aws-smithy-runtime-api",
@@ -4592,8 +4593,7 @@ index 534e4a8..319d6e9 100644
 -[[package]]
 -name = "aws-smithy-xml"
 -version = "0.60.14"
-+version = "1.5.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "b53543b4b86ed43f051644f704a98c7291b3618b67adf057ee77a366fa52fcaa"
 -dependencies = [
 - "xmlparser",
@@ -4658,14 +4658,14 @@ index 534e4a8..319d6e9 100644
  [[package]]
  name = "bytes"
 -version = "1.11.1"
--source = "registry+https://github.com/rust-lang/crates.io-index"
++version = "1.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 -
 -[[package]]
 -name = "bytes-utils"
 -version = "0.1.4"
-+version = "1.12.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35"
 -dependencies = [
 - "bytes",
@@ -4693,15 +4693,15 @@ index 534e4a8..319d6e9 100644
  name = "cfg_aliases"
 -version = "0.2.1"
 +version = "0.2.2"
-+source = "registry+https://github.com/rust-lang/crates.io-index"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 +checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
--checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures",
@@ -5728,10 +5728,10 @@ index 534e4a8..319d6e9 100644
  [[package]]
  name = "quinn-proto"
 -version = "0.11.13"
-+version = "0.11.17"
++version = "0.11.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
  dependencies = [
   "bytes",
 - "getrandom 0.3.4",
@@ -20279,7 +20279,7 @@ index 98ac82d..e199140 100644
  [dev-dependencies]
  tokio-test = { workspace = true }
 diff --git a/vendor/serdes-ai-providers/Cargo.lock b/vendor/serdes-ai-providers/Cargo.lock
-index 23e6c72..d0f6df1 100644
+index 23e6c72..fdfafb4 100644
 --- a/vendor/serdes-ai-providers/Cargo.lock
 +++ b/vendor/serdes-ai-providers/Cargo.lock
 @@ -4,37 +4,37 @@ version = 3
@@ -20393,9 +20393,9 @@ index 23e6c72..d0f6df1 100644
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
++version = "0.10.2"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures 0.3.0",
@@ -21071,10 +21071,10 @@ index 23e6c72..d0f6df1 100644
  [[package]]
  name = "quinn-proto"
 -version = "0.11.13"
-+version = "0.11.17"
++version = "0.11.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
  dependencies = [
   "bytes",
 - "getrandom 0.3.4",
@@ -24316,7 +24316,7 @@ index 31c55f7..81061d2 100644
  }
 diff --git a/vendor/serdes-ai-responses/Cargo.lock b/vendor/serdes-ai-responses/Cargo.lock
 new file mode 100644
-index 0000000..4f38e1e
+index 0000000..b29b96a
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/Cargo.lock
 @@ -0,0 +1,2124 @@
@@ -24428,9 +24428,9 @@ index 0000000..4f38e1e
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
++version = "0.10.2"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures 0.3.0",
@@ -25180,9 +25180,9 @@ index 0000000..4f38e1e
 +
 +[[package]]
 +name = "quinn-proto"
-+version = "0.11.17"
++version = "0.11.18"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
 +dependencies = [
 + "bytes",
 + "getrandom 0.4.3",
@@ -32967,7 +32967,7 @@ index e662236..0000000
 -    }
 -}
 diff --git a/vendor/serdes-ai-retries/Cargo.lock b/vendor/serdes-ai-retries/Cargo.lock
-index f00ac17..9fa0043 100644
+index f00ac17..dd6236c 100644
 --- a/vendor/serdes-ai-retries/Cargo.lock
 +++ b/vendor/serdes-ai-retries/Cargo.lock
 @@ -4,28 +4,28 @@ version = 3
@@ -33054,9 +33054,9 @@ index f00ac17..9fa0043 100644
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
++version = "0.10.2"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures",
@@ -33567,10 +33567,10 @@ index f00ac17..9fa0043 100644
  [[package]]
  name = "quinn-proto"
 -version = "0.11.13"
-+version = "0.11.17"
++version = "0.11.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
  dependencies = [
   "bytes",
 - "getrandom 0.3.4",
@@ -42236,7 +42236,7 @@ index 7dbe328..b6e5005 100644
  [dependencies.thiserror]
  version = "1.0"
 diff --git a/vendor/serdes-ai/Cargo.lock b/vendor/serdes-ai/Cargo.lock
-index 3e9d926..c9a1c07 100644
+index 3e9d926..38a126e 100644
 --- a/vendor/serdes-ai/Cargo.lock
 +++ b/vendor/serdes-ai/Cargo.lock
 @@ -4,27 +4,27 @@ version = 3
@@ -42514,7 +42514,8 @@ index 3e9d926..c9a1c07 100644
 -[[package]]
 -name = "aws-smithy-async"
 -version = "1.2.13"
--source = "registry+https://github.com/rust-lang/crates.io-index"
++version = "1.5.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "5cc50d0f63e714784b84223abd7abbc8577de8c35d699e0edd19f0a88a08ae13"
 -dependencies = [
 - "futures-util",
@@ -42684,8 +42685,7 @@ index 3e9d926..c9a1c07 100644
 -[[package]]
 -name = "aws-smithy-xml"
 -version = "0.60.14"
-+version = "1.5.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "b53543b4b86ed43f051644f704a98c7291b3618b67adf057ee77a366fa52fcaa"
 -dependencies = [
 - "xmlparser",
@@ -42786,9 +42786,9 @@ index 3e9d926..c9a1c07 100644
 +
 +[[package]]
 +name = "chacha20"
-+version = "0.10.1"
++version = "0.10.2"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
-+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 +dependencies = [
 + "cfg-if",
 + "cpufeatures 0.3.0",
@@ -43826,10 +43826,10 @@ index 3e9d926..c9a1c07 100644
  [[package]]
  name = "quinn-proto"
 -version = "0.11.13"
-+version = "0.11.17"
++version = "0.11.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
-+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
  dependencies = [
   "bytes",
 - "getrandom 0.3.4",
