@@ -13,7 +13,7 @@ impl Turn<'_> {
             self.telemetry_attempt.set(0);
         }
         for retry in 0..=super::rate_limit::MAX_RETRIES {
-            let result = self.round_once(requests, tools);
+            let result = self.round_once(requests, tools, retry > 0);
             self.persist_observations(store, reserved)?;
             let events = match result {
                 Err(RoundFailure::StreamInterrupted(events))
@@ -22,12 +22,13 @@ impl Turn<'_> {
                     events
                 }
                 Err(RoundFailure::ModelTransport(failure))
-                    if failure.kind == crate::transport::TransportKind::RateLimit
-                        && failure.status == Some(429) =>
+                    if failure.kind.is_retryable()
+                        && (failure.kind != crate::transport::TransportKind::RateLimit
+                            || failure.status == Some(429)) =>
                 {
                     let started = std::time::Instant::now();
                     let result = self.rate_limit_delay(store, reserved, failure.clone(), retry);
-                    if !matches!(result, Err(RoundFailure::RateLimitStopped { .. })) {
+                    if !matches!(result, Err(RoundFailure::TransportRetryStopped { .. })) {
                         self.observed_retry(Some(&failure), started.elapsed());
                         self.persist_observations(store, reserved)?;
                     }

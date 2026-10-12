@@ -94,7 +94,7 @@ def envelope(tool_calls):
         "tool_calls": tool_calls,
         "declared_tool_calls": 16,
         "budget_exhausted": False,
-        "zero_call_tail": 1,
+        "zero_call_tail": 1, "retry_attempts": 0,
         "prompt_digest": fnv1a(prompt or ""),
     })
 "#;

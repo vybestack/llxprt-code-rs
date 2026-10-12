@@ -100,6 +100,8 @@ pub struct CompletedRun {
     pub status: String,
     pub branch: bool,
     pub replayed: bool,
+    /// Transport reattempts actually issued during this invocation (zero on replay).
+    pub retry_attempts: u64,
 }
 
 /// Resolved per-run output caps (issue 77). Defined in [`crate::envelope`] beside the
@@ -366,6 +368,7 @@ impl CodingAgent {
             budget_exhausted: false,
             zero_call_tail: malformed_tool_call::zero_call_tail(&reserved.rounds),
             replayed: true,
+            retry_attempts: 0,
             terminal_outcome: None,
         }
     }
@@ -430,6 +433,17 @@ impl CodingAgent {
 }
 impl Turn<'_> {
     pub(super) fn run_reserved(
+        &self,
+        store: &SessionStore,
+        reserved: &mut ReservedRequest,
+    ) -> Result<CompletedRun, AgentError> {
+        self.run_live(store, reserved).map_err(|mut error| {
+            error.retry_attempts = Some(self.retry_attempts.get());
+            error
+        })
+    }
+
+    fn run_live(
         &self,
         store: &SessionStore,
         reserved: &mut ReservedRequest,
@@ -759,6 +773,7 @@ impl Turn<'_> {
             terminal_outcome: None,
             branch: reserved.attempt > 1,
             replayed: false,
+            retry_attempts: self.retry_attempts.get(),
         })
     }
 
@@ -862,7 +877,7 @@ enum RoundFailure {
     InvalidToolCall(String),
     FinishReason(String),
     ModelTransport(TransportFailure),
-    RateLimitStopped {
+    TransportRetryStopped {
         failure: TransportFailure,
         retries: usize,
         reason: &'static str,

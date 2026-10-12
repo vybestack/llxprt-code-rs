@@ -32,12 +32,13 @@ impl Turn<'_> {
         &self,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
+        reattempt: bool,
     ) -> Result<LlmResult, RoundFailure> {
         self.telemetry_attempt
             .set(self.telemetry_attempt.get().saturating_add(1));
         let started = std::time::Instant::now();
         let collector = serdes_ai::models::telemetry::Collector::default();
-        let mut result = self.round_once_inner(requests, tools, &collector);
+        let mut result = self.round_once_inner(requests, tools, reattempt, &collector);
         let observed = collector.snapshot();
         let wall = started.elapsed();
         if let Ok(reply) = &mut result {
@@ -221,9 +222,8 @@ fn outcome(failure: &RoundFailure) -> &'static str {
     match failure {
         RoundFailure::TurnTime => "cancelled",
         RoundFailure::StreamInterrupted(_) => "stream-interrupted",
-        RoundFailure::ModelTransport(f) | RoundFailure::RateLimitStopped { failure: f, .. } => {
-            f.kind.token()
-        }
+        RoundFailure::ModelTransport(f)
+        | RoundFailure::TransportRetryStopped { failure: f, .. } => f.kind.token(),
         _ => "failed",
     }
 }

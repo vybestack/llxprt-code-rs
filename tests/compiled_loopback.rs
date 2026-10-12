@@ -575,7 +575,7 @@ fn omitted_session_is_fresh_and_matches_its_directory() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = std::thread::spawn(move || {
-        for _ in 0..2 {
+        for _ in 0..8 {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
             loop {
@@ -630,7 +630,7 @@ fn explicit_default_session_resumes() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = std::thread::spawn(move || {
-        for _ in 0..2 {
+        for _ in 0..8 {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
             loop {

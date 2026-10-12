@@ -16,6 +16,8 @@ pub struct AgentError {
     /// tool-call collapse (issue 146) and the exhausted truncation retry (issue 153) both
     /// stay typed failures but carry a distinct verdict the caller can branch on.
     pub terminal_outcome: Option<&'static str>,
+    /// Transport reattempts in the live invocation, absent before turn startup.
+    pub retry_attempts: Option<u64>,
 }
 
 impl AgentError {
@@ -26,6 +28,7 @@ impl AgentError {
             message: msg.into(),
             envelope_code: None,
             terminal_outcome: None,
+            retry_attempts: None,
             telemetry: None,
         }
     }
@@ -44,6 +47,7 @@ impl AgentError {
             message: error.to_string(),
             envelope_code: None,
             terminal_outcome: None,
+            retry_attempts: None,
             telemetry: None,
         }
     }

@@ -1,4 +1,4 @@
-//! Bounded host policy for retryable HTTP 429s, not quota or status-free failures.
+//! Bounded host backoff for typed transient failures, never quota refusals.
 use super::*;
 use std::hash::{BuildHasher, Hasher};
 use std::time::Duration;
@@ -27,7 +27,7 @@ impl Turn<'_> {
         retries: usize,
     ) -> Result<(), RoundFailure> {
         if retries == MAX_RETRIES {
-            return Err(RoundFailure::RateLimitStopped {
+            return Err(RoundFailure::TransportRetryStopped {
                 failure,
                 retries,
                 reason: "retry cap exhausted",
@@ -39,7 +39,7 @@ impl Turn<'_> {
             .build_hasher()
             .finish();
         let Some(wait) = delay(retries, failure.retry_after, entropy) else {
-            return Err(RoundFailure::RateLimitStopped {
+            return Err(RoundFailure::TransportRetryStopped {
                 failure,
                 retries,
                 reason: "Retry-After exceeds the 30s wait bound; no early retry sent",

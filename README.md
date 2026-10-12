@@ -643,21 +643,26 @@ Related telemetry quantities can be joined by `round_index` and `call_index`:
 | `model_reply_mapped_bytes` | reply token counts | Same reply, mapped bytes versus tokens |
 | `round_index`, `call_index` | round/call identifiers | Same identifiers |
 
-### Retryable HTTP 429 rate limits
+### Bounded request retries
 
-The host reissues an identical provider request on classified HTTP 429 `rate-limit`
-failures, with at most **three retries** (four attempts including the original).
-The cap is shared with preterminal Responses stream reissues for that request.
+The host reissues an identical provider request on typed HTTP 429 throttles,
+transient 5xx and connectivity failures, with at most **three retries** (four
+attempts including the original). The cap is shared with preterminal Responses
+stream reissues for that request.
 Backoff uses exponential equal jitter (250–500ms, 500–1000ms, 1000–2000ms), added
 above the provider's `Retry-After` minimum, with each wait bounded to 30 seconds.
 A hint greater than 30 seconds fails explicitly without an early retry. Exhaustion
-keeps exit 5 and `error.code: "model-rate-limit"`; `error.message` states the used
-and remaining retry budget. No alternate provider or model is selected.
+keeps exit 5 and the last `model-<class>` error code; `error.message` states the
+used and remaining retry budget. Final envelopes also report `retry_attempts`
+(`error.retry_attempts` on live-turn failure), counting reattempts actually issued
+in this invocation. A completed replay reports zero. No alternate provider or
+model is selected.
 
 Retries remain inside the original `--turn-time` deadline; signal cancellation
-interrupts a wait immediately. Completed tools are not rerun, and a failed 429
-adds neither a model reply nor a tool round to history. Quota/billing 429s,
-permanent errors, and status-free failures are not retried by this policy.
+interrupts a wait immediately. Completed tools are not rerun, and failed requests
+add neither a model reply nor a tool round to history. Quota/billing refusals,
+permanent errors, malformed protocol and unclassified errors are not retried.
+See [request retries](docs/request-retries.md) for telemetry and Retry-After semantics.
 
 ### Preterminal Responses SSE transport loss
 
@@ -668,8 +673,8 @@ request-identity policy. No partial reply, argument bytes or tool calls enter mo
 history or execution. The original turn deadline also bounds the backoff.
 Malformed SSE frames, protocol/lifecycle contradictions, provider error events
 (including quota/auth refusals), and failures after a terminal event still fail fast.
-HTTP 429 rate limits use the bounded policy above; other provider failures are not
-retried by this stream-loss policy.
+Typed HTTP/connectivity failures use the bounded policy above, sharing the same
+per-request cap with stream-loss retries.
 
 Each scheduled stream-loss reissue is persisted before sleeping, independently of `--emit`,
 and is visible in `transcript --json` as `turns[].model_retries` (`round`, `retry`,
@@ -680,7 +685,8 @@ exit; a fresh process does not resume an interrupted model request.
 
 This adds required retry metadata to the **session store version 4** format.
 Earlier store versions are refused; start a fresh session. No old-format reader
-or migration path is provided. The stdout envelope format is unchanged.
+or migration path is provided. Invocation retry counts are separately carried in
+the stdout envelope; they do not change the session store format.
 
 
 ### Turn telemetry

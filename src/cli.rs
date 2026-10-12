@@ -411,6 +411,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                     .unwrap_or(-1),
                 budget_exhausted: o.run.budget_exhausted,
                 zero_call_tail: o.run.zero_call_tail,
+                retry_attempts: o.run.retry_attempts,
                 prompt_digest: o.run.prompt_digest.clone(),
                 output_caps: o.output_caps,
                 terminal_outcome: declared.terminal_outcome,
@@ -424,7 +425,8 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 error.session_status.as_deref().unwrap_or("ok"),
             );
             if let Envelope::Error(detail) = &mut envelope {
-                detail.telemetry = error.telemetry.clone();
+                detail.error.retry_attempts = error.retry_attempts();
+                detail.telemetry = error.telemetry().cloned().map(Box::new);
             }
             envelope
         }
@@ -435,7 +437,8 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
                 error.message.clone(),
             );
             if let Envelope::Error(detail) = &mut envelope {
-                detail.telemetry = error.telemetry.clone();
+                detail.error.retry_attempts = error.retry_attempts();
+                detail.telemetry = error.telemetry().cloned().map(Box::new);
                 if let Some(outcome) = error.terminal_outcome {
                     detail.error.terminal_outcome = Some(outcome.to_string());
                 }
@@ -596,10 +599,18 @@ fn recognized_option_spellings() -> std::collections::BTreeSet<String> {
     out
 }
 
+/// What a live turn observed before it failed. Held behind one box so `AppError`
+/// stays small enough to return by value.
+#[derive(Default)]
+pub struct FailureObservations {
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
+    pub retry_attempts: Option<u64>,
+}
+
 /// Error payload used by `main`.
 pub struct AppError {
-    /// Observations for this invocation, absent before a turn exists.
-    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
+    /// Absent before a turn exists.
+    pub observations: Option<Box<FailureObservations>>,
     pub code: Code,
     pub key: &'static str,
     pub message: String,
@@ -616,6 +627,14 @@ pub struct AppError {
 }
 
 impl AppError {
+    pub fn telemetry(&self) -> Option<&crate::telemetry::Telemetry> {
+        self.observations.as_deref()?.telemetry.as_deref()
+    }
+
+    pub fn retry_attempts(&self) -> Option<u64> {
+        self.observations.as_deref()?.retry_attempts
+    }
+
     /// Build an error whose message has passed the **final** scrub-and-UTF8-bound for
     /// user-facing output: every surfaced diagnostic is at most
     /// [`crate::redact::MAX_DIAGNOSTIC_BYTES`] including the marker, so an
@@ -630,7 +649,7 @@ impl AppError {
             session_status: None,
             envelope_code: None,
             terminal_outcome: None,
-            telemetry: None,
+            observations: None,
         }
     }
 
@@ -654,7 +673,7 @@ impl AppError {
             session_status: Some("ok".into()),
             envelope_code: None,
             terminal_outcome: None,
-            telemetry: None,
+            observations: None,
         }
     }
 }

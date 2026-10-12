@@ -231,12 +231,18 @@ fn resolved_digest_size_floor(settings: &Settings) -> Result<usize, AppError> {
 fn agent_error(error: crate::agent::AgentError) -> AppError {
     if error.code == Code::Profiling {
         let mut app = AppError::profiling_at(error.key, error.message);
-        app.telemetry = error.telemetry;
+        app.observations = Some(Box::new(FailureObservations {
+            telemetry: error.telemetry,
+            retry_attempts: error.retry_attempts,
+        }));
         return app;
     }
     let mut app =
         AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code);
-    app.telemetry = error.telemetry;
+    app.observations = Some(Box::new(FailureObservations {
+        telemetry: error.telemetry,
+        retry_attempts: error.retry_attempts,
+    }));
     if error.terminal_outcome.is_some() {
         // The run declared its own terminal verdict (issues 146 and 153); carry it into
         // the stdout envelope so a headless caller can branch on this condition alone.
@@ -268,14 +274,20 @@ fn publish_telemetry(
     result: Result<crate::agent::CompletedRun, AppError>,
 ) -> Result<crate::agent::CompletedRun, AppError> {
     let telemetry = match &result {
-        Ok(run) => &run.telemetry,
-        Err(error) => &error.telemetry,
+        Ok(run) => run.telemetry.as_deref(),
+        Err(error) => error.telemetry(),
     };
     if let (Some(output), Some(telemetry)) = (&mut output, telemetry) {
         if let Err(message) = output.publish(telemetry) {
             let mut error = AppError::new(Code::Turn, "telemetry-output", message);
             error.session_status = Some(if result.is_ok() { "ok" } else { "failed" }.into());
-            error.telemetry = Some(telemetry.clone());
+            error.observations = Some(Box::new(FailureObservations {
+                telemetry: Some(Box::new(telemetry.clone())),
+                retry_attempts: match &result {
+                    Ok(run) => Some(run.retry_attempts),
+                    Err(failed) => failed.retry_attempts(),
+                },
+            }));
             return Err(error);
         }
     }
@@ -289,6 +301,9 @@ fn reservation_error(
     let mut app = AppError::new(Code::Turn, "turn", error.to_string());
     let mut telemetry = crate::telemetry::Telemetry::default();
     store.observe_store(&mut telemetry);
-    app.telemetry = Some(Box::new(telemetry));
+    app.observations = Some(Box::new(FailureObservations {
+        telemetry: Some(Box::new(telemetry)),
+        retry_attempts: None,
+    }));
     app
 }

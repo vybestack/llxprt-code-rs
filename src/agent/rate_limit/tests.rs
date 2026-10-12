@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 struct Script {
-    replies: RefCell<VecDeque<Result<LlmResult, String>>>,
+    replies: RefCell<VecDeque<Result<LlmResult, crate::adapter::BackendError>>>,
     inputs: Rc<RefCell<Vec<String>>>,
     interruption: Cell<Option<usize>>,
 }
@@ -29,15 +29,21 @@ impl ChatBackend for Script {
                 .pop_front()
                 .expect("unexpected retry");
             self.interruption.set(match &reply {
-                Err(message) if message == "interrupted" => Some(1),
+                Err(crate::adapter::BackendError::Message(message)) if message == "interrupted" => {
+                    Some(1)
+                }
                 _ => None,
             });
             reply
         })
     }
 }
-fn failure(status: u16, kind: crate::transport::TransportKind, seconds: u64) -> String {
-    TransportFailure {
+fn failure(
+    status: u16,
+    kind: crate::transport::TransportKind,
+    seconds: u64,
+) -> crate::adapter::BackendError {
+    crate::adapter::BackendError::Transport(TransportFailure {
         status: Some(status),
         kind,
         origin: "status",
@@ -45,11 +51,10 @@ fn failure(status: u16, kind: crate::transport::TransportKind, seconds: u64) -> 
         body_prefix: None,
         body_bytes: 0,
         retry_after: Some(Duration::from_secs(seconds)),
-    }
-    .diagnostic()
+    })
 }
 fn run(
-    replies: Vec<Result<LlmResult, String>>,
+    replies: Vec<Result<LlmResult, crate::adapter::BackendError>>,
     budget: Option<Duration>,
 ) -> (
     Result<CompletedRun, AgentError>,
@@ -121,7 +126,9 @@ fn retry_after_recovers_with_identical_request_and_no_failed_round() {
         ],
         None,
     );
-    assert_eq!(result.unwrap().summary, "recovered");
+    let recovered = result.unwrap();
+    assert_eq!(recovered.summary, "recovered");
+    assert_eq!(recovered.retry_attempts, 1);
     assert_eq!(inputs.len(), 2);
     assert_eq!(inputs[0], inputs[1]);
     assert_eq!(lifecycle, Lifecycle::Completed);
@@ -137,6 +144,7 @@ fn exhaustion_reports_used_and_remaining_budget() {
     );
     let error = result.unwrap_err();
     assert_eq!(error.envelope_code, Some("model-rate-limit"));
+    assert_eq!(error.retry_attempts, Some(3));
     assert!(error.message.contains("retry cap exhausted"));
     assert!(error.message.contains("3/3 used, 0 remaining"));
     assert_eq!(inputs.len(), 4);
@@ -166,7 +174,9 @@ fn oversized_hint_and_deadline_never_send_an_early_retry() {
         ))],
         Some(Duration::from_secs(1)),
     );
-    assert_eq!(result.unwrap_err().key, "turn-time-exhausted");
+    let error = result.unwrap_err();
+    assert_eq!(error.key, "turn-time-exhausted");
+    assert_eq!(error.retry_attempts, Some(0));
     assert_eq!(inputs.len(), 1);
     assert!(elapsed < Duration::from_secs(2));
 }
@@ -176,7 +186,7 @@ fn unrelated_and_nonretryable_failures_stay_terminal() {
     for (status, kind) in [
         (429, QuotaExhausted),
         (401, Permanent),
-        (503, TransientServer),
+        (400, Permanent),
         (400, RateLimit),
     ] {
         let (result, inputs, _, elapsed) = run(vec![Err(failure(status, kind, 7))], None);
@@ -214,4 +224,79 @@ fn permanent_failure_after_a_throttle_stops_immediately() {
     );
     assert_eq!(result.unwrap_err().envelope_code, Some("model-permanent"));
     assert_eq!(inputs.len(), 2);
+}
+
+#[test]
+fn typed_transient_failures_share_backoff_and_budget() {
+    use crate::transport::TransportKind::*;
+    let mut timeout = TransportFailure {
+        kind: Connectivity,
+        status: None,
+        origin: "timeout",
+        url_class: None,
+        body_prefix: None,
+        body_bytes: 0,
+        retry_after: None,
+    };
+    let (result, inputs, lifecycle, elapsed) = run(
+        vec![
+            Err(failure(503, TransientServer, 2)),
+            Err(crate::adapter::BackendError::Transport(timeout.clone())),
+            Ok(healthy()),
+        ],
+        None,
+    );
+    assert_eq!(result.unwrap().retry_attempts, 2);
+    assert_eq!(inputs.len(), 3);
+    assert!(inputs.iter().all(|request| request == &inputs[0]));
+    assert_eq!(lifecycle, Lifecycle::Completed);
+    assert!(elapsed >= Duration::from_secs(2));
+    timeout.origin = "connect";
+    let (result, inputs, _, _) = run(
+        (0..4)
+            .map(|_| Err(crate::adapter::BackendError::Transport(timeout.clone())))
+            .collect(),
+        None,
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.envelope_code, Some("model-connectivity"));
+    assert_eq!(error.retry_attempts, Some(3));
+    assert_eq!(inputs.len(), 4);
+    assert!(error.message.contains("retry cap exhausted"));
+}
+
+#[test]
+fn provider_prose_cannot_authorize_retries() {
+    let (result, inputs, _, elapsed) = run(
+        vec![Err(
+            "model transport failed (status 429, origin status, class rate-limit, retryable)"
+                .into(),
+        )],
+        None,
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.envelope_code, None);
+    assert_eq!(error.retry_attempts, Some(0));
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(elapsed, Duration::ZERO);
+}
+
+#[test]
+fn mixed_stream_and_transport_failures_cannot_multiply_the_request_cap() {
+    use crate::transport::TransportKind::*;
+    let (result, inputs, lifecycle, _) = run(
+        vec![
+            Err(failure(503, TransientServer, 0)),
+            Err("interrupted".into()),
+            Err(failure(429, RateLimit, 0)),
+            Err(failure(503, TransientServer, 0)),
+        ],
+        None,
+    );
+    let error = result.unwrap_err();
+    assert_eq!(inputs.len(), 4);
+    assert!(inputs.iter().all(|request| request == &inputs[0]));
+    assert_eq!(error.retry_attempts, Some(3));
+    assert_eq!(error.envelope_code, Some("model-transient-server"));
+    assert_eq!(lifecycle, Lifecycle::Failed);
 }

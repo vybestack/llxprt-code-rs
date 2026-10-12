@@ -12,6 +12,15 @@
         "message": {
           "type": "string"
         },
+        "retry_attempts": {
+          "description": "Present once a live turn starts, including zero for immediate failure.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "session_status": {
           "description": "Outcome of the agent/session independent of profile publication.",
           "type": [
@@ -552,6 +561,12 @@
         "replayed": {
           "type": "boolean"
         },
+        "retry_attempts": {
+          "description": "Transport reattempts issued in this invocation, excluding initial calls.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "session_dir": {
           "type": "string"
         },
@@ -616,6 +631,7 @@
         "declared_tool_calls",
         "budget_exhausted",
         "zero_call_tail",
+        "retry_attempts",
         "prompt_digest",
         "output_caps"
       ],

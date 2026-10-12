@@ -1,4 +1,4 @@
-//! Stock CLI + real loopback 429s; no provider credentials or external network.
+//! Stock CLI + real loopback transient failures; no provider credentials or external network.
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
@@ -104,6 +104,9 @@ impl Fixture {
         Self { root, listener }
     }
     fn spawn(&self, budget: &str) -> Child {
+        self.spawn_with_request_timeout(budget, "900s")
+    }
+    fn spawn_with_request_timeout(&self, budget: &str, timeout: &str) -> Child {
         Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
             .env_clear()
             .env("LLXPRT_CONFIG_HOME", self.root.path())
@@ -115,6 +118,8 @@ impl Fixture {
                 "rate-limit",
                 "--turn-time",
                 budget,
+                "--request-timeout",
+                timeout,
                 "--max-tool-calls",
                 "4",
                 "-p",
@@ -171,6 +176,7 @@ fn retry_after_recovers_after_tool_progress_without_reexecuting_tools() {
     assert_eq!(output["status"], "ok");
     assert_eq!(output["summary"], "Recovered.");
     assert_eq!(output["tool_calls"], 1);
+    assert_eq!(output["retry_attempts"], 1);
     assert_eq!(first, second);
     assert!(retried_at.duration_since(failed_at) >= Duration::from_secs(1));
     assert!(retried_at.duration_since(failed_at) < Duration::from_secs(5));
@@ -202,6 +208,7 @@ fn repeated_429_exhausts_three_retries_and_exposes_budget_in_envelope() {
         .collect::<Vec<_>>();
     let output = envelope(finish(child), 5);
     assert_eq!(output["error"]["code"], "model-rate-limit");
+    assert_eq!(output["error"]["retry_attempts"], 3);
     let message = output["error"]["message"].as_str().unwrap();
     assert!(message.contains("retry cap exhausted"));
     assert!(message.contains("3/3 used, 0 remaining"));
@@ -238,6 +245,7 @@ fn quota_and_permanent_errors_do_not_retry() {
         );
         let output = envelope(finish(child), 5);
         assert_eq!(output["error"]["code"], code);
+        assert_eq!(output["error"]["retry_attempts"], 0);
         f.no_more_requests();
     }
 }
@@ -252,6 +260,7 @@ fn deadline_and_oversized_hint_stop_before_reissue() {
         respond(&f.listener, throttle(Some(hint)));
         let output = envelope(finish(child), 5);
         assert_eq!(output["error"]["code"], code);
+        assert_eq!(output["error"]["retry_attempts"], 0);
         assert!(output["error"]["message"]
             .as_str()
             .unwrap()
@@ -279,4 +288,164 @@ fn sigterm_interrupts_retry_after_immediately() {
         f.state().snapshot().unwrap().branches[0].lifecycle,
         Lifecycle::Pending
     );
+}
+
+#[test]
+fn transient_server_and_connection_loss_recover_without_changing_the_request() {
+    let f = Fixture::new();
+    let child = f.spawn("10s");
+    let (first, _) = respond(
+        &f.listener,
+        Response {
+            status: 503,
+            hint: None,
+            body: json!({"error":{"message":"temporarily unavailable"}}),
+        },
+    );
+    // Drop a subsequent connection before response headers arrive.
+    let stream = accept(&f.listener);
+    drop(stream);
+    let (last, _) = respond(&f.listener, completion(vec![]));
+    let output = envelope(finish(child), 0);
+    assert_eq!(first, last);
+    assert_eq!(output["retry_attempts"], 2);
+    f.no_more_requests();
+}
+
+#[test]
+fn anthropic_quota_refusals_and_throttles_keep_typed_retry_policy() {
+    for quota in [false, true] {
+        let f = Fixture::new();
+        std::fs::write(
+            f.root.path().join("profiles/loopback.json"),
+            json!({
+                "provider":"anthropic","model":"loopback","ephemeralSettings":{
+                    "base-url":format!("http://{}", f.listener.local_addr().unwrap()),
+                    "auth-key":"fixture-secret"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let child = f.spawn("10s");
+        respond(
+            &f.listener,
+            Response {
+                status: 429,
+                hint: Some(1),
+                body: json!({"error":{
+                    "type":if quota { "insufficient_quota" } else { "rate_limit_error" },
+                    "message":if quota { "payment required" } else { "slow down" }
+                }}),
+            },
+        );
+        if quota {
+            let output = envelope(finish(child), 5);
+            assert_eq!(output["error"]["code"], "model-quota-exhausted");
+            assert_eq!(output["error"]["retry_attempts"], 0);
+        } else {
+            respond(
+                &f.listener,
+                Response {
+                    status: 200,
+                    hint: None,
+                    body: json!({
+                        "id":"fixture","type":"message","role":"assistant","model":"loopback",
+                        "content":[{"type":"text","text":"Recovered."}],
+                        "stop_reason":"end_turn","stop_sequence":null,
+                        "usage":{"input_tokens":1,"output_tokens":1}
+                    }),
+                },
+            );
+            let output = envelope(finish(child), 0);
+            assert_eq!(output["retry_attempts"], 1);
+            assert_eq!(output["summary"], "Recovered.");
+        }
+        f.no_more_requests();
+    }
+}
+
+#[test]
+fn received_401_with_diagnostic_body_timeout_never_retries() {
+    for provider in ["openai", "anthropic", "openai-responses"] {
+        let f = Fixture::new();
+        std::fs::write(
+            f.root.path().join("profiles/loopback.json"),
+            json!({
+                "provider":provider,"model":"loopback","ephemeralSettings":{
+                    "base-url":format!("http://{}", f.listener.local_addr().unwrap()),
+                    "auth-key":"fixture-secret"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let child = f.spawn_with_request_timeout("10s", "200ms");
+        let mut stream = accept(&f.listener);
+        // Read all request headers/body before supplying an incomplete error body.
+        let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                if key.eq_ignore_ascii_case("content-length") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        reader.read_exact(&mut vec![0; length]).unwrap();
+        stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial").unwrap();
+        // Hold the socket open: the diagnostic-body deadline, not peer EOF, fires.
+        let output = envelope(finish(child), 5);
+        drop(reader);
+        drop(stream);
+        assert_eq!(output["error"]["code"], "model-permanent");
+        assert_eq!(output["error"]["retry_attempts"], 0);
+        assert!(output["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("status 401"));
+        f.no_more_requests();
+    }
+}
+
+#[test]
+fn responses_http_retains_retry_after_and_reissues_identical_bytes() {
+    let f = Fixture::new();
+    std::fs::write(
+        f.root.path().join("profiles/loopback.json"),
+        json!({
+            "provider":"openai-responses","model":"loopback","ephemeralSettings":{
+                "base-url":format!("http://{}/v1/responses", f.listener.local_addr().unwrap()),
+                "auth-key":"fixture-secret"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let child = f.spawn("10s");
+    let (first, at) = respond(&f.listener, throttle(Some(1)));
+    let (last, next) = respond(
+        &f.listener,
+        Response {
+            status: 200,
+            hint: None,
+            body: json!({
+                "id":"fixture","object":"response","created_at":1,"model":"loopback",
+                "status":"completed","output":[{"type":"message","id":"msg","status":"completed","role":"assistant",
+                    "content":[{"type":"output_text","text":"Recovered.","annotations":[]}]}],
+                "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+            }),
+        },
+    );
+    let output = envelope(finish(child), 0);
+    assert_eq!(first, last);
+    assert!(next.duration_since(at) >= Duration::from_secs(1));
+    assert_eq!(output["retry_attempts"], 1);
+    assert_eq!(output["summary"], "Recovered.");
+    f.no_more_requests();
 }

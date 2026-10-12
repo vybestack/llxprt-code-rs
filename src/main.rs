@@ -64,7 +64,7 @@ fn main() {
                 Ok(done) => summary = Some(done),
                 Err(error) => {
                     let status = session_status(&outcome);
-                    outcome = Err(profile_error(error, status));
+                    outcome = Err(profile_error(error, status, &outcome));
                 }
             }
         }
@@ -118,9 +118,17 @@ fn session_status(outcome: &Result<cli::RunOutcome, cli::AppError>) -> String {
 fn profile_error(
     error: llxprt_code_rs::memory_profile::ProfilingError,
     status: String,
+    outcome: &Result<cli::RunOutcome, cli::AppError>,
 ) -> cli::AppError {
     let mut app = cli::AppError::profiling(error);
-    app.session_status = Some(status.into());
+    app.session_status = Some(status.into_boxed_str());
+    app.observations = Some(Box::new(cli::FailureObservations {
+        telemetry: None,
+        retry_attempts: match outcome {
+            Ok(run) => Some(run.run.retry_attempts),
+            Err(error) => error.retry_attempts(),
+        },
+    }));
     app
 }
 
