@@ -16,9 +16,6 @@ use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
 pub const STORE_VERSION: u32 = 5;
-/// Bounded lease for a reservation, in seconds. A `pending` branch whose
-/// `lease_expiry` is in the past may be reclaimed by another process.
-pub const LEASE_SECONDS: u64 = 3600;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
 pub const MAX_PROMPT_BYTES: usize = 512 * 1024;
@@ -652,7 +649,7 @@ impl SessionStore {
         self.locked(|| {
             let state = self.read()?;
             let branch = self.live_branch(&state, reserved)?;
-            let expiry = now_secs().saturating_add(LEASE_SECONDS);
+            let expiry = now_secs().saturating_add(crate::limits::TIMEOUT_LEASE_SECONDS);
             self.append_event(log::Event::LeaseRenewed {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
@@ -677,7 +674,7 @@ impl SessionStore {
                 branch_id: branch.branch_id.clone(),
                 owner: reserved.owner.clone(),
                 rounds: suffix.to_vec(),
-                lease_expiry: now_secs().saturating_add(LEASE_SECONDS),
+                lease_expiry: now_secs().saturating_add(crate::limits::TIMEOUT_LEASE_SECONDS),
             })
         })
     }

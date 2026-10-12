@@ -436,6 +436,10 @@ errors fail the gate.
 
 CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
 
+The [module boundary audit](docs/module-boundary-audit.md) records issue #67's
+landed modularity seams, public-boundary test evidence, and follow-up findings;
+it distinguishes the existing acyclic/debt enforcement from a fixed layer policy.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball
