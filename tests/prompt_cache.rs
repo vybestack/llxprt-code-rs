@@ -37,13 +37,27 @@ fn response(provider: &str, round: usize) -> Value {
 fn exact_wire_round_and_turn_prefixes_and_cache_accounting() {
     for provider in ["openai", "openai-responses", "anthropic"] {
         for off in [false, true] {
-            run_wire_case(provider, off, false);
-            run_wire_case(provider, off, true);
+            run_wire_case(provider, off, false, false);
+            run_wire_case(provider, off, true, false);
         }
     }
 }
 
-fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
+#[test]
+fn independent_sessions_route_separately_with_identical_shell_enabled_heads() {
+    for provider in ["openai", "openai-responses", "anthropic"] {
+        for off in [false, true] {
+            run_wire_case(provider, off, false, true);
+        }
+    }
+}
+
+fn run_wire_case(
+    provider: &'static str,
+    off: bool,
+    partial_usage: bool,
+    independent_shell_sessions: bool,
+) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     std::fs::create_dir_all(root.join("tmp")).unwrap();
     let work = tempfile::tempdir_in(root.join("tmp")).unwrap();
@@ -135,9 +149,15 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
                     .to_string(),
             )
             .unwrap();
-    for turn in 0..2 {
+    let sessions = if independent_shell_sessions {
+        ["cache-session", "isolated-session"]
+    } else {
+        ["cache-session", "cache-session"]
+    };
+    for (turn, session) in sessions.iter().enumerate() {
         let observations = work.path().join(format!("cache-{turn}.jsonl"));
-        let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"));
+        command
             .env("LLXPRT_CONFIG_HOME", work.path())
             // Only this loopback fixture subprocess ignores CI off-box proxies.
             .env_remove("HTTP_PROXY")
@@ -146,22 +166,29 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
             .env_remove("http_proxy")
             .env_remove("https_proxy")
             .env_remove("all_proxy")
-            .args(["--profile", "cache", "--session", "cache-session", "--cwd"])
+            .args(["--profile", "cache", "--session", session, "--cwd"])
             .arg(work.path())
             .arg("--cache-observations")
             .arg(&observations)
             .args([
                 "-p",
                 &format!("Read fixture.txt then say done, turn {turn}"),
-            ])
-            .output()
-            .unwrap();
+            ]);
+        if independent_shell_sessions {
+            command.arg("--allow-shell");
+        }
+        let output = command.output().unwrap();
         assert!(
             output.status.success(),
             "{provider} off={off} turn={turn}: {}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        let terminal: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(terminal["status"], "ok");
+        assert_eq!(terminal["summary"], "done");
+        assert_eq!(terminal["session_id"], *session);
+        assert_eq!(terminal["replayed"], false);
         assert!(output.stderr.is_empty());
         let stderr = std::fs::read_to_string(&observations).unwrap();
         let aggregate: Value = stderr
@@ -234,16 +261,17 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
                 .unwrap()
         })
         .collect();
-    assert_eq!(
-        names,
-        [
-            "read_file",
-            "write_file",
-            "replace",
-            "list_directory",
-            "search_file_content"
-        ]
-    );
+    let mut expected_names = vec![
+        "read_file",
+        "write_file",
+        "replace",
+        "list_directory",
+        "search_file_content",
+    ];
+    if independent_shell_sessions {
+        expected_names.push("run_shell_command");
+    }
+    assert_eq!(names, expected_names);
     if provider == "anthropic" {
         let system = field(&bodies[0], "system");
         for body in &bodies {
@@ -279,12 +307,12 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
         let changed = system.replacen("You", "Timestamp: 1. You", 1);
         assert_ne!(system.as_bytes(), changed.as_bytes(), "negative control");
     } else {
-        for body in &bodies {
+        for (round, body) in bodies.iter().enumerate() {
             let value: Value = serde_json::from_str(body).unwrap();
             if off {
                 assert!(value.get("prompt_cache_key").is_none());
             } else {
-                assert_eq!(value["prompt_cache_key"], "cache-session");
+                assert_eq!(value["prompt_cache_key"], sessions[round / 2]);
             }
         }
     }
@@ -301,6 +329,12 @@ fn run_wire_case(provider: &'static str, off: bool, partial_usage: bool) {
                 .starts_with(&first.as_bytes()[..first.len() - 1]),
             "round prefix drift: {provider}"
         );
+    }
+    if independent_shell_sessions {
+        // A fresh session shares only the immutable head, not the preceding
+        // session's assistant/tool transcript. Routing keys must not pollute it.
+        assert!(!field(&bodies[2], messages).contains("call-0"));
+        assert!(field(&bodies[3], messages).contains("call-1"));
     }
     // History representation can change across turns; the system head must not.
     if provider == "openai-responses" {

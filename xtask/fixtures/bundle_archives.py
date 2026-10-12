@@ -111,20 +111,62 @@ def malformed(tmp, marker):
 
 
 def matching(root, tmp, listing, marker):
-    entries = listing.decode().splitlines()
     digest_name = 'THIRD_PARTY_LICENSES/source-bundle.sha256'
     manifest_name = 'THIRD_PARTY_LICENSES/source-bundle.txt'
-    source_files = [entry for entry in entries if not entry.endswith('/') and entry not in {digest_name, manifest_name}]
-    digests = ''.join(f'{hashlib.sha256((root / entry).read_bytes()).hexdigest()}  {entry}\n' for entry in sorted(source_files, key=os.fsencode)).encode('ascii')
-    for hostile, name in [(True, 'bash-env-candidate.bundle'), (False, 'valid-candidate.bundle')]:
+    lockfile = 'vendor/serdes-ai-models/Cargo.lock'
+    variants = [
+        ('bash-env-candidate.bundle', True, False),
+        ('valid-candidate.bundle', False, False),
+        ('missing-models-lockfile.candidate.bundle', False, True),
+    ]
+    for name, hostile, missing_lockfile in variants:
+        entries = listing.decode().splitlines()
+        if missing_lockfile:
+            assert entries.count(lockfile) == 1, 'positive control must contain the models lockfile'
+            entries.remove(lockfile)
+        candidate_listing = ('\n'.join(entries) + '\n').encode()
+        source_files = [entry for entry in entries if not entry.endswith('/') and entry not in {digest_name, manifest_name}]
+        digests = ''.join(f'{hashlib.sha256((root / entry).read_bytes()).hexdigest()}  {entry}\n' for entry in sorted(source_files, key=os.fsencode)).encode('ascii')
         with tarfile.open(tmp / name, 'w:gz', format=tarfile.GNU_FORMAT) as tf:
             directory(tf, 'bundle/')
             for entry in entries:
                 if entry.endswith('/'):
                     directory(tf, 'bundle/' + entry)
                     continue
-                if entry == manifest_name: data = listing
+                if entry == manifest_name: data = candidate_listing
                 elif entry == digest_name: data = digests
                 elif hostile and entry == 'Cargo.toml': data = f'printf archive-startup-code > {str(marker)!r}\n'.encode()
                 else: data = (root / entry).read_bytes()
                 regular(tf, 'bundle/' + entry, data)
+
+
+def isolated_lockfile_pair(tmp):
+    """Prove the negative differs only in the omitted file and canonical metadata."""
+    def contents(name):
+        with tarfile.open(tmp / name) as tf:
+            entries = {}
+            for member in tf:
+                assert member.name not in entries, ('duplicate pair member', member.name)
+                entries[member.name] = (member.type, member.mode,
+                                        tf.extractfile(member).read() if member.isfile() else None)
+            return entries
+    positive = contents('valid-candidate.bundle')
+    negative = contents('missing-models-lockfile.candidate.bundle')
+    lockfile = 'bundle/vendor/serdes-ai-models/Cargo.lock'
+    assert set(positive) - set(negative) == {lockfile}
+    assert not set(negative) - set(positive)
+    metadata = {'bundle/THIRD_PARTY_LICENSES/source-bundle.txt',
+                'bundle/THIRD_PARTY_LICENSES/source-bundle.sha256'}
+    for name in negative:
+        if name not in metadata:
+            assert positive[name] == negative[name], ('unrelated pair mutation', name)
+    manifest = 'bundle/THIRD_PARTY_LICENSES/source-bundle.txt'
+    digest = 'bundle/THIRD_PARTY_LICENSES/source-bundle.sha256'
+    relative = lockfile.removeprefix('bundle/').encode()
+    assert negative[manifest][:2] == positive[manifest][:2]
+    assert negative[manifest][2] == positive[manifest][2].replace(relative + b'\n', b'')
+    removed = [line for line in positive[digest][2].splitlines(keepends=True)
+               if line.endswith(b'  ' + relative + b'\n')]
+    assert len(removed) == 1
+    assert negative[digest][:2] == positive[digest][:2]
+    assert negative[digest][2] == positive[digest][2].replace(removed[0], b'')

@@ -43,6 +43,8 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+hyper = { version = "=1.11.0", default-features = false }
+rustls = { version = "=0.23.45", default-features = false }
 futures = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }

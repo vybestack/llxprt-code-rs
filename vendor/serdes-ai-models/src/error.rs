@@ -1,5 +1,7 @@
 //! Model-related error types.
 
+pub mod cause;
+
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -132,6 +134,8 @@ pub struct TransportDetail {
     pub body_bytes: usize,
     /// The provider's `Retry-After` hint, when one was sent.
     pub retry_after: Option<Duration>,
+    /// Allowlisted terminal source-chain category; no external error text retained.
+    pub terminal_cause: cause::TerminalCause,
 }
 
 impl TransportDetail {
@@ -165,6 +169,7 @@ impl TransportDetail {
             body_prefix,
             body_bytes,
             retry_after,
+            terminal_cause: cause::TerminalCause::Unknown,
         }
     }
 
@@ -195,6 +200,7 @@ impl TransportDetail {
             body_prefix: None,
             body_bytes: 0,
             retry_after: None,
+            terminal_cause: cause::TerminalCause::from_error(error),
         }
     }
 }

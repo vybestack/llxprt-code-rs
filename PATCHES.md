@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `0698ed512ba9a890b824e08f737ac88a5eb2edb7c9e4d0c60ad11e3562dcfaaf`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `961484338be8d45b94983f03ea0f405385faeefcf3c5265e0725fe590e13b5c9`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -502,3 +502,28 @@ Reasoning IDs, encrypted data, original summary arrays and assistant phase survi
 stateless input replay. No previous-response chain or legacy session compatibility path
 is added. Direct model/Responses suites and stock CLI continuity fixtures cover these
 changes; no live endpoint capability claim is inferred from loopback contracts.
+
+## Issue 191 - bounded terminal transport cause (measurement, not provider repair)
+
+`vendor/serdes-ai-models/src/error/cause.rs` walks at most 32 typed source nodes without
+calling Display/Debug or matching arbitrary strings. Only allowlisted Hyper, I/O and rustls
+categories survive in `TransportDetail.terminal_cause`; TLS alert contents, URLs, credentials,
+headers and bodies do not. An exhausted/cyclic chain is `chain-limit`, and unrecognized
+chains remain `unknown`. Hyper and rustls are direct, default-feature-free dependencies at
+the exact already-locked versions, so downcasts share reqwest's concrete types. The source
+closure is unchanged; all affected vendored lockfiles carry only the added direct edges.
+
+The existing Anthropic host owner measures elapsed milliseconds across its provider call
+and records `cause` and `provider-call-ms` on the typed `BackendError::Transport`
+failure, which renders them into the bounded diagnostic. This boundary includes local conversion, send, body read and
+parse, not tool execution, time-to-first-byte, connection establishment time or provider
+processing alone. Millisecond rounding may produce zero; zero does not prove an unsent
+request. Timeout/connect variants retain their existing classification and formatting.
+No retry, fallback, streaming switch, timeout change or pool/runtime change is introduced.
+
+Regressions use the real CLI and Anthropic adapter against controlled loopback peers: a
+partial response head after an accepted implementation request preserves `incomplete-message`
+and measured latency without replay; a local timeout stays distinct; a truncated body
+preserves `unexpected-eof`; a controlled three-tool implementation executes edits and its
+Python tests, independently inspected/rerun. These do not establish the cause of historical
+Z.ai failures or prove a live-provider implementation mission completes.
