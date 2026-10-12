@@ -651,9 +651,12 @@ Related telemetry quantities can be joined by `round_index` and `call_index`:
 ### Bounded request retries
 
 The host reissues an identical provider request on typed HTTP 429 throttles,
-transient 5xx and connectivity failures, with at most **three retries** (four
+transient 5xx/408 refusals and connection-establishment failures, with at most **three retries** (four
 attempts including the original). The cap is shared with preterminal Responses
-stream reissues for that request.
+stream reissues for that request. Transient classification alone does not authorize
+replay: partial response heads, body loss, sent-request loss and ambiguous request
+timeouts remain terminal with `request not replayed`, preserving typed cause and
+provider-call timing when available (#363).
 Backoff uses exponential equal jitter (250–500ms, 500–1000ms, 1000–2000ms), added
 above the provider's `Retry-After` minimum, with each wait bounded to 30 seconds.
 A hint greater than 30 seconds fails explicitly without an early retry. Exhaustion
