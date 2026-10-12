@@ -9,7 +9,7 @@ import sys
 import tarfile
 import tempfile
 
-from bundle_archives import malformed, matching
+from bundle_archives import malformed, matching, isolated_lockfile_pair
 import bundle_publication
 import bundle_cancellation
 import bundle_witness
@@ -270,6 +270,13 @@ def main():
         task(ROOT, 'verify', tmp / 'bash-env-candidate.bundle', cwd=tmp, env={'BASH_ENV': 'Cargo.toml'}, accepted=False, contains='bundle content does not match')
         assert not marker.exists() and not marker.is_symlink()
         task(ROOT, 'verify', tmp / 'valid-candidate.bundle')
+        isolated_lockfile_pair(tmp)
+        isolated = tmp / 'missing-models-lockfile.candidate.bundle'
+        command(['python3', ROOT / 'scripts/source-bundle-validate.py', isolated])
+        result = task(ROOT, 'verify', isolated, accepted=False,
+                      contains='required regular file missing in extracted bundle: vendor/serdes-ai-models/Cargo.lock')
+        assert result.returncode == 1, ('unexpected verifier exit class', result.returncode)
+        print('accepted actual-source positive; isolated models-lockfile negative rejected with exit 1', flush=True)
         policy_source = tmp / 'policy-source'
         clean_copy(ROOT, policy_source)
         output_policy(policy_source, tmp)
