@@ -23,7 +23,7 @@ Every completion report carries all fourteen fields. A field with no value is wr
 | `limitations` | What the evidence does not show, in one to three sentences. |
 | `dependency handoff` | For each dependency on another delivery: its issue, its head SHA, and the exact symbol or file this delivery consumes. `none` is a valid answer. |
 | `PR base/head` | PR number, base branch and base SHA, head branch and head SHA. |
-| `review cycle/result` | Which pass this is, `first full` or `findings-only follow-up`, and its result. |
+| `review cycle/result` | `skipped per Andrew directive 2026-10-09 (no OCR)`. OCR and external review are disabled; all other gates remain required. |
 
 ## Evidence levels
 
@@ -109,7 +109,7 @@ limitations:              proves the refusal terminal for one governed payload; 
 dependency handoff:       none
 PR base/head:             PR <N>, base main at 0aa49153f28e5951e76b85728281f3e7bde27f57,
                           head issue171-admission-windows at <candidate SHA>
-review cycle/result:      first full, <result>
+review cycle/result:      skipped per Andrew directive 2026-10-09 (no OCR)
 ```
 
 The terminal label and the message text in that block are placeholders. A real report names
@@ -133,14 +133,18 @@ Each entry is a report fragment that a driver rejects, followed by the evidence 
 
 ## Directional rules
 
-One direction. Formats move forward and old formats are deleted in the same change. No migration path, no migration tool, no backward-compatibility shim, no legacy format reader, and no LLM-compat fallback enters any delivery. A reader for an old shape is new code that keeps two shapes alive, so it is out of scope until an issue explicitly authorizes it.
+One direction. Formats move forward and old formats are deleted in the same change. No migration path, no migration tool, no backward-compatibility shim, no legacy format reader, and no LLM-compat fallback enters any delivery. A reader for an old shape is new code that keeps two shapes alive, so it is out of scope unless an Andrew-approved issue is listed in `compat-ledger.md`.
 
 One compactor. Exactly one compaction implementation owns compaction for this repository. A second compactor, a parallel summarizer, or a fallback compactor is a new architecture decision and requires its own issue with its own evidence contract. A delivery that needs different compaction behavior changes the existing compactor.
 
 Truthful internal failures. An internal failure surfaces as a typed error with its own exit status. A report never describes a swallowed error as success, a skipped check as passed, or a partial run as complete. Where a check did not run, the report says it did not run.
 
-Review ceiling. A delivery receives one full final review plus at most one findings-only follow-up. A third cycle is not run. The delivery returns to its issue with the findings recorded, and the `review cycle/result` field carries that outcome.
+Review directive. OCR/open-code-review and every external reviewer are disabled per Andrew directive 2026-10-09. Do not run them. Record `review cycle/result` as `skipped per Andrew directive 2026-10-09 (no OCR)`. All other gates remain required. The handoff is an open PR; do not merge or close the issue.
 
 ## Handoff
 
 The driver assembles the worker prompt from `docs/architecture-evidence-handoff-template.md` and passes the requirements, the absolute evidence directory, and every dependency SHA explicitly on the command line. The driver never assumes the worker discovers this contract, the template, or any skill on its own. The project-local driver procedure lives in `.agents/skills/rs-architecture-delivery/SKILL.md`.
+
+Master issue #169 routing, source limitations and the exact-head gate inventory are in
+[the integration evidence index](architecture-integration-evidence-index.md). This contract
+does not transfer any runtime ownership or establish composed workload acceptance.

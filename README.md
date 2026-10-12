@@ -436,6 +436,18 @@ errors fail the gate.
 
 CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
 
+## Architecture delivery evidence
+
+The [issue #169 integration evidence index](docs/architecture-integration-evidence-index.md)
+routes the assessment recommendations through their existing owners and distinguishes
+source inventory, production integration and independently demonstrated workloads. Use the
+[completion contract](docs/architecture-evidence-contract.md),
+[explicit worker handoff](docs/architecture-evidence-handoff-template.md) and
+[driver skill](.agents/skills/rs-architecture-delivery/SKILL.md) together. Helper coverage
+or a clean tree does not prove composed acceptance or transfer an API lease. OCR/external
+review is disabled per Andrew directive 2026-10-09; all other gates remain required and the
+handoff is an open PR, not a merge.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball

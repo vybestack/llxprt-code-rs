@@ -1,6 +1,6 @@
 ---
 name: rs-architecture-delivery
-description: Orchestrate an llxprt-code-rs delivery with ownership refresh, explicit worker prompts, exact-commit verification, contract-classified evidence, and the existing final-review and merge gates.
+description: Orchestrate an llxprt-code-rs delivery with ownership refresh, explicit worker prompts, exact-commit verification, contract-classified evidence, and an open-PR handoff.
 ---
 
 # rs-architecture-delivery
@@ -9,6 +9,9 @@ This skill is the operating procedure for a TypeScript driver orchestrating one 
 `llxprt-code-rs`. It produces no code and adds no framework. The evidence definitions live in
 `docs/architecture-evidence-contract.md` and the prompt slots live in
 `docs/architecture-evidence-handoff-template.md`. The driver reads both before starting.
+Issue #169 routing and current integration limitations are indexed in
+`docs/architecture-integration-evidence-index.md`; refresh its source/ownership observations
+at the delivery head rather than treating the historical inventory as a lease.
 
 ## 1. Refresh ownership
 
@@ -29,7 +32,7 @@ contract, or the template. Pass each input as an explicit argument:
 - the issue number, the lease boundary, and the paths the worker must not touch;
 - the requirements, written as the invariant the driver will verify;
 - the absolute evidence directory, for example
-  `/tmp/llxprt-evidence/issue<N>/`, created before the invocation. In the
+  `<absolute worktree>/tmp/llxprt-evidence/issue<N>/`, created before the invocation. In the
   template's terms this is `$EVIDENCE_DIR`, which is `<ABS_EVIDENCE_DIR>/issue<N>`, with
   each claim under `$EVIDENCE_DIR/claim-<k>/`;
 - every dependency SHA, one per dependency, with the symbol or file each one supplies;
@@ -45,6 +48,11 @@ contract, or the template. Pass each input as an explicit argument:
    gates ran against.
 2. Rebuild independently: `cargo build --release --offline --locked` at that head, from the
    clean tree.
+   Also run the MSRV and stable CI-equivalent fmt, strict Clippy, xtask quality/tests,
+   direct-vendor suites, MSRV rustdoc and strict release/extracted-source gates recorded
+   in `.github/workflows/ci.yml` and `docs/architecture-integration-evidence-index.md`.
+   Keep Cargo home, targets and temporary directories in the worktree, retaining any
+   ancestor-workspace sandbox workaround; use short/relative Unix-socket fixture paths.
 3. Recompute the binary hash: `shasum -a 256 target/release/llxprt-code-rs` or
    `sha256sum target/release/llxprt-code-rs`, whichever the host provides, recorded
    verbatim. A hash the driver did not recompute binds nothing.
@@ -95,20 +103,23 @@ Reject these five reports, each with the missing evidence named:
 
 Use the gates that already exist. This skill adds none.
 
-- Final review: one full review, then at most one findings-only follow-up. The review is an
-  OCR (open-code-review CLI) run by the driver with the configured zai glm-5.3 reviewer
-  model; the follow-up, when there is one, is findings-only and reuses the same reviewer
-  model. A third cycle is not run; the delivery returns to its issue with the findings
-  recorded and the `review cycle/result` field carries that outcome.
-- Merge: CI green at the exact head SHA, not at a later head, then one squash merge.
+- Review cycle/result: `skipped per Andrew directive 2026-10-09 (no OCR)`.
+  OCR/open-code-review and every external reviewer are disabled. Do not run them.
+  All other gates still apply; a skipped review is never recorded as passed.
+- Open-PR handoff: verify identity `acoliver` before any GitHub write and stop on
+  auth/access mismatch. Push only the issue's mapped branch via the authorized SSH
+  remote and open a PR against `main` with its exact separate `Tracker-Issue:` and
+  `Fixes #<N>` lines. Record the PR URL/number, base/head SHAs, and exact-head gate
+  results. Required CI remains mandatory. Do not merge, close or reassign the issue.
 
 ## 6. Rules carried into every prompt
 
 One direction: formats move forward, old formats are deleted in the same change, and no
 migration path, backward-compatibility shim, legacy format reader, or LLM-compat fallback is
-written unless an issue explicitly authorizes it. Exactly one compactor exists; compaction
-behavior changes go into that compactor. Internal failures surface as typed errors with their
-own exit statuses and are never reported as success. The review ceiling is one full review
-plus at most one findings-only follow-up. These rules travel in the worker prompt, because
+written unless an Andrew-approved issue is listed in `compat-ledger.md`. Exactly one
+compactor exists; compaction behavior changes go into that compactor. Internal failures
+surface as typed errors with their own exit statuses and are never reported as success.
+OCR and external review are disabled per Andrew directive 2026-10-09; record
+`skipped per Andrew directive 2026-10-09 (no OCR)`. These rules travel in the worker prompt, because
 the worker is the one writing the code, and the template carries their wording in the
 heredoc.
