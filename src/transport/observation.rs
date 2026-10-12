@@ -1,4 +1,4 @@
-//! Bounded request observations carried through the backend's existing framed error.
+//! Bounded request observations carried on the typed transport failure and rendered into its diagnostic.
 
 use serdes_ai::models::error::cause::TerminalCause;
 
@@ -13,19 +13,6 @@ pub struct RequestObservation {
 }
 
 impl RequestObservation {
-    pub(super) fn from_fields(fields: &str) -> Option<Self> {
-        let mut observation = Self::default();
-        for field in fields.split(", ") {
-            if let Some(token) = field.strip_prefix("cause ") {
-                observation.cause = Some(TerminalCause::from_token(token)?);
-            }
-            if let Some(value) = field.strip_prefix("provider-call-ms ") {
-                observation.provider_call_ms = Some(value.parse().ok()?);
-            }
-        }
-        Some(observation)
-    }
-
     pub(super) fn render(&self, out: &mut String) {
         if let Some(cause) = self.cause {
             out.push_str(&format!(", cause {}", cause.as_str()));
@@ -41,20 +28,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn observations_round_trip_without_external_text() {
+    fn observations_render_only_typed_tokens_and_measured_numbers() {
         let observation = RequestObservation {
             cause: Some(TerminalCause::IncompleteMessage),
             provider_call_ms: Some(71),
         };
         let mut out = String::new();
         observation.render(&mut out);
-        assert_eq!(RequestObservation::from_fields(&out), Some(observation));
-        assert!(RequestObservation::from_fields("cause secret.example").is_none());
-        assert!(RequestObservation::from_fields("provider-call-ms secret").is_none());
-        assert!(RequestObservation::from_fields("provider-call-ms 18446744073709551616").is_none());
-        assert_eq!(
-            RequestObservation::from_fields(""),
-            Some(RequestObservation::default())
-        );
+        assert_eq!(out, ", cause incomplete-message, provider-call-ms 71");
+        let mut empty = String::new();
+        RequestObservation::default().render(&mut empty);
+        assert_eq!(empty, "");
     }
 }

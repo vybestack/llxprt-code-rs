@@ -1,10 +1,8 @@
 //! Bounded HTTP response-body handling shared by provider models.
 
 use crate::error::{ModelError, ModelResult};
-// Only the OpenAI chat path reads a failed response as a structured transport detail.
-// The helper set below is compiled solely for that feature so no other retained feature
-// combination sees dead code.
-#[cfg(feature = "openai")]
+// OpenAI chat and Anthropic retain structured status facts for host retry policy.
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 use crate::error::{TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
 #[cfg(any(
     feature = "antigravity",
@@ -17,7 +15,7 @@ use crate::error::{TransportDetail, MAX_TRANSPORT_BODY_PREFIX_BYTES};
     feature = "openai"
 ))]
 use serde::de::DeserializeOwned;
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 use std::time::Duration;
 
 /// Maximum successful JSON response body accepted from a provider.
@@ -39,6 +37,9 @@ pub(crate) const MAX_STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 async fn read_bounded(mut response: reqwest::Response, limit: usize) -> ModelResult<Vec<u8>> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(ModelError::from)? {
+        if !chunk.is_empty() {
+            crate::telemetry::first_body();
+        }
         let next = bytes
             .len()
             .checked_add(chunk.len())
@@ -195,6 +196,18 @@ pub(crate) async fn json<T: DeserializeOwned>(response: reqwest::Response) -> Mo
 }
 
 /// Consume a bounded error response and return a fixed diagnostic that cannot disclose secrets.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<String> {
     let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
     std::str::from_utf8(&bytes)
@@ -205,13 +218,17 @@ pub(crate) async fn error_text(response: reqwest::Response) -> ModelResult<Strin
 /// Consume a bounded error response and return the structured transport facts the host
 /// needs to classify it: the status, a bounded body prefix with the total byte length,
 /// and the provider's `Retry-After`. No unbounded body is retained and the prefix is a
-/// typed field the public formatting never renders. Compiled only for the OpenAI chat
-/// path, which is the single retained consumer.
-#[cfg(feature = "openai")]
+/// typed field the public formatting never renders. A failed diagnostic-body read
+/// never replaces an already-received status with a connectivity failure.
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult<TransportDetail> {
     let status = response.status().as_u16();
     let retry_after = parse_retry_after(response.headers());
-    let bytes = read_bounded(response, MAX_ERROR_BODY_BYTES).await?;
+    let bytes = match read_bounded(response, MAX_ERROR_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(error @ ModelError::ResponseTooLarge { .. }) => return Err(error),
+        Err(_) => return Ok(TransportDetail::from_status(status, None, 0, retry_after)),
+    };
     let body_bytes = bytes.len();
     let text = String::from_utf8_lossy(&bytes);
     let prefix = if text.is_empty() {
@@ -230,7 +247,7 @@ pub(crate) async fn transport_detail(response: reqwest::Response) -> ModelResult
 /// Bound a decoded body to a fixed prefix. The total byte length is kept separately so a
 /// truncated prefix still states how much was read, and the truncation is at a safe
 /// UTF-8 boundary.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn bounded_body_prefix(text: &str) -> String {
     if text.len() <= MAX_TRANSPORT_BODY_PREFIX_BYTES {
         return text.to_string();
@@ -243,16 +260,37 @@ pub(crate) fn bounded_body_prefix(text: &str) -> String {
 }
 
 /// Read the provider's `Retry-After` hint, when one is sent.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    headers
-        .get("retry-after")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
+    retry_after_at(headers, chrono::Utc::now())
+}
+
+#[cfg(any(feature = "openai", feature = "anthropic"))]
+fn retry_after_at(
+    headers: &reqwest::header::HeaderMap,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<Duration> {
+    let value = headers.get("retry-after")?.to_str().ok()?.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let date = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+    Some(date.signed_duration_since(now).to_std().unwrap_or_default())
 }
 
 /// Convert a provider status to a typed, value-free diagnostic.
+#[cfg(any(
+    test,
+    feature = "antigravity",
+    feature = "chatgpt-oauth",
+    feature = "claude-code-oauth",
+    feature = "cohere",
+    feature = "google",
+    feature = "huggingface",
+    feature = "mistral",
+    feature = "ollama",
+    feature = "openrouter"
+))]
 pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>) -> ModelError {
     match status {
         401 | 403 => ModelError::auth("provider authentication failed"),
@@ -265,7 +303,7 @@ pub(crate) fn status_error(status: u16, retry_after: Option<std::time::Duration>
 /// The structured transport failure for a provider status response whose body was read
 /// bounded. The classification derives from the status plus the bounded body, so a
 /// weekly usage limit riding on a 429 or a 403 is a quota exhaustion, not a throttle.
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "anthropic"))]
 pub(crate) fn status_transport_error(detail: TransportDetail) -> ModelError {
     ModelError::Transport(detail)
 }
@@ -371,6 +409,27 @@ mod tests {
         ));
         let diagnostic = status_error(500, None).to_string();
         assert_eq!(diagnostic, "Model HTTP error (status 500)");
+    }
+
+    #[cfg(any(feature = "openai", feature = "anthropic"))]
+    #[test]
+    fn retry_after_supports_seconds_and_http_dates_without_early_rounding() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-11T12:00:00.500Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for (value, expected) in [
+            ("7", Some(Duration::from_secs(7))),
+            (
+                "Sun, 11 Oct 2026 12:00:04 GMT",
+                Some(Duration::from_millis(3500)),
+            ),
+            ("Sun, 11 Oct 2026 11:59:00 GMT", Some(Duration::ZERO)),
+            ("invalid", None),
+        ] {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("retry-after", value.parse().unwrap());
+            assert_eq!(retry_after_at(&headers, now), expected);
+        }
     }
 
     #[tokio::test]

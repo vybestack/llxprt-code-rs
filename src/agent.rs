@@ -27,6 +27,7 @@ mod deadline;
 mod provider_validation;
 mod rate_limit;
 mod stream_retry;
+mod telemetry;
 use deadline::Turn;
 mod finish;
 mod in_flight;
@@ -75,6 +76,8 @@ pub use truncation::is_output_truncation;
 /// Result of a completed turn (either live or replayed).
 #[derive(Debug, Clone)]
 pub struct CompletedRun {
+    /// Observations for this invocation, absent before a turn exists.
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     pub turn: u32,
     pub attempt: u32,
     pub branch_id: String,
@@ -97,6 +100,8 @@ pub struct CompletedRun {
     pub status: String,
     pub branch: bool,
     pub replayed: bool,
+    /// Transport reattempts actually issued during this invocation (zero on replay).
+    pub retry_attempts: u64,
 }
 
 /// Resolved per-run output caps (issue 77). Defined in [`crate::envelope`] beside the
@@ -345,6 +350,7 @@ impl CodingAgent {
 
     fn replayed_run(&self, reserved: &ReservedRequest) -> CompletedRun {
         CompletedRun {
+            telemetry: None,
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
@@ -362,6 +368,7 @@ impl CodingAgent {
             budget_exhausted: false,
             zero_call_tail: malformed_tool_call::zero_call_tail(&reserved.rounds),
             replayed: true,
+            retry_attempts: 0,
             terminal_outcome: None,
         }
     }
@@ -392,18 +399,51 @@ impl CodingAgent {
                     ..Default::default()
                 },
             )?;
-            return Ok(self.replayed_run(&reserved));
+            let mut run = self.replayed_run(&reserved);
+            let mut telemetry = crate::telemetry::Telemetry::default();
+            store.observe_store(&mut telemetry);
+            run.telemetry = Some(Box::new(telemetry));
+            return Ok(run);
         }
         match Turn::new(self) {
-            Ok(turn) => turn.run_reserved(store, &mut reserved),
+            Ok(turn) => {
+                turn.observations.borrow_mut().materialized_history_bytes =
+                    estimate_history_bytes(&reserved.history) as u64;
+                let mut result = turn.run_reserved(store, &mut reserved);
+                let telemetry = turn.snapshot_observations(store);
+                if let Err(error) = store.record_telemetry(&reserved, &telemetry) {
+                    result = Err(AgentError::from_store(error));
+                }
+                match &mut result {
+                    Ok(run) => run.telemetry = Some(Box::new(telemetry)),
+                    Err(error) => error.telemetry = Some(Box::new(telemetry)),
+                }
+                result
+            }
             Err(error) => {
-                Err(self.dead_coded(store, &reserved, error.code, error.key, &error.message, &[]))
+                let mut error =
+                    self.dead_coded(store, &reserved, error.code, error.key, &error.message, &[]);
+                let mut telemetry = crate::telemetry::Telemetry::default();
+                store.observe_store(&mut telemetry);
+                error.telemetry = Some(Box::new(telemetry));
+                Err(error)
             }
         }
     }
 }
 impl Turn<'_> {
     pub(super) fn run_reserved(
+        &self,
+        store: &SessionStore,
+        reserved: &mut ReservedRequest,
+    ) -> Result<CompletedRun, AgentError> {
+        self.run_live(store, reserved).map_err(|mut error| {
+            error.retry_attempts = Some(self.retry_attempts.get());
+            error
+        })
+    }
+
+    fn run_live(
         &self,
         store: &SessionStore,
         reserved: &mut ReservedRequest,
@@ -530,6 +570,7 @@ impl Turn<'_> {
         } else {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
+        let tool_started = std::time::Instant::now();
         let (ok, raw_text) = if known_tool(&call.name, self.allow_shell) {
             crate::tools::execute_tool_with_limit(
                 &self.cwd,
@@ -547,6 +588,13 @@ impl Turn<'_> {
                 ),
             )
         };
+        self.observe_tool(
+            attempt.rounds.len() + 1,
+            call,
+            ok,
+            &raw_text,
+            tool_started.elapsed(),
+        );
         let scrubbed = crate::redact::scrub_secrets(&raw_text, &self.secrets);
         attempt.usage.total_calls += 1;
         let text = crate::redact::truncate_utf8(scrubbed, body_budget);
@@ -708,6 +756,7 @@ impl Turn<'_> {
             Some(self.started.elapsed()),
         )?;
         Ok(CompletedRun {
+            telemetry: None,
             turn: reserved.turn,
             attempt: reserved.attempt,
             branch_id: reserved.branch_id.clone(),
@@ -724,6 +773,7 @@ impl Turn<'_> {
             terminal_outcome: None,
             branch: reserved.attempt > 1,
             replayed: false,
+            retry_attempts: self.retry_attempts.get(),
         })
     }
 
@@ -827,7 +877,7 @@ enum RoundFailure {
     InvalidToolCall(String),
     FinishReason(String),
     ModelTransport(TransportFailure),
-    RateLimitStopped {
+    TransportRetryStopped {
         failure: TransportFailure,
         retries: usize,
         reason: &'static str,

@@ -11,7 +11,8 @@
 
 use crate::model::{ModelConfig, SerdeAiParams, SerdeAiSettings};
 use crate::session::RoundRecord;
-use crate::transport::TransportFailure;
+mod error;
+pub use error::BackendError;
 use serdes_ai::core::{
     messages::ToolCallArgs,
     messages::{FinishReason, ModelResponse, ModelResponsePart},
@@ -36,6 +37,7 @@ pub struct LlmUsage {
     pub request_tokens: Option<u64>,
     pub response_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
     pub cache_creation_tokens: Option<u64>,
     pub cache_read_tokens: Option<u64>,
 }
@@ -87,6 +89,11 @@ impl LlmResult {
                 request_tokens: u.request_tokens,
                 response_tokens: u.response_tokens,
                 total_tokens: u.total_tokens,
+                reasoning_tokens: u
+                    .details
+                    .as_ref()
+                    .and_then(|d| d.get("reasoning_tokens"))
+                    .and_then(serde_json::Value::as_u64),
                 cache_creation_tokens: u.cache_creation_tokens,
                 cache_read_tokens: u.cache_read_tokens,
             });
@@ -104,10 +111,14 @@ impl LlmResult {
 /// transport; implementations must not block the executor. Transport tasks must
 /// stay on the caller's runtime so turn teardown cancels them as well.
 pub type ModelFuture<'a> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, String>> + 'a>>;
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, BackendError>> + 'a>>;
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Whether response body events arrive during generation (rather than final JSON).
+    fn streams_response(&self) -> bool {
+        false
+    }
     /// Typed preterminal SSE interruption from the most recent request only.
     /// Implementations clear this before every call; ordinary errors never set it.
     fn stream_interruption(&self) -> Option<usize> {
@@ -126,7 +137,7 @@ pub trait ChatBackend {
     }
 
     /// Send the accumulated parts and map the reply. A network/transport error becomes
-    /// `Err(String)`; the agent turns that into a terminal failure.
+    /// a structured error; the agent applies bounded retry policy.
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],
@@ -334,13 +345,12 @@ pub fn openai_chat_model(
 }
 
 impl ModelAdapter {
-    /// Send a request and map the reply, translating errors into the `Err(String)` the
-    /// loop converts to a failed result.
+    /// Send a request and retain structured transport errors for host retry policy.
     pub async fn request_async(
         &self,
         requests: &[ModelRequest],
         tools: &[crate::tools::ToolSpec],
-    ) -> Result<LlmResult, String> {
+    ) -> Result<LlmResult, BackendError> {
         let tool_defs = tools.iter().map(schema_for).collect::<Vec<_>>();
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tool_defs),
@@ -355,13 +365,7 @@ impl ModelAdapter {
             .inner
             .request(requests, &settings, &params.to_model_request_parameters())
             .await
-            .map_err(|e| {
-                let e = crate::transport::context_length_400(&e).unwrap_or(e);
-                match TransportFailure::from_model_error(&e) {
-                    Some(failure) => failure.diagnostic(),
-                    None => e.to_string(),
-                }
-            })?;
+            .map_err(BackendError::from_model)?;
         Ok(LlmResult::from_response(&resp, &[]))
     }
 }

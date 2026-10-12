@@ -16,8 +16,12 @@ const RUNTIME_SHUTDOWN_BOUND: std::time::Duration = std::time::Duration::from_mi
 /// detached instead of delaying the terminal envelope.
 pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
+    pub(super) observations: std::cell::RefCell<crate::telemetry::Telemetry>,
+    pub(super) telemetry_round: std::cell::Cell<usize>,
+    pub(super) telemetry_attempt: std::cell::Cell<u64>,
     pub(super) started: Instant,
     pub(super) deadline: Option<Instant>,
+    pub(super) retry_attempts: std::cell::Cell<u64>,
     pub(super) runtime: Option<tokio::runtime::Runtime>,
 }
 
@@ -68,9 +72,13 @@ impl<'a> Turn<'a> {
         };
         Ok(Self {
             agent,
+            observations: Default::default(),
+            telemetry_round: std::cell::Cell::new(1),
+            telemetry_attempt: std::cell::Cell::new(0),
             started,
             deadline,
             runtime: Some(runtime),
+            retry_attempts: std::cell::Cell::new(0),
         })
     }
 
@@ -115,43 +123,51 @@ impl<'a> Turn<'a> {
         &self,
         requests: &[serdes_ai::core::ModelRequest],
         tools: &[crate::tools::ToolSpec],
+        reattempt: bool,
+    ) -> Result<LlmResult, RoundFailure> {
+        self.observed_round(requests, tools, reattempt)
+    }
+
+    pub(super) fn round_once_inner(
+        &self,
+        requests: &[serdes_ai::core::ModelRequest],
+        tools: &[crate::tools::ToolSpec],
+        reattempt: bool,
+        collector: &serdes_ai::models::telemetry::Collector,
     ) -> Result<LlmResult, RoundFailure> {
         let result = self
             .runtime
             .as_ref()
             .expect("the turn runtime outlives every provider round")
             .block_on(async {
-                let request = self.backend.request(requests, tools);
+                if self
+                    .deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    return Err(RoundFailure::TurnTime);
+                }
+                if reattempt {
+                    self.retry_attempts.set(self.retry_attempts.get() + 1);
+                }
+                let request = collector.scope(self.backend.request(requests, tools));
                 match self.deadline {
-                    Some(deadline) => {
-                        if Instant::now() >= deadline {
-                            return Err(RoundFailure::TurnTime);
-                        }
-                        tokio::time::timeout_at(deadline, request)
-                            .await
-                            .map_err(|_| RoundFailure::TurnTime)
-                    }
+                    Some(deadline) => tokio::time::timeout_at(deadline, request)
+                        .await
+                        .map_err(|_| RoundFailure::TurnTime),
                     None => Ok(request.await),
                 }
             })?
-            .map_err(|message| {
+            .map_err(|error| {
                 if let Some(events) = self.backend.stream_interruption() {
                     return RoundFailure::StreamInterrupted(events);
                 }
-                match TransportFailure::from_message(&message) {
-                    Some(failure) => RoundFailure::ModelTransport(failure),
-                    None => RoundFailure::Model(message),
+                match error {
+                    crate::adapter::BackendError::Transport(failure) => {
+                        RoundFailure::ModelTransport(failure)
+                    }
+                    crate::adapter::BackendError::Message(message) => RoundFailure::Model(message),
                 }
             })?;
-        if let (Some(output), Some(snapshot)) =
-            (&self.cache_output, self.backend.cache_observation())
-        {
-            output
-                .publish(&snapshot)
-                .map_err(RoundFailure::CacheOutput)?;
-        }
-        // Bound and validate the reply before it can join any transcript or usage total.
-        provider_validation::validate(&result, &self.secrets)?;
         Ok(result)
     }
 }

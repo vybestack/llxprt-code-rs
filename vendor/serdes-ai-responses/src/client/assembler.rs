@@ -213,6 +213,7 @@ mod tests {
         let response = ResponseObject {
             id: "resp_1".into(),
             usage: Some(ResponseUsage {
+                output_tokens_details: None,
                 input_tokens: Some(7),
                 input_tokens_details: Some(crate::types::InputTokensDetails {
                     cached_tokens: Some(5),

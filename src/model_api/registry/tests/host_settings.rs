@@ -137,17 +137,13 @@ fn responses_profile_request_budget_bounds_a_stalled_loopback_request() {
             .request(&[serdes_ai::ModelRequest::default()], &[]),
     );
     let error = result.unwrap_err();
-    // The parsed budget is installed on both reqwest and the outer request timer.
-    // Either timer can report this same deadline; require a truthful timeout, not
-    // whichever layer happens to win their race. Other transport errors reject.
-    assert!(
-        matches!(
-            error.as_str(),
-            "responses request exceeded the configured timeout"
-                | "model transport failed (origin timeout, class connectivity, retryable)"
-        ),
-        "unexpected deadline outcome: {error}"
-    );
+    // The HTTP transport owns the parsed request budget through the body.
+    // Require a typed timeout, not diagnostic prose or a competing timer.
+    let crate::adapter::BackendError::Transport(failure) = error else {
+        panic!("expected typed timeout: {error}");
+    };
+    assert_eq!(failure.kind, crate::transport::TransportKind::Connectivity);
+    assert_eq!(failure.origin, "timeout");
     assert_eq!(constructed.backend.request_calls(), 1);
     let body = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     for key in [

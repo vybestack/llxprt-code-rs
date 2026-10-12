@@ -11,7 +11,8 @@ runtime, a provider idle cutoff, quota exhaustion, or any single cause for the e
 This change repairs the **measurement loss**, not a demonstrated provider transport defect.
 It uses the existing Anthropic backend and preserves the current request generation, provider
 selection, usage/finish semantics, request timeout, retry policy and executor. There is no
-streaming switch, provider fallback, compatibility reader or automatic accepted-request replay.
+streaming switch, provider fallback or compatibility reader. This change adds no replay;
+the bounded connectivity retry owned by `docs/request-retries.md` (#49) is the only reissue.
 The parallel open PR touching the Anthropic wire implementation is left unchanged.
 
 ## Public observations
@@ -23,7 +24,7 @@ A status-free reqwest error retains one typed allowlisted terminal source catego
 source string is inspected, retained or rendered; rustls alert/certificate payloads are never
 printed. Unknown causes stay unknown, and a capped/cyclic chain is explicitly incomplete.
 
-The existing framed diagnostic carries `cause <token>` and `provider-call-ms <integer>` into
+The typed `BackendError::Transport` failure renders `cause <token>` and `provider-call-ms <integer>` into
 the final error envelope and failed session record, without a new envelope format. The elapsed
 value is measured with a monotonic clock across the host's provider call: local request
 conversion, send, response read and parse. It excludes tool execution and the gap between
@@ -40,8 +41,8 @@ Anthropic peers, with real tools, session storage and terminal error handling:
 
 - Complete one source edit, accept the next implementation request, wait 60 ms, send a partial
   HTTP response head, then close. The terminal and persisted error preserve typed
-  `incomplete-message` and measured latency; exit is 5, useful edits survive, and no accepted
-  request is replayed.
+  `incomplete-message` and measured latency; exit is 5, useful edits survive, and the request
+  is reissued only within the bounded #49 retry budget (one attempt plus three retries).
 - Accept a request but do not respond before its configured local timeout. The terminal is
   `origin timeout`, not `incomplete-message`, and no source edit is claimed.
 - Complete a three-tool controlled implementation mission: author a Python addition function,

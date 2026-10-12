@@ -662,9 +662,20 @@ pub struct InputTokensDetails {
     pub cached_tokens: Option<u64>,
 }
 
+/// Provider-reported output token details.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputTokensDetails {
+    /// Reasoning tokens, absent when not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+}
+
 /// Token usage reported on a response.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponseUsage {
+    /// Output token details, absent when not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens_details: Option<OutputTokensDetails>,
     /// Provider-reported input cache details, absent when not reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens_details: Option<InputTokensDetails>,

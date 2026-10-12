@@ -7,7 +7,6 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{anthropic_claude_profile, ModelProfile};
 use async_trait::async_trait;
 use base64::Engine;
-use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
     DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
@@ -564,19 +563,6 @@ impl AnthropicModel {
             kind: "response".to_string(),
         })
     }
-
-    fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
-        headers
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_secs)
-    }
-
-    /// Handle API error response.
-    fn handle_error_response(&self, status: u16, _body: &str, headers: &HeaderMap) -> ModelError {
-        crate::response::status_error(status, Self::parse_retry_after(headers))
-    }
 }
 
 #[async_trait]
@@ -621,13 +607,13 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
-        let status = response.status().as_u16();
         if !response.status().is_success() {
-            let headers = response.headers().clone();
-            let body = crate::response::error_text(response).await?;
-            return Err(self.handle_error_response(status, &body, &headers));
+            let detail = crate::response::transport_detail(response).await?;
+            return Err(crate::response::status_transport_error(detail));
         }
 
         let resp: MessagesResponse = crate::response::json(response).await?;
@@ -661,13 +647,13 @@ impl Model for AnthropicModel {
             request = request.header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
+        crate::telemetry::request_sent();
         let response = request.json(&body).send().await?;
+        crate::telemetry::headers();
 
-        let status = response.status().as_u16();
         if !response.status().is_success() {
-            let headers = response.headers().clone();
-            let body = crate::response::error_text(response).await?;
-            return Err(self.handle_error_response(status, &body, &headers));
+            let detail = crate::response::transport_detail(response).await?;
+            return Err(crate::response::status_transport_error(detail));
         }
 
         let byte_stream = crate::response::stream(response);

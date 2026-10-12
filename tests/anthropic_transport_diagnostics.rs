@@ -76,9 +76,18 @@ fn invoke(
         .env_remove("LLXPRT_CONFIG_OVERRIDES").env_remove("LLXPRT_CODE_RS_BIN")
         .args(["--profile-load"]).arg(profile)
         .args(["--session",session,"--cwd"]).arg(root)
-        .args(["--allow-shell","--max-tool-calls","8","--turn-time","10s","-p",
+        .args(["--allow-shell","--max-tool-calls","8","--turn-time","30s","-p",
             "Implement add(a,b) in arithmetic.py, write test_arithmetic.py with an assertion, run python3 test_arithmetic.py, then summarize."])
         .output().unwrap()
+}
+
+/// The envelope carries the rendered diagnostic, so read the measured timing from it.
+fn provider_call_ms(message: &str) -> u64 {
+    message
+        .split_once("provider-call-ms ")
+        .and_then(|(_, rest)| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or_else(|| panic!("no provider-call-ms in {message}"))
 }
 
 #[test]
@@ -97,21 +106,25 @@ fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_
             ))
             .unwrap();
         drop(first);
-        let (mut second, _) = accept(&listener);
-        let request = read_request(&second);
-        assert!(request["messages"].to_string().contains("tool_result"));
-        // Accepted request, delayed partial response head, then orderly peer closure.
-        std::thread::sleep(Duration::from_millis(60));
-        second
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
-            .unwrap();
-        drop(second);
+        // Since #49 the host reissues a connectivity failure at most MAX_RETRIES
+        // times, so the accepted request is attempted 1 + 3 times and never again.
+        for _ in 0..4 {
+            let (mut second, _) = accept(&listener);
+            let request = read_request(&second);
+            assert!(request["messages"].to_string().contains("tool_result"));
+            // Accepted request, delayed partial response head, then orderly peer closure.
+            std::thread::sleep(Duration::from_millis(60));
+            second
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+                .unwrap();
+            drop(second);
+        }
         listener.set_nonblocking(true).unwrap();
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
-            "no automatic accepted-request replay"
+            "no replay beyond the bounded retry budget"
         );
     });
     let root = tempfile::tempdir().unwrap();
@@ -124,8 +137,7 @@ fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_
     let message = envelope["error"]["message"].as_str().unwrap();
     assert!(message.contains("origin request"), "{message}");
     assert!(message.contains("cause incomplete-message"), "{message}");
-    let failure = llxprt_code_rs::transport::TransportFailure::from_message(message).unwrap();
-    assert!(failure.observation.provider_call_ms.unwrap() >= 50);
+    assert!(provider_call_ms(message) >= 50);
     assert!(message.len() < llxprt_code_rs::transport::MAX_TRANSPORT_DIAGNOSTIC_BYTES);
     for private in [
         "issue191-secret-marker",
@@ -165,9 +177,16 @@ fn local_request_timeout_is_not_classified_as_incomplete_message() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
-        let (stream, _) = accept(&listener);
-        read_request(&stream);
+        // The initial attempt and each of the three bounded retries stay unanswered.
+        let held: Vec<_> = (0..4)
+            .map(|_| {
+                let (stream, _) = accept(&listener);
+                read_request(&stream);
+                stream
+            })
+            .collect();
         std::thread::sleep(Duration::from_millis(1500));
+        drop(held);
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), "issue191-timeout");
@@ -178,8 +197,7 @@ fn local_request_timeout_is_not_classified_as_incomplete_message() {
     let message = envelope["error"]["message"].as_str().unwrap();
     assert!(message.contains("origin timeout"), "{message}");
     assert!(!message.contains("incomplete-message"));
-    let failure = llxprt_code_rs::transport::TransportFailure::from_message(message).unwrap();
-    assert!(failure.observation.provider_call_ms.unwrap() >= 1000);
+    assert!(provider_call_ms(message) >= 1000);
     assert!(!root.path().join("arithmetic.py").exists());
 }
 

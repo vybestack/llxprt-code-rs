@@ -47,9 +47,9 @@ fn codex_sse_errors_controls_and_ambiguity_are_not_replayed() {
         ] {
             let (backend, server) = loopback_sse(payload.to_string());
             let error = test_runtime().block_on(backend.request(&[ModelRequest::default()], &[])).unwrap_err();
-            assert!(error.contains("SSE"), "{error}");
-            assert!(!error.contains("SECRET"));
-            assert!(error.len() <= crate::redact::MAX_DIAGNOSTIC_BYTES);
+            assert!(error.to_string().contains("SSE"), "{error}");
+            assert!(!error.to_string().contains("SECRET"));
+            assert!(error.to_string().len() <= crate::redact::MAX_DIAGNOSTIC_BYTES);
             assert_eq!(backend.request_calls(), 1);
             server.join().unwrap();
         }
@@ -65,9 +65,9 @@ fn codex_sse_preserves_progress_but_does_not_claim_partial_success() {
     let error = test_runtime()
         .block_on(backend.request(&[ModelRequest::default()], &[]))
         .unwrap_err();
-    assert!(error.contains("accumulated"), "{error}");
-    assert!(!error.contains("accumulated 0"), "{error}");
-    assert!(!error.contains("SECRET"));
+    assert!(error.to_string().contains("accumulated"), "{error}");
+    assert!(!error.to_string().contains("accumulated 0"), "{error}");
+    assert!(!error.to_string().contains("SECRET"));
     assert_eq!(backend.request_calls(), 1);
     server.join().unwrap();
 }
@@ -115,8 +115,11 @@ fn codex_sse_response_failed_is_typed_scrubbed_and_terminal() {
     let error = test_runtime()
         .block_on(backend.request(&[ModelRequest::default()], &[]))
         .unwrap_err();
-    assert!(error.contains("provider error (server_error)"), "{error}");
-    assert!(!error.contains("SECRET"));
+    assert!(
+        error.to_string().contains("provider error (server_error)"),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("SECRET"));
     assert_eq!(backend.request_calls(), 1);
     server.join().unwrap();
 }
@@ -145,7 +148,10 @@ fn codex_sse_ambiguous_terminal_status_is_not_success() {
     let error = test_runtime()
         .block_on(backend.request(&[ModelRequest::default()], &[]))
         .unwrap_err();
-    assert!(error.contains("ambiguous completed response"), "{error}");
+    assert!(
+        error.to_string().contains("ambiguous completed response"),
+        "{error}"
+    );
     assert_eq!(backend.request_calls(), 1);
     server.join().unwrap();
 }
@@ -160,8 +166,8 @@ fn codex_sse_frames_after_terminal_are_not_silent_success() {
     ] {
         let (backend, server) = loopback_sse(format!("{normal}{suffix}"));
         let error = test_runtime().block_on(backend.request(&[ModelRequest::default()], &[])).unwrap_err();
-        assert!(error.contains("after"), "{error}");
-        assert!(error.contains("accumulated"), "{error}");
+        assert!(error.to_string().contains("after"), "{error}");
+        assert!(error.to_string().contains("accumulated"), "{error}");
         assert_eq!(backend.request_calls(), 1);
         server.join().unwrap();
     }
@@ -203,8 +209,8 @@ fn codex_sse_nonterminal_lifecycle_contradictions_cannot_be_dropped() {
             let error = test_runtime()
                 .block_on(backend.request(&[ModelRequest::default()], &[]))
                 .unwrap_err();
-            assert!(error.contains("ambiguous"), "{error}");
-            assert!(!error.contains("SECRET"));
+            assert!(error.to_string().contains("ambiguous"), "{error}");
+            assert!(!error.to_string().contains("SECRET"));
             assert_eq!(backend.request_calls(), 1);
             server.join().unwrap();
         }

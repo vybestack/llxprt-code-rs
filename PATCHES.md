@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `df01b7794bdd0988b301625807dd29e08758ca368ea11c4946dce18533ef4db7`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `b517abb067b69eac09b1dc7dab76ae1722f5aaef11880af4dc50a7730e67fdad`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -460,6 +460,37 @@ tests plus the root adapter tests consume them. The former contradiction case th
 cleared the terminal output now mutates a terminal item's arguments instead, because
 clearing the output is valid live wire.
 
+## Patch 18 - request retry facts (#49)
+
+OpenAI chat, Anthropic Messages and Responses HTTP (streaming and nonstreaming)
+share bounded structured error-body extraction.
+Anthropic now retains status, bounded body prefix and Retry-After so quota refusals
+remain nonretryable instead of being flattened to generic throttles. A received
+HTTP error status survives a diagnostic-body transport failure (notably a 401
+whose body times out); oversized diagnostic bodies still fail their existing
+protocol cap. Retry-After accepts delta seconds and HTTP dates via the already
+shipped chrono dependency, preserving subsecond minimum waits. The host adapter
+carries these facts as `BackendError::Transport` into the single bounded turn-owned
+retry loop; provider diagnostic prose never authorizes a retry. Public vendored
+error formatting remains value-free. No new dependency or second retry policy is
+introduced.
+Responses HTTP uses the additive typed `TransportDetail::from_response` reader
+instead of flattening status/error bodies, retaining Retry-After and preserving
+its existing previous-response recovery. The host still recognizes typed 400
+context-window refusals before retry classification.
+Responses HTTP applies ModelSettings::timeout through the body; the host timer
+remains only for WebSocket. This removes the competing deadline that could erase
+an already-received permanent status when diagnostic-body reading times out.
+
+## Issue 17: request-local telemetry
+
+The model crate now exposes a scoped monotonic transport collector: send, headers,
+first nonempty body/frame and streamed terminal time. The Responses reader task
+explicitly propagates that scope, including on cancellation. Chat reasoning-token
+usage and Responses terminal total/reasoning usage are retained. Unknown counters
+remain absent; numeric totals use checked arithmetic. No endpoint/authentication,
+request-content, transport retry or stream-validation policy is changed.
+
 ## Issue 191 - bounded terminal transport cause (measurement, not provider repair)
 
 `vendor/serdes-ai-models/src/error/cause.rs` walks at most 32 typed source nodes without
@@ -471,8 +502,8 @@ the exact already-locked versions, so downcasts share reqwest's concrete types. 
 closure is unchanged; all affected vendored lockfiles carry only the added direct edges.
 
 The existing Anthropic host owner measures elapsed milliseconds across its provider call
-and carries `cause` and `provider-call-ms` through the existing framed error and terminal
-transport classification. This boundary includes local conversion, send, body read and
+and records `cause` and `provider-call-ms` on the typed `BackendError::Transport`
+failure, which renders them into the bounded diagnostic. This boundary includes local conversion, send, body read and
 parse, not tool execution, time-to-first-byte, connection establishment time or provider
 processing alone. Millisecond rounding may produce zero; zero does not prove an unsent
 request. Timeout/connect variants retain their existing classification and formatting.

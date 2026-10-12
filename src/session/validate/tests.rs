@@ -8,6 +8,7 @@ fn valid_state() -> SessionState {
         cwd_dev: 0,
         cwd_ino: 0,
         branches: vec![BranchRecord {
+            telemetry: None,
             stream_retries: Vec::new(),
             branch_id: "b1".to_string(),
             turn: 1,

@@ -65,6 +65,9 @@ pub enum Envelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OkEnvelope {
+    /// Strict, versioned observations; setup failures may have none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -85,6 +88,8 @@ pub struct OkEnvelope {
     /// Consecutive trailing assistant rounds that parsed to zero tool calls, including
     /// the final summary round (so a healthy wrap-up reports `1`).
     pub zero_call_tail: u64,
+    /// Transport reattempts issued in this invocation, excluding initial calls.
+    pub retry_attempts: u64,
     pub prompt_digest: String,
     /// Resolved output caps (issue 77): per-result shell/tool caps and the aggregate
     /// per-turn tool-output cap.
@@ -99,6 +104,9 @@ pub struct OkEnvelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorEnvelope {
+    /// Strict, versioned observations; setup failures may have none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
     /// Safe session component: ASCII letters, digits, underscore, or hyphen.
     #[schemars(regex(pattern = "^[A-Za-z0-9_-]{1,64}$"))]
     pub session_id: String,
@@ -116,6 +124,9 @@ pub struct EnvelopeError {
     /// `model-transient-server`. Free-form text never appears here.
     pub code: String,
     pub message: String,
+    /// Present once a live turn starts, including zero for immediate failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_attempts: Option<u64>,
     /// Profiling lifecycle stage; present only for `mem-profile` failures.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
@@ -143,6 +154,7 @@ impl Envelope {
         message: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: code.into(),
@@ -150,6 +162,7 @@ impl Envelope {
                 stage: None,
                 session_status: None,
                 terminal_outcome: None,
+                retry_attempts: None,
             },
         })
     }
@@ -162,6 +175,7 @@ impl Envelope {
         session_status: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
                 code: "mem-profile".into(),
@@ -169,6 +183,7 @@ impl Envelope {
                 stage: Some(stage.into()),
                 session_status: Some(session_status.into()),
                 terminal_outcome: None,
+                retry_attempts: None,
             },
         })
     }

@@ -1,3 +1,4 @@
+mod telemetry_output;
 use super::*;
 
 /// Maps a digest-size-floor failure to its CLI boundary error (issue 125): a tightening
@@ -26,6 +27,7 @@ pub fn run_profiled(
     let config_home = crate::config::ConfigHomeRoot::discover()
         .map_err(|error| AppError::new(Code::Config, "config-home", error))?;
     let cache_output = open_cache_output(&args, &config_home)?;
+    let telemetry_output = open_telemetry_output(&args, &config_home)?;
     // Issue 88: install the cancellation handlers before anything else so a `kill -TERM` on this
     // worker takes the active tool's process group with it. Best-effort; a platform that rejects
     // the registration still runs the turn.
@@ -80,7 +82,7 @@ pub fn run_profiled(
             &cwd,
             agent.workspace_cap(),
         )
-        .map_err(|error| AppError::new(Code::Turn, "turn", error.to_string()))?;
+        .map_err(|error| reservation_error(&store, error))?;
     let metrics = store.take_profile_metrics();
     profile_event(
         &profiler,
@@ -94,7 +96,8 @@ pub fn run_profiled(
         },
     )?;
     let output_caps = agent.output_caps();
-    let run = agent.run(&store, &reserved).map_err(agent_error)?;
+    let result = agent.run(&store, &reserved).map_err(agent_error);
+    let run = publish_telemetry(telemetry_output, result)?;
     Ok(RunOutcome {
         session: session_id,
         session_dir: store.session_dir().to_path_buf(),
@@ -227,10 +230,19 @@ fn resolved_digest_size_floor(settings: &Settings) -> Result<usize, AppError> {
 
 fn agent_error(error: crate::agent::AgentError) -> AppError {
     if error.code == Code::Profiling {
-        return AppError::profiling_at(error.key, error.message);
+        let mut app = AppError::profiling_at(error.key, error.message);
+        app.observations = Some(Box::new(FailureObservations {
+            telemetry: error.telemetry,
+            retry_attempts: error.retry_attempts,
+        }));
+        return app;
     }
     let mut app =
         AppError::new(error.code, error.key, error.message).with_envelope_code(error.envelope_code);
+    app.observations = Some(Box::new(FailureObservations {
+        telemetry: error.telemetry,
+        retry_attempts: error.retry_attempts,
+    }));
     if error.terminal_outcome.is_some() {
         // The run declared its own terminal verdict (issues 146 and 153); carry it into
         // the stdout envelope so a headless caller can branch on this condition alone.
@@ -245,3 +257,53 @@ fn agent_error(error: crate::agent::AgentError) -> AppError {
 
 #[cfg(test)]
 mod shell_policy_tests;
+
+fn open_telemetry_output(
+    args: &Args,
+    config: &crate::config::ConfigHomeRoot,
+) -> Result<Option<telemetry_output::Output>, AppError> {
+    args.telemetry_output
+        .as_deref()
+        .map(|path| telemetry_output::Output::create(path, config))
+        .transpose()
+        .map_err(|message| AppError::new(Code::Config, "telemetry-output", message))
+}
+
+fn publish_telemetry(
+    mut output: Option<telemetry_output::Output>,
+    result: Result<crate::agent::CompletedRun, AppError>,
+) -> Result<crate::agent::CompletedRun, AppError> {
+    let telemetry = match &result {
+        Ok(run) => run.telemetry.as_deref(),
+        Err(error) => error.telemetry(),
+    };
+    if let (Some(output), Some(telemetry)) = (&mut output, telemetry) {
+        if let Err(message) = output.publish(telemetry) {
+            let mut error = AppError::new(Code::Turn, "telemetry-output", message);
+            error.session_status = Some(if result.is_ok() { "ok" } else { "failed" }.into());
+            error.observations = Some(Box::new(FailureObservations {
+                telemetry: Some(Box::new(telemetry.clone())),
+                retry_attempts: match &result {
+                    Ok(run) => Some(run.retry_attempts),
+                    Err(failed) => failed.retry_attempts(),
+                },
+            }));
+            return Err(error);
+        }
+    }
+    result
+}
+
+fn reservation_error(
+    store: &crate::session::SessionStore,
+    error: crate::session::StoreError,
+) -> AppError {
+    let mut app = AppError::new(Code::Turn, "turn", error.to_string());
+    let mut telemetry = crate::telemetry::Telemetry::default();
+    store.observe_store(&mut telemetry);
+    app.observations = Some(Box::new(FailureObservations {
+        telemetry: Some(Box::new(telemetry)),
+        retry_attempts: None,
+    }));
+    app
+}

@@ -57,6 +57,7 @@
 #![deny(unsafe_code)]
 
 pub mod error;
+pub mod telemetry;
 
 #[cfg(any(
     feature = "anthropic",

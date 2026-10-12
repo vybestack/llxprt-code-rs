@@ -46,7 +46,10 @@ fn truncated_body_has_typed_cause_and_never_becomes_completion() {
         .block_on(backend.request(&[crate::adapter::system_request("secret-prompt")], &[]))
         .unwrap_err();
     server.join().unwrap();
-    let failure = crate::transport::TransportFailure::from_message(&error).unwrap();
+    let crate::adapter::BackendError::Transport(failure) = &error else {
+        panic!("expected a typed transport failure: {error}");
+    };
+    let error = error.to_string();
     // reqwest wraps response chunk failures as decode at this reader boundary.
     assert_eq!(failure.origin, "decode");
     assert_eq!(

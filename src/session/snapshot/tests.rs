@@ -10,6 +10,7 @@ fn reservation_event(prompt: &str) -> log::Event {
         cwd_dev: 1,
         cwd_ino: 1,
         branch: Box::new(BranchRecord {
+            telemetry: None,
             branch_id: "b1".into(),
             turn: 1,
             attempt: 1,
