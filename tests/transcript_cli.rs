@@ -478,7 +478,7 @@ fn missing_session_is_not_created_and_help_teaches() {
     let help = String::from_utf8(help.stdout).unwrap();
     for text in [
         "--emit",
-        "Chat has no thinking",
+        "readable thinking",
         "2>turn.jsonl",
         "transcript --session",
         "2 usage, 3 config, 4 session, 5 model, 6 turn",

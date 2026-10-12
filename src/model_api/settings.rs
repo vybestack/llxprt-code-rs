@@ -54,12 +54,10 @@ impl CodexResponsesSettingsDraft {
     }
 
     pub(crate) fn responses_reasoning(&self) -> Option<ReasoningSettings> {
-        self.reasoning_effort
-            .as_ref()
-            .map(|effort| ReasoningSettings {
-                effort: Some(effort.clone()),
-                summary: Some(serde_json::Value::String("auto".to_string())),
-            })
+        Some(ReasoningSettings {
+            effort: self.reasoning_effort.clone(),
+            summary: Some(serde_json::json!("auto")),
+        })
     }
 }
 
@@ -79,7 +77,9 @@ impl OpenAiResponsesSettingsDraft {
         let cached = self.prompt_caching == PromptCaching::Cached;
         serdes_ai::models::openai::OpenAIResponsesModelSettings {
             reasoning_effort: self.reasoning_effort,
-            reasoning_summary: self.reasoning_summary,
+            reasoning_summary: self
+                .reasoning_summary
+                .or(Some(serdes_ai::models::openai::ReasoningSummary::Auto)),
             send_reasoning_ids: false,
             previous_response_id: None,
             text_verbosity: self.text_verbosity,

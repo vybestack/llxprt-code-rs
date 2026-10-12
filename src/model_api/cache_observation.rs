@@ -379,6 +379,7 @@ mod tests {
                 self.attempts.set(call);
                 match call {
                     1 => Ok(crate::adapter::LlmResult {
+                        continuation: None,
                         thinking: "fixture reasoning".to_string(),
                         usage: LlmUsage {
                             request_tokens: Some(100),

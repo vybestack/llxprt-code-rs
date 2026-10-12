@@ -38,10 +38,20 @@ impl Turn<'_> {
                     }
                     return Err(error);
                 }
-                return Ok(current.text);
+                let text = current.text.clone();
+                attempt.current = Some(current);
+                return Ok(text);
             }
             // Ordinary empty no-tool replies have not yet joined the outgoing requests.
             attempt.requests.push(assistant_request(&current));
+            if current.continuation.is_some() || !current.thinking.is_empty() {
+                attempt.rounds.push(RoundRecord {
+                    thinking: current.thinking,
+                    continuation: current.continuation,
+                    assistant: current.text,
+                    calls: Vec::new(),
+                });
+            }
         }
         self.forced_summary(store, reserved, tools, attempt)
     }
@@ -67,11 +77,13 @@ impl Turn<'_> {
         attempt.usage.assistant_bytes = attempt
             .usage
             .assistant_bytes
-            .saturating_add(forced.text.len());
+            .saturating_add(forced.assistant_bytes());
         self.enforce_usage(store, reserved, &attempt.rounds, &attempt.usage)?;
         self.check_round_limit(store, reserved, &attempt.rounds)?;
         self.emit_response(store, reserved, &attempt.rounds, &forced)?;
-        Ok(forced.text)
+        let text = forced.text.clone();
+        attempt.current = Some(forced);
+        Ok(text)
     }
 
     /// Final calls share provider recovery, the original turn clock, exact live

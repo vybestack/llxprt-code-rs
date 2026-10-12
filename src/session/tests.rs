@@ -165,6 +165,8 @@ fn tool_call_record_durable_form_omits_result_live() {
 fn tool_call_record_debug_omits_live_payload_in_embedded_round() {
     let live_secret = "live-payload-must-not-appear";
     let round = RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: "assistant".to_string(),
         calls: vec![ToolCallRecord {
             id: "call-1".to_string(),

@@ -1,10 +1,10 @@
-//! Responses reasoning is emitted only when provided, and never persisted.
+//! Unsafe/oversized private reasoning is refused, not display-truncated into replay.
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::process::Command;
 
 #[test]
-fn responses_thinking_is_bounded_scrubbed_live_only() {
+fn responses_oversized_private_thinking_is_refused_without_leaking() {
     run_reasoning(
         format!("secret-thinking-key {}", "界".repeat(400_000)),
         None,
@@ -64,11 +64,17 @@ fn run_reasoning(thinking: String, forbidden: Option<&str>) {
         .args(["--emit", "all", "-p", "hello"])
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    // The new private-state owner cannot safely keep these original blocks.
+    // A scrubbed/truncated display must not turn them into successful replay.
+    assert_eq!(output.status.code(), Some(5));
+    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["status"], "error");
+    assert_eq!(envelope["error"]["code"], "model");
+    assert!(envelope["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("reasoning continuation"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("secret-thinking-key"));
     server.join().unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(!stderr.contains("secret-thinking-key"));
@@ -82,20 +88,17 @@ fn run_reasoning(thinking: String, forbidden: Option<&str>) {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0]["type"], "thinking");
-    assert_eq!(events[0]["turn"], 1);
-    assert_eq!(events[0]["round"], 1);
-    assert_eq!(events[1]["type"], "assistant_text");
-    let bytes: usize = events
-        .iter()
-        .map(|event| event["text"].as_str().unwrap().len())
-        .sum();
-    assert!(bytes <= llxprt_code_rs::agent::MAX_TURN_ASSISTANT_BYTES);
-    assert!(events[0]["text"].as_str().unwrap().contains("[truncated]"));
+    assert!(
+        events.is_empty(),
+        "rejected private state must not emit a partial display"
+    );
     let id = llxprt_code_rs::session::SessionId::parse("reason").unwrap();
     let state =
         llxprt_code_rs::session::SessionStore::read_transcript_at(&id, root.path()).unwrap();
-    assert_eq!(state.branches[0].rounds[0].assistant, "done");
+    assert!(state.branches[0].rounds.is_empty());
+    assert_eq!(
+        state.branches[0].lifecycle,
+        llxprt_code_rs::session::Lifecycle::Failed
+    );
     assert!(!serde_json::to_string(&state).unwrap().contains('界'));
 }

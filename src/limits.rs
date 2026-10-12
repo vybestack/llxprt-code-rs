@@ -3,7 +3,7 @@
 //! for replay identity. This module is a leaf: it must NOT import anything from other
 //! crate modules.
 
-/// Cap on the combined assistant text bytes materialized in one turn.
+/// Cap on combined assistant text, readable thinking and private continuation bytes per turn.
 pub const MAX_TURN_ASSISTANT_BYTES: usize = 1024 * 1024;
 /// Cap on the combined raw tool-call argument bytes in one turn.
 pub const MAX_TURN_ARGS_BYTES: usize = 1024 * 1024;

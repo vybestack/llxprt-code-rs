@@ -24,6 +24,7 @@ impl ChatBackend for ShellReply {
             assert!(tools.iter().any(|tool| tool.name == "run_shell_command"));
             let first = !self.sent.replace(true);
             Ok(LlmResult {
+                continuation: None,
                 thinking: String::new(),
                 text: if first { "" } else { "Done." }.into(),
                 calls: if first {

@@ -23,9 +23,12 @@ fn enabled_reasoning_maps_to_tested_responses_shape() {
 }
 
 #[test]
-fn disabled_reasoning_omits_responses_reasoning() {
+fn absent_effort_still_requests_readable_summary() {
     let draft = CodexResponsesSettingsDraft::new("gpt-5.6-sol".to_string(), None);
-    assert!(draft.responses_reasoning().is_none());
+    assert_eq!(
+        draft.responses_reasoning().unwrap().summary,
+        Some(serde_json::json!("auto"))
+    );
 }
 
 #[test]
@@ -92,5 +95,13 @@ fn codex_profile_effort_reaches_serialized_reasoning() {
     settings.remove("reasoning.summary");
     let profile = crate::profile::parse_profile_value(&disabled, "astra").unwrap();
     let resolved = crate::model_api::interpret::ResolvedProfile::interpret(&profile).unwrap();
-    assert!(resolved.codex.unwrap().responses_reasoning().is_none());
+    assert_eq!(
+        resolved
+            .codex
+            .unwrap()
+            .responses_reasoning()
+            .unwrap()
+            .summary,
+        Some(serde_json::json!("auto"))
+    );
 }

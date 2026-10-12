@@ -280,14 +280,31 @@ impl SessionState {
         for (position, round) in branch.rounds.iter().enumerate() {
             let is_completed_final =
                 branch.lifecycle == Lifecycle::Completed && position + 1 == branch.rounds.len();
-            if round.calls.is_empty() && !is_completed_final {
+            if round.calls.is_empty()
+                && !is_completed_final
+                && round.continuation.is_none()
+                && round.thinking.is_empty()
+            {
                 return Err(branch_corrupt(
                     branch,
                     "only a completed branch may have a final no-tool round",
                 ));
             }
+            if let Some(state) = &round.continuation {
+                state.validate(&[]).map_err(|e| branch_corrupt(branch, e))?;
+            }
             assistant_bytes = checked_total(branch, assistant_bytes, round.assistant.len())?;
-            let mut mapped_bytes = round.assistant.len();
+            assistant_bytes = checked_total(branch, assistant_bytes, round.thinking.len())?;
+            assistant_bytes = checked_total(
+                branch,
+                assistant_bytes,
+                round.continuation.as_ref().map_or(0, |s| s.bytes()),
+            )?;
+            let mut mapped_bytes = round
+                .assistant
+                .len()
+                .saturating_add(round.thinking.len())
+                .saturating_add(round.continuation.as_ref().map_or(0, |s| s.bytes()));
             self.validate_mapped_response_size(branch, mapped_bytes)?;
             for call in &round.calls {
                 self.validate_persisted_call(branch, call, &mut ids)?;

@@ -194,6 +194,12 @@ fn response_parts_to_items(response: &ModelResponse) -> Vec<InputItem> {
         .iter()
         .filter_map(|part| match part {
             ModelResponsePart::Text(text) => Some(InputItem::Typed(TypedInputItem::Message {
+                phase: text
+                    .provider_details
+                    .as_ref()
+                    .and_then(|d| d.get("phase"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
                 role: InputRole::Assistant,
                 content: Some(InputMessageContent::Parts(vec![
                     InputContentPart::OutputText {
@@ -209,9 +215,26 @@ fn response_parts_to_items(response: &ModelResponse) -> Vec<InputItem> {
                     .and_then(|value| value.as_str())
                     .map(str::to_string);
                 Some(InputItem::Typed(TypedInputItem::Reasoning {
-                    id: None,
-                    summary: vec![SummaryTextItem::new(thinking.content.clone())],
+                    id: thinking.id.clone(),
+                    summary: thinking
+                        .provider_details
+                        .as_ref()
+                        .and_then(|d| d.get("summary"))
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default(),
                     encrypted_content,
+                    extra: thinking
+                        .provider_details
+                        .as_ref()
+                        .map(|d| {
+                            d.iter()
+                                .filter(|(k, _)| {
+                                    k.as_str() != "summary" && k.as_str() != "encrypted_content"
+                                })
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 }))
             }
             ModelResponsePart::ToolCall(call) => {
@@ -239,7 +262,9 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
     output
         .iter()
         .map(|item| match item {
-            OutputItem::Message { content, .. } => {
+            OutputItem::Message {
+                content, id, phase, ..
+            } => {
                 let text = content
                     .iter()
                     .map(|part| match part {
@@ -248,9 +273,22 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
                     })
                     .collect::<Vec<_>>()
                     .join("");
-                ModelResponsePart::Text(TextPart::new(text))
+                let mut part = TextPart::new(text).with_id(id);
+                if let Some(phase) = phase {
+                    part = part.with_provider_details(
+                        [(String::from("phase"), serde_json::json!(phase))]
+                            .into_iter()
+                            .collect(),
+                    );
+                }
+                ModelResponsePart::Text(part)
             }
-            OutputItem::Reasoning { summary, .. } => {
+            OutputItem::Reasoning {
+                id,
+                summary,
+                encrypted_content,
+                extra,
+            } => {
                 let text = summary
                     .iter()
                     .map(|part| part.text.as_str())
@@ -259,7 +297,19 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
                         "
 ",
                     );
-                ModelResponsePart::Thinking(ThinkingPart::new(text))
+                let mut details = extra.clone();
+                details.insert(
+                    "summary".into(),
+                    serde_json::to_value(summary).expect("summary serialization"),
+                );
+                if let Some(encrypted) = encrypted_content {
+                    details.insert("encrypted_content".into(), serde_json::json!(encrypted));
+                }
+                ModelResponsePart::Thinking(
+                    ThinkingPart::new(text)
+                        .with_id(id)
+                        .with_provider_details(details),
+                )
             }
             OutputItem::FunctionCall {
                 name,
@@ -268,7 +318,7 @@ pub fn parts_from_output(output: &[OutputItem]) -> Vec<ModelResponsePart> {
                 ..
             } => ModelResponsePart::ToolCall(ToolCallPart {
                 tool_name: name.clone(),
-                args: ToolCallArgs::from(arguments.as_str()),
+                args: ToolCallArgs::String(arguments.clone()),
                 tool_call_id: Some(call_id.clone()),
                 id: None,
                 provider_details: None,
@@ -399,7 +449,7 @@ pub fn input_to_history(
                 flush_tool_returns(&mut history, &mut pending);
                 push_message_role(&mut history, role, content.as_ref())?;
             }
-            InputItem::Typed(TypedInputItem::Message { role, content }) => {
+            InputItem::Typed(TypedInputItem::Message { role, content, .. }) => {
                 flush_assistant(&mut history, &mut pending);
                 flush_tool_returns(&mut history, &mut pending);
                 push_message_role(&mut history, role, content.as_ref())?;
@@ -606,6 +656,7 @@ pub fn output_items_from_response(response: &ModelResponse) -> Vec<OutputItem> {
         .iter()
         .filter_map(|part| match part {
             ModelResponsePart::Text(text) => Some(OutputItem::Message {
+                phase: None,
                 id: new_id("msg_"),
                 role: "assistant".to_string(),
                 status: OutputItemStatus::Completed,
@@ -618,6 +669,7 @@ pub fn output_items_from_response(response: &ModelResponse) -> Vec<OutputItem> {
                 id: new_id("rs_"),
                 summary: vec![SummaryTextItem::new(thinking.content.clone())],
                 encrypted_content: None,
+                extra: Default::default(),
             }),
             ModelResponsePart::ToolCall(call) => Some(OutputItem::FunctionCall {
                 id: new_id("fc_"),

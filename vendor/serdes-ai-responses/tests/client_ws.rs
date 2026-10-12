@@ -75,6 +75,7 @@ async fn send_completed_turn(ws: &mut FakeWs, id: &str, request: &CreateResponse
     let mut response = ResponseObject::in_progress(id, 0, request.model.clone(), request);
     response.status = ResponseStatus::Completed;
     response.output = vec![OutputItem::Message {
+        phase: None,
         id: format!("msg_{id}"),
         role: "assistant".to_string(),
         status: serdes_ai_responses::types::OutputItemStatus::Completed,
@@ -96,6 +97,7 @@ async fn send_completed_turn(ws: &mut FakeWs, id: &str, request: &CreateResponse
             sequence_number: 1,
             output_index: 0,
             item: OutputItem::Message {
+                phase: None,
                 id: format!("msg_{id}"),
                 role: "assistant".to_string(),
                 status: serdes_ai_responses::types::OutputItemStatus::InProgress,

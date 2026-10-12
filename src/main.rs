@@ -49,7 +49,6 @@ fn main() {
         },
         None => None,
     };
-    let transcript = !args.emit.is_empty();
     let mut outcome = cli::run_profiled(args, profiler.clone());
     let mut summary = None;
     if let Some(profiler) = profiler {
@@ -72,9 +71,8 @@ fn main() {
     let value = cli::json(&outcome, &session_hint);
     let code = cli::exit_code(&outcome);
     println!("{value}");
-    if let Some(summary) = summary.filter(|_| !transcript) {
-        eprintln!("{}", summary.stderr_line());
-    }
+    // Default thinking reserves stderr for transcript JSONL; profiling stays in its file.
+    let _ = summary;
     std::process::exit(code);
 }
 

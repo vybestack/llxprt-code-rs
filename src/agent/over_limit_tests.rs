@@ -61,6 +61,7 @@ impl ChatBackend for std::sync::Arc<RecoveryBackend> {
 }
 fn stop_reply() -> LlmResult {
     LlmResult {
+        continuation: None,
         thinking: String::new(),
         text: "done".into(),
         calls: Vec::new(),
@@ -91,6 +92,8 @@ fn over_limit_preflight_compacts_once_and_proceeds() {
         branch_id: "old".into(),
         prompt: "old".into(),
         rounds: vec![RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "x".repeat(20_000),
             calls: Vec::new(),
         }],
@@ -183,6 +186,8 @@ fn compactable_history() -> crate::session::HistoryTurn {
         branch_id: "prior".into(),
         prompt: "prior prompt".into(),
         rounds: vec![RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "narration".repeat(400),
             calls: vec![],
         }],

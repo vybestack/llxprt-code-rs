@@ -12,6 +12,11 @@ use serde::{Deserialize, Serialize};
 /// assistant's final response and is always persisted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoundRecord {
+    /// Safe readable thinking projection owned by this round.
+    pub thinking: String,
+    /// Private provider replay state; never a transcript display field.
+    #[serde(deserialize_with = "required_continuation")]
+    pub continuation: Option<crate::reasoning::Continuation>,
     /// Assistant text emitted alongside the tool calls of this round.
     pub assistant: String,
     /// The tool calls made in this round (empty for the final response).
@@ -165,4 +170,10 @@ impl SessionState {
             next_branch_seq: 0,
         }
     }
+}
+
+fn required_continuation<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<crate::reasoning::Continuation>, D::Error> {
+    Option::deserialize(d)
 }

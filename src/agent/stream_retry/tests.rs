@@ -40,6 +40,7 @@ impl ChatBackend for Script {
 }
 fn reply(calls: Vec<ToolCall>) -> LlmResult {
     LlmResult {
+        continuation: None,
         text: "healthy".into(),
         thinking: String::new(),
         finish_reason: Some(if calls.is_empty() {

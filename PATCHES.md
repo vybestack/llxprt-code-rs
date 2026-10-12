@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `b517abb067b69eac09b1dc7dab76ae1722f5aaef11880af4dc50a7730e67fdad`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `961484338be8d45b94983f03ea0f405385faeefcf3c5265e0725fe590e13b5c9`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -490,6 +490,18 @@ explicitly propagates that scope, including on cancellation. Chat reasoning-toke
 usage and Responses terminal total/reasoning usage are retained. Unknown counters
 remain absent; numeric totals use checked arithmetic. No endpoint/authentication,
 request-content, transport retry or stream-validation policy is changed.
+
+## Issue #28: reasoning continuation and readable projection
+
+Compatible Chat maps `reasoning_content` onto returned assistant messages only when
+reasoning was actually supplied. Public Responses requests encrypted reasoning and
+retains the original ordered reasoning items, including empty summaries, metadata and
+assistant phase. Codex HTTP requests encrypted content and supplements streamed parts
+with completed-item metadata without replacing verbatim deltas or raw tool arguments.
+Reasoning IDs, encrypted data, original summary arrays and assistant phase survive full
+stateless input replay. No previous-response chain or legacy session compatibility path
+is added. Direct model/Responses suites and stock CLI continuity fixtures cover these
+changes; no live endpoint capability claim is inferred from loopback contracts.
 
 ## Issue 191 - bounded terminal transport cause (measurement, not provider repair)
 

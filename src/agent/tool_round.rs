@@ -33,6 +33,8 @@ impl super::Turn<'_> {
             attempt.budget_exhausted = true;
         }
         let mut round = RoundRecord {
+            thinking: current.thinking,
+            continuation: current.continuation,
             assistant: current.text,
             calls: Vec::new(),
         };
@@ -100,8 +102,13 @@ impl super::Turn<'_> {
                 // Calls enter the round only after execution and result admission.
                 // Publish that prefix on failure too, never the unexecuted suffix.
                 // SessionStore::fail strips live projections from its durable copy.
-                if !round.calls.is_empty() {
+                if !round.calls.is_empty()
+                    || round.continuation.is_some()
+                    || !round.thinking.is_empty()
+                {
                     attempt.rounds.push(RoundRecord {
+                        thinking: std::mem::take(&mut round.thinking),
+                        continuation: round.continuation.take(),
                         assistant: std::mem::take(&mut round.assistant),
                         calls: std::mem::take(&mut round.calls),
                     });
@@ -114,6 +121,8 @@ impl super::Turn<'_> {
                 round.calls.last().expect("admitted call record"),
             ) {
                 attempt.rounds.push(RoundRecord {
+                    thinking: std::mem::take(&mut round.thinking),
+                    continuation: round.continuation.take(),
                     assistant: std::mem::take(&mut round.assistant),
                     calls: std::mem::take(&mut round.calls),
                 });
@@ -216,13 +225,7 @@ mod tests {
         let mut attempt = AttemptState {
             requests: Vec::new(),
             rounds: Vec::new(),
-            current: Some(LlmResult {
-                thinking: String::new(),
-                text: "working".into(),
-                calls: vec![],
-                finish_reason: None,
-                usage: Default::default(),
-            }),
+            current: Some(fixture_reply()),
             ids: Default::default(),
             usage: TurnUsage {
                 assistant_bytes: 0,
@@ -233,6 +236,8 @@ mod tests {
             budget_exhausted: false,
         };
         let mut round = RoundRecord {
+            thinking: String::new(),
+            continuation: None,
             assistant: "working".into(),
             calls: Vec::new(),
         };
@@ -266,6 +271,17 @@ mod tests {
             serde_json::to_value(reopened.snapshot().unwrap().branches).unwrap(),
             serde_json::to_value(snapshot.branches).unwrap()
         );
+    }
+
+    fn fixture_reply() -> LlmResult {
+        LlmResult {
+            continuation: None,
+            thinking: String::new(),
+            text: "working".into(),
+            calls: vec![],
+            finish_reason: None,
+            usage: Default::default(),
+        }
     }
 
     fn assert_written_prefix(branch: &crate::session::BranchRecord, write: &ToolCall) {

@@ -139,6 +139,9 @@ impl ChatCompletionRequest {
 /// Chat message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
+    /// Unmodified provider-exposed reasoning for compatible Chat continuation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     /// Role of the message author.
     pub role: String,
     /// Message content.
@@ -159,6 +162,7 @@ impl ChatMessage {
     /// Create a system message.
     pub fn system(content: impl Into<String>) -> Self {
         Self {
+            reasoning_content: None,
             role: "system".to_string(),
             content: Some(MessageContent::Text(content.into())),
             name: None,
@@ -170,6 +174,7 @@ impl ChatMessage {
     /// Create a user message.
     pub fn user(content: impl Into<String>) -> Self {
         Self {
+            reasoning_content: None,
             role: "user".to_string(),
             content: Some(MessageContent::Text(content.into())),
             name: None,
@@ -181,6 +186,7 @@ impl ChatMessage {
     /// Create an assistant message.
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
+            reasoning_content: None,
             role: "assistant".to_string(),
             content: Some(MessageContent::Text(content.into())),
             name: None,
@@ -192,6 +198,7 @@ impl ChatMessage {
     /// Create a tool response message.
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
+            reasoning_content: None,
             role: "tool".to_string(),
             content: Some(MessageContent::Text(content.into())),
             name: None,

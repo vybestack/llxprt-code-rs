@@ -103,8 +103,12 @@ impl Turn<'_> {
         &self,
         result: Result<LlmResult, RoundFailure>,
     ) -> Result<LlmResult, RoundFailure> {
-        let reply = result?;
+        let mut reply = result?;
         provider_validation::validate(&reply, &self.secrets)?;
+        reply.thinking = crate::redact::truncate_utf8(
+            crate::redact::scrub_secrets(&reply.thinking, &self.secrets),
+            MAX_TURN_ASSISTANT_BYTES,
+        );
         if let (Some(output), Some(snapshot)) =
             (&self.cache_output, self.backend.cache_observation())
         {

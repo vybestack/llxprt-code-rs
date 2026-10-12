@@ -97,6 +97,7 @@ fn run(
 }
 fn healthy() -> LlmResult {
     LlmResult {
+        continuation: None,
         text: "recovered".into(),
         thinking: String::new(),
         calls: vec![],

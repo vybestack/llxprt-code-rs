@@ -389,6 +389,7 @@ pub(super) mod tests {
             response: object.clone(),
         };
         let message = serdes_ai_responses::types::OutputItem::Message {
+            phase: None,
             id: format!("msg_{round}"),
             role: "assistant".to_string(),
             status: serdes_ai_responses::types::OutputItemStatus::Completed,
@@ -413,6 +414,7 @@ pub(super) mod tests {
             sequence_number: 3,
             output_index: 0,
             item: serdes_ai_responses::types::OutputItem::Message {
+                phase: None,
                 id: format!("msg_{round}"),
                 role: "assistant".to_string(),
                 status: serdes_ai_responses::types::OutputItemStatus::Completed,

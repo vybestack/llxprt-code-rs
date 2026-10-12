@@ -20,6 +20,7 @@ mod model_api;
 pub mod process;
 pub mod profile;
 pub mod provider_keys;
+pub mod reasoning;
 pub mod redact;
 mod safe_file;
 pub mod session;

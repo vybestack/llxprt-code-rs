@@ -45,7 +45,9 @@ pub struct LlmUsage {
 /// The model's reply for one round.
 #[derive(Debug)]
 pub struct LlmResult {
-    /// Bounded provider-exposed reasoning; never persisted.
+    /// Private, ordered provider continuation, distinct from readable thinking.
+    pub continuation: Option<crate::reasoning::Continuation>,
+    /// Bounded provider-exposed readable reasoning.
     pub thinking: String,
     pub text: String,
     pub calls: Vec<ToolCall>,
@@ -54,6 +56,14 @@ pub struct LlmResult {
 }
 
 impl LlmResult {
+    /// Shared assistant accounting includes the private transport representation.
+    pub fn assistant_bytes(&self) -> usize {
+        self.text
+            .len()
+            .saturating_add(self.thinking.len())
+            .saturating_add(self.continuation.as_ref().map_or(0, |s| s.bytes()))
+    }
+
     /// Scrub provider reasoning before its first lossy bound, including cross-part secrets.
     pub fn from_response(resp: &ModelResponse, secrets: &[String]) -> Self {
         let mut text = String::new();
@@ -98,6 +108,7 @@ impl LlmResult {
                 cache_read_tokens: u.cache_read_tokens,
             });
         LlmResult {
+            continuation: crate::reasoning::Continuation::capture(resp),
             thinking,
             text,
             calls,
@@ -425,13 +436,16 @@ pub fn user_request(prompt: &str) -> ModelRequest {
 pub fn persisted_round_requests(round: &RoundRecord) -> Vec<ModelRequest> {
     let mut out = Vec::new();
     let mut resp = ModelResponse::new();
-    if !round.assistant.is_empty() {
+    if let Some(state) = &round.continuation {
+        resp = state.response();
+    }
+    if round.continuation.is_none() && !round.assistant.is_empty() {
         resp.parts
             .push(ModelResponsePart::Text(serdes_ai::core::TextPart::new(
                 round.assistant.clone(),
             )));
     }
-    for call in &round.calls {
+    for call in round.calls.iter().filter(|_| round.continuation.is_none()) {
         let args: serde_json::Value =
             serde_json::from_str(&call.args).unwrap_or(serde_json::json!({}));
         resp.parts.push(ModelResponsePart::ToolCall(
@@ -479,13 +493,20 @@ pub fn tool_return_request(
 /// re-emits it as a real `assistant` message with preserved call ids before tool returns.
 pub fn assistant_request(result: &LlmResult) -> ModelRequest {
     let mut resp = ModelResponse::new();
-    if !result.text.is_empty() {
+    if let Some(state) = &result.continuation {
+        resp = state.response();
+    }
+    if result.continuation.is_none() && !result.text.is_empty() {
         resp.parts
             .push(ModelResponsePart::Text(serdes_ai::core::TextPart::new(
                 result.text.clone(),
             )));
     }
-    for call in &result.calls {
+    for call in result
+        .calls
+        .iter()
+        .filter(|_| result.continuation.is_none())
+    {
         let args: serde_json::Value =
             serde_json::from_str(&call.args_json).unwrap_or(serde_json::json!({}));
         resp.parts.push(ModelResponsePart::ToolCall(

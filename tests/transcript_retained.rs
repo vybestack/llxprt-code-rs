@@ -14,6 +14,8 @@ fn retained_set_is_selected_without_manifest_repair() {
             &request,
             "done",
             &[RoundRecord {
+                thinking: String::new(),
+                continuation: None,
                 assistant: "done".into(),
                 calls: vec![],
             }],

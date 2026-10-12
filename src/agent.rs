@@ -328,7 +328,10 @@ impl CodingAgent {
         for history in &reserved.history {
             requests.push(user_request(&history.prompt));
             for round in &history.rounds {
-                if !round.assistant.is_empty() || !round.calls.is_empty() {
+                if !round.assistant.is_empty()
+                    || !round.calls.is_empty()
+                    || round.continuation.is_some()
+                {
                     requests.extend(persisted_round_requests(round));
                 }
             }
@@ -339,6 +342,8 @@ impl CodingAgent {
                     .any(|round| round.assistant == history.summary)
             {
                 requests.extend(persisted_round_requests(&RoundRecord {
+                    thinking: String::new(),
+                    continuation: None,
                     assistant: history.summary.clone(),
                     calls: Vec::new(),
                 }));
@@ -490,7 +495,7 @@ impl Turn<'_> {
         self.renew(store, reserved)?;
         self.check_finish(store, reserved, &current, &[])?;
         let usage = TurnUsage {
-            assistant_bytes: current.text.len(),
+            assistant_bytes: current.assistant_bytes(),
             args_bytes: turn_args_bytes(&current),
             output_bytes: 0,
             total_calls: 0,
@@ -652,7 +657,7 @@ impl Turn<'_> {
         attempt.usage.assistant_bytes = attempt
             .usage
             .assistant_bytes
-            .saturating_add(current.text.len());
+            .saturating_add(current.assistant_bytes());
         attempt.usage.args_bytes = attempt
             .usage
             .args_bytes
@@ -742,6 +747,12 @@ impl Turn<'_> {
     ) -> Result<CompletedRun, AgentError> {
         self.check_time_limit(store, reserved, &attempt.rounds)?;
         attempt.rounds.push(RoundRecord {
+            thinking: attempt
+                .current
+                .as_ref()
+                .map(|r| r.thinking.clone())
+                .unwrap_or_default(),
+            continuation: attempt.current.take().and_then(|r| r.continuation),
             assistant: summary.clone(),
             calls: Vec::new(),
         });

@@ -10,7 +10,8 @@ and built on [`serdes-ai`] 0.2.6. Each invocation:
 3. persists session/turn state under the real config dir,
 4. prints **exactly one JSON object to stdout** (including on failure).
 
-Use `--emit all` for an opt-in live JSONL transcript on stderr, or
+Readable thinking is emitted as JSONL on stderr by default. Use `--emit all` for
+additional text/call/result categories, or
 `llxprt-code-rs transcript --session ID --json` for read-only look-back.
 Cache usage has its own explicit create-only file: `--cache-observations cache.jsonl`.
 It never writes to default stderr or the selected `--emit` transcript stream. Provider
@@ -322,7 +323,11 @@ distributions is recorded in `THIRD_PARTY_LICENSES/SERDES-AI-MIT.txt`.
 ## Reasoning (actual behavior)
 
 Reasoning behavior depends on the selected API. Public OpenAI Responses and Codex Responses
-forward their validated reasoning effort and summary settings. Public Responses also supports
+forward their validated reasoning effort and summary settings (default summary `auto`),
+request encrypted reasoning, and replay returned private continuation state. Readable
+thinking is emitted and persisted by default, separate from that private state. Anthropic
+signed/redacted blocks and compatible Chat `reasoning_content` are retained for tool
+continuation; no opaque fields enter transcript display. Public Responses also supports
 validated text verbosity. OpenAI Chat sends non-streaming Chat Completions and does not set a
 reasoning field; compatible `dsflash*` reasoning effort is represented by a local prompt note.
 Request-side keys the Chat path cannot apply are rejected unless existing `dsflash` compatibility

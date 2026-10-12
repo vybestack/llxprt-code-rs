@@ -67,6 +67,7 @@ impl ChatBackend for Completed {
         Box::pin(async move {
             self.0.set(self.0.get() + 1);
             Ok(LlmResult {
+                continuation: None,
                 thinking: String::new(),
                 text: "done".into(),
                 calls: vec![],

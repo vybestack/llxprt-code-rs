@@ -7,6 +7,8 @@ use crate::session::{HistoryTurn, ToolCallRecord};
 pub(super) fn admitted_round(store: &SessionStore, id: &str, text: &str) -> RoundRecord {
     let projection = store.compact_tool_result("read_file", text).unwrap();
     RoundRecord {
+        thinking: String::new(),
+        continuation: None,
         assistant: format!("Observed {id}"),
         calls: vec![ToolCallRecord {
             id: id.into(),
