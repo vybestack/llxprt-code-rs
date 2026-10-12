@@ -51,6 +51,7 @@ fn failure(
         body_prefix: None,
         body_bytes: 0,
         retry_after: Some(Duration::from_secs(seconds)),
+        observation: Default::default(),
     })
 }
 fn run(
@@ -237,6 +238,7 @@ fn typed_transient_failures_share_backoff_and_budget() {
         body_prefix: None,
         body_bytes: 0,
         retry_after: None,
+        observation: Default::default(),
     };
     let (result, inputs, lifecycle, elapsed) = run(
         vec![
