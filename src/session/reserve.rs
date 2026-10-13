@@ -84,7 +84,7 @@ impl SessionStore {
         let lease = RequestLease {
             owner: new_owner(),
             now,
-            lease_end: now.saturating_add(LEASE_SECONDS),
+            lease_end: now.saturating_add(crate::limits::TIMEOUT_LEASE_SECONDS),
         };
         if let Some(existing) = Self::find_existing(&state, current, target, prompt) {
             return self.reserve_existing(&mut state, current, existing, target, prompt, &lease);
