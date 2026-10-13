@@ -33,6 +33,8 @@ pub const STORE_MODE_UNAVAILABLE: u64 = 3;
 /// Errors raised while folding events.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ReducerError {
+    /// Typed ledger transition failed; no partial ledger mutation is released.
+    Ledger(crate::context_kernel::ledger::LedgerError),
     /// The conversation IR rejected the operation.
     Ir(crate::context_kernel::ir::IrError),
     /// The scope registry rejected the operation.
@@ -96,6 +98,8 @@ pub enum ReducerError {
 /// Fully typed state: everything the projection is derived from.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TypedState {
+    /// Fact state, status product, dependencies and surfaced conflicts.
+    pub ledger: crate::context_kernel::ledger::Ledger,
     /// Conversation intermediate representation.
     pub conversation_ir: ConversationIr,
     /// Scope registry with log-derived lineage and activity.
@@ -137,6 +141,7 @@ impl TypedState {
     /// Builds the state an empty log folds into.
     pub fn genesis(idleness_window: u64, store_version: u64) -> Self {
         Self {
+            ledger: crate::context_kernel::ledger::Ledger::default(),
             conversation_ir: ConversationIr::new(),
             scope_registry: ScopeRegistry::new(idleness_window),
             lane_policy_registry: LanePolicyRegistry::resolve(INITIAL_VERSION)
@@ -175,6 +180,7 @@ impl TypedState {
         sink.int(self.version);
         sink.int(self.store_version);
         sink.int(self.next_offset);
+        self.ledger.encode(sink);
         self.conversation_ir.encode(sink);
         self.scope_registry.encode(sink);
         self.lane_policy_registry.encode(sink);
@@ -248,7 +254,7 @@ impl Reducer {
                 scope,
                 claims,
             } => apply_append(state, event, source, sanitized, *scope, claims),
-            EventKind::Ledger { .. } => Ok(()),
+            EventKind::Ledger { command } => apply_ledger(state, event, command),
             EventKind::OperationCommit {
                 class,
                 subject,
@@ -584,4 +590,33 @@ fn attribute(state: &mut TypedState, scope: ScopeId, sequence: u64) -> Result<()
             ScopeError::UnknownScope { id } => ReducerError::UnknownScope { id },
             other => ReducerError::Scope(other),
         })
+}
+
+/// One atomic ledger event contains both result admission and invalidation.
+fn apply_ledger(
+    state: &mut TypedState,
+    event: &RecordedEvent,
+    command: &crate::context_kernel::ledger::Command,
+) -> Result<(), ReducerError> {
+    let mut next = state.clone();
+    if let crate::context_kernel::ledger::Command::FactInvalidate { result, .. } = command {
+        let source = AppendSource::ToolResult {
+            call_id: result.call_id.clone(),
+            tool: result.tool.clone(),
+        };
+        apply_append(
+            &mut next,
+            event,
+            &source,
+            &result.sanitized,
+            result.scope,
+            &[],
+        )?;
+    }
+    next.ledger
+        .apply(command, event.sequence, &next.scope_registry)
+        .map_err(ReducerError::Ledger)?;
+    next.version += 1;
+    *state = next;
+    Ok(())
 }

@@ -27,15 +27,15 @@ use super::budget::{self, Budget};
 pub enum Proposer {
     /// System / harness.
     S,
-    /// Controllable model.
+    /// Budget controller.
     C,
     /// Model.
     M,
-    /// Observer.
+    /// Operator.
     O,
     /// User.
     U,
-    /// Lane.
+    /// Fact ledger.
     L,
 }
 

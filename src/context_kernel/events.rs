@@ -6,7 +6,7 @@ use crate::context_kernel::lanes::Lane;
 use crate::context_kernel::scopes::ScopeId;
 
 /// Schema version of the event record itself.
-pub const EVENT_SCHEMA_VERSION: u64 = 1;
+pub const EVENT_SCHEMA_VERSION: u64 = 2;
 /// Sequence number of the first event in a log.
 pub const FIRST_SEQUENCE: u64 = 1;
 /// Chain value of an empty log.
@@ -39,31 +39,6 @@ impl AppendSource {
                 sink.blob(call_id.as_bytes());
                 sink.blob(tool.as_bytes());
             }
-        }
-    }
-}
-
-/// Ledger events sequenced in the same total order as appends.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum LedgerEventKind {
-    /// An obligation was admitted under the authority grammar.
-    ObligationAdmitted,
-    /// An obligation was discharged by a gate-supported resolution.
-    ObligationDischarged,
-    /// A convenience memory was admitted above the utility threshold.
-    ConvenienceAdmitted,
-    /// A convenience memory decayed below the threshold and retired.
-    ConvenienceRetired,
-}
-
-impl LedgerEventKind {
-    /// Stable name used in canonical encodings.
-    pub fn name(&self) -> &'static str {
-        match self {
-            LedgerEventKind::ObligationAdmitted => "obligation-admitted",
-            LedgerEventKind::ObligationDischarged => "obligation-discharged",
-            LedgerEventKind::ConvenienceAdmitted => "convenience-admitted",
-            LedgerEventKind::ConvenienceRetired => "convenience-retired",
         }
     }
 }
@@ -165,10 +140,8 @@ pub enum EventKind {
     },
     /// Fact-ledger event.
     Ledger {
-        /// Ledger event class.
-        kind: LedgerEventKind,
-        /// Ledger entry identity.
-        key: String,
+        /// Complete ledger command checked by the transaction executor.
+        command: Box<crate::context_kernel::ledger::Command>,
     },
     /// Operation commit written by the transaction core.
     OperationCommit {
@@ -212,10 +185,9 @@ impl EventKind {
                     }
                 }
             }
-            EventKind::Ledger { kind, key } => {
+            EventKind::Ledger { command } => {
                 sink.tag("ledger");
-                sink.tag(kind.name());
-                sink.blob(key.as_bytes());
+                sink.blob(&serde_json::to_vec(command).expect("integer ledger command encodes"));
             }
             EventKind::OperationCommit {
                 class,
