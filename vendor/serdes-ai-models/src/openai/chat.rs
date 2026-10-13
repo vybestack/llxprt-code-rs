@@ -402,6 +402,19 @@ impl OpenAIChatModel {
         });
 
         let mut request_extra = self.request_settings.extra.clone();
+        let epoch = settings
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("context_epoch"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if epoch > 0 {
+            if let Some(key) = request_extra.get_mut("prompt_cache_key") {
+                if let Some(base) = key.as_str() {
+                    *key = serde_json::json!(format!("{base}:epoch:{epoch}"));
+                }
+            }
+        }
         ChatCompletionRequest {
             model: self.model_name.clone(),
             messages,
@@ -911,5 +924,34 @@ mod tests {
         .unwrap();
         assert!(wire.get("extra").is_none());
         assert!(wire.get("top_k").is_none());
+    }
+    #[test]
+    fn epoch_routing_is_stable_within_epoch_and_changes_only_at_cut() {
+        let model = OpenAIChatModel::new("gpt", "key").with_request_settings(
+            OpenAIChatModelRequestSettings {
+                extra: BTreeMap::from([("prompt_cache_key".into(), serde_json::json!("session"))]),
+                ..Default::default()
+            },
+        );
+        for epoch in [0, 1, 1, 2] {
+            let settings = ModelSettings {
+                extra: Some(serde_json::json!({"context_epoch":epoch})),
+                ..Default::default()
+            };
+            let wire = serde_json::to_value(model.build_request(
+                &[],
+                &settings,
+                &Default::default(),
+                false,
+            ))
+            .unwrap();
+            let expected = if epoch == 0 {
+                "session".to_string()
+            } else {
+                format!("session:epoch:{epoch}")
+            };
+            assert_eq!(wire["prompt_cache_key"], expected);
+            assert!(wire.get("context_epoch").is_none());
+        }
     }
 }

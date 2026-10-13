@@ -16,6 +16,8 @@ const RUNTIME_SHUTDOWN_BOUND: std::time::Duration = std::time::Duration::from_mi
 /// detached instead of delaying the terminal envelope.
 pub(super) struct Turn<'a> {
     agent: &'a CodingAgent,
+    pub(super) checkpoint_pending:
+        std::cell::Cell<Option<crate::context_policy::cache::CutTrigger>>,
     pub(super) calibration: std::cell::RefCell<Vec<crate::telemetry::bounds::RequestBound>>,
     pub(super) observations: std::cell::RefCell<crate::telemetry::Telemetry>,
     pub(super) telemetry_round: std::cell::Cell<usize>,
@@ -73,6 +75,7 @@ impl<'a> Turn<'a> {
         };
         Ok(Self {
             agent,
+            checkpoint_pending: Default::default(),
             calibration: Default::default(),
             observations: Default::default(),
             telemetry_round: std::cell::Cell::new(1),

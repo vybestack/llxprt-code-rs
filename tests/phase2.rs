@@ -1058,8 +1058,13 @@ fn later_round_context_overflow_stops_before_next_call() {
         "a pre-send context-limit refusal has no context-policy terminal outcome: {manifest}"
     );
 
-    let journal = context_artifact(&st, "rewrite-journal.log");
-    assert!(!journal.is_empty(), "policy rewrite accounting is durable");
+    let bytes = context_artifact(&st, "epochs.json");
+    let epochs: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        !epochs["records"].as_array().unwrap().is_empty(),
+        "sent epoch accounting is durable"
+    );
+    assert!(epochs["records"][0]["head_digest"].is_string());
     assert!(!context_artifact(&st, "events.log").is_empty());
     assert!(!context_artifact(&st, "checkpoints").is_empty());
 }

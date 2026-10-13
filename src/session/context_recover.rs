@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::session::context_persist::{
     context_dir, ensure_vault_key, new_context_state, ContextState, PersistedManifest,
     CHECKPOINT_RELOAD_MAX, CONTEXT_COMMITTED_DIR, CONTEXT_PREV_DIR, CONTEXT_STAGE_DIR,
-    EVENTS_RELOAD_MAX, JOURNAL_RELOAD_MAX, MANIFEST_RELOAD_MAX, SPINE_RELOAD_MAX, VAULT_RELOAD_MAX,
+    EPOCH_RELOAD_MAX, EVENTS_RELOAD_MAX, MANIFEST_RELOAD_MAX, SPINE_RELOAD_MAX, VAULT_RELOAD_MAX,
 };
 use crate::session::{open_regular_at, SessionStore};
 
@@ -76,6 +76,7 @@ pub(crate) fn recover_context_state(store: &SessionStore) -> Result<ContextState
     if let Some((outcome, saturated)) = recover_manifest_artifacts(&dir, &mut state)? {
         state.policy.restore_terminal_outcome(outcome, saturated);
     }
+    super::request_epoch::validate(&state)?;
     Ok(state)
 }
 
@@ -161,7 +162,7 @@ fn recover_quiesce_marker(
     Ok(state)
 }
 /// Reloads the durable policy artifacts a previous process published -- the
-/// checkpoint lines, the policy event log, and the rewrite journal -- into a
+/// checkpoint lines, the policy event log, and epoch accounting -- into a
 /// recovering state, and replays them into the controller so the republished
 /// artifacts carry the previous process's records ahead of the new ones
 /// instead of truncating them away (issue 102).
@@ -191,22 +192,18 @@ fn recover_durable_policy_artifacts(
             Err(crate::safe_file::ArtifactError::NotFound { .. }) => None,
             Err(error) => return Err(format!("context policy events unreadable: {error}")),
         };
-    // Reload the rewrite journal the same way, so the durable compaction
-    // economics of the previous process survive the restart (issue 102).
-    let journal =
-        match crate::safe_file::read_artifact(dir, "rewrite-journal.log", JOURNAL_RELOAD_MAX) {
-            Ok(bytes) => load_rewrite_journal(&bytes)?,
-            Err(crate::safe_file::ArtifactError::NotFound { .. }) => RecoveredJournal::default(),
-            Err(error) => return Err(format!("context rewrite journal unreadable: {error}")),
-        };
-    // Replay the reloaded policy history into the controller: the republished
-    // artifacts then carry the previous process's records ahead of the new
-    // ones, and the logical time resumes past the last reloaded record.
-    state.policy.restore_history(
-        recovered_events.unwrap_or_default(),
-        journal.entries,
-        journal.logical_time,
-    );
+    let bytes = crate::safe_file::read_artifact(dir, "epochs.json", EPOCH_RELOAD_MAX)
+        .map_err(|error| format!("context epochs unreadable: {error}"))?;
+    let cache = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("context epochs corrupt: {error}"))?;
+    state
+        .policy
+        .restore_history(recovered_events.unwrap_or_default(), cache, 0)
+        .map_err(|error| error.to_string())?;
+    let bytes = crate::safe_file::read_artifact(dir, "request-prefixes.json", EPOCH_RELOAD_MAX)
+        .map_err(|error| format!("context request prefixes unreadable: {error}"))?;
+    state.request_prefixes = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("context request prefixes corrupt: {error}"))?;
     Ok(())
 }
 
@@ -339,43 +336,6 @@ fn load_policy_events(
         events.push(event);
     }
     Ok(events)
-}
-
-/// The reloaded form of `rewrite-journal.log`: every entry line, in file order.
-///
-/// The trailing `report` line is a derived view recomputed from the restored
-/// entries, so only the entry lines and the logical time they reached are
-/// restored.
-#[derive(Default)]
-struct RecoveredJournal {
-    entries: Vec<crate::context_policy::cache::RewriteEntry>,
-    logical_time: u64,
-}
-
-/// Parses the reloaded `rewrite-journal.log`: one JSON object per non-empty
-/// line. Entry lines carry a `source`; the trailing `report` line does not and
-/// is skipped. A line that names a `source` but does not deserialize as an
-/// entry is a corrupt artifact (issue 102).
-fn load_rewrite_journal(bytes: &[u8]) -> Result<RecoveredJournal, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| format!("context rewrite journal is not utf-8: {error}"))?;
-    let mut journal = RecoveredJournal::default();
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = serde_json::from_str(line)
-            .map_err(|error| format!("context rewrite journal corrupt: {error}"))?;
-        if value.get("report").is_some() {
-            continue;
-        }
-        let entry: crate::context_policy::cache::RewriteEntry =
-            serde_json::from_value(value.clone())
-                .map_err(|error| format!("context rewrite journal entry corrupt: {error}"))?;
-        journal.logical_time = journal.logical_time.max(entry.logical_time);
-        journal.entries.push(entry);
-    }
-    Ok(journal)
 }
 
 /// Maps a reloaded manifest terminal outcome back to its stable name; an

@@ -356,7 +356,7 @@ fn adapter_command_construction_is_exact() {
 /// The scenario-report shape this harness publishes, as a validation fixture.
 fn good_report() -> Value {
     json!({
-        "id": "x", "schema_version": 1, "owner_phase": 7, "arm": "feature",
+        "id": "x", "schema_version": report::REPORT_SCHEMA_VERSION, "owner_phase": 7, "arm": "feature",
         "expected_status": "red", "runner": "rust", "runner_revision": "abc",
         "fixture_digests": [],
         "profile": {"name": "p", "provider": "openai", "model": "m",
@@ -382,7 +382,7 @@ fn good_report() -> Value {
 /// The aggregate-report shape this harness publishes, as a validation fixture.
 fn good_aggregate_report() -> Value {
     json!({
-        "tool": "llxprt-context-eval", "schema_version": 1, "run_id": "r",
+        "tool": "llxprt-context-eval", "schema_version": report::REPORT_SCHEMA_VERSION, "run_id": "r",
         "runner": "rust", "runner_revision": "abc", "expected_status_mode": true,
         "phase0_baseline": {"all_red_baseline": true},
         "records_root": "evals/context-management/records",
@@ -502,26 +502,20 @@ fn terminal_outcomes_are_allowed_alternatives() {
 fn cache_acceptance_report_reads_durable_conditional_telemetry() {
     let dir = std::env::temp_dir().join(format!("ctxeval-cache-{}", crate::harness::uniq()));
     fs::create_dir_all(dir.join("context")).unwrap();
+    let mut epochs = crate::context_policy::cache::EpochCache::default();
+    epochs.start("a".repeat(64), 1).unwrap();
+    epochs.observe(0, Some(100), Some(50), true).unwrap();
     fs::write(
-        dir.join("context/rewrite-journal.log"),
-        concat!(
-            "{\"invalidation_cost\":null,\"bytes_reclaimed\":100}\n",
-            "{\"report\":{\"armed_hit_rate\":0.5,\"armed_rewrites\":1,",
-            "\"disarmed_hit_rate\":null,\"disarmed_rewrites\":0,\"hit_rate\":0.5,",
-            "\"invalidation_cost_per_event\":null,\"known_invalidation_cost_events\":0,",
-            "\"threshold_denials\":0,\"threshold_passes\":1,",
-            "\"economic_gate_suspensions\":1,",
-            "\"unknown_invalidation_cost_events\":1}}\n"
-        ),
+        dir.join("context/epochs.json"),
+        serde_json::to_vec(&epochs).unwrap(),
     )
     .unwrap();
     let cache = report::cache_block_from_session(Some(&dir));
     assert_eq!(cache["class"], "measured");
-    assert_eq!(cache["rewrite_journal_bytes_reclaimed"], 100);
-    assert!(cache["rewrite_journal_bytes_invalidated"].is_null());
-    assert!(cache["prefix_invalidation_cost_per_rewrite"].is_null());
-    assert_eq!(cache["conditional"]["armed_hit_rate"], 0.5);
-    assert_eq!(cache["suspended_while_armed"], true);
+    assert_eq!(cache["epochs"][0]["invalidations"], 0);
+    assert!(cache["epochs"][0]["tokens_invalidated"].is_null());
+    assert_eq!(cache["epochs"][0]["armed_hit_rate"], 0.5);
+    assert!(cache.get("suspended_while_armed").is_none());
     fs::remove_dir_all(dir).ok();
 }
 
@@ -788,7 +782,7 @@ fn planted_secrets_are_found_wherever_they_escape() {
 #[test]
 fn publish_path_report_validates_with_new_fields() {
     let report = json!({
-        "id": "ingress-secret-and-digest", "schema_version": 1, "owner_phase": 2,
+        "id": "ingress-secret-and-digest", "schema_version": report::REPORT_SCHEMA_VERSION, "owner_phase": 2,
         "arm": "feature", "expected_status": "red", "runner": "rust",
         "runner_revision": "abc", "fixture_digests": [],
         "profile": {"name": "p", "provider": "openai", "model": "m",

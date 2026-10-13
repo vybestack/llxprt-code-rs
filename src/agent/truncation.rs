@@ -105,7 +105,7 @@ impl super::Turn<'_> {
     /// One model call of the turn's opening, with the shared profiling and failure mapping.
     fn opening_round(
         &self,
-        requests: &[serdes_ai::core::ModelRequest],
+        requests: &mut Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
         usage: &TurnUsage,
         context: (&SessionStore, &ReservedRequest, usize),

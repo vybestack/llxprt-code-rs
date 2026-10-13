@@ -126,6 +126,9 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// The durable checkpoint epoch; providers use it for cache routing only.
+    fn set_context_epoch(&self, _epoch: u64) {}
+
     /// Exact route/model/render contract; absent for backends without wire measurement.
     fn request_contract(&self) -> Option<crate::telemetry::bounds::RequestContract> {
         None
@@ -200,6 +203,7 @@ pub fn schema_for(t: &crate::tools::ToolSpec) -> serdes_ai::tools::ToolDefinitio
 /// Wraps the SerdesAI OpenAI chat model.
 pub struct ModelAdapter {
     inner: OpenAIChatModel,
+    context_epoch: std::sync::atomic::AtomicU64,
     timeout: std::time::Duration,
     max_output_tokens: Option<u64>,
     model_params: Option<crate::profile::ModelParams>,
@@ -308,6 +312,7 @@ pub fn make_adapter(config: &ModelConfig) -> Result<ModelAdapter, ModelErrorAdap
     model = model.with_request_settings(request_settings);
     Ok(ModelAdapter {
         inner: model,
+        context_epoch: Default::default(),
         timeout,
         max_output_tokens: config.max_output_tokens,
         model_params: config.model_params.clone(),
@@ -371,12 +376,16 @@ impl ModelAdapter {
         let params = SerdeAiParams {
             tools: std::sync::Arc::new(tool_defs),
         };
-        let settings = SerdeAiSettings {
+        let mut settings = SerdeAiSettings {
             timeout: Some(self.timeout),
             max_tokens: self.max_output_tokens,
             model_params: self.model_params.as_ref(),
         }
         .into_model_settings();
+        settings.extra.get_or_insert_with(|| serde_json::json!({}))["context_epoch"] =
+            serde_json::json!(self
+                .context_epoch
+                .load(std::sync::atomic::Ordering::Relaxed));
         let resp = self
             .inner
             .request(requests, &settings, &params.to_model_request_parameters())
@@ -387,6 +396,10 @@ impl ModelAdapter {
 }
 
 impl ChatBackend for ModelAdapter {
+    fn set_context_epoch(&self, epoch: u64) {
+        self.context_epoch
+            .store(epoch, std::sync::atomic::Ordering::Relaxed);
+    }
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],

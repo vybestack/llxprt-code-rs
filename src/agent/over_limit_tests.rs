@@ -4,6 +4,7 @@ mod accounting;
 mod boundaries;
 mod diagnostics;
 mod effective_compaction;
+mod epochs;
 mod findings;
 
 use super::tests::shared_config_home;

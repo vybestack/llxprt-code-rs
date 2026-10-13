@@ -86,7 +86,7 @@ impl super::Turn<'_> {
     /// same backend and clock, without replaying unsafe fields or executing its batch.
     pub(super) fn round(
         &self,
-        requests: &[serdes_ai::core::ModelRequest],
+        requests: &mut Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
         context: (
             &crate::session::SessionStore,
@@ -98,7 +98,7 @@ impl super::Turn<'_> {
             Err(RoundFailure::ToolCallRefusal(message)) => message,
             other => return other,
         };
-        let mut correction = requests.to_vec();
+        let mut correction = requests.clone();
         correction.push(crate::adapter::user_request(
             "Your previous tool-call reply was refused: a function name was invalid or exceeded \
              the 64-byte cap. None of that reply's tools ran. Use only the exact registered \
@@ -109,7 +109,8 @@ impl super::Turn<'_> {
                 "{first}; corrective reissue refused by request budget"
             )));
         }
-        match self.retry_stream(&correction, tools, context) {
+        *requests = correction;
+        match self.retry_stream(requests, tools, context) {
             Err(RoundFailure::ToolCallRefusal(second)) => Err(RoundFailure::ToolCallRefusal(
                 format!("{first}; one corrective reissue exhausted: {second}"),
             )),

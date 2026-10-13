@@ -124,6 +124,9 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
+    fn set_context_epoch(&self, epoch: u64) {
+        self.inner.set_context_epoch(epoch);
+    }
     fn request_contract(&self) -> Option<crate::telemetry::bounds::RequestContract> {
         let mut contract = self.inner.request_contract()?;
         contract.input_accounting = match self.accounting {

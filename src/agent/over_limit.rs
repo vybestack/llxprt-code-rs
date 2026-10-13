@@ -85,8 +85,26 @@ impl super::Turn<'_> {
         reserved: &mut ReservedRequest,
     ) -> Result<Vec<serdes_ai::core::ModelRequest>, AgentError> {
         self.renew(store, reserved)?;
-        let mut requests = self.materialize_requests(reserved);
+        let mut requests = store
+            .resume_request_prefix(reserved, self.materialize_requests(reserved), {
+                let mut tail = reserved
+                    .history
+                    .last()
+                    .and_then(|h| h.rounds.last())
+                    .map(crate::adapter::persisted_round_requests)
+                    .unwrap_or_default();
+                tail.push(crate::adapter::user_request(&reserved.prompt));
+                tail
+            })
+            .map_err(AgentError::from_store)?;
         let tools = crate::tools::tool_specs(self.allow_shell);
+        if self.checkpoint_requested
+            && self.compact_provider_context(&mut reserved.clone(), &mut requests, &[])
+        {
+            self.checkpoint_pending.set(Some(
+                crate::context_policy::cache::CutTrigger::ExplicitRequest,
+            ));
+        }
         if !crate::agent::round_budget_exceeded(&requests, &tools, self.context_limit) {
             return Ok(requests);
         }
@@ -113,7 +131,7 @@ impl super::Turn<'_> {
         phases: (&'static str, &'static str),
     ) -> Result<LlmResult, AgentError> {
         match self.profiled_round(
-            &attempt.requests,
+            &mut attempt.requests,
             tools,
             phases.0,
             phases.1,
@@ -142,7 +160,7 @@ impl super::Turn<'_> {
                     &attempt.rounds,
                 )?;
                 match self.profiled_round(
-                    &attempt.requests,
+                    &mut attempt.requests,
                     tools,
                     phases.0,
                     phases.1,
@@ -182,17 +200,23 @@ impl super::Turn<'_> {
         let mut history = reserved.clone();
         let history_changed = compact_history(&mut history.history);
         let mut candidate = requests.clone();
+        // The resumed prefix can include live projections absent from the
+        // transcript. Never splice it by a re-materialized transcript length.
+        let current = content::current_prompt_start(requests, &reserved.prompt);
         if history_changed {
-            let base_len = self.materialize_requests(reserved).len();
-            let mut prefix = self.materialize_requests(&history);
-            content::preserve_unchanged_prefix(&requests[..base_len], &mut prefix);
-            candidate.splice(..base_len, prefix);
+            content::compact_narration(&mut candidate[..current], &reserved.history);
         }
-        let base_len = self.materialize_requests(&history).len();
-        let results_changed = compact_observed_results(&mut candidate[base_len..], rounds);
-        if !(history_changed || results_changed) || !content::content_shrank(requests, &candidate) {
+        let results_changed = compact_observed_results(&mut candidate[current..], rounds);
+        if !(history_changed || results_changed) {
             return false;
         }
+        content::checkpoint_head(&mut candidate, &reserved.history);
+        if !content::content_shrank(requests, &candidate) {
+            return false;
+        }
+        self.checkpoint_pending.set(Some(
+            crate::context_policy::cache::CutTrigger::BudgetPressure,
+        ));
         reserved.history = history.history;
         *requests = candidate;
         true

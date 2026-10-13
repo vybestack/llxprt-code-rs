@@ -45,6 +45,13 @@ pub fn round_limit_message(max_rounds: usize) -> String {
 }
 
 impl super::CodingAgent {
+    /// Propose a checkpoint through the same compactor and governor as pressure
+    /// recovery. No eligible reduction means no cut (not a timer or rewrite).
+    pub fn with_checkpoint_request(mut self) -> Self {
+        self.checkpoint_requested = true;
+        self
+    }
+
     /// Override the agent's conservative per-request context budget (tests drive budget
     /// enforcement with an explicit token budget instead of a profile).
     pub fn with_context_limit(mut self, context_limit: Option<u64>) -> CodingAgent {

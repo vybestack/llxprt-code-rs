@@ -1,5 +1,5 @@
 //! Versioned report schema for context evals.
-//! Cache accounting is loaded from the runtime-owned rewrite journal when available.
+//! Cache accounting is loaded from the runtime-owned epoch accounting when available.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::context_eval::REQUEST_SHAPE_DIGEST_KEY;
 
 /// Report schema version. Bumping it is a breaking eval change.
-pub const REPORT_SCHEMA_VERSION: u32 = 1;
+pub const REPORT_SCHEMA_VERSION: u32 = 2;
 /// Cost class recorded when cache telemetry is unavailable.
 pub const CACHE_UNKNOWN_CLASS: &str = "disarmed_unavailable";
 /// Every verdict name the schema accepts, exactly as [`crate::context_eval::grader::Verdict`]
@@ -92,125 +92,60 @@ const EVIDENCE_STATUS_REQUIRED: [&str; 9] = [
     "isolation_ok",
 ];
 
-/// Cache telemetry is explicitly unknown when no durable journal is available.
+/// Epoch cache telemetry stays unknown when no durable accounting is available.
 pub fn cache_block() -> Value {
-    json!({
-        "class": CACHE_UNKNOWN_CLASS,
-        "hit_rate": Value::Null,
-        "armed_hit_rate": Value::Null,
-        "disarmed_hit_rate": Value::Null,
-        "invalidation_cost_per_event": Value::Null,
-        "prefix_invalidation_cost_per_rewrite": Value::Null,
-        "rewrite_journal_entries": Value::Null,
-        "rewrite_journal_bytes_reclaimed": Value::Null,
-        "rewrite_journal_bytes_invalidated": Value::Null,
-        "amortization_decisions_below_at_above": Value::Null,
-        "suspended_while_armed": Value::Null,
-        "source": "unknown",
-        "note": "runtime rewrite-journal telemetry was unavailable",
-    })
+    json!({"class": CACHE_UNKNOWN_CLASS, "epochs": Value::Null,
+        "hit_rate": Value::Null, "source": "unknown",
+        "note": "runtime epoch telemetry was unavailable"})
 }
 
-/// Load an acceptance-report cache block from the runtime rewrite journal.
 pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
-    let Some(session_dir) = session_dir else {
+    let Some(dir) = session_dir else {
         return cache_block();
     };
-    let Ok(text) = std::fs::read_to_string(
-        crate::session::context_artifact_dir(session_dir).join("rewrite-journal.log"),
-    ) else {
+    let Ok(bytes) = std::fs::read(crate::session::context_artifact_dir(dir).join("epochs.json"))
+    else {
         return cache_block();
     };
-    let mut entries = 0_u64;
-    let mut bytes_reclaimed = 0_u64;
-    let mut bytes_invalidated = 0_u64;
-    let mut unknown_invalidation = false;
-    let mut runtime_report = None;
-    for line in text.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            return cache_block();
-        };
-        if let Some(report) = value.get("report") {
-            runtime_report = Some(report.clone());
-            continue;
-        }
-        let Some(reclaimed) = value.get("bytes_reclaimed").and_then(Value::as_u64) else {
-            continue;
-        };
-        entries = entries.saturating_add(1);
-        bytes_reclaimed = bytes_reclaimed.saturating_add(reclaimed);
-        match value.get("invalidation_cost").and_then(Value::as_u64) {
-            Some(cost) => bytes_invalidated = bytes_invalidated.saturating_add(cost),
-            None => unknown_invalidation = true,
-        }
+    let Ok(cache) = serde_json::from_slice::<crate::context_policy::cache::EpochCache>(&bytes)
+    else {
+        return cache_block();
+    };
+    if cache.validate().is_err() {
+        return cache_block();
     }
-    let Some(report) = runtime_report else {
-        return cache_block();
-    };
-    // F17: the sibling field is byte-labelled, so this one keeps the same
-    // unit across journal and report; a missing cost stays unknown rather
-    // than being mislabelled as a measured byte count.
-    let invalidated = if unknown_invalidation {
-        Value::Null
-    } else {
-        json!(bytes_invalidated)
-    };
-    json!({
-        "class": "measured",
-        "hit_rate": report["hit_rate"],
-        "armed_hit_rate": report["armed_hit_rate"],
-        "disarmed_hit_rate": report["disarmed_hit_rate"],
-        "invalidation_cost_per_event": report["invalidation_cost_per_event"],
-        "prefix_invalidation_cost_per_rewrite": Value::Null,
-        "known_invalidation_cost_events": report["known_invalidation_cost_events"],
-        "unknown_invalidation_cost_events": report["unknown_invalidation_cost_events"],
-        "rewrite_journal_entries": entries,
-        "rewrite_journal_bytes_reclaimed": bytes_reclaimed,
-        "rewrite_journal_bytes_invalidated": invalidated,
-        "amortization_decisions_below_at_above": {
-            "below": report["threshold_denials"],
-            "at_or_above": report["threshold_passes"],
-        },
-        "conditional": {
-            "armed_rewrites": report["armed_rewrites"],
-            "disarmed_rewrites": report["disarmed_rewrites"],
-            "armed_hit_rate": report["armed_hit_rate"],
-            "disarmed_hit_rate": report["disarmed_hit_rate"],
-        },
-        "suspended_while_armed": report["economic_gate_suspensions"].as_u64().unwrap_or(0) > 0,
-        "source": "context/rewrite-journal.log",
-    })
+    let epochs: Vec<Value> = cache
+        .records()
+        .iter()
+        .map(|record| {
+            json!({
+                "epoch": record.epoch, "head_digest": record.head_digest,
+                "trigger": record.trigger, "armed": record.armed,
+                "invalidations": record.invalidations, "bytes_reclaimed": record.bytes_reclaimed,
+                "bytes_invalidated": record.bytes_invalidated,
+                "tokens_invalidated": record.tokens_invalidated, "tokens_reclaimed": record.tokens_reclaimed,
+                "calls": record.calls, "measured_calls": record.measured_calls,
+                "hit_rate": record.hit_rate(), "armed_hit_rate": record.armed_hit_rate(),
+                "disarmed_hit_rate": record.disarmed_hit_rate(),
+            })
+        })
+        .collect();
+    json!({"class": "measured", "epochs": epochs, "source": "context/epochs.json"})
 }
 
-/// Preserve each scenario's conditional report in the aggregate acceptance report.
+/// Preserve epoch conditionals rather than averaging unrelated prefixes.
 pub fn aggregate_cache(scenarios: &[Value]) -> Value {
-    let measured: Vec<Value> = scenarios
+    let reports: Vec<Value> = scenarios
         .iter()
-        .filter_map(|scenario| scenario.get("cache"))
-        .filter(|cache| cache.get("class").and_then(Value::as_str) == Some("measured"))
+        .filter_map(|s| s.get("cache"))
+        .filter(|c| c["class"] == "measured")
         .cloned()
         .collect();
-    if measured.is_empty() {
+    if reports.is_empty() {
         return cache_block();
     }
-    let reclaimed = measured.iter().fold(0_u64, |sum, cache| {
-        sum.saturating_add(
-            cache["rewrite_journal_bytes_reclaimed"]
-                .as_u64()
-                .unwrap_or(0),
-        )
-    });
-    json!({
-        "class": "measured_aggregate",
-        "hit_rate": Value::Null,
-        "prefix_invalidation_cost_per_rewrite": Value::Null,
-        "rewrite_journal_bytes_reclaimed": reclaimed,
-        "rewrite_journal_bytes_invalidated": Value::Null,
-        "amortization_decisions_below_at_above": Value::Null,
-        "suspended_while_armed": measured.iter().any(|cache| cache["suspended_while_armed"] == true),
-        "source": "scenario rewrite journals",
-        "conditional_reports": measured,
-    })
+    json!({"class": "measured_aggregate", "conditional_reports": reports,
+        "source": "scenario epochs"})
 }
 
 /// Validate a report value against the required schema. `aggregate` selects the field set.

@@ -1110,7 +1110,7 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
         !String::from_utf8_lossy(&events).contains(SECRET),
         "the policy event log never names a secret"
     );
-    let journal = artifact(&store, "rewrite-journal.log");
+    let journal = artifact(&store, "epochs.json");
     assert!(
         !String::from_utf8_lossy(&journal).contains(SECRET),
         "the rewrite journal never carries a secret"
@@ -1151,19 +1151,19 @@ fn production_secret_corpus_never_reaches_the_durable_artifacts() {
 
 /// F1: a restart preserves BOTH durable policy journals.
 ///
-/// Process A publishes `events.log` and `rewrite-journal.log`; a second
+/// Process A publishes `events.log` and `epochs.json`; a second
 /// `recover_context_state` (the same seam a later process runs) reloads them
 /// and a republished pair carries the previous process's records ahead of the
 /// new ones, never a fresh controller's empty logs (issue 102).
 #[test]
-fn restart_preserves_the_policy_event_log_and_rewrite_journal() {
+fn restart_preserves_policy_events_and_epoch_cache() {
     let cwd = workspace();
     let first = store("journal-survival");
     run_bulk_turn(&first, &cwd, "a.txt", "c0");
     let events_a = artifact(&first, "events.log");
-    let journal_a = artifact(&first, "rewrite-journal.log");
+    let journal_a = artifact(&first, "epochs.json");
     let events_lines_a = nonempty_lines(&events_a);
-    let entry_lines_a = entry_lines(&journal_a);
+    let epochs_a: serde_json::Value = serde_json::from_slice(&journal_a).unwrap();
     assert!(
         !events_lines_a.is_empty(),
         "process A recorded at least one policy event"
@@ -1173,9 +1173,9 @@ fn restart_preserves_the_policy_event_log_and_rewrite_journal() {
     let second = reopen(&first);
     run_bulk_turn(&second, &cwd, "b.txt", "c1");
     let events_b = artifact(&second, "events.log");
-    let journal_b = artifact(&second, "rewrite-journal.log");
+    let journal_b = artifact(&second, "epochs.json");
     let events_lines_b = nonempty_lines(&events_b);
-    let entry_lines_b = entry_lines(&journal_b);
+    let epochs_b: serde_json::Value = serde_json::from_slice(&journal_b).unwrap();
 
     // The recovered event log comes back AHEAD of the new records: the first
     // lines are byte-identical to process A's, and the republished log is
@@ -1195,34 +1195,23 @@ fn restart_preserves_the_policy_event_log_and_rewrite_journal() {
         assert_eq!(before, after, "each recovered event line is unchanged");
     }
 
-    // The rewrite journal likewise survives: every entry line process A wrote
-    // is still present in process B's republished journal, in the same order.
-    let mut remaining = entry_lines_b.clone();
-    for wanted in &entry_lines_a {
-        let at = remaining
-            .iter()
-            .position(|line| line == wanted)
-            .expect("a recovered rewrite-journal entry survives the restart");
-        remaining.remove(at);
-    }
+    assert!(!epochs_a["records"].as_array().unwrap().is_empty());
+    let before = epochs_a["records"].as_array().unwrap();
+    let after = epochs_b["records"].as_array().unwrap();
     assert_eq!(
-        remaining.len(),
-        entry_lines_b.len() - entry_lines_a.len(),
-        "only the new generation's entries were appended"
+        after.len(),
+        before.len(),
+        "ordinary appends must not cut an epoch"
     );
-
-    // Each journal line stays parseable JSON with the fields a later process
-    // reloads, so the survival is a real recovery, not a copy.
-    for line in &entry_lines_b {
-        let value: serde_json::Value =
-            serde_json::from_str(line).expect("each journal entry is one JSON object");
-        let has_source = value.get("source").is_some();
-        assert!(has_source, "each journal entry names its source");
-        let has_logical_time = value.get("logical_time").is_some();
-        assert!(
-            has_logical_time,
-            "each journal entry names the logical time it reached"
-        );
+    for (a, b) in before.iter().zip(after) {
+        assert_eq!(a["head_digest"], b["head_digest"]);
+        assert_eq!(a["invalidations"], b["invalidations"]);
+        assert!(b["calls"].as_u64().unwrap() > a["calls"].as_u64().unwrap());
+    }
+    for record in after {
+        assert!(record["head_digest"].is_string());
+        assert!(record["epoch"].is_u64());
+        assert!(record["calls"].is_u64());
     }
 }
 
@@ -1283,17 +1272,6 @@ fn nonempty_lines(bytes: &[u8]) -> Vec<String> {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.to_string())
-        .collect()
-}
-
-/// The entry lines of `rewrite-journal.log`, skipping the derived `report`.
-fn entry_lines(journal: &[u8]) -> Vec<String> {
-    nonempty_lines(journal)
-        .into_iter()
-        .filter(|line| {
-            let value: serde_json::Value = serde_json::from_str(line).unwrap_or_default();
-            value.get("report").is_none()
-        })
         .collect()
 }
 

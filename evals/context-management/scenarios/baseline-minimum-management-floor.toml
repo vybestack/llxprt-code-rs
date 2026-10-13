@@ -26,7 +26,7 @@ fixture = "tool-output-block.txt"
 
 [assertions]
 required_final_marker = "CTXEVAL-FINAL-7f3a9c"
-required_context_artifacts = ["context/rewrite-journal.log"]
+required_context_artifacts = ["context/epochs.json"]
 required_outcomes = ["wrap_up"]
 
 [runtime]

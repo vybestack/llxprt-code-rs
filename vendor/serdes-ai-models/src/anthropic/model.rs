@@ -158,12 +158,14 @@ impl AnthropicModel {
         requests: &[ModelRequest],
     ) -> (Option<SystemContent>, Vec<AnthropicMessage>) {
         let mut system_parts: Vec<String> = Vec::new();
+        let mut checkpoint = false;
         let mut api_messages: Vec<AnthropicMessage> = Vec::new();
 
         for req in requests {
             for part in &req.parts {
                 match part {
                     ModelRequestPart::SystemPrompt(sys) => {
+                        checkpoint |= sys.dynamic_ref.as_deref() == Some("context-checkpoint");
                         system_parts.push(sys.content.clone());
                     }
                     ModelRequestPart::UserPrompt(user) => {
@@ -238,10 +240,8 @@ impl AnthropicModel {
 
         let system = if system_parts.is_empty() {
             None
-        } else if self.enable_caching && system_parts.len() == 1 {
-            Some(SystemContent::cached(
-                system_parts.into_iter().next().unwrap(),
-            ))
+        } else if self.enable_caching && (system_parts.len() == 1 || checkpoint) {
+            Some(SystemContent::cached(system_parts.join("\n\n")))
         } else {
             Some(SystemContent::text(system_parts.join("\n\n")))
         };
@@ -873,5 +873,32 @@ mod tests {
         assert!(matches!(&result.parts[0], ModelResponsePart::Text(_)));
         assert!(matches!(&result.parts[1], ModelResponsePart::ToolCall(_)));
         assert!(matches!(result.finish_reason, Some(FinishReason::ToolCall)));
+    }
+    #[test]
+    fn checkpoint_system_prefix_has_one_cache_breakpoint_and_off_has_none() {
+        let requests = vec![ModelRequest::with_parts(vec![
+            ModelRequestPart::SystemPrompt(serdes_ai_core::messages::SystemPromptPart::new(
+                "tools and shell",
+            )),
+            ModelRequestPart::SystemPrompt(
+                serdes_ai_core::messages::SystemPromptPart::new("checkpoint summary")
+                    .with_dynamic_ref("context-checkpoint"),
+            ),
+        ])];
+        for enabled in [false, true] {
+            let mut model = AnthropicModel::new("claude", "key");
+            if enabled {
+                model = model.with_caching();
+            }
+            let (system, _) = model.convert_messages(&requests);
+            let wire = serde_json::to_value(system).unwrap();
+            if enabled {
+                assert_eq!(wire[0]["cache_control"]["type"], "ephemeral");
+                assert_eq!(wire[0]["text"], "tools and shell\n\ncheckpoint summary");
+                assert_eq!(wire.as_array().unwrap().len(), 1);
+            } else {
+                assert_eq!(wire, "tools and shell\n\ncheckpoint summary");
+            }
+        }
     }
 }

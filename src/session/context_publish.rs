@@ -33,12 +33,12 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
     write_artifact(&dir, &stage, "events.log", policy_events(state)?.as_bytes())?;
     let checkpoints = checkpoint_lines(state)?;
     write_artifact(&dir, &stage, "checkpoints", checkpoints.as_bytes())?;
-    write_artifact(
-        &dir,
-        &stage,
-        "rewrite-journal.log",
-        journal_lines(state).as_bytes(),
-    )?;
+    let epochs = serde_json::to_vec(state.policy.epoch_cache())
+        .map_err(|error| format!("encode context epochs failed: {error}"))?;
+    write_artifact(&dir, &stage, "epochs.json", &epochs)?;
+    let prefixes = serde_json::to_vec(&state.request_prefixes)
+        .map_err(|error| format!("encode request prefixes failed: {error}"))?;
+    write_artifact(&dir, &stage, "request-prefixes.json", &prefixes)?;
     // The recorded kernel chain (132): the next sequence and head checksum the
     // session's executor reached, so a recovered process resumes the chain
     // instead of re-minting used sequence numbers.
@@ -142,46 +142,6 @@ fn checkpoint_lines(state: &ContextState) -> Result<String, String> {
     checkpoints.push_str(&line);
     checkpoints.push('\n');
     Ok(checkpoints)
-}
-
-/// Encodes the durable `rewrite-journal.log`: one JSON line per entry, then the
-/// derived `report` view recomputed from those entries.
-fn journal_lines(state: &ContextState) -> String {
-    let mut journal = String::new();
-    for entry in state.policy.journal().entries() {
-        let line = serde_json::json!({
-            "source": entry.source,
-            "bytes_reclaimed": entry.bytes_reclaimed,
-            "invalidation_cost": entry.invalidation_cost,
-            "logical_time": entry.logical_time,
-            "wall_elapsed_us": entry.wall_elapsed_us,
-            "amortized": entry.amortized,
-        });
-        journal.push_str(&line.to_string());
-        journal.push('\n');
-    }
-    let report = state.policy.cache_report();
-    journal.push_str(
-        &serde_json::json!({
-            "report": {
-                "hit_rate": report.hit_rate,
-                "armed_hit_rate": report.armed_hit_rate,
-                "disarmed_hit_rate": report.disarmed_hit_rate,
-                "invalidation_cost_per_event": report.invalidation_cost_per_event,
-                "known_invalidation_cost_events": report.known_cost_events,
-                "unknown_invalidation_cost_events": report.unknown_cost_events,
-                "threshold_passes": report.threshold_passes,
-                "threshold_denials": report.threshold_denials,
-                "armed_rewrites": report.armed_rewrites,
-                "disarmed_rewrites": report.disarmed_rewrites,
-                "economic_gate_suspensions": report.economic_gate_suspensions,
-                "forced_flushes": report.forced_flushes,
-            }
-        })
-        .to_string(),
-    );
-    journal.push('\n');
-    journal
 }
 
 /// Encodes and writes the durable `manifest.json`.

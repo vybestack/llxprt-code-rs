@@ -37,8 +37,8 @@ pub(crate) const VAULT_RELOAD_MAX: usize = 8 << 20;
 pub(crate) const MANIFEST_RELOAD_MAX: usize = 1 << 20;
 /// Read bound for a reloaded policy event log.
 pub(crate) const EVENTS_RELOAD_MAX: usize = 8 << 20;
-/// Read bound for a reloaded rewrite journal.
-pub(crate) const JOURNAL_RELOAD_MAX: usize = 8 << 20;
+/// Read bound for reloaded epoch accounting and request-prefix metadata.
+pub(crate) const EPOCH_RELOAD_MAX: usize = 8 << 20;
 /// Read bound for reloaded durable checkpoint lines.
 pub(crate) const CHECKPOINT_RELOAD_MAX: usize = 8 << 20;
 
@@ -116,6 +116,7 @@ pub(crate) struct ContextState {
     /// of this generation's own line instead of truncating them away
     /// (issue 102 restart).
     pub(crate) recovered_checkpoints: Option<Vec<u8>>,
+    pub(crate) request_prefixes: super::request_epoch::RequestPrefixes,
 }
 
 /// Durable context-store facts the CLI envelope re-reads after the run.
@@ -307,6 +308,7 @@ pub(crate) fn new_context_state(key: crate::context_store::vault::VaultKey) -> C
             crate::context_kernel::events::GENESIS_CHECKSUM,
         ),
         recovered_checkpoints: None,
+        request_prefixes: Default::default(),
     }
 }
 

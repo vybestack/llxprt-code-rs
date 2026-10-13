@@ -16,6 +16,7 @@ enum ResponsesModel {
 pub(crate) struct ResponsesBackend {
     model: ResponsesModel,
     model_settings: ModelSettings,
+    context_epoch: std::cell::Cell<u64>,
     calls: AtomicUsize,
     secrets: Vec<String>,
     interrupted: std::cell::Cell<Option<usize>>,
@@ -37,6 +38,7 @@ impl ResponsesBackend {
         Self {
             model,
             model_settings,
+            context_epoch: Default::default(),
             calls: AtomicUsize::new(0),
             secrets: Vec::new(),
             interrupted: std::cell::Cell::new(None),
@@ -57,15 +59,18 @@ impl ResponsesBackend {
             tools: std::sync::Arc::new(tools.iter().map(schema_for).collect()),
         };
         let request_parameters = params.to_model_request_parameters();
+        let mut settings = self.model_settings.clone();
+        settings.extra.get_or_insert_with(|| serde_json::json!({}))["context_epoch"] =
+            serde_json::json!(self.context_epoch.get());
         let response = match &self.model {
             ResponsesModel::Codex(model) => {
                 model
-                    .request(requests, &self.model_settings, &request_parameters)
+                    .request(requests, &settings, &request_parameters)
                     .await
             }
             ResponsesModel::OpenAi(model) => {
                 model
-                    .request(requests, &self.model_settings, &request_parameters)
+                    .request(requests, &settings, &request_parameters)
                     .await
             }
         }
@@ -80,6 +85,9 @@ impl ResponsesBackend {
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn set_context_epoch(&self, epoch: u64) {
+        self.context_epoch.set(epoch);
+    }
     fn streams_response(&self) -> bool {
         matches!(self.model, ResponsesModel::Codex(_))
     }

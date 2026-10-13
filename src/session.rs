@@ -50,6 +50,7 @@ mod log;
 mod output_ownership;
 pub(crate) use output_ownership::validate_diagnostic_destination;
 mod replay;
+pub(crate) mod request_epoch;
 mod reserve;
 mod snapshot;
 mod validate;

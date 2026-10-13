@@ -7332,7 +7332,7 @@ index b35e397..913af57 100644
  ## Installation
  
 diff --git a/vendor/serdes-ai-models/src/anthropic/model.rs b/vendor/serdes-ai-models/src/anthropic/model.rs
-index 0d35170..2ae3d34 100644
+index 0d35170..16b79a8 100644
 --- a/vendor/serdes-ai-models/src/anthropic/model.rs
 +++ b/vendor/serdes-ai-models/src/anthropic/model.rs
 @@ -7,7 +7,6 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
@@ -7421,6 +7421,34 @@ index 0d35170..2ae3d34 100644
      /// Get the appropriate profile for a model name.
      fn profile_for_model(model: &str) -> ModelProfile {
          let mut profile = anthropic_claude_profile();
+@@ -144,12 +158,14 @@ impl AnthropicModel {
+         requests: &[ModelRequest],
+     ) -> (Option<SystemContent>, Vec<AnthropicMessage>) {
+         let mut system_parts: Vec<String> = Vec::new();
++        let mut checkpoint = false;
+         let mut api_messages: Vec<AnthropicMessage> = Vec::new();
+
+         for req in requests {
+             for part in &req.parts {
+                 match part {
+                     ModelRequestPart::SystemPrompt(sys) => {
++                        checkpoint |= sys.dynamic_ref.as_deref() == Some("context-checkpoint");
+                         system_parts.push(sys.content.clone());
+                     }
+                     ModelRequestPart::UserPrompt(user) => {
+@@ -224,10 +240,8 @@ impl AnthropicModel {
+
+         let system = if system_parts.is_empty() {
+             None
+-        } else if self.enable_caching && system_parts.len() == 1 {
+-            Some(SystemContent::cached(
+-                system_parts.into_iter().next().unwrap(),
+-            ))
++        } else if self.enable_caching && (system_parts.len() == 1 || checkpoint) {
++            Some(SystemContent::cached(system_parts.join("\n\n")))
+         } else {
+             Some(SystemContent::text(system_parts.join("\n\n")))
+         };
 @@ -475,6 +489,7 @@ impl AnthropicModel {
              metadata: None,
              stream: if stream { Some(true) } else { None },
@@ -7607,6 +7635,38 @@ index 0d35170..2ae3d34 100644
                  cache_creation_input_tokens: None,
                  cache_read_input_tokens: None,
              },
+@@ -868,4 +874,31 @@ mod tests {
+         assert!(matches!(&result.parts[1], ModelResponsePart::ToolCall(_)));
+         assert!(matches!(result.finish_reason, Some(FinishReason::ToolCall)));
+     }
++    #[test]
++    fn checkpoint_system_prefix_has_one_cache_breakpoint_and_off_has_none() {
++        let requests = vec![ModelRequest::with_parts(vec![
++            ModelRequestPart::SystemPrompt(serdes_ai_core::messages::SystemPromptPart::new(
++                "tools and shell",
++            )),
++            ModelRequestPart::SystemPrompt(
++                serdes_ai_core::messages::SystemPromptPart::new("checkpoint summary")
++                    .with_dynamic_ref("context-checkpoint"),
++            ),
++        ])];
++        for enabled in [false, true] {
++            let mut model = AnthropicModel::new("claude", "key");
++            if enabled {
++                model = model.with_caching();
++            }
++            let (system, _) = model.convert_messages(&requests);
++            let wire = serde_json::to_value(system).unwrap();
++            if enabled {
++                assert_eq!(wire[0]["cache_control"]["type"], "ephemeral");
++                assert_eq!(wire[0]["text"], "tools and shell\n\ncheckpoint summary");
++                assert_eq!(wire.as_array().unwrap().len(), 1);
++            } else {
++                assert_eq!(wire, "tools and shell\n\ncheckpoint summary");
++            }
++        }
++    }
+ }
 diff --git a/vendor/serdes-ai-models/src/anthropic/stream.rs b/vendor/serdes-ai-models/src/anthropic/stream.rs
 index 8623d2c..9112c5e 100644
 --- a/vendor/serdes-ai-models/src/anthropic/stream.rs
@@ -15344,7 +15404,7 @@ index 97d1a2d..a67f673 100644
 +    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/chat.rs b/vendor/serdes-ai-models/src/openai/chat.rs
-index 9471b5b..523c412 100644
+index 9471b5b..17b7ceb 100644
 --- a/vendor/serdes-ai-models/src/openai/chat.rs
 +++ b/vendor/serdes-ai-models/src/openai/chat.rs
 @@ -2,12 +2,11 @@
@@ -15536,15 +15596,28 @@ index 9471b5b..523c412 100644
              role: "assistant".to_string(),
              content,
              name: None,
-@@ -338,6 +401,7 @@ impl OpenAIChatModel {
+@@ -338,6 +401,20 @@ impl OpenAIChatModel {
              ResponseFormat::json_schema("output", schema_value, true)
          });
  
 +        let mut request_extra = self.request_settings.extra.clone();
++        let epoch = settings
++            .extra
++            .as_ref()
++            .and_then(|e| e.get("context_epoch"))
++            .and_then(serde_json::Value::as_u64)
++            .unwrap_or(0);
++        if epoch > 0 {
++            if let Some(key) = request_extra.get_mut("prompt_cache_key") {
++                if let Some(base) = key.as_str() {
++                    *key = serde_json::json!(format!("{base}:epoch:{epoch}"));
++                }
++            }
++        }
          ChatCompletionRequest {
              model: self.model_name.clone(),
              messages,
-@@ -364,10 +428,17 @@ impl OpenAIChatModel {
+@@ -364,10 +441,17 @@ impl OpenAIChatModel {
              },
              logprobs: None,
              top_logprobs: None,
@@ -15562,7 +15635,7 @@ index 9471b5b..523c412 100644
      fn parse_response(&self, resp: ChatCompletionResponse) -> Result<ModelResponse, ModelError> {
          let choice = resp
              .choices
-@@ -375,6 +446,12 @@ impl OpenAIChatModel {
+@@ -375,6 +459,12 @@ impl OpenAIChatModel {
              .next()
              .ok_or_else(|| ModelError::invalid_response("No choices in response"))?;
  
@@ -15575,7 +15648,7 @@ index 9471b5b..523c412 100644
          let mut parts = Vec::new();
  
          // Check for refusal
-@@ -397,22 +474,29 @@ impl OpenAIChatModel {
+@@ -397,22 +487,29 @@ impl OpenAIChatModel {
  
          if let Some(tool_calls) = choice.message.tool_calls {
              for tc in tool_calls {
@@ -15610,7 +15683,7 @@ index 9471b5b..523c412 100644
          });
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -421,7 +505,10 @@ impl OpenAIChatModel {
+@@ -421,7 +518,10 @@ impl OpenAIChatModel {
              total_tokens: Some(u.total_tokens),
              cache_creation_tokens: None,
              cache_read_tokens: u.prompt_tokens_details.and_then(|d| d.cached_tokens),
@@ -15622,7 +15695,7 @@ index 9471b5b..523c412 100644
          });
  
          Ok(ModelResponse {
-@@ -436,42 +523,18 @@ impl OpenAIChatModel {
+@@ -436,42 +536,18 @@ impl OpenAIChatModel {
          })
      }
  
@@ -15675,7 +15748,7 @@ index 9471b5b..523c412 100644
      }
  }
  
-@@ -499,12 +562,16 @@ impl Model for OpenAIChatModel {
+@@ -499,12 +575,16 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15694,7 +15767,7 @@ index 9471b5b..523c412 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -513,21 +580,22 @@ impl Model for OpenAIChatModel {
+@@ -513,21 +593,22 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -15727,7 +15800,7 @@ index 9471b5b..523c412 100644
      }
  
      async fn request_stream(
-@@ -540,12 +608,15 @@ impl Model for OpenAIChatModel {
+@@ -540,12 +621,15 @@ impl Model for OpenAIChatModel {
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
@@ -15745,7 +15818,7 @@ index 9471b5b..523c412 100644
  
          if let Some(ref org) = self.organization {
              request = request.header("OpenAI-Organization", org);
-@@ -554,18 +625,22 @@ impl Model for OpenAIChatModel {
+@@ -554,18 +638,22 @@ impl Model for OpenAIChatModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -15775,7 +15848,7 @@ index 9471b5b..523c412 100644
  
          Ok(Box::pin(parser))
      }
-@@ -582,6 +657,61 @@ mod tests {
+@@ -582,6 +670,61 @@ mod tests {
          assert_eq!(model.system(), "openai");
      }
  
@@ -15837,7 +15910,7 @@ index 9471b5b..523c412 100644
      #[test]
      fn test_openai_model_builder() {
          let model = OpenAIChatModel::new("gpt-4o", "sk-test-key")
-@@ -661,4 +791,125 @@ mod tests {
+@@ -661,4 +804,154 @@ mod tests {
          assert_eq!(req.stream, Some(true));
          assert!(req.stream_options.is_some());
      }
@@ -15962,6 +16035,35 @@ index 9471b5b..523c412 100644
 +        assert!(wire.get("extra").is_none());
 +        assert!(wire.get("top_k").is_none());
 +    }
++    #[test]
++    fn epoch_routing_is_stable_within_epoch_and_changes_only_at_cut() {
++        let model = OpenAIChatModel::new("gpt", "key").with_request_settings(
++            OpenAIChatModelRequestSettings {
++                extra: BTreeMap::from([("prompt_cache_key".into(), serde_json::json!("session"))]),
++                ..Default::default()
++            },
++        );
++        for epoch in [0, 1, 1, 2] {
++            let settings = ModelSettings {
++                extra: Some(serde_json::json!({"context_epoch":epoch})),
++                ..Default::default()
++            };
++            let wire = serde_json::to_value(model.build_request(
++                &[],
++                &settings,
++                &Default::default(),
++                false,
++            ))
++            .unwrap();
++            let expected = if epoch == 0 {
++                "session".to_string()
++            } else {
++                format!("session:epoch:{epoch}")
++            };
++            assert_eq!(wire["prompt_cache_key"], expected);
++            assert!(wire.get("context_epoch").is_none());
++        }
++    }
  }
 diff --git a/vendor/serdes-ai-models/src/openai/mod.rs b/vendor/serdes-ai-models/src/openai/mod.rs
 index c1e00c9..34b9981 100644
@@ -15991,7 +16093,7 @@ index c1e00c9..34b9981 100644
  
  /// Create a new OpenAI chat model.
 diff --git a/vendor/serdes-ai-models/src/openai/responses.rs b/vendor/serdes-ai-models/src/openai/responses.rs
-index 9384750..8884492 100644
+index 9384750..d2d0fb6 100644
 --- a/vendor/serdes-ai-models/src/openai/responses.rs
 +++ b/vendor/serdes-ai-models/src/openai/responses.rs
 @@ -18,8 +18,7 @@ use reqwest::Client;
@@ -16060,11 +16162,11 @@ index 9384750..8884492 100644
 +    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub text: Option<ResponseTextConfig>,
 +    /// Stable prompt-cache identity.
-+    #[serde(skip_serializing_if = "Option::is_none")]
-+    pub prompt_cache_key: Option<String>,
-+    /// Prompt-cache retention policy.
      #[serde(skip_serializing_if = "Option::is_none")]
 -    pub store: Option<bool>,
++    pub prompt_cache_key: Option<String>,
++    /// Prompt-cache retention policy.
++    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub prompt_cache_retention: Option<PromptCacheRetention>,
      /// Metadata for the request.
      #[serde(skip_serializing_if = "Option::is_none")]
@@ -16081,7 +16183,7 @@ index 9384750..8884492 100644
  /// Reasoning configuration.
  #[derive(Debug, Clone, Serialize)]
  pub struct ReasoningConfig {
-@@ -246,27 +291,61 @@ pub struct TruncationConfig {
+@@ -246,25 +291,59 @@ pub struct TruncationConfig {
  
  /// Input item for the Responses API.
  #[derive(Debug, Clone, Serialize)]
@@ -16104,7 +16206,12 @@ index 9384750..8884492 100644
          #[serde(skip_serializing_if = "Option::is_none")]
 -        reasoning_id: Option<String>,
 +        phase: Option<String>,
-+    },
+     },
+-    /// Tool output.
+-    #[serde(rename = "tool")]
+-    Tool {
+-        tool_call_id: String,
+-        content: String,
 +    /// A prior assistant function call.
 +    FunctionCall {
 +        #[serde(rename = "type")]
@@ -16113,20 +16220,15 @@ index 9384750..8884492 100644
 +        name: String,
 +        arguments: String,
      },
--    /// Tool output.
--    #[serde(rename = "tool")]
--    Tool {
--        tool_call_id: String,
--        content: String,
 +    /// Output that matches a prior assistant function call.
 +    FunctionCallOutput {
 +        #[serde(rename = "type")]
 +        item_type: FunctionCallOutputInputType,
 +        call_id: String,
 +        output: String,
-     },
- }
- 
++    },
++}
++
 +/// Role for an input message.
 +#[derive(Debug, Clone, Copy, Serialize)]
 +#[serde(rename_all = "lowercase")]
@@ -16151,11 +16253,9 @@ index 9384750..8884492 100644
 +    /// Output from a function call.
 +    #[serde(rename = "function_call_output")]
 +    FunctionCallOutput,
-+}
-+
+ }
+
  /// Content for response input.
- #[derive(Debug, Clone, Serialize)]
- #[serde(untagged)]
 @@ -476,7 +555,7 @@ pub struct ResponseError {
  }
  
@@ -16367,14 +16467,14 @@ index 9384750..8884492 100644
          }
  
 -        (inputs, instructions)
-+        Ok((inputs, instructions))
-     }
- 
+-    }
+-
 -    fn convert_user_prompt(&self, user: &UserPromptPart) -> ResponseInput {
 -        let content = self.convert_user_content(&user.content);
 -        ResponseInput::User { content }
--    }
--
++        Ok((inputs, instructions))
+     }
+
 -    fn convert_user_content(&self, content: &UserContent) -> ResponseInputContent {
 +    fn convert_user_content(
 +        &self,
@@ -16425,19 +16525,19 @@ index 9384750..8884492 100644
                  })
              }
 -            _ => None, // Skip unsupported types
+-        }
+-    }
+-
+-    fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ResponseInput {
+-        ResponseInput::Tool {
+-            tool_call_id: tool_ret.tool_call_id.clone().unwrap_or_default(),
+-            content: tool_ret.content.to_string_content(),
 +            _ => Err(ModelError::api(
 +                "unsupported user content in Responses request",
 +            )),
          }
      }
  
--    fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ResponseInput {
--        ResponseInput::Tool {
--            tool_call_id: tool_ret.tool_call_id.clone().unwrap_or_default(),
--            content: tool_ret.content.to_string_content(),
--        }
--    }
--
 -    fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ResponseInput {
 -        ResponseInput::User {
 -            content: ResponseInputContent::Text(retry.content.message().to_string()),
@@ -16543,7 +16643,7 @@ index 9384750..8884492 100644
              model: self.model_name.clone(),
              input,
              instructions,
-@@ -965,55 +1076,105 @@ impl OpenAIResponsesModel {
+@@ -965,55 +1076,117 @@ impl OpenAIResponsesModel {
              service_tier: self.default_settings.service_tier,
              truncation,
              user: None,
@@ -16553,7 +16653,19 @@ index 9384750..8884492 100644
 +                .default_settings
 +                .text_verbosity
 +                .map(|verbosity| ResponseTextConfig { verbosity }),
-+            prompt_cache_key: self.default_settings.prompt_cache_key.clone(),
++            prompt_cache_key: self.default_settings.prompt_cache_key.as_ref().map(|key| {
++                let epoch = settings
++                    .extra
++                    .as_ref()
++                    .and_then(|e| e.get("context_epoch"))
++                    .and_then(JsonValue::as_u64)
++                    .unwrap_or(0);
++                if epoch == 0 {
++                    key.clone()
++                } else {
++                    format!("{key}:epoch:{epoch}")
++                }
++            }),
 +            prompt_cache_retention: self.default_settings.prompt_cache_retention,
              metadata: None,
 -        }
@@ -16668,7 +16780,7 @@ index 9384750..8884492 100644
                              }
                          }
                      }
-@@ -1022,32 +1183,39 @@ impl OpenAIResponsesModel {
+@@ -1022,32 +1195,39 @@ impl OpenAIResponsesModel {
                      call_id,
                      name,
                      arguments,
@@ -16718,7 +16830,7 @@ index 9384750..8884492 100644
          };
  
          let usage = resp.usage.map(|u| RequestUsage {
-@@ -1076,31 +1244,21 @@ impl OpenAIResponsesModel {
+@@ -1076,31 +1256,21 @@ impl OpenAIResponsesModel {
              kind: "response".to_string(),
          })
      }
@@ -16762,7 +16874,7 @@ index 9384750..8884492 100644
  }
  
  #[async_trait]
-@@ -1123,7 +1281,7 @@ impl Model for OpenAIResponsesModel {
+@@ -1123,7 +1293,7 @@ impl Model for OpenAIResponsesModel {
          settings: &ModelSettings,
          params: &ModelRequestParameters,
      ) -> Result<ModelResponse, ModelError> {
@@ -16771,7 +16883,7 @@ index 9384750..8884492 100644
  
          let timeout = settings.timeout.unwrap_or(self.default_timeout);
  
-@@ -1141,18 +1299,18 @@ impl Model for OpenAIResponsesModel {
+@@ -1141,18 +1311,18 @@ impl Model for OpenAIResponsesModel {
              request = request.header("OpenAI-Project", project);
          }
  
@@ -16798,7 +16910,7 @@ index 9384750..8884492 100644
  
          self.process_response(resp)
      }
-@@ -1266,22 +1424,179 @@ mod tests {
+@@ -1266,22 +1436,206 @@ mod tests {
  
      #[test]
      fn test_response_input_serialization() {
@@ -16985,6 +17097,33 @@ index 9384750..8884492 100644
 +                    .is_err(),
 +                "{path}"
 +            );
++        }
++    }
++    #[test]
++    fn epoch_routing_is_stable_within_epoch_and_changes_only_at_cut() {
++        let model =
++            OpenAIResponsesModel::new("gpt", "key").with_settings(OpenAIResponsesModelSettings {
++                prompt_cache_key: Some("session".into()),
++                ..Default::default()
++            });
++        for epoch in [0, 1, 1, 2] {
++            let settings = ModelSettings {
++                extra: Some(serde_json::json!({"context_epoch":epoch})),
++                ..Default::default()
++            };
++            let wire = serde_json::to_value(
++                model
++                    .build_request(&[], &settings, &Default::default(), false)
++                    .unwrap(),
++            )
++            .unwrap();
++            let expected = if epoch == 0 {
++                "session".to_string()
++            } else {
++                format!("session:epoch:{epoch}")
++            };
++            assert_eq!(wire["prompt_cache_key"], expected);
++            assert!(wire.get("context_epoch").is_none());
 +        }
      }
  }
@@ -27253,7 +27392,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..99e851b 100644
+index f90cc22..fc5c0bc 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -27467,7 +27606,7 @@ index f90cc22..99e851b 100644
      let (instructions, items) = history_to_wire(messages, skip).map_err(client_error)?;
      let tools: Option<Vec<_>> = if params.tools.is_empty() {
          None
-@@ -484,11 +561,20 @@ fn build_request(
+@@ -484,11 +561,32 @@ fn build_request(
                  .collect(),
          )
      };
@@ -27481,7 +27620,19 @@ index f90cc22..99e851b 100644
      Ok(CreateResponseRequest {
          model: inner.model_name.clone(),
 -        input: if items.is_empty() {
-+        prompt_cache_key: inner.prompt_cache_key.clone(),
++        prompt_cache_key: inner.prompt_cache_key.as_ref().map(|key| {
++            let epoch = settings
++                .extra
++                .as_ref()
++                .and_then(|e| e.get("context_epoch"))
++                .and_then(serde_json::Value::as_u64)
++                .unwrap_or(0);
++            if epoch == 0 {
++                key.clone()
++            } else {
++                format!("{key}:epoch:{epoch}")
++            }
++        }),
 +        input: if items.is_empty() && !inner.codex_http {
              crate::types::ResponseInput::Text(String::new())
          } else {
@@ -27489,7 +27640,7 @@ index f90cc22..99e851b 100644
              crate::types::ResponseInput::Items(items)
          },
          instructions,
-@@ -496,7 +582,7 @@ fn build_request(
+@@ -496,7 +594,7 @@ fn build_request(
          tool_choice: tool_choice_to_wire(params.tool_choice.as_ref()),
          temperature: settings.temperature,
          top_p: settings.top_p,
@@ -27498,7 +27649,7 @@ index f90cc22..99e851b 100644
          stream: None,
          background: None,
          store: Some(store),
-@@ -506,41 +592,29 @@ fn build_request(
+@@ -506,41 +604,29 @@ fn build_request(
          metadata: None,
          user: None,
          truncation: None,
@@ -27551,7 +27702,7 @@ index f90cc22..99e851b 100644
      }
  }
  
-@@ -571,6 +645,9 @@ impl Model for OpenResponsesModel {
+@@ -571,6 +657,9 @@ impl Model for OpenResponsesModel {
                      &response.id,
                  ))
              }
@@ -27561,7 +27712,7 @@ index f90cc22..99e851b 100644
              Transport::Http => self.run_http_turn(messages, settings, params).await,
          }
      }
-@@ -587,7 +664,7 @@ impl Model for OpenResponsesModel {
+@@ -587,7 +676,7 @@ impl Model for OpenResponsesModel {
          let settings = settings.clone();
          let params = params.clone();
  
@@ -27570,7 +27721,7 @@ index f90cc22..99e851b 100644
              let result = match inner.transport {
                  Transport::WebSocket => {
                      let mut sink = ChannelSink(&tx);
-@@ -602,11 +679,15 @@ impl Model for OpenResponsesModel {
+@@ -602,11 +691,15 @@ impl Model for OpenResponsesModel {
              if let Err(error) = result {
                  // A failure after events escaped still reaches the caller as
                  // an error item; a failure before that is the only item.
@@ -27588,7 +27739,7 @@ index f90cc22..99e851b 100644
      }
  
      fn profile(&self) -> &ModelProfile {
-@@ -620,7 +701,7 @@ fn response_from_events(
+@@ -620,7 +713,7 @@ fn response_from_events(
      model_name: &str,
      response_id: &str,
  ) -> ModelResponse {
@@ -27597,7 +27748,7 @@ index f90cc22..99e851b 100644
  
      let mut parts: Vec<serdes_ai_core::messages::ModelResponsePart> = Vec::new();
      let mut finish_reason = None;
-@@ -654,8 +735,8 @@ fn response_from_events(
+@@ -654,8 +747,8 @@ fn response_from_events(
                      request_tokens: complete.input_tokens,
                      response_tokens: complete.output_tokens,
                      total_tokens: match (complete.input_tokens, complete.output_tokens) {
@@ -27608,7 +27759,7 @@ index f90cc22..99e851b 100644
                      },
                      cache_creation_tokens: complete.cache_creation_tokens,
                      cache_read_tokens: complete.cache_read_tokens,
-@@ -665,6 +746,40 @@ fn response_from_events(
+@@ -665,6 +758,40 @@ fn response_from_events(
          }
      }
  
@@ -27649,7 +27800,7 @@ index f90cc22..99e851b 100644
      ModelResponse {
          parts,
          model_name: Some(model_name.to_string()),
-@@ -678,7 +793,50 @@ fn response_from_events(
+@@ -678,7 +805,50 @@ fn response_from_events(
  }
  
  impl OpenResponsesModel {
@@ -27701,7 +27852,7 @@ index f90cc22..99e851b 100644
      async fn run_http_turn(
          &self,
          messages: &[ModelRequest],
-@@ -700,19 +858,28 @@ impl OpenResponsesModel {
+@@ -700,19 +870,28 @@ impl OpenResponsesModel {
                  build_request(inner, messages, settings, params, skip, previous, true)?;
              request.stream = Some(false);
  
@@ -27738,7 +27889,7 @@ index f90cc22..99e851b 100644
                      .ok()
                      .map(|envelope| envelope.error.code)
                      .unwrap_or_default();
-@@ -721,13 +888,16 @@ impl OpenResponsesModel {
+@@ -721,13 +900,16 @@ impl OpenResponsesModel {
                      session.sent_requests = 0;
                      continue;
                  }
@@ -27760,7 +27911,7 @@ index f90cc22..99e851b 100644
              session.previous_response_id = Some(object.id.clone());
              session.sent_requests = messages.len();
              return Ok(ModelResponse {
-@@ -744,7 +914,9 @@ impl OpenResponsesModel {
+@@ -744,7 +926,9 @@ impl OpenResponsesModel {
                      response_tokens: usage.output_tokens,
                      total_tokens: usage.total_tokens,
                      cache_creation_tokens: None,
@@ -27771,7 +27922,7 @@ index f90cc22..99e851b 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,22 +931,39 @@ impl OpenResponsesModel {
+@@ -759,22 +943,39 @@ impl OpenResponsesModel {
      }
  }
  
@@ -27817,7 +27968,7 @@ index f90cc22..99e851b 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -788,20 +977,28 @@ async fn run_http_stream(
+@@ -788,20 +989,28 @@ async fn run_http_stream(
          let mut request = build_request(inner, messages, settings, params, skip, previous, true)?;
          request.stream = Some(true);
  
@@ -27854,7 +28005,7 @@ index f90cc22..99e851b 100644
              .ok()
              .map(|envelope| envelope.error.code)
              .unwrap_or_default();
-@@ -810,32 +1007,79 @@ async fn run_http_stream(
+@@ -810,32 +1019,79 @@ async fn run_http_stream(
              session.sent_requests = 0;
              continue;
          }
@@ -27899,9 +28050,7 @@ index f90cc22..99e851b 100644
 +                return Err(ModelError::InvalidResponse(
 +                    "responses SSE: frame after DONE".to_string(),
 +                ));
-             }
--            let event: StreamEvent = serde_json::from_str(payload)
--                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
++            }
 +            let event = match frame {
 +                sse::Frame::Control => continue,
 +                sse::Frame::Done if terminal_id.is_some() => {
@@ -27919,7 +28068,9 @@ index f90cc22..99e851b 100644
 +                return Err(ModelError::InvalidResponse(
 +                    "responses SSE: semantic event after terminal event".to_string(),
 +                ));
-+            }
+             }
+-            let event: StreamEvent = serde_json::from_str(payload)
+-                .map_err(|e| ModelError::InvalidResponse(e.to_string()))?;
 +            let adopted = lifecycle.validate(&event)?;
              if let StreamEvent::ResponseCompleted { response, .. }
              | StreamEvent::ResponseIncomplete { response, .. } = &event
@@ -27949,7 +28100,7 @@ index f90cc22..99e851b 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1090,58 @@ async fn run_http_stream(
+@@ -846,14 +1102,94 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -28010,6 +28161,42 @@ index f90cc22..99e851b 100644
 +            .bytes()
 +            .try_for_each(|byte| decoder.byte(byte).map(|_| ()))
 +            .is_err());
++    }
++    #[test]
++    fn epoch_cache_key_changes_only_at_checkpoint_and_disabled_stays_absent() {
++        use super::*;
++        for enabled in [true, false] {
++            let model = OpenResponsesModel::new("fixture", "http://localhost")
++                .with_prompt_cache_key(enabled.then(|| "session".to_owned()));
++            for epoch in [0, 1, 1, 2] {
++                let settings = ModelSettings {
++                    extra: Some(serde_json::json!({"context_epoch":epoch})),
++                    ..Default::default()
++                };
++                let request = build_request(
++                    &model.inner,
++                    &[],
++                    &settings,
++                    &Default::default(),
++                    0,
++                    None,
++                    false,
++                )
++                .unwrap();
++                let wire = serde_json::to_value(request).unwrap();
++                if enabled {
++                    let expected = if epoch == 0 {
++                        "session".to_owned()
++                    } else {
++                        format!("session:epoch:{epoch}")
++                    };
++                    assert_eq!(wire["prompt_cache_key"], expected);
++                } else {
++                    assert!(wire.get("prompt_cache_key").is_none());
++                }
++                assert!(wire.get("context_epoch").is_none());
++            }
++        }
 +    }
  }
 diff --git a/vendor/serdes-ai-responses/src/client/sse.rs b/vendor/serdes-ai-responses/src/client/sse.rs

@@ -52,7 +52,7 @@ impl CodingAgent {
 impl super::Turn<'_> {
     pub(super) fn profiled_round(
         &self,
-        requests: &[serdes_ai::core::ModelRequest],
+        requests: &mut Vec<serdes_ai::core::ModelRequest>,
         tools: &[crate::tools::ToolSpec],
         before: &'static str,
         after: &'static str,

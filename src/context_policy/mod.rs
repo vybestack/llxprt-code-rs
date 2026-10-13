@@ -3,7 +3,7 @@
 //! Every component here *proposes*. None of them mutates store or executor
 //! state. The plane covers classed queues with reserved service shares, the
 //! admission governor, dual-threshold pressure, the fixed reclamation ladder,
-//! the read-only runtime monitor, the rewrite journal (cache), the parameter
+//! the read-only runtime monitor, epoch cache accounting, the parameter
 //! registry, and the progress macrostep measure.
 
 pub mod cache;

@@ -12,8 +12,27 @@ impl Turn<'_> {
         if self.telemetry_round.replace(round) != round {
             self.telemetry_attempt.set(0);
         }
+        let trigger = self.checkpoint_pending.get();
+        let epoch = store
+            .record_request_prefix(reserved, requests, trigger)
+            .map_err(RoundFailure::RetryStore)?;
+        self.checkpoint_pending.set(None);
+        self.backend.set_context_epoch(epoch);
         for retry in 0..=super::rate_limit::MAX_RETRIES {
             let result = self.round_once(requests, tools, retry > 0);
+            if let Some(call) = self.observations.borrow().rounds.last() {
+                if result.is_ok() {
+                    store
+                        .observe_epoch_usage(
+                            epoch,
+                            call.input_tokens,
+                            call.cached_input_tokens,
+                            trigger
+                                == Some(crate::context_policy::cache::CutTrigger::BudgetPressure),
+                        )
+                        .map_err(RoundFailure::RetryStore)?;
+                }
+            }
             self.persist_observations(store, reserved)?;
             let events = match result {
                 Err(RoundFailure::StreamInterrupted(events))

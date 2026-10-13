@@ -12,11 +12,9 @@
 //! violation at `finish_window` tightens the quota that the next window's
 //! admission actually observes (issue 110).
 
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
-use super::cache::{CacheConfig, CacheReport, RewriteEntry, RewriteJournal};
+use super::cache::{CheckpointCut, CutTrigger, EpochCache, EpochError};
 use super::governor::{Admission, Governor, GovernorConfig};
 use super::ladder;
 use super::monitor::RuntimeMonitor;
@@ -105,8 +103,7 @@ pub struct ProposalOnlyController {
     governor: Governor,
     pressure: Pressure,
     monitor: RuntimeMonitor,
-    journal: RewriteJournal,
-    seen_content: BTreeSet<u64>,
+    cache: EpochCache,
     events: Vec<PolicyEvent>,
     logical_time: u64,
     terminal_outcome: Option<&'static str>,
@@ -130,9 +127,6 @@ pub struct ProposalOnlyController {
     /// tier change across the admission is a real signal the monitor hook
     /// sees (issue 110).
     pressure_tier_before: SafetyTier,
-    /// How many `complete_bulk` flushes were skipped by the cache gate, so a
-    /// test can prove the gate actually gates (issue 110).
-    deferred_flushes: u64,
     /// No-op macrosteps observed while the governor keeps admitting: a turn
     /// whose window reclaims nothing degrades the window measure (issue 112).
     pub(crate) noop_steps: u64,
@@ -165,16 +159,11 @@ impl ProposalOnlyController {
             .expect("registry pressure thresholds are valid"),
         );
         let monitor = RuntimeMonitor::new(param_usize(&registry, "monitor.sticky_cap") as u32);
-        let journal = RewriteJournal::new(CacheConfig {
-            amortization_bar: param_u64(&registry, "cache.amortization_bar"),
-            flush_epoch: param_usize(&registry, "cache.flush_epoch"),
-        });
         Self {
             governor,
             pressure,
             monitor,
-            journal,
-            seen_content: BTreeSet::new(),
+            cache: EpochCache::default(),
             events: Vec::new(),
             logical_time: 0,
             terminal_outcome: None,
@@ -184,7 +173,6 @@ impl ProposalOnlyController {
             registry,
             turn_window: 0,
             pressure_tier_before: SafetyTier::Disarmed,
-            deferred_flushes: 0,
             noop_steps: 0,
         }
     }
@@ -192,17 +180,6 @@ impl ProposalOnlyController {
     /// The parameter registry this controller reads its calibrations from.
     pub fn registry(&self) -> &ParameterRegistry {
         &self.registry
-    }
-
-    /// Flushes the rewrite journal's pending notes only when the cache gate
-    /// says a flush is due (`should_flush`), so a `complete_bulk` that notes
-    /// fewer entries than the flush epoch defers and the count proves it.
-    fn flush_when_due(&mut self, source: u64, armed: bool, wall_elapsed_us: u64) {
-        if self.journal.should_flush() {
-            self.journal.force_flush(source, armed, wall_elapsed_us);
-        } else {
-            self.deferred_flushes = self.deferred_flushes.saturating_add(1);
-        }
     }
 
     /// Feed the monitor one real signal: a pressure tier change across an
@@ -298,22 +275,9 @@ impl ProposalOnlyController {
         bytes: &[u8],
         admitted_bytes: usize,
         admitted_pressure: f64,
-        wall_elapsed_us: u64,
+        _wall_elapsed_us: u64,
     ) {
-        let content = crate::context_kernel::canonical::digest(bytes);
-        let hit = !self.seen_content.insert(content);
-        self.journal.observe_access(hit, proposal.armed);
         let reclaimed = bytes.len().saturating_sub(admitted_bytes) as u64;
-        // The cache gate is honored: the verdict is read, and the flush only
-        // happens when the journal says one is due (issue 110).
-        let _gate = self.journal.should_rewrite(reclaimed, None, proposal.armed);
-        self.journal.note(RewriteEntry::new(
-            proposal.source,
-            reclaimed,
-            None,
-            proposal.logical_time,
-        ));
-        self.flush_when_due(proposal.source, proposal.armed, wall_elapsed_us);
         // The admission was counted at the raw bound at proposal time; what
         // actually entered the context is the record length. Settle the
         // measured keep/reclaim split into the window, so the rate predicate
@@ -462,39 +426,44 @@ impl ProposalOnlyController {
     pub fn events(&self) -> &[PolicyEvent] {
         &self.events
     }
-    /// Restores the durable policy history a previous process published: the
-    /// event log, the rewrite journal, and the logical time it had reached.
-    ///
-    /// `events.log` is reloaded so the republished log carries the previous
-    /// process's records ahead of the new ones instead of replacing them; the
-    /// journal entries come back so `rewrite-journal.log` likewise survives a
-    /// restart; the logical time resumes past the last reloaded event so a
-    /// restored event never shares a logical time with a new one.
-    ///
-    /// The restored events are appended after any events this process already
-    /// emitted (a recovery can happen after a refused admission), and the
-    /// logical time resumes past the maximum of the reloaded and local ones.
+    /// Restores current-format durable policy events and epoch accounting.
     pub fn restore_history(
         &mut self,
         events: Vec<PolicyEvent>,
-        entries: Vec<RewriteEntry>,
+        cache: EpochCache,
         logical_time: u64,
-    ) {
+    ) -> Result<(), EpochError> {
+        cache.validate()?;
         for event in events {
             self.logical_time = self.logical_time.max(event.logical_time);
             self.events.push(event);
         }
-        for entry in entries {
-            self.logical_time = self.logical_time.max(entry.logical_time);
-            self.journal.restore_entry(entry);
-        }
+        self.cache = cache;
         self.logical_time = self.logical_time.max(logical_time);
+        Ok(())
     }
-    pub fn journal(&self) -> &RewriteJournal {
-        &self.journal
+    pub fn epoch_cache(&self) -> &EpochCache {
+        &self.cache
     }
-    pub fn cache_report(&self) -> &CacheReport {
-        self.journal.report()
+    pub fn epoch_cache_mut(&mut self) -> &mut EpochCache {
+        &mut self.cache
+    }
+
+    /// A checkpoint proposal shares the admission governor's refusal gate.
+    /// Age and cache prices are deliberately absent. Erasure is correctness-only.
+    pub fn checkpoint_allowed(&self, trigger: CutTrigger) -> bool {
+        trigger == CutTrigger::Erasure
+            || (!self.governor.state().quiescing
+                && !matches!(
+                    self.terminal_outcome,
+                    Some("quiesce_rate" | "quiesce_unwritable")
+                ))
+    }
+    pub fn checkpoint(&mut self, cut: CheckpointCut) -> Result<u64, EpochError> {
+        if !self.checkpoint_allowed(cut.trigger) {
+            return Err(EpochError::GovernorRefused);
+        }
+        self.cache.cut(cut)
     }
     pub fn terminal_outcome(&self) -> Option<&'static str> {
         self.terminal_outcome
@@ -540,13 +509,11 @@ impl ProposalOnlyController {
     pub fn logical_time(&self) -> u64 {
         self.logical_time
     }
+    pub fn armed(&self) -> bool {
+        self.pressure.tier() == SafetyTier::Armed
+    }
     pub fn governor(&self) -> &Governor {
         &self.governor
-    }
-    /// How many `complete_bulk` flushes the cache gate deferred (issue 110):
-    /// proof the gate actually gates instead of flushing unconditionally.
-    pub fn deferred_flushes(&self) -> u64 {
-        self.deferred_flushes
     }
     /// The monitor's observed counters, for the window-hook signal test.
     pub fn monitor_counters(&self) -> &super::monitor::MonitorCounters {

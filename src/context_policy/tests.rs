@@ -1,6 +1,6 @@
 //! RED tests for the Phase-4 policy plane contracts.
 
-use crate::context_policy::cache::{CacheConfig, RewriteEntry, RewriteJournal};
+use crate::context_policy::cache::{CheckpointCut, CutTrigger, EpochCache};
 use crate::context_policy::governor::{Admission, Governor, GovernorConfig};
 use crate::context_policy::ladder::{
     escalate, operation, select, select_candidate, Candidate, Capabilities, DegradationClass,
@@ -326,80 +326,52 @@ fn monitor_sticky_caps_freeze_and_relax_only_disarmed() {
     assert!(late_relaxation);
 }
 
-#[test]
-fn cache_threshold_boundaries_and_unknown_cost() {
-    let cfg = CacheConfig {
-        amortization_bar: 100,
-        flush_epoch: 4,
-    };
-    let mut journal = RewriteJournal::new(cfg);
-
-    let below = journal.should_rewrite(100, Some(50), false);
-    assert!(!below);
-
-    let boundary = journal.should_rewrite(150, Some(50), false);
-    assert!(boundary);
-
-    let just_under = journal.should_rewrite(149, Some(50), false);
-    assert!(!just_under);
-
-    // Unknown invalidation cost stays None; it is never treated as zero.
-    let unknown = journal.should_rewrite(10, None, false);
-    assert!(!unknown);
-
-    let report = journal.report();
-    let denials = report.threshold_denials > 0;
-    let passes = report.threshold_passes > 0;
-    let accounted = denials;
-    let observed_passes = passes;
-    assert!(accounted);
-    assert!(observed_passes);
-    let unknowns = journal.report().unknown_cost_events == 0;
-    assert!(unknowns);
+fn cut(trigger: CutTrigger) -> CheckpointCut {
+    CheckpointCut {
+        head_digest: "a".repeat(64),
+        head_requests: 2,
+        trigger,
+        armed: true,
+        bytes_reclaimed: 100,
+        bytes_invalidated: 1000,
+        tokens_invalidated: None,
+    }
 }
 
 #[test]
-fn cache_forced_flush_and_armed_suspension() {
-    let cfg = CacheConfig {
-        amortization_bar: 100,
-        flush_epoch: 4,
-    };
-    let mut journal = RewriteJournal::new(cfg);
-
-    // Armed pressure suspends economics entirely.
-    let armed_rewrite = journal.should_rewrite(10, Some(5000), true);
-    assert!(armed_rewrite);
-
-    journal.note(RewriteEntry::new(3, 50, Some(5), 7));
-    let early_flush = journal.should_flush();
-    assert!(!early_flush);
-    journal.note(RewriteEntry::new(3, 60, Some(6), 8));
-    journal.note(RewriteEntry::new(3, 70, Some(7), 9));
-    journal.note(RewriteEntry::new(3, 80, Some(8), 10));
-    let epoch_ready = journal.should_flush();
-    assert!(epoch_ready);
-
-    let flushed = journal.force_flush(3, true, 42);
-    let nonempty = !flushed.is_empty();
-    assert!(nonempty);
-    let unamortized = flushed.iter().all(|e| e.amortized);
-    assert!(!unamortized);
-    let timed = flushed.iter().any(|e| e.wall_elapsed_us == 42);
-    assert!(timed);
-    let forced = journal.report().forced_flushes == 1;
-    assert!(forced);
-    journal.observe_access(true, true);
-    journal.observe_access(false, false);
-    assert_eq!(journal.report().hit_rate, Some(0.5));
-    assert_eq!(journal.report().armed_hit_rate, Some(1.0));
-    assert_eq!(journal.report().disarmed_hit_rate, Some(0.0));
-    assert_eq!(journal.report().invalidation_cost_per_event, Some(6.5));
-    assert_eq!(journal.report().economic_gate_suspensions, 1);
-    journal.record(RewriteEntry::new(3, 1, None, 11));
-    assert_eq!(journal.report().invalidation_cost_per_event, None);
+fn epoch_cache_counts_exactly_one_invalidation_per_cut() {
+    let mut cache = EpochCache::default();
+    assert_eq!(cache.start("b".repeat(64), 1).unwrap(), 0);
+    cache.observe(0, Some(100), Some(0), false).unwrap();
+    assert_eq!(cache.records()[0].hit_rate(), Some(0.0));
+    cache.observe(0, Some(100), Some(100), false).unwrap();
+    assert_eq!(cache.records()[0].hit_rate(), Some(0.5));
+    assert_eq!(cache.records()[0].invalidations, 0);
+    assert_eq!(cache.cut(cut(CutTrigger::BudgetPressure)).unwrap(), 1);
+    assert_eq!(cache.records()[1].invalidations, 1);
+    assert_eq!(cache.records()[1].bytes_reclaimed, 100);
+    assert_eq!(cache.records()[1].tokens_invalidated, None);
+    cache.validate().unwrap();
 }
 
-const EXPECTED_PARAMETERS: [(&str, ParameterClass); 26] = [
+#[test]
+fn epoch_cache_unknown_usage_and_armed_conditionals() {
+    let mut cache = EpochCache::default();
+    cache.start("a".repeat(64), 1).unwrap();
+    cache.observe(0, None, None, true).unwrap();
+    cache.observe(0, Some(100), Some(101), true).unwrap();
+    assert_eq!(cache.records()[0].hit_rate(), None);
+    cache.observe(0, Some(100), Some(80), true).unwrap();
+    cache.observe(0, Some(100), Some(20), false).unwrap();
+    let record = &cache.records()[0];
+    assert_eq!(record.calls, 4);
+    assert_eq!(record.measured_calls, 2);
+    assert_eq!(record.armed_hit_rate(), Some(0.8));
+    assert_eq!(record.disarmed_hit_rate(), Some(0.2));
+    assert_eq!(record.hit_rate(), Some(0.5));
+}
+
+const EXPECTED_PARAMETERS: [(&str, ParameterClass); 22] = [
     (
         "safety.classification_floor",
         ParameterClass::SafetyInvariant,
@@ -419,14 +391,10 @@ const EXPECTED_PARAMETERS: [(&str, ParameterClass); 26] = [
     ("pressure.disarm", ParameterClass::ProfileTunable),
     ("pressure.target", ParameterClass::ProfileTunable),
     ("pressure.minimum_floor", ParameterClass::OperatorEnvelope),
-    ("ladder.amortization_bar", ParameterClass::ProfileTunable),
     ("ladder.escalation_bound", ParameterClass::OperatorEnvelope),
     ("ladder.confidence_floor", ParameterClass::ProfileTunable),
     ("monitor.sticky_cap", ParameterClass::ProfileTunable),
     ("monitor.relaxation_windows", ParameterClass::ProfileTunable),
-    ("cache.amortization_bar", ParameterClass::ProfileTunable),
-    ("cache.flush_epoch", ParameterClass::ProfileTunable),
-    ("cache.invalidation_penalty", ParameterClass::Calibrated),
     (
         "progress.mandatory_queue_weight",
         ParameterClass::ProfileTunable,
@@ -473,7 +441,6 @@ fn parameters_are_total_and_classed_once() {
 #[test]
 fn constructor_positive_parameters_reject_zero_updates() {
     let cases = [
-        ("cache.flush_epoch", UpdateAuthority::ProfileLoad),
         ("governor.per_window_quota", UpdateAuthority::CalibrationTxn),
         ("governor.per_turn_ceiling", UpdateAuthority::Operator),
         ("governor.quota_floor", UpdateAuthority::Operator),
@@ -544,7 +511,10 @@ fn runtime_bulk_accounting_uses_measured_pressure_without_panicking() {
         None,
         "an ordinary disarmed completion records no terminal"
     );
-    assert_eq!(policy.cache_report().economic_gate_suspensions, 1);
+    assert!(
+        policy.epoch_cache().records().is_empty(),
+        "ingress is append-only, not a checkpoint"
+    );
     assert!(!policy.events()[0].armed_after);
     // F7: the refusal arms of `wrap_up` are exercised, not assumed. An
     // unwritable store refuses the terminal (the write would never land), and
@@ -769,7 +739,7 @@ fn parameter_mutations_are_authorized_logged_and_armed_safe() {
     let wrong = registry.update("pressure.arm", 0.9, 1, UpdateAuthority::Operator, false);
     assert_eq!(wrong, Err(UpdateError::WrongAuthority));
     let blocked = registry.update(
-        "cache.invalidation_penalty",
+        "governor.per_window_quota",
         20.0,
         1,
         UpdateAuthority::CalibrationTxn,
@@ -778,7 +748,7 @@ fn parameter_mutations_are_authorized_logged_and_armed_safe() {
     assert_eq!(blocked, Err(UpdateError::ArmedCalibration));
     registry
         .update(
-            "cache.invalidation_penalty",
+            "governor.per_window_quota",
             20.0,
             1,
             UpdateAuthority::CalibrationTxn,
@@ -795,24 +765,20 @@ fn parameter_mutations_are_authorized_logged_and_armed_safe() {
         )
         .unwrap();
     assert_eq!(registry.updates().len(), 2);
-    assert_eq!(registry.value("cache.invalidation_penalty"), Some(20.0));
+    assert_eq!(registry.value("governor.per_window_quota"), Some(20.0));
 }
 
 #[test]
-fn source_scoped_forced_flush_leaves_other_notes_pending() {
-    let mut journal = RewriteJournal::new(CacheConfig {
-        amortization_bar: 1,
-        flush_epoch: 2,
-    });
-    journal.note(RewriteEntry::new(1, 10, Some(1), 1));
-    journal.note(RewriteEntry::new(2, 20, Some(2), 2));
-    let flushed = journal.force_flush(1, true, 9);
-    assert_eq!(flushed.len(), 1);
-    assert_eq!(flushed[0].source, 1);
-    assert_eq!(journal.len(), 1);
-    let second = journal.force_flush(2, false, 10);
-    assert_eq!(second.len(), 1);
-    assert_eq!(second[0].source, 2);
+fn epoch_serialization_restores_identical_accounting_and_rejects_old_format() {
+    let mut cache = EpochCache::default();
+    cache.start("a".repeat(64), 1).unwrap();
+    cache.observe(0, Some(100), Some(50), true).unwrap();
+    cache.cut(cut(CutTrigger::ExplicitRequest)).unwrap();
+    let bytes = serde_json::to_vec(&cache).unwrap();
+    let restored: EpochCache = serde_json::from_slice(&bytes).unwrap();
+    restored.validate().unwrap();
+    assert_eq!(cache, restored);
+    assert!(serde_json::from_str::<EpochCache>(r#"{"source":1,"amortized":true}"#).is_err());
 }
 
 /// Issue 111: the controller's every calibration is read from the registry.
@@ -832,8 +798,6 @@ fn controller_calibration_is_registry_sourced() {
         "pressure.target",
         "pressure.minimum_floor",
         "monitor.sticky_cap",
-        "cache.amortization_bar",
-        "cache.flush_epoch",
     ] {
         assert!(
             registry.value(name).is_some(),
@@ -871,5 +835,30 @@ fn registry_default_changes_flow_into_runtime_behavior() {
         proposal.admission,
         Admission::Handle,
         "the lowered registry ceiling must degrade the same traffic"
+    );
+}
+
+#[test]
+fn governor_refuses_checkpoint_but_never_prices_erasure() {
+    let mut policy = crate::context_policy::runtime::ProposalOnlyController::default();
+    drive_governor_to_rate_quiesce(&mut policy);
+    let before = policy.epoch_cache().clone();
+    for trigger in [CutTrigger::BudgetPressure, CutTrigger::ExplicitRequest] {
+        assert_eq!(
+            policy.checkpoint(cut(trigger)),
+            Err(crate::context_policy::cache::EpochError::GovernorRefused)
+        );
+        assert_eq!(policy.epoch_cache(), &before);
+    }
+    let mut erasure = cut(CutTrigger::Erasure);
+    erasure.tokens_invalidated = Some(999);
+    let epoch = policy.checkpoint(erasure).unwrap();
+    assert_eq!(
+        policy.epoch_cache().records()[epoch as usize].tokens_invalidated,
+        None
+    );
+    assert_eq!(
+        policy.epoch_cache().records()[epoch as usize].invalidations,
+        1
     );
 }
