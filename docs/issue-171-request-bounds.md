@@ -61,7 +61,11 @@ The margin is the maximum nonnegative residual `normalized observed input - esti
 retained complete observations for the identical contract. No observations means null, not
 an invented zero. Normalized inclusive input already includes cached reads; Anthropic adds
 reported cache creation and reads **once** to reported uncached input. Reasoning/output tokens
-are never added to input calibration. Missing/overflowed normalization remains null.
+are never added to input calibration. Missing/overflowed normalization remains null. If next-estimate + retained margin cannot
+be represented in u64, `bounded_input` is null and capability is
+`calibration_overflow_unavailable`; measurements must not interrupt unrelated terminal/tool
+persistence. A configured admission limit/reserve refuses such an unrepresentable bound
+before send. Without token admission, the existing byte policy remains authoritative.
 
 Existing strict session telemetry is the only store. `Turn::run_live` restores at most the
 latest 4096 bound records through the current session reader; live observations use the same

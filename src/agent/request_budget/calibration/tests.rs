@@ -203,3 +203,21 @@ fn wire_serializer_settings_and_tools_invalidate_margin() {
     assert_eq!(changed.margin, None);
     assert_ne!(changed.contract, bound.contract);
 }
+
+#[test]
+fn external_u64_usage_overflow_is_explicit_unavailable_not_zero_or_wrapped() {
+    let mut train = measure(contract(None), &wire("first"), None, None, &[]).unwrap();
+    train.observed_input = Some(u64::MAX);
+    let next = measure(
+        contract(None),
+        &wire("longer second request"),
+        None,
+        None,
+        &[train],
+    )
+    .unwrap();
+    assert_eq!(next.capability, "calibration_overflow_unavailable");
+    assert!(next.margin.is_some());
+    assert_eq!(next.bounded_input, None);
+    assert_eq!(check_held_out(&next), Err(CalibrationError::Unavailable));
+}

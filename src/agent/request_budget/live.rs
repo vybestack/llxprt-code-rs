@@ -19,15 +19,12 @@ pub(in crate::agent) fn collector(
                         "request bound measurement failed".into(),
                     )
                 })?;
-        if let (Some(input), Some(limit), Some(reserve)) = (
-            bound.bounded_input,
-            context_limit,
-            bound.terms.output_reserve,
-        ) {
-            let total = input
-                .checked_add(reserve)
+        if let (Some(limit), Some(reserve)) = (context_limit, bound.terms.output_reserve) {
+            let total = bound
+                .bounded_input
+                .and_then(|input| input.checked_add(reserve))
                 .and_then(|n| n.checked_add(bound.terms.terminal_reserve));
-            if total.is_none_or(|total| total > limit) {
+            if bound.margin.is_some() && total.is_none_or(|total| total > limit) {
                 return Err(serdes_ai::models::ModelError::RequestBound { limit });
             }
         }

@@ -61,8 +61,14 @@ pub fn measure(
     let margin = margin(&contract, observations);
     let bounded_input = estimated_input
         .zip(margin)
-        .map(|(input, margin)| input.checked_add(margin).ok_or(CalibrationError::Overflow))
-        .transpose()?;
+        .and_then(|(input, margin)| input.checked_add(margin));
+    let capability = if margin.is_some() && bounded_input.is_none() {
+        "calibration_overflow_unavailable"
+    } else if tokenizer.is_some() {
+        "tokenizer_available"
+    } else {
+        "tokenizer_unavailable_byte_heuristic"
+    };
     Ok(RequestBound {
         contract,
         wire_digest: format!("{:x}", Sha256::digest(wire)),
@@ -74,12 +80,7 @@ pub fn measure(
         bounded_input,
         context_limit,
         host_memory_cap_bytes: super::materialization_budget(context_limit) as u64,
-        capability: if tokenizer.is_some() {
-            "tokenizer_available"
-        } else {
-            "tokenizer_unavailable_byte_heuristic"
-        }
-        .into(),
+        capability: capability.into(),
     })
 }
 
