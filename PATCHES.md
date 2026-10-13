@@ -11,6 +11,18 @@ Focused conversion tests cover stable keys, cut-over keys and disabled caching.
 The retained patch and its strict pinned digest below include these changes;
 upstream archive identities remain unchanged.
 
+## Issue 375: Codex overload classification
+
+The Responses SSE provider code `server_is_overloaded` now maps to the existing
+`server_error` category. The original sanitized provider code remains in the
+trusted diagnostic, and the typed API code is `sse_provider_server_error`.
+Like every existing SSE provider-error category, it remains a non-retryable
+`ModelError::Api` and does not replay the request. No retry/backoff policy changes
+are introduced. A direct decoder regression covers flat and nested error codes
+and the type-only form while checking the unchanged non-retryable verdict.
+The aggregate patch and both strict digest pins are regenerated from the retained
+upstream inputs; upstream revisions and licenses are unchanged.
+
 ## Issue 316: all-feature model test fixtures
 
 The OAuth SSE fixture counter validates each JSON data frame with `inspect`
@@ -116,7 +128,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `c9fd372518bd5295f621afd039165641bbf51ba78faea3b5a3857acc33dce035`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `19719d8ecc055364c12be0bd8c3c95845dc677ce0f5f25bb56d01163824407ef`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

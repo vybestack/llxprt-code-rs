@@ -249,7 +249,7 @@ fn known_category(code: &str) -> Option<&'static str> {
         | "usage_limit_reached"
         | "insufficient_quota"
         | "too_many_requests" => Some("rate_limit_exceeded"),
-        "server_error" | "internal_error" => Some("server_error"),
+        "server_error" | "internal_error" | "server_is_overloaded" => Some("server_error"),
         "model_error" => Some("model_error"),
         "authentication_error" => Some("authentication_error"),
         _ => None,
@@ -330,6 +330,22 @@ mod tests {
             panic!("wrong error type")
         };
         (message, code.unwrap())
+    }
+
+    #[test]
+    fn server_is_overloaded_has_server_error_category_without_replay() {
+        for payload in [
+            r#"{"type":"error","code":"server_is_overloaded","message":"SECRET"}"#,
+            r#"{"type":"error","error":{"code":"server_is_overloaded","message":"SECRET"}}"#,
+            r#"{"type":"error","error":{"type":"server_is_overloaded","code":null,"message":"SECRET"}}"#,
+        ] {
+            let (message, code) = api_failure(payload);
+            assert_eq!(code, "sse_provider_server_error");
+            assert_eq!(
+                message,
+                "responses SSE: provider error (server_error; provider_code=server_is_overloaded); request not replayed"
+            );
+        }
     }
 
     #[test]
