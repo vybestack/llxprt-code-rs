@@ -1,314 +1,229 @@
-//! Rewrite journal, amortization gates, flush epochs, and conditional cache reports.
+//! Epoch-granular cache accounting. There is no priced rewrite operation.
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct RewriteEntry {
-    pub source: u64,
-    /// Bytes this rewrite reclaimed, in budget units (renamed from the
-    /// token-spelling `tokens_reclaimed`, issue 123). The alias keeps
-    /// journals written by pre-rename builds recoverable: `load_rewrite_journal`
-    /// treats a line that fails to deserialize as a corrupt artifact and fails
-    /// the whole recovery, so without the alias a pre-rename session could
-    /// never be reopened (issue 102 recovery).
-    #[serde(alias = "tokens_reclaimed")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutTrigger {
+    BudgetPressure,
+    ExplicitRequest,
+    /// Correctness-only: no invalidation price is assigned to erasure.
+    Erasure,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EpochRecord {
+    pub epoch: u64,
+    pub head_digest: String,
+    pub head_requests: usize,
+    pub trigger: Option<CutTrigger>,
+    pub armed: bool,
     pub bytes_reclaimed: u64,
-    pub invalidation_cost: Option<u64>,
-    pub logical_time: u64,
-    pub wall_elapsed_us: u64,
-    pub amortized: bool,
+    pub bytes_invalidated: u64,
+    pub tokens_invalidated: Option<u64>,
+    pub tokens_reclaimed: Option<u64>,
+    pub invalidations: u64,
+    pub aggregate_valid: bool,
+    pub calls: u64,
+    pub measured_calls: u64,
+    pub input_tokens: u64,
+    pub cached_tokens: u64,
+    pub armed_input_tokens: u64,
+    pub armed_cached_tokens: u64,
+    pub disarmed_input_tokens: u64,
+    pub disarmed_cached_tokens: u64,
 }
 
-impl RewriteEntry {
-    pub const fn new(
-        source: u64,
-        bytes_reclaimed: u64,
-        invalidation_cost: Option<u64>,
-        logical_time: u64,
-    ) -> Self {
+impl EpochRecord {
+    fn new(epoch: u64, head_digest: String, head_requests: usize) -> Self {
         Self {
-            source,
-            bytes_reclaimed,
-            invalidation_cost,
-            logical_time,
-            wall_elapsed_us: 0,
-            amortized: true,
+            epoch,
+            head_digest,
+            head_requests,
+            trigger: None,
+            armed: false,
+            bytes_reclaimed: 0,
+            bytes_invalidated: 0,
+            tokens_invalidated: None,
+            tokens_reclaimed: None,
+            invalidations: 0,
+            aggregate_valid: true,
+            calls: 0,
+            measured_calls: 0,
+            input_tokens: 0,
+            cached_tokens: 0,
+            armed_input_tokens: 0,
+            armed_cached_tokens: 0,
+            disarmed_input_tokens: 0,
+            disarmed_cached_tokens: 0,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CacheConfig {
-    pub amortization_bar: u64,
-    pub flush_epoch: usize,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            amortization_bar: 100,
-            flush_epoch: 4,
-        }
+    pub fn hit_rate(&self) -> Option<f64> {
+        self.aggregate_valid
+            .then(|| ratio(self.cached_tokens, self.input_tokens))
+            .flatten()
+    }
+    pub fn armed_hit_rate(&self) -> Option<f64> {
+        self.aggregate_valid
+            .then(|| ratio(self.armed_cached_tokens, self.armed_input_tokens))
+            .flatten()
+    }
+    pub fn disarmed_hit_rate(&self) -> Option<f64> {
+        self.aggregate_valid
+            .then(|| ratio(self.disarmed_cached_tokens, self.disarmed_input_tokens))
+            .flatten()
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct CacheReport {
-    pub hits: u64,
-    pub events: u64,
-    pub armed_hits: u64,
-    pub armed_events: u64,
-    pub disarmed_hits: u64,
-    pub disarmed_events: u64,
-    pub rewrite_events: u64,
-    pub invalidation_total: u64,
-    pub known_cost_events: u64,
-    pub unknown_cost_events: u64,
-    pub threshold_passes: u64,
-    pub threshold_denials: u64,
-    pub armed_threshold_passes: u64,
-    pub disarmed_threshold_passes: u64,
-    pub forced_flushes: u64,
-    pub armed_rewrites: u64,
-    pub disarmed_rewrites: u64,
-    pub economic_gate_suspensions: u64,
-    pub hit_rate: Option<f64>,
-    pub armed_hit_rate: Option<f64>,
-    pub disarmed_hit_rate: Option<f64>,
-    pub invalidation_cost_per_event: Option<f64>,
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EpochCache {
+    records: Vec<EpochRecord>,
 }
 
-#[derive(Debug)]
-pub struct RewriteJournal {
-    config: CacheConfig,
-    entries: Vec<RewriteEntry>,
-    noted: Vec<RewriteEntry>,
-    report: CacheReport,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EpochError {
+    #[error("context epoch is unknown")]
+    UnknownEpoch,
+    #[error("context epoch counter exhausted")]
+    Exhausted,
+    #[error("context epoch accounting is corrupt")]
+    Corrupt,
+    #[error("context checkpoint refused by the governor")]
+    GovernorRefused,
+    #[error("context prefix changed without a checkpoint")]
+    PrefixChanged,
 }
 
-impl RewriteJournal {
-    pub fn new(config: CacheConfig) -> Self {
-        assert!(config.flush_epoch > 0, "flush epoch must be positive");
-        Self {
-            config,
-            entries: Vec::new(),
-            noted: Vec::new(),
-            report: CacheReport::default(),
-        }
+impl EpochCache {
+    pub fn records(&self) -> &[EpochRecord] {
+        &self.records
     }
 
-    pub fn config(&self) -> &CacheConfig {
-        &self.config
-    }
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-    pub fn entries(&self) -> &[RewriteEntry] {
-        &self.entries
+    pub fn start(&mut self, digest: String, requests: usize) -> Result<u64, EpochError> {
+        let epoch = match self.records.last() {
+            Some(last) => last.epoch.checked_add(1).ok_or(EpochError::Exhausted)?,
+            None => 0,
+        };
+        self.records.push(EpochRecord::new(epoch, digest, requests));
+        Ok(epoch)
     }
 
-    /// Restores one durable journal entry a previous process recorded, so a
-    /// republished journal carries the previous records ahead of the new ones
-    /// instead of replacing them (issue 102 restart).
-    ///
-    /// The entry's own counters are folded into the running report by the
-    /// same `fold_entry` `record` runs, so a restored journal still yields a
-    /// report a later publication can render faithfully.
-    pub fn restore_entry(&mut self, entry: RewriteEntry) {
-        self.fold_entry(entry);
-    }
-
-    /// The one fold behind `record` and `restore_entry` (issue 122): the
-    /// entry's own counters bump the running report, the entry joins the
-    /// journal, and the derived ratios re-render.
-    fn fold_entry(&mut self, entry: RewriteEntry) {
-        let cost = entry.invalidation_cost;
-        self.report.rewrite_events = self.report.rewrite_events.saturating_add(1);
-        match cost {
-            Some(cost) => {
-                self.report.invalidation_total =
-                    self.report.invalidation_total.saturating_add(cost);
-                self.report.known_cost_events = self.report.known_cost_events.saturating_add(1);
-            }
-            None => {
-                self.report.unknown_cost_events = self.report.unknown_cost_events.saturating_add(1);
-            }
-        }
-        if entry.amortized {
-            self.report.disarmed_rewrites = self.report.disarmed_rewrites.saturating_add(1);
+    pub fn cut(&mut self, cut: CheckpointCut) -> Result<u64, EpochError> {
+        let epoch = self.start(cut.head_digest, cut.head_requests)?;
+        let record = self.records.last_mut().ok_or(EpochError::UnknownEpoch)?;
+        record.trigger = Some(cut.trigger);
+        record.armed = cut.armed;
+        record.bytes_reclaimed = cut.bytes_reclaimed;
+        record.bytes_invalidated = cut.bytes_invalidated;
+        record.tokens_invalidated = if cut.trigger == CutTrigger::Erasure {
+            None
         } else {
-            self.report.armed_rewrites = self.report.armed_rewrites.saturating_add(1);
-        }
-        self.entries.push(entry);
-        self.refresh_report();
+            cut.tokens_invalidated
+        };
+        record.invalidations = 1;
+        Ok(epoch)
     }
 
-    pub fn observe_access(&mut self, hit: bool, armed: bool) {
-        self.report.events = self.report.events.saturating_add(1);
-        if hit {
-            self.report.hits = self.report.hits.saturating_add(1);
-        }
-        if armed {
-            self.report.armed_events = self.report.armed_events.saturating_add(1);
-            if hit {
-                self.report.armed_hits = self.report.armed_hits.saturating_add(1);
-            }
-        } else {
-            self.report.disarmed_events = self.report.disarmed_events.saturating_add(1);
-            if hit {
-                self.report.disarmed_hits = self.report.disarmed_hits.saturating_add(1);
-            }
-        }
-        self.refresh_report();
-    }
-
-    pub fn record(&mut self, entry: RewriteEntry) {
-        self.fold_entry(entry);
-    }
-
-    pub fn should_rewrite(
+    /// Only normalized provider usage counts as a cache observation. Missing or
+    /// inconsistent telemetry is a coverage gap, never a fabricated cache miss.
+    pub fn observe(
         &mut self,
-        expected_benefit: u64,
-        invalidation_cost: Option<u64>,
+        epoch: u64,
+        input: Option<u64>,
+        cached: Option<u64>,
         armed: bool,
-    ) -> bool {
-        let allowed = armed
-            || invalidation_cost.is_some_and(|cost| {
-                expected_benefit >= cost.saturating_add(self.config.amortization_bar)
-            });
-        if armed {
-            self.report.economic_gate_suspensions =
-                self.report.economic_gate_suspensions.saturating_add(1);
+    ) -> Result<(), EpochError> {
+        let record = self
+            .records
+            .iter_mut()
+            .find(|r| r.epoch == epoch)
+            .ok_or(EpochError::UnknownEpoch)?;
+        record.calls = record.calls.checked_add(1).ok_or(EpochError::Exhausted)?;
+        let Some((input, cached)) = input.zip(cached).filter(|(i, c)| c <= i) else {
+            return Ok(());
+        };
+        record.measured_calls = record
+            .measured_calls
+            .checked_add(1)
+            .ok_or(EpochError::Exhausted)?;
+        if !record.aggregate_valid {
+            return Ok(());
         }
-        if allowed {
-            self.report.threshold_passes = self.report.threshold_passes.saturating_add(1);
-            if armed {
-                self.report.armed_threshold_passes =
-                    self.report.armed_threshold_passes.saturating_add(1);
-            } else {
-                self.report.disarmed_threshold_passes =
-                    self.report.disarmed_threshold_passes.saturating_add(1);
-            }
+        // Stage every total. Provider telemetry overflow invalidates metrics,
+        // not the turn or prefix authority, and never persists partial totals.
+        let mut staged = record.clone();
+        if add_usage(&mut staged, input, cached, armed).is_err() {
+            record.aggregate_valid = false;
         } else {
-            self.report.threshold_denials = self.report.threshold_denials.saturating_add(1);
+            *record = staged;
         }
-        allowed
+        Ok(())
     }
 
-    pub fn should_flush(&self) -> bool {
-        self.noted.len() >= self.config.flush_epoch
-    }
-    pub fn note(&mut self, entry: RewriteEntry) {
-        self.noted.push(entry);
-    }
-
-    pub fn force_flush(
-        &mut self,
-        source: u64,
-        armed: bool,
-        wall_elapsed_us: u64,
-    ) -> Vec<RewriteEntry> {
-        self.report.forced_flushes = self.report.forced_flushes.saturating_add(1);
-        let noted = std::mem::take(&mut self.noted);
-        let mut drained = Vec::new();
-        for mut entry in noted {
-            if entry.source == source {
-                entry.amortized = !armed;
-                entry.wall_elapsed_us = wall_elapsed_us;
-                self.record(entry);
-                drained.push(entry);
-            } else {
-                self.noted.push(entry);
+    pub fn validate(&self) -> Result<(), EpochError> {
+        for (index, record) in self.records.iter().enumerate() {
+            if record.epoch != index as u64
+                || record.head_digest.len() != 64
+                || !record.head_digest.bytes().all(|b| b.is_ascii_hexdigit())
+                || record.invalidations != u64::from(record.trigger.is_some())
+                || record.cached_tokens > record.input_tokens
+                || record.measured_calls > record.calls
+                || record.armed_cached_tokens > record.armed_input_tokens
+                || record.disarmed_cached_tokens > record.disarmed_input_tokens
+                || record
+                    .armed_input_tokens
+                    .checked_add(record.disarmed_input_tokens)
+                    != Some(record.input_tokens)
+                || record
+                    .armed_cached_tokens
+                    .checked_add(record.disarmed_cached_tokens)
+                    != Some(record.cached_tokens)
+            {
+                return Err(EpochError::Corrupt);
             }
         }
-        drained
-    }
-
-    pub fn report(&self) -> &CacheReport {
-        &self.report
-    }
-
-    fn refresh_report(&mut self) {
-        self.report.hit_rate = ratio(self.report.hits, self.report.events);
-        self.report.armed_hit_rate = ratio(self.report.armed_hits, self.report.armed_events);
-        self.report.disarmed_hit_rate =
-            ratio(self.report.disarmed_hits, self.report.disarmed_events);
-        self.report.invalidation_cost_per_event =
-            if self.report.rewrite_events == 0 || self.report.unknown_cost_events > 0 {
-                None
-            } else {
-                ratio(self.report.invalidation_total, self.report.rewrite_events)
-            };
+        Ok(())
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CheckpointCut {
+    pub head_digest: String,
+    pub head_requests: usize,
+    pub trigger: CutTrigger,
+    pub armed: bool,
+    pub bytes_reclaimed: u64,
+    pub bytes_invalidated: u64,
+    pub tokens_invalidated: Option<u64>,
+}
+
+fn add_usage(
+    record: &mut EpochRecord,
+    input: u64,
+    cached: u64,
+    armed: bool,
+) -> Result<(), EpochError> {
+    add(&mut record.input_tokens, input)?;
+    add(&mut record.cached_tokens, cached)?;
+    let (total, hits) = if armed {
+        (
+            &mut record.armed_input_tokens,
+            &mut record.armed_cached_tokens,
+        )
+    } else {
+        (
+            &mut record.disarmed_input_tokens,
+            &mut record.disarmed_cached_tokens,
+        )
+    };
+    add(total, input)?;
+    add(hits, cached)
+}
+fn add(value: &mut u64, increment: u64) -> Result<(), EpochError> {
+    *value = value.checked_add(increment).ok_or(EpochError::Exhausted)?;
+    Ok(())
+}
 fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then(|| numerator as f64 / denominator as f64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Issue 121-c (F13): a journal line written by a pre-rename build - which
-    /// spelled the field `tokens_reclaimed` - must still deserialize, because
-    /// `load_rewrite_journal` fails the whole recovery on an entry that does
-    /// not. The alias is the only thing keeping those sessions recoverable.
-    #[test]
-    fn a_pre_rename_journal_line_still_deserializes() {
-        let line = r#"{"source":7,"tokens_reclaimed":4096,"invalidation_cost":null,"logical_time":3,"wall_elapsed_us":12,"amortized":true}"#;
-        let entry: RewriteEntry =
-            serde_json::from_str(line).expect("the old spelling must deserialize");
-        assert_eq!(entry.bytes_reclaimed, 4096);
-        // New builds write the new spelling, and both spellings never mix in
-        // one entry: the new key is the one serialization emits.
-        let round: String = serde_json::to_string(&entry).expect("entry serializes");
-        assert!(round.contains("bytes_reclaimed"));
-        assert!(!round.contains("tokens_reclaimed"));
-    }
-
-    /// A journal written by the CURRENT build keeps restoring through the same
-    /// path recovery uses, so the alias never masks a real corruption of the
-    /// new spelling.
-    #[test]
-    fn a_current_journal_line_still_deserializes() {
-        let line = r#"{"source":9,"bytes_reclaimed":32,"invalidation_cost":8,"logical_time":5,"wall_elapsed_us":0,"amortized":false}"#;
-        let entry: RewriteEntry =
-            serde_json::from_str(line).expect("the new spelling must deserialize");
-        assert_eq!(entry.bytes_reclaimed, 32);
-        assert_eq!(entry.invalidation_cost, Some(8));
-    }
-
-    /// Issue 122: `restore_entry` and `record` share one fold, so replaying
-    /// the same entries onto identical starting journals yields identical
-    /// `CacheReport` deltas whichever path carried them in.
-    #[test]
-    fn restore_entry_and_record_produce_identical_report_deltas() {
-        let entries = [
-            RewriteEntry::new(7, 4096, Some(96), 3),
-            RewriteEntry::new(9, 32, None, 5),
-        ];
-        let mut live = RewriteJournal::new(CacheConfig::default());
-        let mut restored = RewriteJournal::new(CacheConfig::default());
-        // An identical non-empty starting journal, so the derived ratios have
-        // real denominators before the fold under test runs.
-        live.observe_access(true, false);
-        restored.observe_access(true, false);
-        for entry in entries {
-            live.record(entry);
-            restored.restore_entry(entry);
-        }
-        assert_eq!(live.entries(), restored.entries());
-        assert_eq!(live.report(), restored.report());
-        let report = live.report();
-        assert_eq!(report.rewrite_events, 2);
-        assert_eq!(report.known_cost_events, 1);
-        assert_eq!(report.unknown_cost_events, 1);
-        assert_eq!(report.invalidation_total, 96);
-        // `RewriteEntry::new` marks entries amortized, and the fold reads the
-        // amortized flag the same way on both paths.
-        assert_eq!(report.disarmed_rewrites, 2);
-        assert_eq!(report.armed_rewrites, 0);
-    }
 }

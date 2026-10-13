@@ -38,15 +38,6 @@ fn part_content(part: &ModelRequestPart) -> Result<Vec<u8>, serde_json::Error> {
     }
 }
 
-pub(super) fn request_content(request: &ModelRequest) -> Result<Vec<u8>, serde_json::Error> {
-    let parts = request
-        .parts
-        .iter()
-        .map(part_content)
-        .collect::<Result<Vec<_>, _>>()?;
-    serde_json::to_vec(&(&request.kind, parts))
-}
-
 fn content_bytes(requests: &[ModelRequest]) -> Result<usize, serde_json::Error> {
     requests.iter().try_fold(0usize, |n, request| {
         request
@@ -67,22 +58,81 @@ pub(crate) fn content_shrank(before: &[ModelRequest], after: &[ModelRequest]) ->
     }
 }
 
-/// Retain unaffected original messages, including their exact creation metadata.
-/// Rebuilt history is an ordered subsequence of original messages apart from the
-/// genuinely reclaimed assistant narration. Only those changed messages are new.
-pub(super) fn preserve_unchanged_prefix(before: &[ModelRequest], after: &mut [ModelRequest]) {
-    let mut cursor = 0;
-    for request in after {
-        let Ok(content) = request_content(request) else {
+/// Locate this turn's prompt in the actual resumed request projection.
+pub(super) fn current_prompt_start(requests: &[ModelRequest], prompt: &str) -> usize {
+    requests
+        .iter()
+        .rposition(|request| {
+            request.parts.iter().any(|part| {
+                if let ModelRequestPart::UserPrompt(p) = part {
+                    p.content.as_text() == Some(prompt)
+                } else {
+                    false
+                }
+            })
+        })
+        .map_or(0, |index| index + 1)
+}
+
+/// The existing compactor's narration reduction, applied to the exact prefix
+/// rather than reconstructed messages. Call/return pairing and metadata stay put.
+pub(super) fn compact_narration(
+    requests: &mut [ModelRequest],
+    history: &[crate::session::HistoryTurn],
+) {
+    for part in requests.iter_mut().flat_map(|r| &mut r.parts) {
+        let ModelRequestPart::ModelResponse(response) = part else {
             continue;
         };
-        if let Some(index) = before[cursor..]
-            .iter()
-            .position(|old| request_content(old).is_ok_and(|old| old == content))
-        {
-            cursor += index;
-            *request = before[cursor].clone();
-            cursor += 1;
+        for piece in &mut response.parts {
+            let serdes_ai::core::ModelResponsePart::Text(text) = piece else {
+                continue;
+            };
+            if history.iter().any(|turn| {
+                !turn.summary.is_empty()
+                    && turn.rounds.iter().any(|round| {
+                        round.continuation.is_none()
+                            && round.assistant != turn.summary
+                            && round.assistant == text.content
+                    })
+            }) {
+                text.content.clear();
+            }
         }
     }
+}
+
+/// Put a compact, stable summary at the head only when crossing a checkpoint.
+/// All subsequent calls inherit it verbatim through the persisted projection.
+pub(super) fn checkpoint_head(
+    requests: &mut Vec<ModelRequest>,
+    history: &[crate::session::HistoryTurn],
+) {
+    requests.retain(|request| {
+        !request.parts.iter().any(|part| {
+            if let ModelRequestPart::SystemPrompt(prompt) = part {
+                prompt.dynamic_ref.as_deref() == Some("context-checkpoint")
+            } else {
+                false
+            }
+        })
+    });
+    let summary = history
+        .last()
+        .map(|turn| turn.summary.as_str())
+        .unwrap_or("");
+    let mut text = String::from("Context checkpoint: older payloads are represented by admitted digests; preserve the latest evidence and tool pairing.");
+    if !summary.is_empty() {
+        text.push('\n');
+        text.push_str(summary);
+    }
+    let head = ModelRequest {
+        parts: vec![ModelRequestPart::SystemPrompt(
+            serdes_ai::core::SystemPromptPart::new(text).with_dynamic_ref("context-checkpoint"),
+        )],
+        ..Default::default()
+    };
+    // Keep the immutable agent shell and initial user prompt intact. The
+    // checkpoint summary precedes the retained execution evidence.
+    requests.insert(2.min(requests.len()), head);
 }

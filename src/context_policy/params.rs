@@ -33,7 +33,7 @@ impl Parameter {
     }
 }
 
-pub const PARAMETERS: [Parameter; 26] = [
+pub const PARAMETERS: [Parameter; 22] = [
     Parameter::new(
         "safety.classification_floor",
         ParameterClass::SafetyInvariant,
@@ -72,11 +72,6 @@ pub const PARAMETERS: [Parameter; 26] = [
         0.0,
     ),
     Parameter::new(
-        "ladder.amortization_bar",
-        ParameterClass::ProfileTunable,
-        100.0,
-    ),
-    Parameter::new(
         "ladder.escalation_bound",
         ParameterClass::OperatorEnvelope,
         6.0,
@@ -91,17 +86,6 @@ pub const PARAMETERS: [Parameter; 26] = [
         "monitor.relaxation_windows",
         ParameterClass::ProfileTunable,
         1.0,
-    ),
-    Parameter::new(
-        "cache.amortization_bar",
-        ParameterClass::ProfileTunable,
-        100.0,
-    ),
-    Parameter::new("cache.flush_epoch", ParameterClass::ProfileTunable, 4.0),
-    Parameter::new(
-        "cache.invalidation_penalty",
-        ParameterClass::Calibrated,
-        16.0,
     ),
     Parameter::new(
         "progress.mandatory_queue_weight",
@@ -254,10 +238,7 @@ fn valid_value(name: &str, value: f64) -> bool {
     }
     if matches!(
         name,
-        "cache.flush_epoch"
-            | "governor.per_window_quota"
-            | "governor.per_turn_ceiling"
-            | "governor.quota_floor"
+        "governor.per_window_quota" | "governor.per_turn_ceiling" | "governor.quota_floor"
     ) && value == 0.0
     {
         return false;

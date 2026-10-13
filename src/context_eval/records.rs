@@ -411,7 +411,8 @@ pub fn baseline_summary(records: &Records, manifest_ids: &[String]) -> Result<Va
     green_without_prior_red.sort();
     green_without_prior_red.dedup();
     Ok(json!({
-        "phase0_entries": phase0.len(),
+        "phase0_entries": phase0.iter().filter(|r| manifest_ids.contains(&r.scenario)).count(),
+        "historical_phase0_entries": phase0.len(),
         "manifests": manifest_ids.len(),
         "missing_phase0_entry": missing,
         "phase0_non_red": non_red,

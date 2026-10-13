@@ -570,7 +570,19 @@ fn build_request(
     };
     Ok(CreateResponseRequest {
         model: inner.model_name.clone(),
-        prompt_cache_key: inner.prompt_cache_key.clone(),
+        prompt_cache_key: inner.prompt_cache_key.as_ref().map(|key| {
+            let epoch = settings
+                .extra
+                .as_ref()
+                .and_then(|e| e.get("context_epoch"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            if epoch == 0 {
+                key.clone()
+            } else {
+                format!("{key}:epoch:{epoch}")
+            }
+        }),
         input: if items.is_empty() && !inner.codex_http {
             crate::types::ResponseInput::Text(String::new())
         } else {
@@ -1143,5 +1155,41 @@ mod tests {
             .bytes()
             .try_for_each(|byte| decoder.byte(byte).map(|_| ()))
             .is_err());
+    }
+    #[test]
+    fn epoch_cache_key_changes_only_at_checkpoint_and_disabled_stays_absent() {
+        use super::*;
+        for enabled in [true, false] {
+            let model = OpenResponsesModel::new("fixture", "http://localhost")
+                .with_prompt_cache_key(enabled.then(|| "session".to_owned()));
+            for epoch in [0, 1, 1, 2] {
+                let settings = ModelSettings {
+                    extra: Some(serde_json::json!({"context_epoch":epoch})),
+                    ..Default::default()
+                };
+                let request = build_request(
+                    &model.inner,
+                    &[],
+                    &settings,
+                    &Default::default(),
+                    0,
+                    None,
+                    false,
+                )
+                .unwrap();
+                let wire = serde_json::to_value(request).unwrap();
+                if enabled {
+                    let expected = if epoch == 0 {
+                        "session".to_owned()
+                    } else {
+                        format!("session:epoch:{epoch}")
+                    };
+                    assert_eq!(wire["prompt_cache_key"], expected);
+                } else {
+                    assert!(wire.get("prompt_cache_key").is_none());
+                }
+                assert!(wire.get("context_epoch").is_none());
+            }
+        }
     }
 }

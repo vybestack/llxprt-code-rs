@@ -316,7 +316,12 @@ fn chmod_tree(root: &Path, file_mode: u32, dir_mode: u32) {
 
 /// Files a consistent session `context/` store must carry. A store that is missing them
 /// is not a store, so consistency is judged against existence first.
-pub const STORE_FILES: [&str; 3] = ["manifest.json", "events.log", "rewrite-journal.log"];
+pub const STORE_FILES: [&str; 4] = [
+    "manifest.json",
+    "events.log",
+    "epochs.json",
+    "request-prefixes.json",
+];
 
 /// Consistent-shape check for the session `context/` store after a fault-triggered
 /// process death.
@@ -337,6 +342,15 @@ pub fn store_shape_consistent(context: &Path) -> bool {
             return false;
         }
     }
+    for name in ["manifest.json", "epochs.json", "request-prefixes.json"] {
+        if fs::read(context.join(name))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .is_none()
+        {
+            return false;
+        }
+    }
     let manifest = context.join("manifest.json");
     match fs::read(&manifest) {
         Ok(bytes) => {
@@ -346,11 +360,11 @@ pub fn store_shape_consistent(context: &Path) -> bool {
         }
         Err(_) => return false,
     }
-    // `events.log` and `rewrite-journal.log` are newline-separated JSON documents,
+    // `events.log` is newline-separated JSON documents,
     // atomically published (tmp file + rename), so a torn frame here is not expected
     // from a crash; every document must parse. The vault and sanitized spine are
     // binary/framed formats the replaying process itself validates on open.
-    for name in ["events.log", "rewrite-journal.log"] {
+    for name in ["events.log"] {
         let path = context.join(name);
         let bytes = match fs::read(&path) {
             Ok(b) => b,

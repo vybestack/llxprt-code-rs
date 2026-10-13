@@ -54,6 +54,9 @@ impl BoundBackend {
 }
 
 impl ChatBackend for BoundBackend {
+    fn set_context_epoch(&self, epoch: u64) {
+        self.inner.set_context_epoch(epoch);
+    }
     fn request_contract(&self) -> Option<crate::telemetry::bounds::RequestContract> {
         Some(self.contract.clone())
     }

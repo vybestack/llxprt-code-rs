@@ -1,5 +1,5 @@
 schema_version = 1
-id = "cache-amortization"
+id = "epoch-cache"
 owner_phase = 4
 arm = "feature"
 expected_status = "red"
@@ -14,7 +14,7 @@ context_limit_tokens = 20000
 max_output_tokens = 2048
 
 [stimulus]
-prompt = "CTXEVAL-TASK-14 Alternate append-only work with prefix rewrites under unknown cache telemetry and account every rewrite in the journal."
+prompt = "CTXEVAL-TASK-14 Append evidence through governor budget pressure to a checkpoint, then continue appending behind its stable summary head. Account epochs and preserve unknown telemetry."
 
 [wall]
 tool_rounds = 8
@@ -22,7 +22,7 @@ tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]
-required_context_artifacts = ["context/rewrite-journal.log"]
+required_context_artifacts = ["context/epochs.json"]
 
 [runtime]
 name = "profile-limit"

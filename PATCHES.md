@@ -1,5 +1,16 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 78: checkpoint-epoch cache mapping
+
+OpenAI Chat, OpenAI Responses and Codex Responses derive routing keys from the
+session key plus the durable checkpoint epoch (epoch zero retains the session
+key). Disabled caching stays disabled; the internal epoch setting is never
+forwarded as a provider field. Anthropic places one ephemeral cache breakpoint
+on the complete checkpoint system/summary prefix when caching is enabled.
+Focused conversion tests cover stable keys, cut-over keys and disabled caching.
+The retained patch and its strict pinned digest below include these changes;
+upstream archive identities remain unchanged.
+
 ## Issue 375: Codex overload classification
 
 The Responses SSE provider code `server_is_overloaded` now maps to the existing
@@ -117,7 +128,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `e269e388a9c910d0b29304be06d11952c465e1630f1b1b618c587d5200226437`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `19719d8ecc055364c12be0bd8c3c95845dc677ce0f5f25bb56d01163824407ef`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

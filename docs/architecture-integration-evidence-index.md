@@ -114,3 +114,15 @@ Fixes #169
 Report the open PR URL and number, base/head SHAs and evidence limitations. Do not merge,
 close or reassign the tracker, or represent this bounded docs slice as completion of #169's
 composed CLI milestone or full endurance/security acceptance.
+
+### #78 checkpoint-epoch cache controller
+
+- Owned lease: October 13 issue-78 handoff; open-PR overlap refresh `[]`.
+- Evidence: [epoch cache handoff](architecture-issue78-epoch-cache-evidence.md).
+- Shared APIs: policy epoch accounting, session encrypted request-prefix
+  authority, existing agent compactor, provider epoch-routing projection.
+- Falsifiers: intra-epoch wire rewrite, ungated/timer cut, invented hit metrics,
+  lost newest evidence/tool partner, corrupt restart accepted, weakened gates.
+- Review cycle/result: skipped per Andrew directive 2026-10-09 (no OCR).
+- This is runtime integration evidence, not live-model eval acceptance. Exact
+  head local gate logs/commands and hosted CI status are recorded in the PR.

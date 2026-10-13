@@ -241,8 +241,13 @@ fn compiled_tool_workload_compacts_and_remains_productive_after_restore() {
     for (index, result) in returns.iter().enumerate() {
         assert_eq!(result["tool_call_id"], format!("read-{}", index + 1));
     }
-    for value in &values {
-        assert_eq!(value["prompt_cache_key"], "effective-native");
+    for (index, value) in values.iter().enumerate() {
+        let key = if index < 3 {
+            "effective-native"
+        } else {
+            "effective-native:epoch:1"
+        };
+        assert_eq!(value["prompt_cache_key"], key);
         assert!(value["tools"]
             .as_array()
             .unwrap()

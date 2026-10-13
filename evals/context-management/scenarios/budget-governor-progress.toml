@@ -22,7 +22,7 @@ tool_output_bytes = 131072
 fixture = "tool-output-block.txt"
 
 [assertions]
-required_context_artifacts = ["context/rewrite-journal.log"]
+required_context_artifacts = ["context/epochs.json"]
 required_outcomes = ["disarm", "quiesce_unwritable", "wrap_up"]
 
 [runtime]

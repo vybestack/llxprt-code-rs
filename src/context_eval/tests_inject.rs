@@ -343,7 +343,8 @@ fn minimal_store(context: &Path) {
     for (name, body) in [
         ("manifest.json", "{\"id\":\"s\"}"),
         ("events.log", "{\"e\":1}"),
-        ("rewrite-journal.log", "{\"j\":1}"),
+        ("epochs.json", "{\"records\":[]}"),
+        ("request-prefixes.json", "{}"),
     ] {
         fs::write(context.join(name), body).unwrap();
     }

@@ -304,7 +304,7 @@ fn predictions_still_license_nothing() {
 /// The scenario-report shape a passing drive publishes, as a validation fixture.
 fn good_scenario_report() -> Value {
     json!({
-        "id": "gate-probe", "schema_version": 1, "owner_phase": 2, "arm": "feature",
+        "id": "gate-probe", "schema_version": report::REPORT_SCHEMA_VERSION, "owner_phase": 2, "arm": "feature",
         "expected_status": "green", "runner": "rust", "runner_revision": "abc",
         "fixture_digests": [],
         "profile": {"name": "p", "provider": "openai", "model": "m",

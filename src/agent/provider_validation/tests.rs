@@ -200,7 +200,8 @@ fn correction_obeys_request_budget_and_original_turn_deadline() {
     let store =
         SessionStore::load_at(&SessionId::parse("retry-budget").unwrap(), cwd.path()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
-    let Err(RoundFailure::ToolCallRefusal(message)) = turn.round(&[], &[], (&store, &reserved, 1))
+    let Err(RoundFailure::ToolCallRefusal(message)) =
+        turn.round(&mut Vec::new(), &[], (&store, &reserved, 1))
     else {
         panic!("correction ignored the request budget");
     };
@@ -232,7 +233,7 @@ fn correction_obeys_request_budget_and_original_turn_deadline() {
     .with_turn_time(Some(std::time::Duration::from_millis(30)));
     let turn = Turn::new(&agent).unwrap();
     assert!(matches!(
-        turn.round(&[], &[], (&store, &reserved, 1)),
+        turn.round(&mut Vec::new(), &[], (&store, &reserved, 1)),
         Err(RoundFailure::TurnTime)
     ));
     assert!(turn.started.elapsed() < std::time::Duration::from_secs(1));

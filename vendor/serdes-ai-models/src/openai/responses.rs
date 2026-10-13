@@ -1081,7 +1081,19 @@ impl OpenAIResponsesModel {
                 .default_settings
                 .text_verbosity
                 .map(|verbosity| ResponseTextConfig { verbosity }),
-            prompt_cache_key: self.default_settings.prompt_cache_key.clone(),
+            prompt_cache_key: self.default_settings.prompt_cache_key.as_ref().map(|key| {
+                let epoch = settings
+                    .extra
+                    .as_ref()
+                    .and_then(|e| e.get("context_epoch"))
+                    .and_then(JsonValue::as_u64)
+                    .unwrap_or(0);
+                if epoch == 0 {
+                    key.clone()
+                } else {
+                    format!("{key}:epoch:{epoch}")
+                }
+            }),
             prompt_cache_retention: self.default_settings.prompt_cache_retention,
             metadata: None,
         })
@@ -1597,6 +1609,33 @@ mod tests {
                     .is_err(),
                 "{path}"
             );
+        }
+    }
+    #[test]
+    fn epoch_routing_is_stable_within_epoch_and_changes_only_at_cut() {
+        let model =
+            OpenAIResponsesModel::new("gpt", "key").with_settings(OpenAIResponsesModelSettings {
+                prompt_cache_key: Some("session".into()),
+                ..Default::default()
+            });
+        for epoch in [0, 1, 1, 2] {
+            let settings = ModelSettings {
+                extra: Some(serde_json::json!({"context_epoch":epoch})),
+                ..Default::default()
+            };
+            let wire = serde_json::to_value(
+                model
+                    .build_request(&[], &settings, &Default::default(), false)
+                    .unwrap(),
+            )
+            .unwrap();
+            let expected = if epoch == 0 {
+                "session".to_string()
+            } else {
+                format!("session:epoch:{epoch}")
+            };
+            assert_eq!(wire["prompt_cache_key"], expected);
+            assert!(wire.get("context_epoch").is_none());
         }
     }
 }
