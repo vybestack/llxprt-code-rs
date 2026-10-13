@@ -18,6 +18,7 @@ pub mod budget;
 pub mod executor;
 pub mod ledger;
 pub mod operation;
+pub mod semantic;
 
 #[cfg(test)]
 mod tests;

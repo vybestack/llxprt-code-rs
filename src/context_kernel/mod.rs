@@ -26,3 +26,6 @@ mod phase2_tests;
 
 /// Fact ledger and proposer class L (Phase 5).
 pub mod ledger;
+
+/// Independent typed validation oracle (Phase 6).
+pub mod validation;

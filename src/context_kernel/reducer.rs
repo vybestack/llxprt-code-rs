@@ -33,6 +33,8 @@ pub const STORE_MODE_UNAVAILABLE: u64 = 3;
 /// Errors raised while folding events.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ReducerError {
+    /// Typed semantic transition failed; no partial projection.
+    Semantic(crate::context_kernel::validation::GateError),
     /// Typed ledger transition failed; no partial ledger mutation is released.
     Ledger(crate::context_kernel::ledger::LedgerError),
     /// The conversation IR rejected the operation.
@@ -98,6 +100,8 @@ pub enum ReducerError {
 /// Fully typed state: everything the projection is derived from.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TypedState {
+    /// Gate-validated semantic projection and typed receipts.
+    pub semantic: crate::context_kernel::validation::SemanticState,
     /// Fact state, status product, dependencies and surfaced conflicts.
     pub ledger: crate::context_kernel::ledger::Ledger,
     /// Conversation intermediate representation.
@@ -141,6 +145,7 @@ impl TypedState {
     /// Builds the state an empty log folds into.
     pub fn genesis(idleness_window: u64, store_version: u64) -> Self {
         Self {
+            semantic: crate::context_kernel::validation::SemanticState::default(),
             ledger: crate::context_kernel::ledger::Ledger::default(),
             conversation_ir: ConversationIr::new(),
             scope_registry: ScopeRegistry::new(idleness_window),
@@ -180,6 +185,7 @@ impl TypedState {
         sink.int(self.version);
         sink.int(self.store_version);
         sink.int(self.next_offset);
+        self.semantic.encode(sink);
         self.ledger.encode(sink);
         self.conversation_ir.encode(sink);
         self.scope_registry.encode(sink);
@@ -254,6 +260,10 @@ impl Reducer {
                 scope,
                 claims,
             } => apply_append(state, event, source, sanitized, *scope, claims),
+            EventKind::Semantic { event } => state
+                .semantic
+                .apply(event, &state.scope_registry)
+                .map_err(ReducerError::Semantic),
             EventKind::Ledger { command } => apply_ledger(state, event, command),
             EventKind::OperationCommit {
                 class,
