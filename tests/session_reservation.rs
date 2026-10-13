@@ -351,7 +351,7 @@ fn second_store_failed_child_retries_into_a_new_branch() {
 }
 
 /// A reservation whose lease is **already expired** (past) can never be finalized or
-/// failed: both commit paths must reject with `StoreError::Stale` before writing
+/// failed: both commit paths must reject with `StoreError::LeaseExpired { .. }` before writing
 /// anything, so rounds/lifecycle/owner/error/summary all stay as reserved.
 #[test]
 fn finalize_and_fail_reject_expired_lease_leaving_state_unchanged() {
@@ -363,8 +363,8 @@ fn finalize_and_fail_reject_expired_lease_leaving_state_unchanged() {
     let rounds = noop_rounds();
 
     match st.finalize(rf, "unwritten-summary", &rounds) {
-        Err(StoreError::Stale) => {}
-        other => panic!("finalize on an expired lease must be Stale, got {other:?}"),
+        Err(StoreError::LeaseExpired { .. }) => {}
+        other => panic!("finalize on an expired lease must be LeaseExpired, got {other:?}"),
     }
     let snap = st.snapshot().unwrap();
     assert_eq!(snap.branches.len(), 1, "finalize: no branch added");
@@ -396,8 +396,8 @@ fn finalize_and_fail_reject_expired_lease_leaving_state_unchanged() {
     let rb = leak_reserved(rb);
     let rounds = noop_rounds();
     match st.fail(rb, "unwritten-error", &rounds) {
-        Err(StoreError::Stale) => {}
-        other => panic!("fail on an expired lease must be Stale, got {other:?}"),
+        Err(StoreError::LeaseExpired { .. }) => {}
+        other => panic!("fail on an expired lease must be LeaseExpired, got {other:?}"),
     }
     let snap = st.snapshot().unwrap();
     assert_eq!(snap.branches.len(), 1, "fail: no branch added");
@@ -417,7 +417,7 @@ fn finalize_and_fail_reject_expired_lease_leaving_state_unchanged() {
 
 /// A reservation whose lease **equals** now is already stale too: `lease_expiry <=
 /// now` includes exact equality, so both `finalize` and `fail` must reject with
-/// `StoreError::Stale` and leave rounds/lifecycle/owner/error/summary exactly as
+/// `StoreError::LeaseExpired { .. }` and leave rounds/lifecycle/owner/error/summary exactly as
 /// they were before the attempt.
 #[test]
 fn finalize_and_fail_reject_exact_now_lease_leaving_state_unchanged() {
@@ -429,8 +429,8 @@ fn finalize_and_fail_reject_exact_now_lease_leaving_state_unchanged() {
     let rounds = noop_rounds();
 
     match st.finalize(rf, "unwritten-summary", &rounds) {
-        Err(StoreError::Stale) => {}
-        other => panic!("finalize on an exactly-now lease must be Stale, got {other:?}"),
+        Err(StoreError::LeaseExpired { .. }) => {}
+        other => panic!("finalize on an exactly-now lease must be LeaseExpired, got {other:?}"),
     }
     let snap = st.snapshot().unwrap();
     assert_eq!(snap.branches.len(), 1, "finalize: no branch added");
@@ -462,8 +462,8 @@ fn finalize_and_fail_reject_exact_now_lease_leaving_state_unchanged() {
     let rb = leak_reserved(rb);
     let rounds = noop_rounds();
     match st.fail(rb, "unwritten-error", &rounds) {
-        Err(StoreError::Stale) => {}
-        other => panic!("fail on an exactly-now lease must be Stale, got {other:?}"),
+        Err(StoreError::LeaseExpired { .. }) => {}
+        other => panic!("fail on an exactly-now lease must be LeaseExpired, got {other:?}"),
     }
     let snap = st.snapshot().unwrap();
     assert_eq!(snap.branches.len(), 1, "fail: no branch added");

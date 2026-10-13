@@ -95,8 +95,11 @@ impl super::Turn<'_> {
             if known_tool(&call.name, self.allow_shell) {
                 in_flight::mark(store, &call.name);
             }
-            let outcome =
-                self.execute_one_call(config, store, attempt, round, call, (index, calls.len()));
+            let outcome = store
+                .with_tool_lease(reserved, || {
+                    self.execute_one_call(config, store, attempt, round, call, (index, calls.len()))
+                })
+                .unwrap_or_else(|error| Err(ToolCallFailure::Session(error)));
             in_flight::clear(store);
             if let Err(failure) = outcome {
                 // Calls enter the round only after execution and result admission.
@@ -157,6 +160,14 @@ impl super::Turn<'_> {
         rounds: &[RoundRecord],
     ) -> AgentError {
         match failure {
+            ToolCallFailure::Session(error) => self.dead_coded(
+                store,
+                reserved,
+                crate::envelope::Code::Session,
+                "session",
+                &error.to_string(),
+                rounds,
+            ),
             ToolCallFailure::Invalid(error) => {
                 self.dead(store, reserved, "invalid-tool-call", &error, rounds)
             }

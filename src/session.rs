@@ -42,6 +42,7 @@ pub(crate) mod context_recover;
 pub(crate) mod records;
 mod stream_retry;
 mod telemetry;
+mod tool_lease;
 pub use context_persist::ToolResultProjection;
 pub use records::{
     BranchRecord, Lifecycle, RoundRecord, SessionState, StreamRetryRecord, ToolCallRecord,
@@ -109,6 +110,10 @@ pub enum StoreError {
     Io(String),
     Corrupt(String),
     Stale,
+    /// The reservation still matches, but its bounded lease elapsed.
+    LeaseExpired {
+        elapsed_seconds: u64,
+    },
     Busy(String),
     Lock(String),
     LockTimeout,
@@ -125,6 +130,9 @@ impl std::fmt::Display for StoreError {
             StoreError::Io(m) => format!("session io: {m}"),
             StoreError::Corrupt(m) => format!("corrupt session state: {m}"),
             StoreError::Stale => "session state changed since reservation; retry".to_string(),
+            StoreError::LeaseExpired { elapsed_seconds } => format!(
+                "lease expired during tool execution (elapsed {elapsed_seconds}s since reservation)"
+            ),
             StoreError::Busy(m) => format!("session reservation active: {m}"),
             StoreError::Lock(m) => format!("session lock: {m}"),
             StoreError::LockTimeout => "session lock timed out; retry".to_string(),
@@ -855,10 +863,16 @@ impl SessionStore {
         if branch.lifecycle != Lifecycle::Pending
             || branch.owner != reserved.owner
             || branch.turn != reserved.turn
+            || branch.attempt != reserved.attempt
             || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
-            || branch.lease_expiry <= now_secs()
         {
             return Err(StoreError::Stale);
+        }
+        let now = now_secs();
+        if branch.lease_expiry <= now {
+            return Err(StoreError::LeaseExpired {
+                elapsed_seconds: now.saturating_sub(branch.reserved_at),
+            });
         }
         Ok(branch)
     }
@@ -874,6 +888,7 @@ impl SessionStore {
             .find(|branch| branch.branch_id == reserved.branch_id)
             .ok_or(StoreError::Stale)?;
         if branch.turn != reserved.turn
+            || branch.attempt != reserved.attempt
             || branch.digest != crate::limits::prompt_digest(&reserved.prompt)
         {
             return Err(StoreError::Stale);
