@@ -113,7 +113,13 @@ impl SessionStore {
             .as_ref()
             .map(|prefix| load(state, prefix))
             .transpose()?;
-        let append = old.as_ref().is_none_or(|old| requests.starts_with(old));
+        let append = match &old {
+            Some(old) if requests.len() >= old.len() => {
+                encode(&requests[..old.len()])? == encode(old)?
+            }
+            Some(_) => false,
+            None => true,
+        };
         if !append && trigger.is_none() {
             return Err(StoreError::Invalid(EpochError::PrefixChanged.to_string()));
         }
