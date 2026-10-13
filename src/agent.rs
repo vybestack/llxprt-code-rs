@@ -880,6 +880,7 @@ fn is_context_limit_error(message: &str) -> bool {
 
 /// Per-call failure kinds that keep the caller's error codes intact.
 enum ToolCallFailure {
+    Session(crate::session::StoreError),
     Invalid(String),
     OutputCap,
 }
