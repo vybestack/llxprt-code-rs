@@ -3,7 +3,8 @@
 ## Ownership and invariant
 
 Issue **#171**, owner `acoliver`; context-owner handoff recorded by `acoliver` in issue comment
-6129284474 on 2026-10-12. Base main: `5024b439b6d2c00d6a58c200a193eb6ac161b117`.
+6129284474 on 2026-10-12. Initial main: `5024b439b6d2c00d6a58c200a193eb6ac161b117`; refreshed integration base
+`ab7e8add9f0be99421bd502ee90b86f3829608ad` supplies the existing audited dependency closure.
 This adds estimation/calibration in the existing agent request-budget/compaction path, not
 another controller, renderer, compactor, retry loop, model registry or persistence reader.
 The durable accounting port remains a **byte**-denominated store contract; provider tokens

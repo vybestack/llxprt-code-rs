@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `7affaab4554eedd4dd19293e80bfe6d1ff0d05f46e6ce43632c2d10e2b2b4de6`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `ad77f3e42871d833ec1e5def483ae3f153364c60c9c6d24f11794090d476051b`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -334,6 +334,18 @@ The seven vendored lockfiles that pin `rustls` move from 0.23.43 to 0.23.45 in l
 `cargo audit` against the root, `xtask/Cargo.lock`, and each `vendor/*/Cargo.lock`). No vendored
 source is touched: the patch is lockfile-only, so the vendored crates compile exactly as before against
 the re-vendored `registry-vendor/rustls-0.23.45`.
+
+## Issue 368: audited lockfiles advance quinn-proto and chacha20
+
+The root lockfile and the six vendored lockfiles that contain these packages
+(`serdes-ai`, `serdes-ai-agent`, `serdes-ai-models`, `serdes-ai-providers`,
+`serdes-ai-responses`, and `serdes-ai-retries`) move `quinn-proto` from 0.11.17
+to 0.11.18, fixing RUSTSEC-2026-0338 and RUSTSEC-2026-0340, and `chacha20`
+from the yanked 0.10.1 to the compatible, non-yanked 0.10.2. No other package
+versions or dependency edges change. The checksum-locked registry closure
+ships the new releases in place of the old ones; the aggregate patch and its
+verification pins are regenerated to retain exact vendor reconstruction.
+No audit ignores, compatibility shims, or gate changes are introduced.
 
 ## Tests
 
