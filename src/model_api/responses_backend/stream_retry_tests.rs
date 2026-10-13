@@ -27,6 +27,24 @@ fn read_request(stream: &mut std::net::TcpStream) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 fn run(bodies: Vec<(String, usize)>, status: i32) -> (Value, Vec<Value>, Value, tempfile::TempDir) {
+    let (result, requests, transcript, root) = run_detailed(bodies);
+    assert_eq!(
+        result.is_ok(),
+        status == 0,
+        "{:?}",
+        result.as_ref().err().map(|e| &e.message)
+    );
+    let status = if result.is_ok() { "ok" } else { "error" };
+    (json!({"status":status}), requests, transcript, root)
+}
+fn run_detailed(
+    bodies: Vec<(String, usize)>,
+) -> (
+    Result<crate::agent::CompletedRun, crate::agent::AgentError>,
+    Vec<Value>,
+    Value,
+    tempfile::TempDir,
+) {
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -76,12 +94,10 @@ fn run(bodies: Vec<(String, usize)>, status: i32) -> (Value, Vec<Value>, Value, 
         .start_request(None, None, "Inspect then summarize.", root.path())
         .unwrap();
     let result = agent.run(&store, &reserved);
-    assert_eq!(result.is_ok(), status == 0, "{result:?}");
     let requests = server.join().unwrap();
     let state = SessionStore::read_transcript_at(&id, root.path()).unwrap();
     let transcript = json!({"turns":[{"model_retries":state.branches[0].stream_retries,"rounds":state.branches[0].rounds}]});
-    let status = if result.is_ok() { "ok" } else { "error" };
-    (json!({"status":status}), requests, transcript, root)
+    (result, requests, transcript, root)
 }
 
 fn healthy() -> String {
@@ -140,6 +156,38 @@ fn lifecycle_provider_and_post_terminal_failures_never_retry() {
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn unknown_provider_code_reaches_the_headless_error_message_without_replay() {
+    for (event, expected) in [
+        (
+            r#"{"type":"error","status_code":429,"error":{"code":"usage_limit_reached","message":"fixture-only-secret"}}"#,
+            "provider error (rate_limit_exceeded; provider_code=usage_limit_reached; status=429); request not replayed",
+        ),
+        (
+            r#"{"type":"error","error":{"code":"brand_new_code","message":"fixture-only-secret","param":"fixture-only-secret"}}"#,
+            "provider error (unclassified; provider_code=brand_new_code); request not replayed",
+        ),
+        (
+            r#"{"type":"error","code":"Bearer fixture-only-secret","message":"x"}"#,
+            "provider error (unclassified; provider_code=invalid_code); request not replayed",
+        ),
+    ] {
+        let (result, requests, transcript, _) =
+            run_detailed(vec![(format!("data: {event}\n\n"), 0)]);
+        let Err(error) = result else {
+            panic!("provider error is terminal")
+        };
+        assert_eq!(error.key, "model");
+        assert!(error.message.contains(expected), "{}", error.message);
+        assert!(!error.message.contains("fixture-only-secret"));
+        assert_eq!(requests.len(), 1);
+        assert!(transcript["turns"][0]["model_retries"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
 }
 
 #[test]
