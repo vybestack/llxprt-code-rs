@@ -7427,7 +7427,7 @@ index 0d35170..16b79a8 100644
          let mut system_parts: Vec<String> = Vec::new();
 +        let mut checkpoint = false;
          let mut api_messages: Vec<AnthropicMessage> = Vec::new();
-
+ 
          for req in requests {
              for part in &req.parts {
                  match part {
@@ -7437,7 +7437,7 @@ index 0d35170..16b79a8 100644
                      }
                      ModelRequestPart::UserPrompt(user) => {
 @@ -224,10 +240,8 @@ impl AnthropicModel {
-
+ 
          let system = if system_parts.is_empty() {
              None
 -        } else if self.enable_caching && system_parts.len() == 1 {
@@ -16254,7 +16254,7 @@ index 9384750..d2d0fb6 100644
 +    #[serde(rename = "function_call_output")]
 +    FunctionCallOutput,
  }
-
+ 
  /// Content for response input.
 @@ -476,7 +555,7 @@ pub struct ResponseError {
  }
@@ -16474,7 +16474,7 @@ index 9384750..d2d0fb6 100644
 -        ResponseInput::User { content }
 +        Ok((inputs, instructions))
      }
-
+ 
 -    fn convert_user_content(&self, content: &UserContent) -> ResponseInputContent {
 +    fn convert_user_content(
 +        &self,
@@ -28201,10 +28201,10 @@ index f90cc22..fc5c0bc 100644
  }
 diff --git a/vendor/serdes-ai-responses/src/client/sse.rs b/vendor/serdes-ai-responses/src/client/sse.rs
 new file mode 100644
-index 0000000..a68c87b
+index 0000000..baee3c9
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/src/client/sse.rs
-@@ -0,0 +1,389 @@
+@@ -0,0 +1,611 @@
 +//! Strict Responses SSE transport boundary. No payload text enters diagnostics.
 +use crate::types::{ResponseStatus, StreamEvent};
 +use serde::Deserialize;
@@ -28348,12 +28348,11 @@ index 0000000..a68c87b
 +                return Err(invalid("invalid error sequence number"));
 +            }
 +        }
++        let status = object
++            .remove("status_code")
++            .map(|value| error_status(&value))
++            .transpose()?;
 +        let body = if let Some(body) = object.remove("error") {
-+            if let Some(status) = object.remove("status_code") {
-+                if !status.as_u64().is_some_and(|n| (400..=599).contains(&n)) {
-+                    return Err(invalid("invalid error status code"));
-+                }
-+            }
 +            if !object.is_empty() {
 +                return Err(invalid("ambiguous error envelope"));
 +            }
@@ -28363,14 +28362,20 @@ index 0000000..a68c87b
 +        };
 +        let error: ProviderError =
 +            serde_json::from_value(body).map_err(|_| invalid("malformed provider error"))?;
-+        // Provider prose/params can echo prompts, tokens or URLs. Retain only
-+        // known categories; unknown codes are never printed or used for replay.
++        // Provider prose/params can echo prompts, tokens or URLs, so they are
++        // never retained. The code/type identifiers are sanitized before use.
 +        let _ = (error.message, error.param);
 +        return Err(provider_failure(
-+            error.code.as_deref().or(error.kind.as_deref()),
++            error.code.as_deref(),
++            error.kind.as_deref(),
++            status,
 +        ));
 +    }
 +    if kind == "response.failed" {
++        let status = object
++            .remove("status_code")
++            .map(|value| error_status(&value))
++            .transpose()?;
 +        let event: StreamEvent =
 +            serde_json::from_value(value).map_err(|_| invalid("malformed failed response"))?;
 +        let StreamEvent::ResponseFailed { response, .. } = event else {
@@ -28380,7 +28385,7 @@ index 0000000..a68c87b
 +            return Err(invalid("failed event has non-failed response status"));
 +        }
 +        let code = response.error.map(|error| error.code);
-+        return Err(provider_failure(code.as_deref()));
++        return Err(provider_failure(code.as_deref(), None, status));
 +    }
 +    let event: StreamEvent = serde_json::from_value(value)
 +        .map_err(|_| invalid("unknown or malformed Responses event"))?;
@@ -28415,18 +28420,68 @@ index 0000000..a68c87b
 +    Ok(Frame::Event(Box::new(event)))
 +}
 +
-+fn provider_failure(code: Option<&str>) -> ModelError {
-+    let category = match code {
-+        Some("invalid_request_error") => "invalid_request_error",
-+        Some("context_length_exceeded") => "context_length_exceeded",
-+        Some("rate_limit_exceeded") => "rate_limit_exceeded",
-+        Some("server_error" | "internal_error") => "server_error",
-+        Some("model_error") => "model_error",
-+        Some("authentication_error") => "authentication_error",
-+        _ => "unclassified",
-+    };
++fn error_status(value: &serde_json::Value) -> Result<u16, ModelError> {
++    value
++        .as_u64()
++        .filter(|n| (400..=599).contains(n))
++        .and_then(|n| u16::try_from(n).ok())
++        .ok_or_else(|| invalid("invalid error status code"))
++}
++
++const MAX_PROVIDER_CODE_CHARS: usize = 64;
++
++/// Provider codes are identifiers, not prose. Anything outside the identifier
++/// alphabet or length bound could carry a secret, so it is replaced wholesale.
++fn sanitize_provider_code(code: &str) -> &str {
++    let valid = !code.is_empty()
++        && code.len() <= MAX_PROVIDER_CODE_CHARS
++        && code
++            .bytes()
++            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'));
++    if valid {
++        code
++    } else {
++        "invalid_code"
++    }
++}
++
++/// Known categories only relabel the failure. Every category stays an
++/// `ModelError::Api`, which is never replayed or retried.
++fn known_category(code: &str) -> Option<&'static str> {
++    match code {
++        "invalid_request_error" => Some("invalid_request_error"),
++        "context_length_exceeded" => Some("context_length_exceeded"),
++        "rate_limit_exceeded"
++        | "rate_limit_error"
++        | "usage_limit_reached"
++        | "insufficient_quota"
++        | "too_many_requests" => Some("rate_limit_exceeded"),
++        "server_error" | "internal_error" => Some("server_error"),
++        "model_error" => Some("model_error"),
++        "authentication_error" => Some("authentication_error"),
++        _ => None,
++    }
++}
++
++fn provider_failure(code: Option<&str>, kind: Option<&str>, status: Option<u16>) -> ModelError {
++    let category = [code, kind]
++        .into_iter()
++        .flatten()
++        .find_map(known_category)
++        .or((status == Some(429)).then_some("rate_limit_exceeded"))
++        .unwrap_or("unclassified");
++    let mut detail = category.to_string();
++    if let Some(provider_code) = code.or(kind).map(sanitize_provider_code) {
++        if provider_code != category {
++            detail.push_str("; provider_code=");
++            detail.push_str(provider_code);
++        }
++    }
++    if let Some(status) = status {
++        detail.push_str(&format!("; status={status}"));
++    }
 +    ModelError::api_with_code(
-+        format!("responses SSE: provider error ({category}); request not replayed"),
++        format!("responses SSE: provider error ({detail}); request not replayed"),
 +        format!("sse_provider_{category}"),
 +    )
 +}
@@ -28467,9 +28522,176 @@ index 0000000..a68c87b
 +            };
 +            assert!(detail.contains("provider error"));
 +            assert!(code.unwrap().starts_with("sse_provider_"));
-+            assert!(!provider_failure(Some("rate_limit_exceeded")).is_retryable());
++            assert!(!provider_failure(Some("rate_limit_exceeded"), None, None).is_retryable());
 +            assert!(!detail.contains("SECRET"));
 +            assert!(detail.len() < 160);
++        }
++    }
++
++    fn api_failure(payload: &str) -> (String, String) {
++        let error = frames(format!("data: {payload}\n\n").as_bytes())
++            .err()
++            .unwrap();
++        assert!(!error.is_retryable(), "{error:?}");
++        let ModelError::Api { message, code } = error else {
++            panic!("wrong error type")
++        };
++        (message, code.unwrap())
++    }
++
++    #[test]
++    fn unknown_provider_code_is_preserved_with_status() {
++        let (message, code) = api_failure(
++            r#"{"type":"error","status_code":418,"error":{"code":"quota.window:v2-x","message":"SECRET","param":"SECRET"}}"#,
++        );
++        assert_eq!(
++            message,
++            "responses SSE: provider error (unclassified; provider_code=quota.window:v2-x; status=418); request not replayed"
++        );
++        assert_eq!(code, "sse_provider_unclassified");
++        assert!(!message.contains("SECRET"));
++    }
++
++    #[test]
++    fn unknown_type_is_kept_when_code_is_absent() {
++        let (message, code) = api_failure(
++            r#"{"type":"error","error":{"type":"billing_hold","code":null,"message":"SECRET"}}"#,
++        );
++        assert_eq!(
++            message,
++            "responses SSE: provider error (unclassified; provider_code=billing_hold); request not replayed"
++        );
++        assert_eq!(code, "sse_provider_unclassified");
++    }
++
++    #[test]
++    fn unsafe_or_oversized_provider_codes_become_invalid_code() {
++        let long = "a".repeat(MAX_PROVIDER_CODE_CHARS + 1);
++        let exact = "a".repeat(MAX_PROVIDER_CODE_CHARS);
++        for unsafe_code in [
++            "Bearer SECRET",
++            "https://user:SECRET@example.test/",
++            "tok=SECRET",
++            "line\nbreak",
++            "caf\u{e9}",
++            "",
++            long.as_str(),
++        ] {
++            let payload = serde_json::json!({
++                "type": "error", "code": unsafe_code, "message": "SECRET"
++            })
++            .to_string();
++            let (message, code) = api_failure(&payload);
++            assert_eq!(
++                message,
++                "responses SSE: provider error (unclassified; provider_code=invalid_code); request not replayed"
++            );
++            assert_eq!(code, "sse_provider_unclassified");
++        }
++        let payload = serde_json::json!({"type": "error", "code": exact, "message": "x"});
++        let (message, _) = api_failure(&payload.to_string());
++        assert!(
++            message.contains(&format!("provider_code={exact}")),
++            "{message}"
++        );
++    }
++
++    #[test]
++    fn status_code_is_carried_for_error_events_and_failed_responses() {
++        let (message, code) = api_failure(
++            r#"{"type":"error","status_code":503,"error":{"code":"server_error","message":"SECRET"}}"#,
++        );
++        assert_eq!(
++            message,
++            "responses SSE: provider error (server_error; status=503); request not replayed"
++        );
++        assert_eq!(code, "sse_provider_server_error");
++
++        let (message, _) = api_failure(
++            r#"{"type":"error","status_code":500,"code":"server_error","message":"SECRET"}"#,
++        );
++        assert!(message.contains("status=500"), "{message}");
++
++        let request =
++            serde_json::from_value(serde_json::json!({"model":"fixture","input":[]})).unwrap();
++        let mut response = crate::types::ResponseObject::in_progress("r", 1, "fixture", &request);
++        response.status = ResponseStatus::Failed;
++        response.error = Some(
++            serde_json::from_value(
++                serde_json::json!({"code":"mystery_failure","message":"SECRET"}),
++            )
++            .unwrap(),
++        );
++        let mut event = serde_json::to_value(StreamEvent::ResponseFailed {
++            sequence_number: 1,
++            response,
++        })
++        .unwrap();
++        let (message, code) = api_failure(&event.to_string());
++        assert_eq!(
++            message,
++            "responses SSE: provider error (unclassified; provider_code=mystery_failure); request not replayed"
++        );
++        assert_eq!(code, "sse_provider_unclassified");
++        event["status_code"] = serde_json::json!(502);
++        let (message, _) = api_failure(&event.to_string());
++        assert_eq!(
++            message,
++            "responses SSE: provider error (unclassified; provider_code=mystery_failure; status=502); request not replayed"
++        );
++        assert!(!message.contains("SECRET"));
++        event["status_code"] = serde_json::json!(200);
++        assert!(frames(format!("data: {event}\n\n").as_bytes()).is_err());
++    }
++
++    #[test]
++    fn rate_and_usage_limit_codes_and_status_429_are_rate_limit_category() {
++        for code in [
++            "rate_limit_exceeded",
++            "rate_limit_error",
++            "usage_limit_reached",
++            "insufficient_quota",
++            "too_many_requests",
++        ] {
++            let payload = serde_json::json!({
++                "type": "error", "status_code": 429, "error": {"code": code, "message": "SECRET"}
++            });
++            let (message, error_code) = api_failure(&payload.to_string());
++            assert_eq!(error_code, "sse_provider_rate_limit_exceeded", "{code}");
++            assert!(
++                message.contains("provider error (rate_limit_exceeded"),
++                "{message}"
++            );
++            assert!(message.contains("status=429"), "{message}");
++            assert!(!message.contains("SECRET"));
++        }
++        let (message, code) = api_failure(
++            r#"{"type":"error","status_code":429,"error":{"code":"brand_new_limit","message":"SECRET"}}"#,
++        );
++        assert_eq!(code, "sse_provider_rate_limit_exceeded");
++        assert_eq!(
++            message,
++            "responses SSE: provider error (rate_limit_exceeded; provider_code=brand_new_limit; status=429); request not replayed"
++        );
++        let (message, code) = api_failure(
++            r#"{"type":"error","error":{"type":"rate_limit_error","code":"vendor_specific","message":"x"}}"#,
++        );
++        assert_eq!(code, "sse_provider_rate_limit_exceeded");
++        assert!(
++            message.contains("provider_code=vendor_specific"),
++            "{message}"
++        );
++    }
++
++    #[test]
++    fn out_of_range_error_status_is_rejected() {
++        for status in ["200", "399", "600", "\"429\"", "-1"] {
++            let payload = format!(
++                r#"data: {{"type":"error","status_code":{status},"error":{{"code":"x","message":"y"}}}}
++
++"#
++            );
++            assert!(frames(payload.as_bytes()).is_err(), "accepted {status}");
 +        }
 +    }
 +
