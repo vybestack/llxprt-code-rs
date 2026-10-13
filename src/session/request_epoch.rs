@@ -113,13 +113,7 @@ impl SessionStore {
             .as_ref()
             .map(|prefix| load(state, prefix))
             .transpose()?;
-        let append = match &old {
-            Some(old) if requests.len() >= old.len() => {
-                encode(&requests[..old.len()])? == encode(old)?
-            }
-            Some(_) => false,
-            None => true,
-        };
+        let append = is_append(old.as_deref(), requests)?;
         if !append && trigger.is_none() {
             return Err(StoreError::Invalid(EpochError::PrefixChanged.to_string()));
         }
@@ -238,4 +232,14 @@ pub(crate) fn validate(state: &super::context_persist::ContextState) -> Result<(
         load(state, prefix).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn is_append(old: Option<&[ModelRequest]>, requests: &[ModelRequest]) -> Result<bool, StoreError> {
+    // Equality of serialized projections excludes non-wire metadata skipped by
+    // serde (e.g. provider continuation metadata). Object PartialEq does not.
+    Ok(match old {
+        Some(old) if requests.len() >= old.len() => encode(&requests[..old.len()])? == encode(old)?,
+        Some(_) => false,
+        None => true,
+    })
 }
