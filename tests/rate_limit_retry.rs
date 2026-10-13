@@ -291,7 +291,7 @@ fn sigterm_interrupts_retry_after_immediately() {
 }
 
 #[test]
-fn transient_server_and_connection_loss_recover_without_changing_the_request() {
+fn transient_server_recovers_without_changing_the_request() {
     let f = Fixture::new();
     let child = f.spawn("10s");
     let (first, _) = respond(
@@ -302,13 +302,43 @@ fn transient_server_and_connection_loss_recover_without_changing_the_request() {
             body: json!({"error":{"message":"temporarily unavailable"}}),
         },
     );
-    // Drop a subsequent connection before response headers arrive.
-    let stream = accept(&f.listener);
-    drop(stream);
     let (last, _) = respond(&f.listener, completion(vec![]));
     let output = envelope(finish(child), 0);
     assert_eq!(first, last);
-    assert_eq!(output["retry_attempts"], 2);
+    assert_eq!(output["retry_attempts"], 1);
+    f.no_more_requests();
+}
+
+#[test]
+fn connection_loss_after_request_send_is_not_replayed() {
+    let f = Fixture::new();
+    let child = f.spawn("10s");
+    let stream = accept(&f.listener);
+    // Ensure the peer has received the entire request before dropping it.
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+    let mut length = 0;
+    loop {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            if key.eq_ignore_ascii_case("content-length") {
+                length = value.trim().parse().unwrap();
+            }
+        }
+    }
+    reader.read_exact(&mut vec![0; length]).unwrap();
+    drop(reader);
+    drop(stream);
+    let output = envelope(finish(child), 5);
+    assert_eq!(output["error"]["code"], "model-connectivity");
+    assert_eq!(output["error"]["retry_attempts"], 0);
+    assert!(output["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("request not replayed"));
     f.no_more_requests();
 }
 

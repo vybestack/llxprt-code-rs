@@ -246,6 +246,19 @@ impl TransportFailure {
         }
     }
 
+    /// Whether this failure authorizes automatic replay. A transient class alone
+    /// is not evidence that a sent request produced no output. Connect failures
+    /// precede acceptance; explicit retryable statuses report a refusal. Head/body
+    /// loss and ambiguous timeouts stay terminal. Responses stream interruptions
+    /// use their separate, durably recorded retry path.
+    pub fn permits_replay(&self) -> bool {
+        self.kind.is_retryable()
+            && ((self.origin == "connect" && self.status.is_none())
+                || (self.origin == "status"
+                    && matches!(self.status, Some(408 | 429 | 500..=599))
+                    && (self.kind != TransportKind::RateLimit || self.status == Some(429))))
+    }
+
     /// The stable `error.code` component for this failure: the model code plus the
     /// classification token, for example `model-quota-exhausted`.
     pub fn transport_key(&self) -> &'static str {
@@ -293,6 +306,9 @@ impl TransportFailure {
         }
         if let Some(retry_after) = self.retry_after {
             out.push_str(&format!(" retry-after {}s", retry_after.as_secs()));
+        }
+        if self.kind.is_retryable() && !self.permits_replay() {
+            out.push_str("; request not replayed");
         }
         out
     }
@@ -429,6 +445,24 @@ mod tests {
         assert_eq!(TransportKind::Permanent.key(), "model-permanent");
     }
 
+    #[test]
+    fn replay_permission_requires_pre_acceptance_evidence() {
+        for status in [408, 429, 500, 503, 599] {
+            assert!(status_failure(status, "temporary refusal", None).permits_replay());
+        }
+        for status in [200, 400, 401, 402, 403, 404] {
+            assert!(!status_failure(status, "", None).permits_replay());
+        }
+        assert!(!status_failure(429, "insufficient_quota", None).permits_replay());
+        assert!(bare_failure(TransportKind::Connectivity, "connect").permits_replay());
+        for origin in ["timeout", "request", "body", "decode", "unknown"] {
+            let mut failure = bare_failure(TransportKind::Connectivity, origin);
+            failure.body_prefix = Some("retryable status 429; no output produced".into());
+            assert!(!failure.permits_replay(), "{origin}");
+            assert!(failure.diagnostic().contains("request not replayed"));
+        }
+    }
+
     /// The diagnostic states the status, the classification, the bounded body prefix with
     /// its total length, and the `Retry-After` hint when one exists.
     #[test]
@@ -450,7 +484,7 @@ mod tests {
         let timed_out = bare_failure(TransportKind::Connectivity, "timeout");
         assert_eq!(
             timed_out.diagnostic(),
-            "model transport failed (origin timeout, class connectivity, retryable)"
+            "model transport failed (origin timeout, class connectivity, retryable); request not replayed"
         );
         assert_eq!(timed_out.transport_key(), "model-connectivity");
     }

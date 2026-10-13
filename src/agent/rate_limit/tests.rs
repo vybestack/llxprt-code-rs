@@ -231,10 +231,10 @@ fn permanent_failure_after_a_throttle_stops_immediately() {
 #[test]
 fn typed_transient_failures_share_backoff_and_budget() {
     use crate::transport::TransportKind::*;
-    let mut timeout = TransportFailure {
+    let connect = TransportFailure {
         kind: Connectivity,
         status: None,
-        origin: "timeout",
+        origin: "connect",
         url_class: None,
         body_prefix: None,
         body_bytes: 0,
@@ -244,7 +244,7 @@ fn typed_transient_failures_share_backoff_and_budget() {
     let (result, inputs, lifecycle, elapsed) = run(
         vec![
             Err(failure(503, TransientServer, 2)),
-            Err(crate::adapter::BackendError::Transport(timeout.clone())),
+            Err(crate::adapter::BackendError::Transport(connect.clone())),
             Ok(healthy()),
         ],
         None,
@@ -254,10 +254,9 @@ fn typed_transient_failures_share_backoff_and_budget() {
     assert!(inputs.iter().all(|request| request == &inputs[0]));
     assert_eq!(lifecycle, Lifecycle::Completed);
     assert!(elapsed >= Duration::from_secs(2));
-    timeout.origin = "connect";
     let (result, inputs, _, _) = run(
         (0..4)
-            .map(|_| Err(crate::adapter::BackendError::Transport(timeout.clone())))
+            .map(|_| Err(crate::adapter::BackendError::Transport(connect.clone())))
             .collect(),
         None,
     );
@@ -302,4 +301,31 @@ fn mixed_stream_and_transport_failures_cannot_multiply_the_request_cap() {
     assert_eq!(error.retry_attempts, Some(3));
     assert_eq!(error.envelope_code, Some("model-transient-server"));
     assert_eq!(lifecycle, Lifecycle::Failed);
+}
+
+#[test]
+fn accepted_or_ambiguous_transport_loss_is_terminal_without_backoff() {
+    for origin in ["request", "body", "decode", "timeout", "unknown"] {
+        let failure = TransportFailure {
+            kind: crate::transport::TransportKind::Connectivity,
+            status: None,
+            origin,
+            url_class: None,
+            body_prefix: None,
+            body_bytes: 0,
+            retry_after: None,
+            observation: Default::default(),
+        };
+        let (result, inputs, lifecycle, elapsed) = run(
+            vec![Err(crate::adapter::BackendError::Transport(failure))],
+            None,
+        );
+        let error = result.unwrap_err();
+        assert_eq!(error.envelope_code, Some("model-connectivity"));
+        assert_eq!(error.retry_attempts, Some(0));
+        assert!(error.message.contains("request not replayed"));
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(lifecycle, Lifecycle::Failed);
+        assert_eq!(elapsed, Duration::ZERO);
+    }
 }

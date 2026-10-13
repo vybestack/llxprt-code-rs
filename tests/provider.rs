@@ -406,7 +406,7 @@ fn timed_out_transport_reports_no_duration() {
     let err = request_one(&cfg).expect_err("a silent provider must time out");
     assert_eq!(
         err,
-        "model transport failed (origin timeout, class connectivity, retryable)"
+        "model transport failed (origin timeout, class connectivity, retryable); request not replayed"
     );
     assert!(
         !err.chars().any(|c| c.is_ascii_digit()),

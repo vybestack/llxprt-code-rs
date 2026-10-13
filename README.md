@@ -436,6 +436,10 @@ errors fail the gate.
 
 CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
 
+The [module boundary audit](docs/module-boundary-audit.md) records issue #67's
+landed modularity seams, public-boundary test evidence, and follow-up findings;
+it distinguishes the existing acyclic/debt enforcement from a fixed layer policy.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball
@@ -651,9 +655,12 @@ Related telemetry quantities can be joined by `round_index` and `call_index`:
 ### Bounded request retries
 
 The host reissues an identical provider request on typed HTTP 429 throttles,
-transient 5xx and connectivity failures, with at most **three retries** (four
+transient 5xx/408 refusals and connection-establishment failures, with at most **three retries** (four
 attempts including the original). The cap is shared with preterminal Responses
-stream reissues for that request.
+stream reissues for that request. Transient classification alone does not authorize
+replay: partial response heads, body loss, sent-request loss and ambiguous request
+timeouts remain terminal with `request not replayed`, preserving typed cause and
+provider-call timing when available (#363).
 Backoff uses exponential equal jitter (250–500ms, 500–1000ms, 1000–2000ms), added
 above the provider's `Retry-After` minimum, with each wait bounded to 30 seconds.
 A hint greater than 30 seconds fails explicitly without an early retry. Exhaustion
