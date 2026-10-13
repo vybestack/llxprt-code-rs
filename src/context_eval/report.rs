@@ -124,7 +124,7 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
                 "invalidations": record.invalidations, "bytes_reclaimed": record.bytes_reclaimed,
                 "bytes_invalidated": record.bytes_invalidated,
                 "tokens_invalidated": record.tokens_invalidated, "tokens_reclaimed": record.tokens_reclaimed,
-                "calls": record.calls, "measured_calls": record.measured_calls,
+                "aggregate_valid": record.aggregate_valid, "calls": record.calls, "measured_calls": record.measured_calls,
                 "hit_rate": record.hit_rate(), "armed_hit_rate": record.armed_hit_rate(),
                 "disarmed_hit_rate": record.disarmed_hit_rate(),
             })

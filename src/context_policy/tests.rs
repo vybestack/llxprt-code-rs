@@ -862,3 +862,25 @@ fn governor_refuses_checkpoint_but_never_prices_erasure() {
         1
     );
 }
+
+#[test]
+fn provider_usage_overflow_invalidates_metrics_not_the_epoch_or_turn() {
+    let mut cache = EpochCache::default();
+    cache.start("a".repeat(64), 1).unwrap();
+    cache
+        .observe(0, Some(u64::MAX), Some(u64::MAX), true)
+        .unwrap();
+    cache.observe(0, Some(1), Some(1), false).unwrap();
+    let record = &cache.records()[0];
+    assert!(!record.aggregate_valid);
+    assert_eq!(record.calls, 2);
+    assert_eq!(record.measured_calls, 2);
+    assert_eq!(record.invalidations, 0);
+    assert_eq!(record.hit_rate(), None);
+    assert_eq!(record.armed_hit_rate(), None);
+    assert_eq!(record.disarmed_hit_rate(), None);
+    cache.validate().unwrap();
+    let restored: EpochCache =
+        serde_json::from_slice(&serde_json::to_vec(&cache).unwrap()).unwrap();
+    assert_eq!(cache, restored);
+}

@@ -23,6 +23,7 @@ pub struct EpochRecord {
     pub tokens_invalidated: Option<u64>,
     pub tokens_reclaimed: Option<u64>,
     pub invalidations: u64,
+    pub aggregate_valid: bool,
     pub calls: u64,
     pub measured_calls: u64,
     pub input_tokens: u64,
@@ -46,6 +47,7 @@ impl EpochRecord {
             tokens_invalidated: None,
             tokens_reclaimed: None,
             invalidations: 0,
+            aggregate_valid: true,
             calls: 0,
             measured_calls: 0,
             input_tokens: 0,
@@ -57,13 +59,19 @@ impl EpochRecord {
         }
     }
     pub fn hit_rate(&self) -> Option<f64> {
-        ratio(self.cached_tokens, self.input_tokens)
+        self.aggregate_valid
+            .then(|| ratio(self.cached_tokens, self.input_tokens))
+            .flatten()
     }
     pub fn armed_hit_rate(&self) -> Option<f64> {
-        ratio(self.armed_cached_tokens, self.armed_input_tokens)
+        self.aggregate_valid
+            .then(|| ratio(self.armed_cached_tokens, self.armed_input_tokens))
+            .flatten()
     }
     pub fn disarmed_hit_rate(&self) -> Option<f64> {
-        ratio(self.disarmed_cached_tokens, self.disarmed_input_tokens)
+        self.aggregate_valid
+            .then(|| ratio(self.disarmed_cached_tokens, self.disarmed_input_tokens))
+            .flatten()
     }
 }
 
@@ -139,21 +147,18 @@ impl EpochCache {
             .measured_calls
             .checked_add(1)
             .ok_or(EpochError::Exhausted)?;
-        add(&mut record.input_tokens, input)?;
-        add(&mut record.cached_tokens, cached)?;
-        let (total, hits) = if armed {
-            (
-                &mut record.armed_input_tokens,
-                &mut record.armed_cached_tokens,
-            )
+        if !record.aggregate_valid {
+            return Ok(());
+        }
+        // Stage every total. Provider telemetry overflow invalidates metrics,
+        // not the turn or prefix authority, and never persists partial totals.
+        let mut staged = record.clone();
+        if add_usage(&mut staged, input, cached, armed).is_err() {
+            record.aggregate_valid = false;
         } else {
-            (
-                &mut record.disarmed_input_tokens,
-                &mut record.disarmed_cached_tokens,
-            )
-        };
-        add(total, input)?;
-        add(hits, cached)
+            *record = staged;
+        }
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), EpochError> {
@@ -193,6 +198,28 @@ pub struct CheckpointCut {
     pub tokens_invalidated: Option<u64>,
 }
 
+fn add_usage(
+    record: &mut EpochRecord,
+    input: u64,
+    cached: u64,
+    armed: bool,
+) -> Result<(), EpochError> {
+    add(&mut record.input_tokens, input)?;
+    add(&mut record.cached_tokens, cached)?;
+    let (total, hits) = if armed {
+        (
+            &mut record.armed_input_tokens,
+            &mut record.armed_cached_tokens,
+        )
+    } else {
+        (
+            &mut record.disarmed_input_tokens,
+            &mut record.disarmed_cached_tokens,
+        )
+    };
+    add(total, input)?;
+    add(hits, cached)
+}
 fn add(value: &mut u64, increment: u64) -> Result<(), EpochError> {
     *value = value.checked_add(increment).ok_or(EpochError::Exhausted)?;
     Ok(())
