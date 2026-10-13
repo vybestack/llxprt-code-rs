@@ -580,8 +580,10 @@ impl Model for OpenAIChatModel {
             request = request.header("OpenAI-Project", project);
         }
 
+        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
+        crate::telemetry::wire_projection(&bytes)?;
         crate::telemetry::request_sent();
-        let response = request.json(&body).send().await?;
+        let response = request.body(bytes).send().await?;
         crate::telemetry::headers();
 
         let status = response.status().as_u16();
@@ -623,8 +625,10 @@ impl Model for OpenAIChatModel {
             request = request.header("OpenAI-Project", project);
         }
 
+        let bytes = serde_json::to_vec(&body).map_err(ModelError::Serialization)?;
+        crate::telemetry::wire_projection(&bytes)?;
         crate::telemetry::request_sent();
-        let response = request.json(&body).send().await?;
+        let response = request.body(bytes).send().await?;
         crate::telemetry::headers();
 
         let status = response.status().as_u16();

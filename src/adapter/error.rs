@@ -2,12 +2,16 @@
 use crate::transport::TransportFailure;
 
 pub enum BackendError {
+    RequestBound { limit: u64 },
     Transport(TransportFailure),
     Message(String),
 }
 
 impl BackendError {
     pub fn from_model(error: serdes_ai::models::ModelError) -> Self {
+        if let serdes_ai::models::ModelError::RequestBound { limit } = error {
+            return Self::RequestBound { limit };
+        }
         let error = crate::transport::context_length_400(&error).unwrap_or(error);
         if let Some(failure) = TransportFailure::from_model_error(&error) {
             return Self::Transport(failure);
@@ -42,6 +46,9 @@ impl std::fmt::Display for BackendError {
         let message = match self {
             Self::Transport(failure) => failure.diagnostic(),
             Self::Message(message) => message.clone(),
+            Self::RequestBound { limit } => {
+                format!("calibrated request exceeds context limit {limit}; no request sent")
+            }
         };
         f.write_str(&crate::redact::scrub_and_bound_diagnostic(&message))
     }

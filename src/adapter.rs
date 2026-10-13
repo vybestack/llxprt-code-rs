@@ -126,6 +126,11 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Exact route/model/render contract; absent for backends without wire measurement.
+    fn request_contract(&self) -> Option<crate::telemetry::bounds::RequestContract> {
+        None
+    }
+
     /// Whether response body events arrive during generation (rather than final JSON).
     fn streams_response(&self) -> bool {
         false

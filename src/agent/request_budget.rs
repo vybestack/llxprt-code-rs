@@ -7,6 +7,8 @@
 //! backend call. Every accumulator here uses saturated arithmetic so an oversized request
 //! or history can never wrap a smaller value.
 
+pub mod calibration;
+pub(super) mod live;
 use super::LlmResult;
 /// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
 /// the **complete** outgoing request on top of the message parts: the model identifier

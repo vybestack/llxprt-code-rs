@@ -60,14 +60,20 @@ impl super::Turn<'_> {
         };
         let first = match self.opening_round(requests, tools, &usage, (store, reserved, 1)) {
             Ok(reply) => reply,
-            Err(RoundFailure::Model(first)) if is_context_limit_error(&first) => {
+            Err(failure) if failure.context_limit_message().is_some() => {
+                let first = failure
+                    .context_limit_message()
+                    .expect("context limit guard");
                 if !self.compact_provider_context(reserved, requests, &[]) {
                     return Err(self.provider_context_unchanged_dead(store, reserved, &first, &[]));
                 }
                 self.check_request_budget(store, reserved, requests, tools, &[])?;
                 match self.opening_round(requests, tools, &usage, (store, reserved, 1)) {
                     Ok(reply) => reply,
-                    Err(RoundFailure::Model(second)) if is_context_limit_error(&second) => {
+                    Err(failure) if failure.context_limit_message().is_some() => {
+                        let second = failure
+                            .context_limit_message()
+                            .expect("context limit guard");
                         return Err(self.provider_context_limit_dead(
                             store,
                             reserved,

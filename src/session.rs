@@ -15,7 +15,7 @@ use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
-pub const STORE_VERSION: u32 = 5;
+pub const STORE_VERSION: u32 = 6;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
 pub const MAX_PROMPT_BYTES: usize = 512 * 1024;

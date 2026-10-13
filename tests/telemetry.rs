@@ -135,7 +135,7 @@ fn compiled_provider_calls_tools_persist_and_replay_without_fabricated_generatio
         server.join().unwrap();
         let value = envelope(&output);
         let t = &value["telemetry"];
-        assert_eq!(t["version"], 1);
+        assert_eq!(t["version"], 2);
         assert_eq!(t["reservation"], "fresh");
         assert_eq!(t["model_calls"], 2);
         assert_eq!(t["round_count"], 2);

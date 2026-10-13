@@ -10,6 +10,25 @@ pub(super) struct Observations {
 }
 
 impl SessionStore {
+    pub(crate) fn request_bound_observations(
+        &self,
+    ) -> Result<Vec<crate::telemetry::bounds::RequestBound>, StoreError> {
+        self.locked(|| {
+            let state = self.read()?;
+            let mut observations: Vec<_> = state
+                .branches
+                .iter()
+                .filter_map(|b| b.telemetry.as_ref())
+                .flat_map(|t| &t.rounds)
+                .filter_map(|c| c.request_bound.clone())
+                .rev()
+                .take(crate::telemetry::MAX_RECORDS)
+                .collect();
+            observations.reverse();
+            Ok(observations)
+        })
+    }
+
     pub(super) fn begin_reservation_observation(&self) {
         let mut observations = self.observations.lock().expect("store observations mutex");
         if !observations.reservation.is_empty() {

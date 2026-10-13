@@ -236,6 +236,11 @@ fn quota_body(body: &str) -> bool {
 /// Model-related errors. External text remains available in typed fields but is never rendered
 /// by the standard public formatting contracts.
 pub enum ModelError {
+    /// Host-calibrated admission refused the selected wire before send.
+    RequestBound {
+        /// Declared input/output context ceiling.
+        limit: u64,
+    },
     /// HTTP error from the API.
     Http {
         /// HTTP status code.
@@ -314,6 +319,7 @@ pub enum ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RequestBound { limit } => write!(f, "calibrated request exceeds context limit {limit}; no request sent"),
             Self::Http { status, .. } => write!(f, "Model HTTP error (status {status})"),
             Self::Api { .. } => f.write_str("Model API error"),
             Self::Timeout => f.write_str("Model request timed out"),
