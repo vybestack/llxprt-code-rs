@@ -105,7 +105,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `ad77f3e42871d833ec1e5def483ae3f153364c60c9c6d24f11794090d476051b`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `d4512108ee8302f0c8845fba9d3e5385f5bc0433bc701102e6aaa153d3e8e570`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -514,6 +514,23 @@ Reasoning IDs, encrypted data, original summary arrays and assistant phase survi
 stateless input replay. No previous-response chain or legacy session compatibility path
 is added. Direct model/Responses suites and stock CLI continuity fixtures cover these
 changes; no live endpoint capability claim is inferred from loopback contracts.
+
+## Issue 373: Responses SSE provider codes survive classification
+(`vendor/serdes-ai-responses/src/client/sse.rs`, `provider_failure`, `sanitize_provider_code`, `known_category`)
+
+A Responses SSE `error` event or `response.failed` with an unknown code used to become
+`unclassified` and the code was dropped, so operators and retry policy could not tell a usage
+limit from a malformed request. The provider `code` (or `type` when no code is present) is now
+kept when it matches `[A-Za-z0-9_.:-]` and is at most 64 bytes; anything else becomes
+`invalid_code`. A valid `status_code` (400-599) is kept for flat and enveloped `error` events and
+for `response.failed`. The message reads, for example,
+`responses SSE: provider error (unclassified; provider_code=usage_limit_reached; status=429); request not replayed`
+with the error code `sse_provider_unclassified`. `rate_limit_exceeded`, `rate_limit_error`,
+`usage_limit_reached`, `insufficient_quota`, `too_many_requests` and status 429 map to the existing
+`rate_limit_exceeded` category. The category is a label only: every result stays a
+`ModelError::Api`, which is neither retried nor replayed, so retry semantics are unchanged. The
+provider `message` and `param` are still never retained. The host forwards this text to the
+headless `error.message`.
 
 ## Issue 191 - bounded terminal transport cause (measurement, not provider repair)
 

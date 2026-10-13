@@ -51,7 +51,7 @@ for manifest in "${required_vendor[@]}"; do
 done
 
 patch_file=SERDES-AI-0.2.6.patch
-expected_patch='ad77f3e42871d833ec1e5def483ae3f153364c60c9c6d24f11794090d476051b'
+expected_patch='d4512108ee8302f0c8845fba9d3e5385f5bc0433bc701102e6aaa153d3e8e570'
 if [[ ! -f "$patch_file" ]]; then
   echo "missing reproducible vendor patch: $patch_file" >&2
   fail=1
