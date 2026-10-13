@@ -49,7 +49,7 @@ impl Ledger {
             && entry.freshness != Freshness::Unknown
             && (entry.class == FactClass::Obligation || entry.utility.0 > self.params.threshold.0)
     }
-    /// Age-independent logged access/reuse normalization, saturating in [0,1].
+    /// Age-independent logged access/reuse normalization, saturating in `[0,1]`.
     pub fn utility(&self, usage: Usage) -> Utility {
         let score = u64::from(usage.accesses) * u64::from(self.params.access_weight)
             + u64::from(usage.reuses) * u64::from(self.params.reuse_weight);

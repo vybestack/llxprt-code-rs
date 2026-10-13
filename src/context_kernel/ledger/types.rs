@@ -56,7 +56,7 @@ pub enum Grammar {
     Ambiguous,
     Evidence,
 }
-/// A normalized fixed-point [0,1] score. No NaN or platform float drift.
+/// A normalized fixed-point `[0,1]` score. No NaN or platform float drift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Utility(pub u16);
 impl Utility {
