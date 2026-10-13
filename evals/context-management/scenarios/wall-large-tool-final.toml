@@ -2,7 +2,7 @@ schema_version = 1
 id = "wall-large-tool-final"
 owner_phase = 7
 arm = "feature"
-expected_status = "red"
+expected_status = "green"
 expected_reason_class = "context-limit"
 accept_any_reason = false
 

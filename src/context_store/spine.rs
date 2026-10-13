@@ -8,7 +8,7 @@ use crate::context_kernel::canonical::digest;
 use std::ops::Range;
 
 /// One framed record in the spine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SpineRecord {
     pub handle: String,
     pub range: Range<u64>,

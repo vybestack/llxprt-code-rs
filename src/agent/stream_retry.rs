@@ -19,7 +19,7 @@ impl Turn<'_> {
         self.checkpoint_pending.set(None);
         self.backend.set_context_epoch(epoch);
         for retry in 0..=super::rate_limit::MAX_RETRIES {
-            let result = self.round_once(requests, tools, retry > 0);
+            let result = self.gateway_round(requests, tools, retry > 0, (store, reserved), epoch);
             if let Some(call) = self.observations.borrow().rounds.last() {
                 if result.is_ok() {
                     store

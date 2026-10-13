@@ -173,6 +173,7 @@ fn build_agent(
         }
     };
     agent = agent
+        .with_unattended(args.unattended)
         .with_emission(args.emit.clone())
         .with_secrets(constructed.secret_values)
         .with_context_limit(constructed.context_limit)

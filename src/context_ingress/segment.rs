@@ -45,7 +45,10 @@ impl StructuralClass {
 
     /// Deterministic class of one line of sanitized bytes.
     pub fn of_line(line: &[u8]) -> Self {
-        if contains(line, b"exact error span") {
+        if contains(line, b"exact error span")
+            || contains(line, b"constraint:")
+            || contains(line, b"failing test identity:")
+        {
             return StructuralClass::ExactSpan;
         }
         if contains(line, b"unknown-shaped identifier") {

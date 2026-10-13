@@ -59,6 +59,9 @@ impl super::Turn<'_> {
         let emitted_prefix = calls.len();
         attempt.rounds.push(round);
         for call in &attempt.rounds.last().expect("recorded round").calls[emitted_prefix..] {
+            store
+                .complete_provider_tool(reserved, call)
+                .map_err(AgentError::from_store)?;
             self.emit_result(reserved.turn, attempt.rounds.len(), call)
                 .map_err(|error| {
                     self.dead(store, reserved, "transcript", &error, &attempt.rounds)
@@ -118,6 +121,9 @@ impl super::Turn<'_> {
                 }
                 return Err(self.tool_failure(store, reserved, failure, &attempt.rounds));
             }
+            store
+                .complete_provider_tool(reserved, round.calls.last().expect("admitted call record"))
+                .map_err(AgentError::from_store)?;
             if let Err(error) = self.emit_result(
                 reserved.turn,
                 round_index,
@@ -233,6 +239,7 @@ mod tests {
             name: "write_file".into(),
             args_json: "[".into(),
         };
+        admit_fixture(&store, &reserved, &write);
         let mut attempt = AttemptState {
             requests: Vec::new(),
             rounds: Vec::new(),
@@ -282,6 +289,43 @@ mod tests {
             serde_json::to_value(reopened.snapshot().unwrap().branches).unwrap(),
             serde_json::to_value(snapshot.branches).unwrap()
         );
+    }
+
+    fn admit_fixture(store: &SessionStore, reserved: &ReservedRequest, write: &ToolCall) {
+        let permit = store
+            .provider_intent(
+                reserved,
+                crate::context_gateway::SendIntent {
+                    identity: String::new(),
+                    branch: reserved.branch_id.clone(),
+                    owner: reserved.owner.clone(),
+                    epoch: 1,
+                    context_version: 1,
+                    request_hash: crate::context_gateway::digest(b"fixture"),
+                    contract_hash: crate::context_gateway::digest(b"contract"),
+                    class: crate::context_gateway::ProviderClass::AtMostOneAttempt,
+                    kind: crate::context_gateway::TurnKind::Conversation,
+                    allowance: 4096,
+                },
+            )
+            .unwrap();
+        let identity = store.admit_send(reserved, permit).unwrap().identity;
+        let mut reply = fixture_reply();
+        reply.calls = vec![write.clone()];
+        store
+            .admit_provider_response(
+                reserved,
+                &identity,
+                serde_json::to_vec(&reply).unwrap(),
+                vec![crate::context_gateway::ExecutionIntent {
+                    id: write.id.clone(),
+                    tool: write.name.clone(),
+                    args: write.args_json.clone(),
+                    read_only: false,
+                    completion: None,
+                }],
+            )
+            .unwrap();
     }
 
     fn fixture_reply() -> LlmResult {

@@ -22,7 +22,7 @@ use serdes_ai::models::openai::OpenAIChatModel;
 use serdes_ai::models::Model as _;
 
 /// A single tool call emitted by the model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -32,7 +32,7 @@ pub struct ToolCall {
 /// Token accounting carried across the backend boundary, cache counters
 /// included, so downstream consumers can act on what the transport already
 /// parsed (issue 80). `None` fields mean the provider did not report them.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmUsage {
     pub request_tokens: Option<u64>,
     pub response_tokens: Option<u64>,
@@ -43,7 +43,7 @@ pub struct LlmUsage {
 }
 
 /// The model's reply for one round.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct LlmResult {
     /// Private, ordered provider continuation, distinct from readable thinking.
     pub continuation: Option<crate::reasoning::Continuation>,
@@ -126,6 +126,17 @@ pub type ModelFuture<'a> =
 
 /// The model-facing backend: one request, one round.
 pub trait ChatBackend {
+    /// Delivery posture is explicit. No provider idempotency is inferred from HTTP.
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        crate::context_gateway::ProviderClass::AtMostOneAttempt
+    }
+    fn supports_context_handles(&self) -> bool {
+        false
+    }
+    fn max_output_tokens(&self) -> Option<u64> {
+        None
+    }
+
     /// The durable checkpoint epoch; providers use it for cache routing only.
     fn set_context_epoch(&self, _epoch: u64) {}
 
@@ -396,6 +407,16 @@ impl ModelAdapter {
 }
 
 impl ChatBackend for ModelAdapter {
+    fn supports_context_handles(&self) -> bool {
+        true
+    }
+    fn max_output_tokens(&self) -> Option<u64> {
+        self.max_output_tokens
+    }
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        crate::context_gateway::ProviderClass::StatelessAttested
+    }
+
     fn set_context_epoch(&self, epoch: u64) {
         self.context_epoch
             .store(epoch, std::sync::atomic::Ordering::Relaxed);

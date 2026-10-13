@@ -18,6 +18,16 @@ pub(super) fn apply_batch(state: &mut SessionState, batch: &EventBatch) -> Resul
 
 fn apply_event(state: &mut SessionState, event: &Event) -> Result<(), StoreError> {
     match event {
+        Event::Provider {
+            branch_id,
+            owner,
+            command,
+        } => provider_event(state, branch_id, owner, command),
+        Event::RenderContract {
+            branch_id,
+            owner,
+            publication,
+        } => publish_render(state, branch_id, owner, publication),
         Event::Telemetry {
             branch_id,
             owner,
@@ -52,12 +62,7 @@ fn apply_event(state: &mut SessionState, event: &Event) -> Result<(), StoreError
             branch_id,
             owner,
             record,
-        } => {
-            let branch = pending(state, branch_id, owner)?;
-            super::stream_retry::validate(record)?;
-            branch.stream_retries.push(record.clone());
-            Ok(())
-        }
+        } => stream_retry(state, branch_id, owner, record),
         Event::LeaseRenewed {
             branch_id,
             owner,
@@ -116,6 +121,10 @@ fn reserve(
         _ => return Err(corrupt("branch reservation has inconsistent cwd pinning")),
     }
     state.next_branch_seq = next_branch_seq;
+    state.provider_epoch = state
+        .provider_epoch
+        .checked_add(1)
+        .ok_or_else(|| corrupt("provider epoch overflow"))?;
     state.branches.push(branch.clone());
     Ok(())
 }
@@ -144,6 +153,10 @@ fn reclaim(
     reserved_at: u64,
     lease_expiry: u64,
 ) -> Result<(), StoreError> {
+    state.provider_epoch = state
+        .provider_epoch
+        .checked_add(1)
+        .ok_or_else(|| corrupt("provider epoch overflow"))?;
     let branch = state
         .branches
         .iter_mut()
@@ -162,7 +175,8 @@ fn reclaim(
     branch.reserved_at = reserved_at;
     branch.lease_expiry = lease_expiry;
     branch.telemetry = None;
-    branch.rounds.clear();
+    // Committed completions survive lease acquisition.
+
     branch.stream_retries.clear();
     branch.summary.clear();
     branch.error.clear();
@@ -276,4 +290,61 @@ pub(super) fn rounds_equal(
     let right = serde_json::to_vec(right)
         .map_err(|error| StoreError::Corrupt(format!("serialize rounds: {error}")))?;
     Ok(left == right)
+}
+
+fn publish_render(
+    state: &mut SessionState,
+    branch: &str,
+    owner: &str,
+    publication: &crate::context_gateway::RenderPublication,
+) -> Result<(), StoreError> {
+    pending(state, branch, owner)?;
+    if state.render_contracts.last() != Some(publication) {
+        state.render_contracts.push(publication.clone());
+    }
+    Ok(())
+}
+
+fn stream_retry(
+    state: &mut SessionState,
+    branch: &str,
+    owner: &str,
+    record: &StreamRetryRecord,
+) -> Result<(), StoreError> {
+    let branch = pending(state, branch, owner)?;
+    super::stream_retry::validate(record)?;
+    branch.stream_retries.push(record.clone());
+    Ok(())
+}
+
+fn provider_event(
+    state: &mut SessionState,
+    branch: &str,
+    owner: &str,
+    command: &crate::context_gateway::Command,
+) -> Result<(), StoreError> {
+    use crate::context_gateway::Command;
+    pending(state, branch, owner)?;
+    match command {
+        Command::Intent(intent)
+            if intent.branch == branch
+                && intent.owner == owner
+                && intent.epoch == state.provider_epoch => {}
+        Command::Recover { branch: target } if target == branch => {}
+        Command::Stage { identity, .. }
+        | Command::Admit { identity, .. }
+        | Command::Reject { identity }
+        | Command::Complete { identity, .. } => {
+            if !state.provider_turns.iter().any(|r| {
+                r.intent.identity == *identity
+                    && r.intent.branch == branch
+                    && r.intent.owner == owner
+            }) {
+                return Err(corrupt("provider command crosses owner or branch fence"));
+            }
+        }
+        _ => return Err(corrupt("provider intent has invalid owner or epoch")),
+    }
+    crate::context_gateway::apply(&mut state.provider_turns, command)
+        .map_err(|e| corrupt(&e.to_string()))
 }

@@ -64,6 +64,10 @@ impl AnthropicBackend {
 }
 
 impl ChatBackend for AnthropicBackend {
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        crate::context_gateway::ProviderClass::StatelessAttested
+    }
+
     fn request<'a>(
         &'a self,
         requests: &'a [ModelRequest],

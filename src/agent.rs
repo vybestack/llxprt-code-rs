@@ -24,6 +24,8 @@ use crate::session::{ReservedRequest, RoundRecord, SessionStore};
 use serde_json::Value as JsonValue;
 
 mod deadline;
+mod gateway;
+mod provider_recovery;
 mod provider_validation;
 mod rate_limit;
 mod stream_retry;
@@ -134,6 +136,7 @@ pub struct CodingAgent {
     /// own default applies.
     request_timeout: Option<std::time::Duration>,
     max_rounds: usize,
+    unattended: bool,
     allow_shell: bool,
     secrets: Vec<String>,
     /// Profile prompt-notes passed to the system prompt (reasoning effort wording).
@@ -208,6 +211,7 @@ impl CodingAgent {
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
+            unattended: false,
             allow_shell,
             secrets: config.secret_values(),
             prompt_notes: None,
@@ -242,6 +246,7 @@ impl CodingAgent {
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
+            unattended: false,
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
@@ -272,6 +277,7 @@ impl CodingAgent {
             digest_size_floor: crate::context_ingress::filter::DEFAULT_DIGEST_SIZE_FLOOR,
             request_timeout: None,
             max_rounds: MAX_TURN_ROUNDS,
+            unattended: false,
             allow_shell,
             secrets: Vec::new(),
             prompt_notes: None,
@@ -414,6 +420,13 @@ impl CodingAgent {
             run.telemetry = Some(Box::new(telemetry));
             return Ok(run);
         }
+        if self.unattended && !self.backend.provider_class().unattended() {
+            return Err(AgentError::new(
+                crate::envelope::Code::Config,
+                "provider-class",
+                "provider class does not support unattended operation",
+            ));
+        }
         match Turn::new(self) {
             Ok(turn) => {
                 turn.observations.borrow_mut().materialized_history_bytes =
@@ -476,7 +489,7 @@ impl Turn<'_> {
         let config = self
             .tools_config(self.allow_shell)
             .map_err(|error| self.dead(store, reserved, "workspace", &error, &[]))?;
-        let mut attempt = self.begin_attempt(store, reserved, requests, &tools)?;
+        let mut attempt = self.resume_or_begin(store, reserved, requests, &tools)?;
         if let Some(command) = mission {
             return self.run_one_command(store, reserved, &command, &config, attempt);
         }
