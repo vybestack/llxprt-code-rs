@@ -576,7 +576,19 @@ fn commit_reports_a_rebase_no_op_instead_of_collapsing_it() {
     ex.generate().unwrap();
     ex.validate(0, &Budget { b: 100, r: 8, h: 4 }, 80, 0, 0, 0)
         .unwrap();
-    assert_eq!(ex.commit(11, None, 0).unwrap(), CommitOutcome::RebaseNoOp);
+    let mut public = ex.clone();
+    assert_eq!(
+        public.commit(11, None, 0),
+        Err(ExecutorError::PreconditionFailed {
+            which: "semantic-receipt-boundary"
+        })
+    );
+    // Exercise the common universal gate directly; public Phase 6 commits now
+    // require exact-candidate receipts (covered by context_validation/semantic).
+    assert_eq!(
+        ex.commit_checked(11, None, 0).unwrap(),
+        CommitOutcome::RebaseNoOp
+    );
     assert_eq!(ex.state(), TxnState::Committed);
 
     // A non-rebase-safe row against a moved parent is a typed stale-parent
@@ -811,7 +823,7 @@ fn budget_properties() {
 /// verdict, never a silent omission.
 #[test]
 fn later_phase_rows_answer_capability_not_landed() {
-    for name in ["reopen", "branch-open", "expire-pin"] {
+    for name in ["admit-response", "branch-open", "expire-pin"] {
         let mut ex = armed_executor(0);
         ex.propose(name, 1).unwrap();
         ex.snapshot().unwrap();

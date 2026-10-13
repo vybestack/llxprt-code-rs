@@ -17,12 +17,25 @@ fn phase6_note_lands_but_generic_commit_cannot_bypass_derivation_receipt() {
     let bytes = 32;
     let bound = executor.port_bound(0, bytes).unwrap();
     executor
-        .validate(bound, &Budget { b: 1 << 20, r: 8, h: 4 }, 0, 0, 0, bytes)
+        .validate(
+            bound,
+            &Budget {
+                b: 1 << 20,
+                r: 8,
+                h: 4,
+            },
+            0,
+            0,
+            0,
+            bytes,
+        )
         .unwrap();
     let before = executor.chain_head();
     assert_eq!(
         executor.commit(1, None, bound),
-        Err(ExecutorError::PreconditionFailed { which: "semantic-receipt-boundary" })
+        Err(ExecutorError::PreconditionFailed {
+            which: "semantic-receipt-boundary"
+        })
     );
     assert_eq!(executor.chain_head(), before);
 }

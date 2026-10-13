@@ -138,6 +138,10 @@ pub enum EventKind {
         /// claim with no recorded class, so its lane falls back to the source.
         claims: Vec<SegmentClaim>,
     },
+    /// Exact-candidate validation and projection effect, sequenced atomically.
+    Semantic {
+        event: Box<crate::context_kernel::validation::SemanticEvent>,
+    },
     /// Fact-ledger event.
     Ledger {
         /// Complete ledger command checked by the transaction executor.
@@ -184,6 +188,10 @@ impl EventKind {
                         None => sink.tag("unclassified"),
                     }
                 }
+            }
+            EventKind::Semantic { event } => {
+                sink.tag("semantic");
+                sink.blob(&serde_json::to_vec(event).expect("typed semantic event"));
             }
             EventKind::Ledger { command } => {
                 sink.tag("ledger");

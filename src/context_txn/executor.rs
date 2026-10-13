@@ -219,6 +219,7 @@ pub struct Executor {
     region_admitted: u64,
     region_ceiling: Option<u64>,
     landed_phase: u8,
+    pub(super) semantic_validation: Option<(crate::context_kernel::validation::SemanticEvent, u64)>,
     pub(super) proposed_by: Option<Proposer>,
     pub(super) ledger_validation: Option<(CommandValidation, u64)>,
 }
@@ -243,7 +244,8 @@ impl Executor {
             contract_version: None,
             region_admitted: 0,
             region_ceiling: None,
-            landed_phase: 5,
+            landed_phase: 6,
+            semantic_validation: None,
             proposed_by: None,
             ledger_validation: None,
         }
@@ -444,6 +446,7 @@ impl Executor {
         self.current = Some(txn.clone());
         self.proposed_by = None;
         self.ledger_validation = None;
+        self.semantic_validation = None;
         self.state = TxnState::Proposed;
         self.aborted = false;
         Ok(txn)
@@ -455,7 +458,7 @@ impl Executor {
         Ok(self.current.clone().expect("txn present after propose"))
     }
 
-    /// Generate effect artifacts (durable). Rows through Phase 5 are landed;
+    /// Generate effect artifacts (durable). Rows through Phase 6 are landed;
     /// rows owned by a later phase stop with a typed verdict and kill the
     /// transaction, so a capability failure can never be committed.
     pub fn generate(&mut self) -> Result<Txn, ExecutorError> {
@@ -471,7 +474,7 @@ impl Executor {
 
     /// Test-only: advances the landed-phase gate so a row owned by a later
     /// phase can be exercised end to end in a fixture. Production callers
-    /// never move this; the default lands rows through Phase 5.
+    /// never move this; the default lands rows through Phase 6.
     #[cfg(test)]
     pub fn land_through(&mut self, phase: u8) {
         self.landed_phase = phase;
@@ -588,6 +591,21 @@ impl Executor {
         effect: Option<crate::context_kernel::events::EventKind>,
         payload_bound: u64,
     ) -> Result<CommitOutcome, ExecutorError> {
+        if self
+            .current
+            .as_ref()
+            .and_then(|t| operation::find(t.op))
+            .is_some_and(|r| r.owner_phase == 6)
+            || matches!(
+                effect,
+                Some(crate::context_kernel::events::EventKind::Semantic { .. })
+            )
+        {
+            self.fail();
+            return Err(ExecutorError::PreconditionFailed {
+                which: "semantic-receipt-boundary",
+            });
+        }
         let ledger_row = self
             .current
             .as_ref()
