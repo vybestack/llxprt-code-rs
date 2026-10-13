@@ -440,6 +440,18 @@ The [module boundary audit](docs/module-boundary-audit.md) records issue #67's
 landed modularity seams, public-boundary test evidence, and follow-up findings;
 it distinguishes the existing acyclic/debt enforcement from a fixed layer policy.
 
+## Architecture delivery evidence
+
+The [issue #169 integration evidence index](docs/architecture-integration-evidence-index.md)
+routes the assessment recommendations through their existing owners and distinguishes
+source inventory, production integration and independently demonstrated workloads. Use the
+[completion contract](docs/architecture-evidence-contract.md),
+[explicit worker handoff](docs/architecture-evidence-handoff-template.md) and
+[driver skill](.agents/skills/rs-architecture-delivery/SKILL.md) together. Helper coverage
+or a clean tree does not prove composed acceptance or transfer an API lease. OCR/external
+review is disabled per Andrew directive 2026-10-09; all other gates remain required and the
+handoff is an open PR, not a merge.
+
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball

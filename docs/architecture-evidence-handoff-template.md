@@ -1,6 +1,6 @@
 # Issue 170 architecture evidence handoff template
 
-This is the fill-in prompt a driver assembles for one architecture worker. Every slot below maps to a field in `docs/architecture-evidence-contract.md`, which the driver quotes in the prompt rather than assuming the worker has read it. The driver procedure is `.agents/skills/rs-architecture-delivery/SKILL.md`. Generated evidence stays outside the source tree, under the absolute evidence directory the driver passes on the command line.
+This is the fill-in prompt a driver assembles for one architecture worker. Every slot below maps to a field in `docs/architecture-evidence-contract.md`, which the driver quotes in the prompt rather than assuming the worker has read it. The driver procedure is `.agents/skills/rs-architecture-delivery/SKILL.md`. Generated evidence stays outside tracked source inputs, under a worktree-local ignored absolute evidence directory the driver passes on the command line (for example `<absolute worktree>/tmp/llxprt-evidence/`). Keep build/temp artifacts in the worktree and use short or relative Unix-socket fixture paths.
 
 `EVIDENCE_DIR` is the absolute `<ABS_EVIDENCE_DIR>/issue<N>` directory. Each dispatch and each worker or driver workload attempt reserves a new directory with `mktemp -d`. Keep every attempt, including failed setup, failed CLI runs, and failed validation. Never reuse a run directory or truncate another attempt's artifacts. Reports identify the concrete paths returned by `mktemp`, not the patterns below. Each level names one artifact, which may be a run directory containing its raw records.
 
@@ -37,7 +37,7 @@ limitations:              <what the evidence does not show>
 dependency handoff:       <issue <N>, head SHA <40-hex>, supplies <symbol or file>>; or "none"
 PR base/head:             PR <N>, base <branch> at <40-hex base SHA>, head <branch> at
                           <40-hex head SHA>
-review cycle/result:      <first full | findings-only follow-up> / <result>
+review cycle/result:      skipped per Andrew directive 2026-10-09 (no OCR)
 ```
 
 ## Directional rules carried inside the prompt
@@ -46,7 +46,7 @@ The four directional rules from `docs/architecture-evidence-contract.md` ride in
 worker prompt heredoc, after the lease and dependency lines and before the reporting
 instruction. They are reproduced verbatim in the heredoc below so a driver copying the
 template carries them without reconstructing them from the contract: one direction, exactly
-one compactor, truthful internal failures, and the review ceiling.
+one compactor, truthful internal failures, and the no-OCR review directive.
 
 ## Claim list slot
 
@@ -82,8 +82,8 @@ Rules:
 1. One direction. Formats move forward and old formats are deleted in the same change.
    No migration path, no migration tool, no backward-compatibility shim, no legacy format
    reader, and no LLM-compat fallback enters any delivery. A reader for an old shape is new
-   code that keeps two shapes alive, so it is out of scope until an issue explicitly
-   authorizes it.
+   code that keeps two shapes alive, so it is out of scope unless an Andrew-approved
+   issue is listed in compat-ledger.md.
 2. One compactor. Exactly one compaction implementation owns compaction for this repository.
    A second compactor, a parallel summarizer, or a fallback compactor is a new architecture
    decision and requires its own issue with its own evidence contract. A delivery that needs
@@ -92,9 +92,10 @@ Rules:
    exit status. A report never describes a swallowed error as success, a skipped check as
    passed, or a partial run as complete. Where a check did not run, the report says it did
    not run.
-4. Review ceiling. A delivery receives one full final review plus at most one findings-only
-   follow-up. A third cycle is not run. The delivery returns to its issue with the findings
-   recorded, and the `review cycle/result` field carries that outcome.
+4. Review directive. OCR/open-code-review and every external reviewer are disabled per
+   Andrew directive 2026-10-09. Do not run them. Record `review cycle/result` as
+   `skipped per Andrew directive 2026-10-09 (no OCR)`. All other gates remain required.
+   The handoff is an open PR; do not merge or close the issue.
 Read docs/architecture-evidence-contract.md and report all fourteen fields.
 Read docs/architecture-evidence-handoff-template.md and use its claim attempt procedure
 for workload evidence. Return the report as your
