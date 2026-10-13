@@ -12,7 +12,8 @@ This change repairs the **measurement loss**, not a demonstrated provider transp
 It uses the existing Anthropic backend and preserves the current request generation, provider
 selection, usage/finish semantics, request timeout, retry policy and executor. There is no
 streaming switch, provider fallback or compatibility reader. This change adds no replay;
-the bounded connectivity retry owned by `docs/request-retries.md` (#49) is the only reissue.
+the bounded pre-acceptance transport retry owned by `docs/request-retries.md` (#49,
+restricted by #363) is the only transport reissue.
 The parallel open PR touching the Anthropic wire implementation is left unchanged.
 
 ## Public observations
@@ -42,9 +43,11 @@ Anthropic peers, with real tools, session storage and terminal error handling:
 - Complete one source edit, accept the next implementation request, wait 60 ms, send a partial
   HTTP response head, then close. The terminal and persisted error preserve typed
   `incomplete-message` and measured latency; exit is 5, useful edits survive, and the request
-  is reissued only within the bounded #49 retry budget (one attempt plus three retries).
+  is not automatically replayed (#363). The diagnostic says `request not replayed`
+  and `error.retry_attempts` is zero.
 - Accept a request but do not respond before its configured local timeout. The terminal is
-  `origin timeout`, not `incomplete-message`, and no source edit is claimed.
+  `origin timeout`, not `incomplete-message`, no source edit is claimed, and no replay
+  is authorized by the absence of a response.
 - Complete a three-tool controlled implementation mission: author a Python addition function,
   author its assertions, and run them. The test independently inspects the resulting source
   and assertions and independently reruns the authored tests, rather than accepting `ok` alone.

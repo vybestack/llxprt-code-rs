@@ -26,15 +26,12 @@ pub const MAX_TOOL_CALL_ID_BYTES: usize = 256;
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
 
 /// Safety margin subtracted from the session lease when validating a request timeout.
-///
-/// This bound mirrors [`crate::session::LEASE_SECONDS`] rather than importing it, keeping this
-/// module a leaf that the agent loop, the session validator, and the model-API registry can all
-/// depend on without forming a cycle.
 pub const TIMEOUT_LEASE_MARGIN_SECONDS: u64 = 60;
 
-/// The session lease the timeout bound is validated against. Kept as a literal copy of
-/// `crate::session::LEASE_SECONDS` so the leaf stays dependency-free; the session module owns
-/// the authoritative value and the two must move together.
+/// Bounded reservation lease, in seconds: the single policy value used both by session
+/// reservation/renewal and by request-timeout validation. A pending reservation whose lease
+/// has expired may be reclaimed. Keeping this value here lets both consumers depend on the
+/// same leaf without either owning a second copy of the policy.
 pub const TIMEOUT_LEASE_SECONDS: u64 = 3600;
 
 /// Validate a request timeout against the session lease, preferring a request that always fits

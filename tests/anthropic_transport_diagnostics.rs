@@ -92,6 +92,25 @@ fn provider_call_ms(message: &str) -> u64 {
 
 #[test]
 fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_replay() {
+    accepted_loss(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+        "request",
+        "incomplete-message",
+        "issue191-incomplete",
+    );
+}
+
+#[test]
+fn truncated_body_after_implementation_edit_is_not_replayed() {
+    accepted_loss(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999\r\nConnection: close\r\n\r\n{\"private\":\"secret-marker\"",
+        "decode",
+        "unexpected-eof",
+        "issue363-body",
+    );
+}
+
+fn accepted_loss(head: &'static [u8], origin: &str, cause: &str, session_id: &str) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
@@ -106,41 +125,40 @@ fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_
             ))
             .unwrap();
         drop(first);
-        // Since #49 the host reissues a connectivity failure at most MAX_RETRIES
-        // times, so the accepted request is attempted 1 + 3 times and never again.
-        for _ in 0..4 {
-            let (mut second, _) = accept(&listener);
-            let request = read_request(&second);
-            assert!(request["messages"].to_string().contains("tool_result"));
-            // Accepted request, delayed partial response head, then orderly peer closure.
-            std::thread::sleep(Duration::from_millis(60));
-            second
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
-                .unwrap();
-            drop(second);
-        }
+        let (mut second, _) = accept(&listener);
+        let request = read_request(&second);
+        assert!(request["messages"].to_string().contains("tool_result"));
+        // Accepted request, delayed partial response head, then orderly peer closure.
+        std::thread::sleep(Duration::from_millis(60));
+        second.write_all(head).unwrap();
+        drop(second);
         listener.set_nonblocking(true).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(800));
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
-            "no replay beyond the bounded retry budget"
+            "no automatic accepted-request replay"
         );
     });
     let root = tempfile::tempdir().unwrap();
-    let out = invoke(address, root.path(), "issue191-incomplete");
-    server.join().unwrap();
+    let out = invoke(address, root.path(), session_id);
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(out.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(envelope["status"], "error");
     assert_eq!(envelope["error"]["code"], "model-connectivity");
     let message = envelope["error"]["message"].as_str().unwrap();
-    assert!(message.contains("origin request"), "{message}");
-    assert!(message.contains("cause incomplete-message"), "{message}");
+    assert!(message.contains(&format!("origin {origin}")), "{message}");
+    assert!(message.contains(&format!("cause {cause}")), "{message}");
+    assert!(message.contains("request not replayed"), "{message}");
+    assert_eq!(envelope["error"]["retry_attempts"], 0);
     assert!(provider_call_ms(message) >= 50);
     assert!(message.len() < llxprt_code_rs::transport::MAX_TRANSPORT_DIAGNOSTIC_BYTES);
     for private in [
         "issue191-secret-marker",
+        "secret-marker",
         &address.to_string(),
         "arithmetic.py",
         "Content-Type",
@@ -155,10 +173,10 @@ fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_
         "def add(a, b):\n    return a + b\n"
     );
     // Diagnostics persist on the same production path without source strings or headers.
-    let session = root.path().join("code-rs-sessions/issue191-incomplete");
+    let session = root.path().join("code-rs-sessions").join(session_id);
     assert!(session.exists());
     let state = llxprt_code_rs::session::SessionStore::read_transcript_at(
-        &llxprt_code_rs::session::SessionId::parse("issue191-incomplete").unwrap(),
+        &llxprt_code_rs::session::SessionId::parse(session_id).unwrap(),
         root.path(),
     )
     .unwrap();
@@ -167,8 +185,9 @@ fn incomplete_head_after_implementation_edit_preserves_cause_and_timing_without_
         llxprt_code_rs::session::Lifecycle::Failed
     );
     let persisted = &state.branches[0].error;
-    assert!(persisted.contains("cause incomplete-message"));
+    assert!(persisted.contains(&format!("cause {cause}")));
     assert!(persisted.contains("provider-call-ms"));
+    assert!(persisted.contains("request not replayed"));
     assert!(!persisted.contains("issue191-secret-marker"));
 }
 
@@ -177,26 +196,31 @@ fn local_request_timeout_is_not_classified_as_incomplete_message() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
-        // The initial attempt and each of the three bounded retries stay unanswered.
-        let held: Vec<_> = (0..4)
-            .map(|_| {
-                let (stream, _) = accept(&listener);
-                read_request(&stream);
-                stream
-            })
-            .collect();
-        std::thread::sleep(Duration::from_millis(1500));
-        drop(held);
+        let (stream, _) = accept(&listener);
+        read_request(&stream);
+        // No response is not proof that the accepted request produced no output.
+        std::thread::sleep(Duration::from_millis(1800));
+        drop(stream);
+        listener.set_nonblocking(true).unwrap();
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "no automatic accepted-request replay"
+        );
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), "issue191-timeout");
-    server.join().unwrap();
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(out.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(envelope["error"]["code"], "model-connectivity");
     let message = envelope["error"]["message"].as_str().unwrap();
     assert!(message.contains("origin timeout"), "{message}");
     assert!(!message.contains("incomplete-message"));
+    assert!(message.contains("request not replayed"), "{message}");
+    assert_eq!(envelope["error"]["retry_attempts"], 0);
     assert!(provider_call_ms(message) >= 1000);
     assert!(!root.path().join("arithmetic.py").exists());
 }
@@ -243,7 +267,9 @@ fn controlled_implementation_mission_completes_and_its_edits_and_tests_are_inspe
     });
     let root = tempfile::tempdir().unwrap();
     let out = invoke(address, root.path(), "issue191-controlled-mission");
-    server.join().unwrap();
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("provider fixture failed; CLI output: {out:?}"));
     assert_eq!(
         out.status.code(),
         Some(0),

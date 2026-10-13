@@ -21,11 +21,7 @@ impl Turn<'_> {
                 {
                     events
                 }
-                Err(RoundFailure::ModelTransport(failure))
-                    if failure.kind.is_retryable()
-                        && (failure.kind != crate::transport::TransportKind::RateLimit
-                            || failure.status == Some(429)) =>
-                {
+                Err(RoundFailure::ModelTransport(failure)) if failure.permits_replay() => {
                     let started = std::time::Instant::now();
                     let result = self.rate_limit_delay(store, reserved, failure.clone(), retry);
                     if !matches!(result, Err(RoundFailure::TransportRetryStopped { .. })) {
