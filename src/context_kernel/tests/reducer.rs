@@ -2,8 +2,8 @@
 
 use crate::context_kernel::canonical::Sink;
 use crate::context_kernel::events::{
-    AppendSource, EventKind, EventLog, LedgerEventKind, OperationClass, ProviderTurnKind,
-    RecordedEvent, Sequencer, FIRST_SEQUENCE, GENESIS_CHECKSUM,
+    AppendSource, EventKind, EventLog, OperationClass, ProviderTurnKind, RecordedEvent, Sequencer,
+    FIRST_SEQUENCE, GENESIS_CHECKSUM,
 };
 use crate::context_kernel::ir::{IrError, ItemId, ItemNamespace, SegmentClaim, StoreRange};
 use crate::context_kernel::lanes::Lane;
@@ -66,10 +66,13 @@ fn sample_log(store_version: u64) -> EventLog {
         &mut sequencer,
         &mut log,
     );
+    let entry = crate::context_kernel::ledger::tests::obligation("obligation-1");
     append(
         EventKind::Ledger {
-            kind: LedgerEventKind::ObligationAdmitted,
-            key: String::from("obligation-1"),
+            command: Box::new(crate::context_kernel::ledger::Command::AdmitObligation {
+                entry,
+                grammar: crate::context_kernel::ledger::Grammar::Obligation,
+            }),
         },
         &mut sequencer,
         &mut log,

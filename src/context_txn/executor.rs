@@ -19,6 +19,7 @@ use crate::context_kernel::legality::{is_legal, RenderContract, Violation};
 use crate::context_kernel::reducer::{Reducer, TypedState, IDLENESS_WINDOW};
 
 use super::budget::{self, AccountingPort, Budget, Margins};
+use super::ledger::CommandValidation;
 use super::operation::{self, Proposer};
 
 /// The scope every session ingress admission attributes to. Unit B owns the
@@ -203,21 +204,23 @@ pub enum CommitOutcome {
 /// clears the aborted flag before the new transaction begins.
 #[derive(Clone)]
 pub struct Executor {
-    epoch: Epoch,
+    pub(super) epoch: Epoch,
     next_id: u64,
     state: TxnState,
-    current: Option<Txn>,
+    pub(super) current: Option<Txn>,
     aborted: bool,
     port: Option<std::rc::Rc<dyn AccountingPort>>,
-    contract: RenderContract,
-    log: EventLog,
-    typed: TypedState,
+    pub(super) contract: RenderContract,
+    pub(super) log: EventLog,
+    pub(super) typed: TypedState,
     /// Contract version committed with the last applied effect; the durable
     /// record carries it and the send path compares against it (#105-3).
     contract_version: Option<u64>,
     region_admitted: u64,
     region_ceiling: Option<u64>,
     landed_phase: u8,
+    pub(super) proposed_by: Option<Proposer>,
+    pub(super) ledger_validation: Option<(CommandValidation, u64)>,
 }
 
 impl Executor {
@@ -240,7 +243,9 @@ impl Executor {
             contract_version: None,
             region_admitted: 0,
             region_ceiling: None,
-            landed_phase: 4,
+            landed_phase: 5,
+            proposed_by: None,
+            ledger_validation: None,
         }
     }
 
@@ -437,6 +442,8 @@ impl Executor {
         };
         self.next_id += 1;
         self.current = Some(txn.clone());
+        self.proposed_by = None;
+        self.ledger_validation = None;
         self.state = TxnState::Proposed;
         self.aborted = false;
         Ok(txn)
@@ -448,7 +455,7 @@ impl Executor {
         Ok(self.current.clone().expect("txn present after propose"))
     }
 
-    /// Generate effect artifacts (durable). Rows through Phase 4 are landed;
+    /// Generate effect artifacts (durable). Rows through Phase 5 are landed;
     /// rows owned by a later phase stop with a typed verdict and kill the
     /// transaction, so a capability failure can never be committed.
     pub fn generate(&mut self) -> Result<Txn, ExecutorError> {
@@ -464,7 +471,7 @@ impl Executor {
 
     /// Test-only: advances the landed-phase gate so a row owned by a later
     /// phase can be exercised end to end in a fixture. Production callers
-    /// never move this; the default lands rows through Phase 4.
+    /// never move this; the default lands rows through Phase 5.
     #[cfg(test)]
     pub fn land_through(&mut self, phase: u8) {
         self.landed_phase = phase;
@@ -473,7 +480,7 @@ impl Executor {
     /// Kills the live transaction after a failed precondition or capability
     /// check: the state machine jumps to `Aborted` and every further step is
     /// refused until a new transaction is proposed.
-    fn fail(&mut self) {
+    pub(super) fn fail(&mut self) {
         self.aborted = true;
         self.state = TxnState::Aborted;
     }
@@ -576,6 +583,32 @@ impl Executor {
     /// the armed ceiling, so a region fills up across admissions instead of
     /// being checked against the last payload alone.
     pub fn commit_outcome(
+        &mut self,
+        actual_parent: u64,
+        effect: Option<crate::context_kernel::events::EventKind>,
+        payload_bound: u64,
+    ) -> Result<CommitOutcome, ExecutorError> {
+        let ledger_row = self
+            .current
+            .as_ref()
+            .and_then(|txn| operation::find(txn.op))
+            .is_some_and(|row| row.owner_phase == 5);
+        if ledger_row
+            || matches!(
+                effect,
+                Some(crate::context_kernel::events::EventKind::Ledger { .. })
+            )
+        {
+            self.fail();
+            return Err(ExecutorError::PreconditionFailed {
+                which: "ledger-receipt-boundary",
+            });
+        }
+        self.commit_checked(actual_parent, effect, payload_bound)
+    }
+
+    /// Common universal commit boundary, also used by receipt-checked ledger commits.
+    pub(super) fn commit_checked(
         &mut self,
         actual_parent: u64,
         effect: Option<crate::context_kernel::events::EventKind>,
@@ -737,7 +770,9 @@ impl Executor {
         if !sanctioned {
             return Err(ExecutorError::AuthorityDenied { op, by });
         }
-        self.propose(op, parent_version)
+        let txn = self.propose(op, parent_version)?;
+        self.proposed_by = Some(by);
+        Ok(txn)
     }
 
     /// Abort the current transaction.
@@ -772,7 +807,7 @@ fn precondition_name(row: &operation::Operation) -> &'static str {
 
 /// Maps a legality violation onto the typed executor error (#105): the kind
 /// names the violated predicate so a rejected commit is explainable.
-fn illegality(violation: Violation) -> ExecutorError {
+pub(super) fn illegality(violation: Violation) -> ExecutorError {
     let which = match violation {
         Violation::Pairing { .. } => "pairing",
         Violation::Ordering { .. } => "ordering",
