@@ -215,14 +215,20 @@ impl super::Turn<'_> {
         if history_changed {
             content::compact_narration(&mut candidate[..current], &reserved.history);
         }
-        let latest_read_handles = self.backend.supports_context_handles()
+        let mut results_changed =
+            compact_observed_results(&mut candidate[current..], rounds, false);
+        // Preserve the mandatory latest evidence whenever eligible older regions
+        // suffice. Only pressure remaining AFTER that fit allows an opted-in read
+        // to become its durable addressable handle, through the same compactor.
+        if self.backend.supports_context_handles()
             && crate::agent::round_budget_exceeded(
-                requests,
+                &candidate,
                 &crate::tools::tool_specs(self.allow_shell),
                 self.context_limit,
-            );
-        let results_changed =
-            compact_observed_results(&mut candidate[current..], rounds, latest_read_handles);
+            )
+        {
+            results_changed |= compact_observed_results(&mut candidate[current..], rounds, true);
+        }
         if !(history_changed || results_changed) {
             return false;
         }

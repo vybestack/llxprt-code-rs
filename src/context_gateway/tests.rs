@@ -55,8 +55,8 @@ fn call_result_order_pairing_and_identity_are_send_preconditions() {
     let result = ModelRequest::with_parts(vec![ModelRequestPart::ToolReturn(
         ToolReturnPart::success("read_file", "ok").with_tool_call_id("one"),
     )]);
-    assert!(legal_requests(&[call.clone()]).is_err());
-    assert!(legal_requests(&[result.clone()]).is_err());
+    assert!(legal_requests(std::slice::from_ref(&call)).is_err());
+    assert!(legal_requests(std::slice::from_ref(&result)).is_err());
     assert!(legal_requests(&[call.clone(), user("intruder"), result.clone()]).is_err());
     assert!(legal_requests(&[call.clone(), result.clone()]).is_ok());
     assert!(legal_requests(&[call.clone(), result.clone(), call, result]).is_err());
