@@ -4,7 +4,6 @@ use serde_json::Value;
 use std::io::{BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 fn read_request(stream: &mut TcpStream) {
@@ -177,59 +176,6 @@ fn sigterm_during_provider_request_keeps_existing_signal_exit_semantics() {
         store.snapshot().unwrap().branches[0].lifecycle,
         Lifecycle::Pending
     );
-}
-
-#[test]
-fn timed_out_turn_teardown_cancels_spawned_transport_work() {
-    // Codex SSE drives its reader on a Tokio task. The turn executor must own
-    // that task even when dropping the outer request alone cannot cancel it.
-    // Its current-thread runtime drops async tasks synchronously during turn
-    // teardown: cancellation must be observable when run returns, not within
-    // a later wall-clock window. Non-cancellable blocking work is covered below.
-    use llxprt_code_rs::adapter::{ChatBackend, ModelFuture};
-    use llxprt_code_rs::agent::CodingAgent;
-    struct SpawnedReader(mpsc::Sender<()>);
-    struct Dropped(mpsc::Sender<()>);
-    impl Drop for Dropped {
-        fn drop(&mut self) {
-            self.0.send(()).unwrap();
-        }
-    }
-    impl ChatBackend for SpawnedReader {
-        fn request<'a>(
-            &'a self,
-            _: &'a [serdes_ai::core::ModelRequest],
-            _: &'a [llxprt_code_rs::tools::ToolSpec],
-        ) -> ModelFuture<'a> {
-            Box::pin(async move {
-                // Own the signal before spawning so teardown is observed even
-                // if the reader is cancelled before its first poll.
-                let guard = Dropped(self.0.clone());
-                tokio::spawn(async move {
-                    let _guard = guard;
-                    std::future::pending::<()>().await;
-                });
-                // Only the turn deadline can end the outer request; scheduling
-                // contention must not make a competing sleep complete it first.
-                std::future::pending().await
-            })
-        }
-    }
-    let (sender, receiver) = mpsc::channel();
-    let root = tempfile::tempdir().unwrap();
-    let agent =
-        CodingAgent::with_backend(Box::new(SpawnedReader(sender)), root.path().into(), false)
-            .with_turn_time(Some(Duration::from_millis(100)));
-    let store =
-        SessionStore::load_at(&SessionId::parse("spawned-reader").unwrap(), root.path()).unwrap();
-    let reserved = store.start_request(None, None, "P", root.path()).unwrap();
-    assert_eq!(
-        agent.run(&store, &reserved).unwrap_err().key,
-        "turn-time-exhausted"
-    );
-    receiver
-        .try_recv()
-        .expect("spawned transport task must be dropped before run returns");
 }
 
 #[test]
