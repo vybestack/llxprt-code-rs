@@ -126,3 +126,14 @@ composed CLI milestone or full endurance/security acceptance.
 - Review cycle/result: skipped per Andrew directive 2026-10-09 (no OCR).
 - This is runtime integration evidence, not live-model eval acceptance. Exact
   head local gate logs/commands and hosted CI status are recorded in the PR.
+
+## Issue 46 Phase 9 checkpoint (not architecture acceptance)
+
+[Issue 46 verification evidence](issue46-phase9-verification.md) records the
+commit-boundary shadow replay, strict epoch/aggregate accounting, reachable
+component sequences, report-completeness fixtures and explicit endurance-evidence
+validator. The release inventory keeps unexecuted ablations, composed mode-product
+coverage, external benchmark pins and >=48-hour confirmation unavailable.
+This row does not mark Phase 9 complete or qualify the architecture.
+
+Review cycle/result: skipped per Andrew directive 2026-10-09 (no OCR)

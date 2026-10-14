@@ -35,6 +35,14 @@ struct Args {
     #[arg(long, default_value = "rust")]
     runner: String,
 
+    /// Publish a complete Phase 9 release inventory (does not turn unavailable claims into passes).
+    #[arg(long)]
+    release_evidence: bool,
+
+    /// Explicit operator-recorded endurance JSON; validated against the exact head and protocol.
+    #[arg(long, requires = "release_evidence")]
+    endurance_evidence: Option<PathBuf>,
+
     /// Comma-separated scenario allow-list.
     #[arg(long)]
     scenarios: Option<String>,
@@ -68,12 +76,16 @@ fn main() -> ExitCode {
         ts_bin: args.ts_bin.clone(),
         allow: args
             .scenarios
+            .as_ref()
             .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
             .unwrap_or_default(),
         records_root: args.eval_root.join("records"),
     };
     match context_eval::run_all(&root, &options) {
         Ok((report, all_accepted)) => {
+            if args.release_evidence {
+                return publish_release(&report, &args);
+            }
             print!("{report}");
             if all_accepted {
                 ExitCode::SUCCESS
@@ -83,6 +95,32 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             eprintln!("context-evals harness error: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn publish_release(report: &serde_json::Value, args: &Args) -> ExitCode {
+    let result =
+        context_eval::release::assemble(report, &args.cli, args.endurance_evidence.as_deref())
+            .and_then(|release| {
+                let path = args.out.join(format!(
+                    "release-report-{}.json",
+                    llxprt_code_rs::harness::uniq()
+                ));
+                let bytes = serde_json::to_vec_pretty(&release).map_err(|e| e.to_string())?;
+                context_eval::publish(&path, &bytes)?;
+                println!("{release}");
+                eprintln!(
+                    "release inventory: {}; release qualification unavailable",
+                    path.display()
+                );
+                Ok(())
+            });
+    match result {
+        Ok(()) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("release evidence error: {e}");
             ExitCode::from(2)
         }
     }

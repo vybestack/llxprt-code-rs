@@ -13,6 +13,7 @@
 //! * [`budget`] - budget accounting port and the pure predicates backing the
 //!   universal preconditions (fit bound, protection floor, reclamation bar).
 
+pub mod audit;
 pub mod bound_port;
 pub mod branch;
 pub mod budget;
@@ -30,3 +31,9 @@ mod tests_ledger;
 mod tests_registry;
 #[cfg(test)]
 mod tests_rows;
+
+#[cfg(test)]
+mod tests_audit;
+
+#[cfg(test)]
+mod tests_sequences;
