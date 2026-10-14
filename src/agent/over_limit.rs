@@ -221,6 +221,7 @@ impl super::Turn<'_> {
         // suffice. Only pressure remaining AFTER that fit allows an opted-in read
         // to become its durable addressable handle, through the same compactor.
         if self.backend.supports_context_handles()
+            && rounds.last().is_some_and(|round| round.calls.len() == 1)
             && crate::agent::round_budget_exceeded(
                 &candidate,
                 &crate::tools::tool_specs(self.allow_shell),
