@@ -1,7 +1,8 @@
-//! One-shot preservation-oriented history compaction for context recovery.
+//! Preservation-oriented history compaction for context recovery.
 
 pub(super) mod content;
 mod diagnostics;
+mod executions;
 
 use diagnostics::over_limit_message;
 
@@ -215,25 +216,30 @@ impl super::Turn<'_> {
         if history_changed {
             content::compact_narration(&mut candidate[..current], &reserved.history);
         }
-        let mut results_changed =
-            compact_observed_results(&mut candidate[current..], rounds, false);
-        // Preserve the mandatory latest evidence whenever eligible older regions
-        // suffice. Only pressure remaining AFTER that fit allows an opted-in read
-        // to become its durable addressable handle, through the same compactor.
-        if self.backend.supports_context_handles()
-            && rounds.last().is_some_and(|round| round.calls.len() == 1)
-            && crate::agent::round_budget_exceeded(
-                &candidate,
-                &crate::tools::tool_specs(self.allow_shell),
-                self.context_limit,
-            )
-        {
-            results_changed |= compact_observed_results(&mut candidate[current..], rounds, true);
+        let results_changed = compact_observed_results(&mut candidate[current..], rounds, false);
+        let tools = crate::tools::tool_specs(self.allow_shell);
+        let mut changed = history_changed || results_changed;
+        // Admitted results and completed summaries are the least destructive cut.
+        // If they cannot fit (or a provider rejected an otherwise unchanged request),
+        // reclaim older complete executions, never half of a call/result pair.
+        if crate::agent::round_budget_exceeded(&candidate, &tools, self.context_limit) || !changed {
+            changed |= executions::elide_oldest(&mut candidate, &reserved.history);
         }
-        if !(history_changed || results_changed) {
+        if !changed {
+            changed = self.compact_latest_read(&mut candidate, rounds, &reserved.prompt, &tools);
+        }
+        if !changed {
             return false;
         }
         content::checkpoint_head(&mut candidate, &reserved.history);
+        while crate::agent::round_budget_exceeded(&candidate, &tools, self.context_limit) {
+            if !executions::elide_oldest(&mut candidate, &reserved.history) {
+                break;
+            }
+        }
+        // Only pressure remaining after all eligible older regions permits an
+        // opted-in latest read to use its admitted durable handle.
+        self.compact_latest_read(&mut candidate, rounds, &reserved.prompt, &tools);
         if !content::content_shrank(requests, &candidate) {
             return false;
         }
@@ -243,6 +249,23 @@ impl super::Turn<'_> {
         reserved.history = history.history;
         *requests = candidate;
         true
+    }
+
+    fn compact_latest_read(
+        &self,
+        candidate: &mut [serdes_ai::core::ModelRequest],
+        rounds: &[RoundRecord],
+        prompt: &str,
+        tools: &[crate::tools::ToolSpec],
+    ) -> bool {
+        if !self.backend.supports_context_handles()
+            || rounds.last().is_none_or(|round| round.calls.len() != 1)
+            || !crate::agent::round_budget_exceeded(candidate, tools, self.context_limit)
+        {
+            return false;
+        }
+        let current = content::current_prompt_start(candidate, prompt);
+        compact_observed_results(&mut candidate[current..], rounds, true)
     }
 
     pub(super) fn provider_context_unchanged_dead(

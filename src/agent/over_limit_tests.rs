@@ -1,6 +1,8 @@
 //! Over-limit recovery verdict tests: compaction once, terminal failure twice.
 
 mod accounting;
+mod assistant_framing;
+mod assistant_pairs;
 mod boundaries;
 mod diagnostics;
 mod effective_compaction;

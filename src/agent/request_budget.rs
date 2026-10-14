@@ -9,6 +9,8 @@
 
 pub mod calibration;
 pub(super) mod live;
+#[cfg(test)]
+mod wire_tests;
 use super::LlmResult;
 /// Bounded framing overhead (bytes) folded into the conservative preflight estimate for
 /// the **complete** outgoing request on top of the message parts: the model identifier
