@@ -9,6 +9,7 @@
 //! projection is derived from typed state, so replaying a recorded event prefix
 //! yields byte-identical state and an identical hash.
 
+pub mod branch;
 pub mod canonical;
 pub mod events;
 pub mod ir;
@@ -17,6 +18,7 @@ pub mod legality;
 pub mod migration;
 pub mod reducer;
 pub mod scopes;
+pub mod security;
 
 #[cfg(test)]
 mod tests;

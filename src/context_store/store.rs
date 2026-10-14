@@ -137,7 +137,11 @@ impl ContextStore {
 
     /// Erases a vault handle, leaving a tombstone.
     pub fn vault_erase(&mut self, handle: &str) -> Result<(), StoreError> {
-        self.vault.erase(handle).map_err(StoreError::Vault)
+        self.begin_state_advancing_turn()
+            .map_err(StoreError::Blocked)?;
+        self.vault.erase(handle).map_err(StoreError::Vault)?;
+        self.checkpoint();
+        Ok(())
     }
 
     /// Bounded page read over the spine.

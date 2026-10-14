@@ -92,6 +92,7 @@ fn command(op: SemanticOperation, key: &str, text: &str, sources: &[&str]) -> Se
         sources: sources.iter().map(|s| (*s).into()).collect(),
         lane: 3,
         store_handle: String::new(),
+        authority: None,
         candidate: Candidate {
             artifact: text.into(),
             rendered_text: text.into(),
@@ -124,6 +125,7 @@ fn validate(
         command,
         SemanticServices {
             gate: &gate,
+            authorization: None,
             required: &[],
             always_checked: &[],
             store: &Store,
@@ -377,4 +379,134 @@ fn infrastructure_failure_routes_to_deterministic_emergency_never_commit() {
         SemanticError::Rejected(record).response(),
         Response::RestoreRequired
     );
+}
+
+#[test]
+fn secret_reflection_corpus_cannot_commit_generated_artifacts_or_durable_plaintext() {
+    for (index, text) in [
+        "visible sk-ctxeval-privatekey12345",
+        "visible CTXEVAL-SECRET-private-observation",
+        "password=CTXEVAL-private-password",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let (mut ex, _) = executor();
+        prepare(&mut ex, "read-back");
+        let gate = Gate::new(1, independence()).unwrap();
+        let mut consumers = Consumers { fail: false };
+        struct SecretStore(String);
+        impl LeafStore for SecretStore {
+            fn authenticated_leaf(&self, id: &str) -> Option<Leaf> {
+                Some(Leaf {
+                    id: id.into(),
+                    source: Source {
+                        leaf: id.into(),
+                        authority: Authority::Environment,
+                        origin: Origin::Ingress,
+                        scope: 1,
+                    },
+                    sanitized: self.0.clone(),
+                })
+            }
+        }
+        let mut txn = IngressTxn::new(65_536, 1_000_000);
+        let mut sink = ContextStore::open(&VaultKey::from([9; 32]));
+        let result = ex.validate_semantic(
+            command(
+                SemanticOperation::ReadBack,
+                &format!("secret-{index}"),
+                text,
+                &[],
+            ),
+            SemanticServices {
+                gate: &gate,
+                authorization: None,
+                required: &[],
+                always_checked: &[],
+                store: &SecretStore(text.to_string()),
+                consumers: &mut consumers,
+                ingress: &mut txn,
+                sink: &mut sink,
+            },
+            &budget(),
+        );
+        assert!(result.is_err(), "secret corpus arm {index} admitted");
+        assert!(ex.semantic().artifacts().is_empty());
+        assert!(!String::from_utf8_lossy(&sink.spine_bytes()).contains(text));
+    }
+}
+
+#[test]
+fn erasure_overlay_marks_semantic_derivatives_unverified_and_blocks_reanimation() {
+    use llxprt_code_rs::context_kernel::{
+        events::{EventKind, Sequencer},
+        reducer::{Reducer, IDLENESS_WINDOW},
+        security::{hash, Erasure, SecurityEvent},
+    };
+    let (mut ex, clock) = executor();
+    prepare(&mut ex, "read-back");
+    let receipt = validate(
+        &mut ex,
+        command(
+            SemanticOperation::ReadBack,
+            "secret-supported",
+            "supported detail",
+            &[],
+        ),
+        false,
+    )
+    .unwrap();
+    ex.commit_semantic(1, &clock, receipt).unwrap();
+    let mut log = ex.governed_log().clone();
+    let mut writer = Sequencer::continuing(&log, clock.latest(), 1_000);
+    log.append(writer.append(
+        EventKind::Security {
+            event: Box::new(SecurityEvent::Erase(Erasure {
+                leaf: "source".into(),
+                vault_handle: "tombstoned".into(),
+                post_checkpoint: hash(b"post-erasure"),
+                pre_hashes_unverifiable: true,
+            })),
+        },
+        log.store_version(),
+    ))
+    .unwrap();
+    let state = Reducer::new(IDLENESS_WINDOW).fold(&log).unwrap();
+    let artifact = &state.semantic.artifacts()["secret-supported"];
+    assert_eq!(
+        artifact.command.candidate.artifact,
+        "[erased: unverified tombstone]"
+    );
+    assert_eq!(
+        artifact.validation.verdict,
+        Verdict::FailProvenance(
+            llxprt_code_rs::context_kernel::validation::ProvenanceFailure::UngroundedRoot
+        )
+    );
+    assert!(artifact.validation.support.is_empty());
+    let original = ex
+        .governed_log()
+        .events()
+        .iter()
+        .find_map(|e| {
+            if let EventKind::Semantic { event } = &e.kind {
+                Some(event.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let mut event = *original;
+    if let SemanticEvent::Put { command, .. } = &mut event {
+        command.key = "reanimate".into();
+    }
+    log.append(writer.append(
+        EventKind::Semantic {
+            event: Box::new(event),
+        },
+        log.store_version(),
+    ))
+    .unwrap();
+    assert!(Reducer::new(IDLENESS_WINDOW).fold(&log).is_err());
 }

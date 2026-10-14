@@ -78,7 +78,9 @@ fn mixed_names_use_original_order_and_budget_prefix() {
     let start = requests[0].len();
     assert_eq!(
         semantic_requests(&requests[1][start..start + calls.len() + 1]),
-        semantic_requests(&persisted_round_requests(&state.branches[0].rounds[0]))
+        semantic_requests(&crate::context_kernel::security::quote_requests(
+            &persisted_round_requests(&state.branches[0].rounds[0])
+        ))
     );
 }
 
@@ -175,7 +177,11 @@ fn socket_name_corrects_to_shell_in_same_turn_with_matching_history() {
         .collect::<Vec<_>>();
     let requests = requests.lock().unwrap();
     let live = &requests[2][requests[0].len()..];
-    assert_eq!(semantic_requests(live), semantic_requests(&recorded));
+    crate::context_kernel::security::legal_quotes(live).unwrap();
+    assert_eq!(
+        semantic_requests(live),
+        semantic_requests(&crate::context_kernel::security::quote_requests(&recorded))
+    );
     let replay = store.start_request(Some(1), None, "P", cwd.path()).unwrap();
     assert!(replay.replay);
     assert_eq!(agent.run(&store, &replay).unwrap().tool_count, 2);

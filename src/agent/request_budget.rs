@@ -102,9 +102,7 @@ pub fn round_budget_exceeded(
     tools: &[crate::tools::ToolSpec],
     context_limit: Option<u64>,
 ) -> bool {
-    estimate_request_bytes(requests)
-        .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
-        > materialization_budget(context_limit)
+    super::over_limit::request_total_bytes(requests, tools) > materialization_budget(context_limit)
 }
 
 /// The conservative refusal message for an over-budget outgoing request.

@@ -4,6 +4,7 @@
 //! byte-identical typed state and an identical hash. Every input to structure is an
 //! event; nothing about a projection can reach back into the reducer.
 
+mod security;
 use crate::context_kernel::canonical::{Digest, HashScope, Sink};
 use crate::context_kernel::events::{
     structural_lane, AppendSource, EventKind, EventLog, OperationClass, RecordedEvent,
@@ -18,6 +19,7 @@ use crate::context_kernel::lanes::{
 use crate::context_kernel::legality::QuotingConvention;
 use crate::context_kernel::migration::{V2, V3};
 use crate::context_kernel::scopes::{ScopeError, ScopeId, ScopeRegistry};
+use security::apply_security;
 
 /// Log window read by the scope-idleness predicate.
 pub const IDLENESS_WINDOW: u64 = 32;
@@ -33,6 +35,8 @@ pub const STORE_MODE_UNAVAILABLE: u64 = 3;
 /// Errors raised while folding events.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ReducerError {
+    Branch(crate::context_kernel::branch::BranchError),
+    Security(crate::context_kernel::security::SecurityError),
     /// Typed semantic transition failed; no partial projection.
     Semantic(crate::context_kernel::validation::GateError),
     /// Typed ledger transition failed; no partial ledger mutation is released.
@@ -100,6 +104,8 @@ pub enum ReducerError {
 /// Fully typed state: everything the projection is derived from.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TypedState {
+    pub branches: crate::context_kernel::branch::BranchState,
+    pub security: crate::context_kernel::security::SecurityState,
     /// Gate-validated semantic projection and typed receipts.
     pub semantic: crate::context_kernel::validation::SemanticState,
     /// Fact state, status product, dependencies and surfaced conflicts.
@@ -145,6 +151,8 @@ impl TypedState {
     /// Builds the state an empty log folds into.
     pub fn genesis(idleness_window: u64, store_version: u64) -> Self {
         Self {
+            branches: Default::default(),
+            security: Default::default(),
             semantic: crate::context_kernel::validation::SemanticState::default(),
             ledger: crate::context_kernel::ledger::Ledger::default(),
             conversation_ir: ConversationIr::new(),
@@ -167,6 +175,22 @@ impl TypedState {
         }
     }
 
+    /// Exact replicated identities and metadata digest for constitutional items.
+    pub fn constitution(&self) -> std::collections::BTreeMap<String, String> {
+        self.conversation_ir
+            .items()
+            .iter()
+            .filter(|i| i.lane == Lane::Constitutional)
+            .map(|i| {
+                let mut sink = Sink::new();
+                i.encode(&mut sink);
+                (
+                    format!("{}:{}", i.id().namespace().code(), i.id().value()),
+                    crate::context_kernel::security::hash(&sink.finish()),
+                )
+            })
+            .collect()
+    }
     /// Whether an event identity has already been folded.
     pub fn is_applied(&self, sequence: u64, body_digest: Digest) -> bool {
         self.applied
@@ -185,6 +209,8 @@ impl TypedState {
         sink.int(self.version);
         sink.int(self.store_version);
         sink.int(self.next_offset);
+        self.branches.encode(sink);
+        self.security.encode(sink);
         self.semantic.encode(sink);
         self.ledger.encode(sink);
         self.conversation_ir.encode(sink);
@@ -260,10 +286,37 @@ impl Reducer {
                 scope,
                 claims,
             } => apply_append(state, event, source, sanitized, *scope, claims),
-            EventKind::Semantic { event } => state
-                .semantic
-                .apply(event, &state.scope_registry)
-                .map_err(ReducerError::Semantic),
+            EventKind::Semantic { event } => {
+                if let crate::context_kernel::validation::SemanticEvent::Put {
+                    validation, ..
+                } = event.as_ref()
+                {
+                    if validation
+                        .support
+                        .values()
+                        .flatten()
+                        .any(|leaf| state.security.erased().contains_key(leaf))
+                    {
+                        return Err(ReducerError::Security(
+                            crate::context_kernel::security::SecurityError::Erasure,
+                        ));
+                    }
+                }
+                state
+                    .semantic
+                    .apply(event, &state.scope_registry)
+                    .map_err(ReducerError::Semantic)
+            }
+            EventKind::Branch { event } => {
+                let constitution = state.constitution();
+                state
+                    .branches
+                    .apply(event, &constitution, state.ledger.versions())
+                    .map_err(ReducerError::Branch)
+            }
+            EventKind::Security { event: security } => {
+                apply_security(state, security, event.sequence)
+            }
             EventKind::Ledger { command } => apply_ledger(state, event, command),
             EventKind::OperationCommit {
                 class,
@@ -275,6 +328,19 @@ impl Reducer {
     }
 }
 
+/// Environment classifiers cannot upgrade text authority. Exact spans still retain
+/// their preservation class, but a tool's imperative/identifier stays evidential.
+fn claim_lane(
+    source: &AppendSource,
+    class: Option<crate::context_kernel::ir::StructuralClass>,
+    fallback: Lane,
+) -> Lane {
+    if matches!(source, AppendSource::ToolResult { .. }) {
+        Lane::Evidential
+    } else {
+        class.map(Lane::for_structural_class).unwrap_or(fallback)
+    }
+}
 /// Appends items derived from the append: one item per recorded claim, with each
 /// item's lane decided by its own claim's structural class and falling back to
 /// the structural lane of the source only when the claim carries no class. An
@@ -326,10 +392,7 @@ fn apply_append(
             offset: state.next_offset + claim.span.offset,
             length: claim.span.length,
         }];
-        let lane = claim
-            .class
-            .map(Lane::for_structural_class)
-            .unwrap_or(fallback);
+        let lane = claim_lane(source, claim.class, fallback);
         staged.push(Item::new(id, lane, provenance, scope));
     }
     // Every claim minted: the append commits as one transition, watermark included.
@@ -407,17 +470,9 @@ fn apply_operation(
             .conversation_ir
             .unplace(ItemId::new(subject))
             .map_err(ReducerError::Ir),
-        OperationClass::Pin => {
-            let id = ItemId::new(subject);
-            if !state.pins.contains(&id) {
-                state.pins.push(id);
-            }
-            Ok(())
-        }
-        OperationClass::Unpin => {
-            state.pins.retain(|pin| pin.value() != subject);
-            Ok(())
-        }
+        OperationClass::Pin | OperationClass::Unpin => Err(ReducerError::Security(
+            crate::context_kernel::security::SecurityError::Authority,
+        )),
         OperationClass::LanePolicyUpdate => update_policy(state, subject, argument),
         OperationClass::MigrationSelect => select_migration(state, subject),
         OperationClass::AdmitIngress => admit_ingress(state, event, subject, argument),

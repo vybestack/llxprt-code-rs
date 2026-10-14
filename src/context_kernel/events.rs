@@ -6,7 +6,7 @@ use crate::context_kernel::lanes::Lane;
 use crate::context_kernel::scopes::ScopeId;
 
 /// Schema version of the event record itself.
-pub const EVENT_SCHEMA_VERSION: u64 = 2;
+pub const EVENT_SCHEMA_VERSION: u64 = 3;
 /// Sequence number of the first event in a log.
 pub const FIRST_SEQUENCE: u64 = 1;
 /// Chain value of an empty log.
@@ -142,6 +142,14 @@ pub enum EventKind {
     Semantic {
         event: Box<crate::context_kernel::validation::SemanticEvent>,
     },
+    /// Read-only namespace lifecycle and store-only rounds.
+    Branch {
+        event: Box<crate::context_kernel::branch::BranchEvent>,
+    },
+    /// Authenticated security lifecycle.
+    Security {
+        event: Box<crate::context_kernel::security::SecurityEvent>,
+    },
     /// Fact-ledger event.
     Ledger {
         /// Complete ledger command checked by the transaction executor.
@@ -193,6 +201,14 @@ impl EventKind {
                 sink.tag("semantic");
                 sink.blob(&serde_json::to_vec(event).expect("typed semantic event"));
             }
+            EventKind::Branch { event } => {
+                sink.tag("branch");
+                sink.blob(&serde_json::to_vec(event).expect("typed branch event"));
+            }
+            EventKind::Security { event } => {
+                sink.tag("security");
+                sink.blob(&serde_json::to_vec(event).expect("typed security event"));
+            }
             EventKind::Ledger { command } => {
                 sink.tag("ledger");
                 sink.blob(&serde_json::to_vec(command).expect("integer ledger command encodes"));
@@ -224,9 +240,10 @@ impl EventKind {
 
 /// Structural lane fallback for an append whose claims carry no recorded class.
 /// Lane assignment is decided by segmentation wherever it classified any claim;
-/// the source is the documented fallback, never the primary rule: a document
+/// the source is the documented fallback for trusted ingress: a document
 /// pasted into a user message is classified by its own content, not by the
-/// message that carried it.
+/// message that carried it. Environment tool results are capped at evidential
+/// by the reducer even when the classifier marks exact spans.
 pub fn structural_lane(source: &AppendSource) -> Lane {
     match source {
         AppendSource::User => Lane::Constitutional,

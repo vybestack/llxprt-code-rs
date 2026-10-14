@@ -40,6 +40,9 @@ impl Ledger {
     pub fn conflicts(&self) -> &BTreeSet<Conflict> {
         &self.conflicts
     }
+    pub fn versions(&self) -> &BTreeMap<String, u64> {
+        &self.versions
+    }
     pub fn params(&self) -> &LedgerParams {
         &self.params
     }

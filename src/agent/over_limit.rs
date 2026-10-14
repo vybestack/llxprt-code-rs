@@ -78,7 +78,7 @@ pub(crate) fn request_total_bytes(
     requests: &[serdes_ai::core::ModelRequest],
     tools: &[crate::tools::ToolSpec],
 ) -> usize {
-    crate::agent::estimate_request_bytes(requests)
+    crate::agent::estimate_request_bytes(&crate::context_kernel::security::quote_requests(requests))
         .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
 }
 

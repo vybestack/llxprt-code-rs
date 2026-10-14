@@ -121,16 +121,8 @@ fn forced_provider_rejection_below_local_guard_recovers_real_admitted_reads() {
     );
     let returns: Vec<_> = captured[5].iter().flat_map(|r| r.tool_returns()).collect();
     assert_eq!(returns.len(), 3);
-    assert!(returns[0]
-        .content
-        .as_text()
-        .unwrap()
-        .contains("CTXDIGEST v1"));
-    assert!(returns[1]
-        .content
-        .as_text()
-        .unwrap()
-        .contains("CTXDIGEST v1"));
+    assert!(super::quoted_payload(returns[0]).contains("CTXDIGEST v1"));
+    assert!(super::quoted_payload(returns[1]).contains("CTXDIGEST v1"));
     assert_eq!(
         returns[2],
         captured[4]

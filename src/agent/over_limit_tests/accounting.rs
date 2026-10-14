@@ -29,16 +29,8 @@ fn forced_summary_reclaims_observed_results_without_releasing_latest() {
         .iter()
         .flat_map(|r| r.tool_returns())
         .collect();
-    assert!(returns[0]
-        .content
-        .as_text()
-        .unwrap()
-        .contains("CTXDIGEST v1"));
-    assert!(returns[2]
-        .content
-        .as_text()
-        .unwrap()
-        .contains("evidence line"));
+    assert!(super::quoted_payload(returns[0]).contains("CTXDIGEST v1"));
+    assert!(super::quoted_payload(returns[2]).contains("evidence line"));
     assert!(serde_json::to_string(final_request)
         .unwrap()
         .contains("Provide your final plain-text summary"));
@@ -82,7 +74,7 @@ fn compaction_does_not_refund_live_output_usage_under_backpressure() {
         .flat_map(|r| r.tool_returns())
         .last()
         .unwrap();
-    let text = latest.content.as_text().unwrap();
+    let text = super::quoted_payload(latest);
     assert!(text.len() < 8000);
     assert!(text.contains("window clamped"), "{text}");
     assert!(text.contains("by output budget"), "{text}");

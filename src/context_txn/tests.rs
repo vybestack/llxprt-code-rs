@@ -825,6 +825,7 @@ fn budget_properties() {
 fn later_phase_rows_answer_capability_not_landed() {
     for name in ["admit-response", "branch-open", "expire-pin"] {
         let mut ex = armed_executor(0);
+        ex.land_through(6);
         ex.propose(name, 1).unwrap();
         ex.snapshot().unwrap();
         match ex.generate() {

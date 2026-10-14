@@ -20,7 +20,8 @@ impl RetainedBytes {
             schemas: crate::adapter::estimate_tool_schema_bytes(tools),
             ..Self::default()
         };
-        for request in requests {
+        let quoted = crate::context_kernel::security::quote_requests(requests);
+        for request in &quoted {
             bytes.framing = bytes
                 .framing
                 .saturating_add(crate::agent::PER_REQUEST_OVERHEAD_BYTES);

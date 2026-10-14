@@ -14,7 +14,7 @@
 //! a region budget or carries an unpaired tool declaration fails commit with
 //! a typed legality error.
 
-use crate::context_kernel::events::EventLog;
+use crate::context_kernel::events::{EventKind, EventLog};
 use crate::context_kernel::legality::{is_legal, RenderContract, Violation};
 use crate::context_kernel::reducer::{Reducer, TypedState, IDLENESS_WINDOW};
 
@@ -219,6 +219,8 @@ pub struct Executor {
     region_admitted: u64,
     region_ceiling: Option<u64>,
     landed_phase: u8,
+    pub(super) branch_validation: Option<(crate::context_kernel::branch::BranchEvent, u64)>,
+    pub(super) security_validation: Option<(crate::context_kernel::security::SecurityEvent, u64)>,
     pub(super) semantic_validation: Option<(crate::context_kernel::validation::SemanticEvent, u64)>,
     pub(super) proposed_by: Option<Proposer>,
     pub(super) ledger_validation: Option<(CommandValidation, u64)>,
@@ -244,7 +246,9 @@ impl Executor {
             contract_version: None,
             region_admitted: 0,
             region_ceiling: None,
-            landed_phase: 6,
+            landed_phase: 8,
+            branch_validation: None,
+            security_validation: None,
             semantic_validation: None,
             proposed_by: None,
             ledger_validation: None,
@@ -447,6 +451,8 @@ impl Executor {
         self.proposed_by = None;
         self.ledger_validation = None;
         self.semantic_validation = None;
+        self.branch_validation = None;
+        self.security_validation = None;
         self.state = TxnState::Proposed;
         self.aborted = false;
         Ok(txn)
@@ -591,6 +597,29 @@ impl Executor {
         effect: Option<crate::context_kernel::events::EventKind>,
         payload_bound: u64,
     ) -> Result<CommitOutcome, ExecutorError> {
+        if self
+            .current
+            .as_ref()
+            .and_then(|t| operation::find(t.op))
+            .is_some_and(|r| r.owner_phase == 8)
+            || matches!(
+                effect,
+                Some(EventKind::Branch { .. } | EventKind::Security { .. })
+            )
+            || matches!(
+                effect,
+                Some(EventKind::OperationCommit {
+                    class: crate::context_kernel::events::OperationClass::Pin
+                        | crate::context_kernel::events::OperationClass::Unpin,
+                    ..
+                })
+            )
+        {
+            self.fail();
+            return Err(ExecutorError::PreconditionFailed {
+                which: "security-receipt-boundary",
+            });
+        }
         if self
             .current
             .as_ref()

@@ -33,6 +33,7 @@ pub struct SemanticReceipt {
 /// Read-only validation owners plus the existing derivation-ingestion capability.
 pub struct SemanticServices<'a> {
     pub gate: &'a Gate,
+    pub authorization: Option<&'a dyn crate::context_kernel::security::Authorization>,
     pub required: &'a [BoundFact],
     pub always_checked: &'a [BoundFact],
     pub store: &'a dyn LeafStore,
@@ -50,6 +51,7 @@ impl Executor {
     ) -> Result<SemanticReceipt, SemanticError> {
         let SemanticServices {
             gate,
+            authorization,
             required,
             always_checked,
             store,
@@ -90,6 +92,7 @@ impl Executor {
             if record.verdict != Verdict::Pass {
                 return Err(SemanticError::Rejected(record));
             }
+            check_lane_authority(&command, &record, store, authorization)?;
             ingress
                 .capture_derivation(
                     command.operation.name(),
@@ -224,7 +227,7 @@ impl Executor {
         &self.typed.semantic
     }
 }
-fn exact_derivation<'a>(
+pub(super) fn exact_derivation<'a>(
     records: &'a [IngressRecord],
     artifact: &str,
 ) -> Result<&'a IngressRecord, SemanticError> {
@@ -249,4 +252,26 @@ impl SemanticError {
             _ => Response::DeterministicEmergency,
         }
     }
+}
+
+fn check_lane_authority(
+    command: &SemanticCommand,
+    record: &ValidationRecord,
+    store: &dyn LeafStore,
+    authorization: Option<&dyn crate::context_kernel::security::Authorization>,
+) -> Result<(), SemanticError> {
+    if command.lane <= 2
+        && !command.authority.as_ref().is_some_and(|a| {
+            a.check(
+                command.lane,
+                command.candidate.scope,
+                record,
+                store,
+                authorization,
+            )
+        })
+    {
+        return Err(SemanticError::Boundary);
+    }
+    Ok(())
 }
