@@ -121,7 +121,7 @@ pub(super) fn checkpoint_head(
         .last()
         .map(|turn| turn.summary.as_str())
         .unwrap_or("");
-    let mut text = String::from("Context checkpoint: older payloads are represented by admitted digests; preserve the latest evidence and tool pairing.");
+    let mut text = String::from("Context checkpoint: older results use admitted digests; older completed executions may be elided from this projection. Preserve prompts, completed summaries, latest evidence and tool pairing.");
     if !summary.is_empty() {
         text.push('\n');
         text.push_str(summary);
