@@ -180,7 +180,8 @@ fn refusal_to_persist_retry_stops_before_any_reissue() {
         turn.retry_stream(&[], &[], (&store, &reserved, 1)),
         Err(RoundFailure::RetryStore(_))
     ));
-    assert_eq!(agent.model_calls(), 1);
+    // Gateway checks durability and the live lease BEFORE the initial send.
+    assert_eq!(agent.model_calls(), 0);
     assert!(store.snapshot().unwrap().branches[0]
         .stream_retries
         .is_empty());

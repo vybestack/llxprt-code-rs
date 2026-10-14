@@ -51,7 +51,11 @@ pub(crate) fn persist_context(store: &SessionStore, state: &ContextState) -> Res
     // The manifest is written INSIDE the staging generation and names it, so a
     // slot whose manifest is missing or unparsable is a torn publication (137).
     write_context_manifest(&dir, &stage, state, state.generation.saturating_add(1))?;
-    commit_generation(&root, &context)
+    commit_generation(&root, &context)?;
+    let index =
+        serde_json::to_vec(state.store.spine_ref().records()).map_err(|_| "encode unit index")?;
+    crate::safe_file::publish_artifact(&root, "unit-index", &index, crate::session::open_regular_at)
+        .map_err(|_| "publish unit index".to_string())
 }
 
 /// Swaps the staged generation in: the committed slot moves aside to `.prev`,

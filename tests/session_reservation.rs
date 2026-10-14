@@ -536,6 +536,9 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
         b.parent_attempt = 1;
     }
     let valid = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "resv-chain".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
@@ -569,6 +572,9 @@ fn near_max_branches_chain_validates_and_cycle_shaped_state_is_corrupt() {
     // Over-cap: MAX_BRANCHES + 1 is rejected with the early "too many branches" cap.
     let over = {
         let valid_again = SessionState {
+            provider_epoch: 0,
+            provider_turns: Vec::new(),
+            render_contracts: Vec::new(),
             version: llxprt_code_rs::session::STORE_VERSION,
             session_id: "resv-over".into(),
             cwd: None,

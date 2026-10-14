@@ -25,6 +25,7 @@ pub(super) fn validate(result: &LlmResult, secrets: &[String]) -> Result<(), Rou
     }
     // Check the complete reply before selecting any diagnostic or cutting a span.
     if std::iter::once(&result.text)
+        .chain(std::iter::once(&result.thinking))
         .chain(
             result
                 .calls

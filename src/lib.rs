@@ -38,3 +38,5 @@ pub mod context_store;
 pub mod context_txn;
 
 pub mod context_management;
+
+pub mod context_gateway;

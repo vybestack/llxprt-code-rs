@@ -43,6 +43,10 @@ const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
     after_help = "Examples:\n  llxprt-code-rs --session demo --cwd ws -p 'fix the test' 2>thinking.jsonl\n  llxprt-code-rs --session demo -p 'now add coverage'\n  llxprt-code-rs --session demo --emit all -p 'inspect' 2>turn.jsonl\n  llxprt-code-rs transcript --session demo --turn 1 --json\n\nExit codes: 2 usage, 3 config, 4 session, 5 model, 6 turn.\nReturned readable thinking is emitted and persisted by default. Text/calls/results are optional.\nTranscript human output and --help/--version are stdout protocol exceptions."
 )]
 pub struct Args {
+    /// Require an explicitly attested stateless or idempotent provider.
+    #[arg(long)]
+    pub unattended: bool,
+
     /// Read a finished or in-progress session without changing it.
     #[command(subcommand)]
     pub command: Option<crate::transcript::Command>,

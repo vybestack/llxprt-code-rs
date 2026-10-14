@@ -31,6 +31,20 @@ impl SessionState {
     /// (unreadable/wrong-version) problems are caught before this is called.
     pub(super) fn validate(&self) -> Result<(), StoreError> {
         self.validate_header()?;
+        crate::context_gateway::validate_records(&self.provider_turns)
+            .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+        if self.provider_turns.iter().any(|r| {
+            r.intent.epoch > self.provider_epoch
+                || !self.branches.iter().any(|b| b.branch_id == r.intent.branch)
+        }) {
+            return Err(StoreError::Corrupt(
+                "provider record has unknown branch or future epoch".into(),
+            ));
+        }
+        for p in &self.render_contracts {
+            p.validate()
+                .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+        }
         let index = self.branch_index()?;
         for branch in &self.branches {
             self.validate_branch(branch, &index)?;

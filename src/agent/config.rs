@@ -45,6 +45,11 @@ pub fn round_limit_message(max_rounds: usize) -> String {
 }
 
 impl super::CodingAgent {
+    pub fn with_unattended(mut self, unattended: bool) -> Self {
+        self.unattended = unattended;
+        self
+    }
+
     /// Propose a checkpoint through the same compactor and governor as pressure
     /// recovery. No eligible reduction means no cut (not a timer or rewrite).
     pub fn with_checkpoint_request(mut self) -> Self {

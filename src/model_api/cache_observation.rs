@@ -124,6 +124,16 @@ impl ObservedBackend {
 }
 
 impl ChatBackend for ObservedBackend {
+    fn supports_context_handles(&self) -> bool {
+        self.inner.supports_context_handles()
+    }
+    fn max_output_tokens(&self) -> Option<u64> {
+        self.inner.max_output_tokens()
+    }
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        self.inner.provider_class()
+    }
+
     fn set_context_epoch(&self, epoch: u64) {
         self.inner.set_context_epoch(epoch);
     }

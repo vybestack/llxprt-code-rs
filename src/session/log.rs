@@ -24,6 +24,16 @@ pub(super) struct EventBatch {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum Event {
+    Provider {
+        branch_id: String,
+        owner: String,
+        command: crate::context_gateway::Command,
+    },
+    RenderContract {
+        branch_id: String,
+        owner: String,
+        publication: crate::context_gateway::RenderPublication,
+    },
     Telemetry {
         branch_id: String,
         owner: String,

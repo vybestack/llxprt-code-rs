@@ -31,6 +31,8 @@ pub struct Evidence {
     pub resource_limit_hit: bool,
     /// Fault-triggered death with persisted state restored to a consistent shape.
     pub recovery_after_fault: bool,
+    /// Independent durable protocol check, not a model-authored completion claim.
+    pub safe_provider_crash: bool,
     /// Planted fixture markers escaped into outputs, stores, or artifacts.
     pub leaks: Vec<(String, String)>,
     /// Executed fault triggers with their loopback-observed trigger points.
@@ -204,6 +206,12 @@ fn evidence_failures(scen: &Scenario, ev: &Evidence) -> Vec<String> {
 
 fn task_failures(scen: &Scenario, ev: &Evidence) -> Vec<String> {
     let mut out = Vec::new();
+    if ev.safe_provider_crash && scen.id == "provider-crash-matrix" {
+        if !ev.recovery_after_fault || ev.faults_executed.is_empty() || ev.provider_requests != 1 {
+            out.push("provider crash lacks a single fenced send and indeterminate recovery".into());
+        }
+        return out;
+    }
     if ev.turns_ok == 0 {
         out.push("no turn completed successfully".to_string());
     }

@@ -49,6 +49,7 @@ struct Turn<'a> {
     marker: &'a str,
     block_bytes: usize,
     tool_names: &'a [String],
+    request: &'a Value,
 }
 
 impl Loopback {
@@ -174,6 +175,7 @@ fn serve(
         marker,
         block_bytes,
         tool_names: &tool_names,
+        request: &parsed,
     };
     respond(&mut writer, streamed, &turn, state);
 }
@@ -248,7 +250,11 @@ fn respond(
     }
     let last = turn.index + 1 >= turn.bulk.len() || tool.is_none();
     let text = if last {
-        format!("CTXEVAL final: {}", turn.marker)
+        format!(
+            "CTXEVAL final: {} {}",
+            turn.marker,
+            retained_tokens(turn.request).join(" ")
+        )
     } else {
         format!(
             "CTXEVAL block {}: {}",
@@ -378,4 +384,36 @@ fn write_chunk(stream: &mut TcpStream, bytes: &[u8]) {
     let _ = write!(stream, "{:x}\r\n", bytes.len());
     let _ = stream.write_all(bytes);
     let _ = stream.write_all(b"\r\n");
+}
+
+/// The oracle only echoes exact planted evidence present in tool-return content.
+/// Tokens in prompts, instructions or fixture declarations cannot authorize it.
+fn retained_tokens(request: &Value) -> Vec<&'static str> {
+    const TOKENS: [&str; 3] = [
+        "CTXEVAL-FACT-B4E1",
+        "CTXEVAL-CONSTRAINT-K1",
+        "CTXEVAL-FAILING-TEST-T7",
+    ];
+    let evidence: Vec<_> = request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["role"] == "tool")
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    TOKENS
+        .into_iter()
+        .filter(|token| evidence.iter().any(|text| text.contains(token)))
+        .collect()
+}
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+    #[test]
+    fn planted_tokens_require_retained_tool_evidence_not_prompt_hints() {
+        let hint = json!({"messages": [{"role": "user", "content": "CTXEVAL-FACT-B4E1"}]});
+        assert!(retained_tokens(&hint).is_empty());
+        let evidence = json!({"messages": [{"role": "tool", "content": "CTXEVAL-FACT-B4E1"}]});
+        assert_eq!(retained_tokens(&evidence), vec!["CTXEVAL-FACT-B4E1"]);
+    }
 }

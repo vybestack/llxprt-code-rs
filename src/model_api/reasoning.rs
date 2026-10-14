@@ -7,6 +7,7 @@ pub(super) struct BoundBackend {
     inner: Box<dyn ChatBackend>,
     binding: String,
     contract: crate::telemetry::bounds::RequestContract,
+    max_output_tokens: Option<u64>,
 }
 
 impl BoundBackend {
@@ -48,12 +49,23 @@ impl BoundBackend {
         Self {
             inner,
             contract,
+            max_output_tokens: profile.ephemeral.max_output_tokens,
             binding: format!("{:x}", Sha256::digest(identity.as_bytes())),
         }
     }
 }
 
 impl ChatBackend for BoundBackend {
+    fn supports_context_handles(&self) -> bool {
+        true
+    }
+    fn max_output_tokens(&self) -> Option<u64> {
+        self.max_output_tokens
+    }
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        self.inner.provider_class()
+    }
+
     fn set_context_epoch(&self, epoch: u64) {
         self.inner.set_context_epoch(epoch);
     }

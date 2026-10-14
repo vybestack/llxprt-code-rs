@@ -85,6 +85,14 @@ impl ResponsesBackend {
 }
 
 impl ChatBackend for ResponsesBackend {
+    fn provider_class(&self) -> crate::context_gateway::ProviderClass {
+        // Codex WebSocket state is not attested stateless; HTTP requests are complete.
+        match self.model {
+            ResponsesModel::Codex(_) => crate::context_gateway::ProviderClass::AtMostOneAttempt,
+            ResponsesModel::OpenAi(_) => crate::context_gateway::ProviderClass::StatelessAttested,
+        }
+    }
+
     fn set_context_epoch(&self, epoch: u64) {
         self.context_epoch.set(epoch);
     }

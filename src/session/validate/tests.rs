@@ -2,6 +2,9 @@ use super::*;
 
 fn valid_state() -> SessionState {
     SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: STORE_VERSION,
         session_id: "session".to_string(),
         cwd: None,

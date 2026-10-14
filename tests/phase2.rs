@@ -427,6 +427,9 @@ fn u32_max_turn_state_cannot_panic() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "s9max".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
@@ -467,6 +470,9 @@ fn child_of_failed_parent_is_corrupt() {
         b
     };
     let state = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "failedparent".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
@@ -501,6 +507,9 @@ fn turn1_child_of_turn2_parent_is_corrupt() {
         b
     };
     let st: SessionState = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "turn1child2".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
@@ -2190,6 +2199,9 @@ fn attempt_overflow_is_a_typed_error() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "attemptmax".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),
@@ -2224,6 +2236,9 @@ fn branch_seq_overflow_is_a_typed_error() {
     let cwd = new_cwd();
     let _root = shared_root();
     let state = SessionState {
+        provider_epoch: 0,
+        provider_turns: Vec::new(),
+        render_contracts: Vec::new(),
         version: llxprt_code_rs::session::STORE_VERSION,
         session_id: "seqmax".into(),
         cwd: Some(cwd.canonicalize().unwrap().to_string_lossy().to_string()),

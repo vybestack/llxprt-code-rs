@@ -35,12 +35,21 @@ pub(crate) fn compact_history(history: &mut [HistoryTurn]) -> bool {
 fn compact_observed_results(
     requests: &mut [serdes_ai::core::ModelRequest],
     rounds: &[crate::session::RoundRecord],
+    latest_read_handles: bool,
 ) -> bool {
     use serdes_ai::core::ModelRequestPart;
     let mut changed = false;
-    let observed = rounds.iter().take(rounds.len().saturating_sub(1));
+    let observed = rounds
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| latest_read_handles || *index + 1 < rounds.len());
     let calls: std::collections::HashMap<_, _> = observed
-        .flat_map(|round| &round.calls)
+        .flat_map(|(index, round)| {
+            round
+                .calls
+                .iter()
+                .filter(move |call| index + 1 < rounds.len() || call.name == "read_file")
+        })
         .filter(|call| call.result.len() < call.result_live.len())
         .map(|call| (call.id.as_str(), call))
         .collect();
@@ -206,7 +215,21 @@ impl super::Turn<'_> {
         if history_changed {
             content::compact_narration(&mut candidate[..current], &reserved.history);
         }
-        let results_changed = compact_observed_results(&mut candidate[current..], rounds);
+        let mut results_changed =
+            compact_observed_results(&mut candidate[current..], rounds, false);
+        // Preserve the mandatory latest evidence whenever eligible older regions
+        // suffice. Only pressure remaining AFTER that fit allows an opted-in read
+        // to become its durable addressable handle, through the same compactor.
+        if self.backend.supports_context_handles()
+            && rounds.last().is_some_and(|round| round.calls.len() == 1)
+            && crate::agent::round_budget_exceeded(
+                &candidate,
+                &crate::tools::tool_specs(self.allow_shell),
+                self.context_limit,
+            )
+        {
+            results_changed |= compact_observed_results(&mut candidate[current..], rounds, true);
+        }
         if !(history_changed || results_changed) {
             return false;
         }

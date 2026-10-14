@@ -16,6 +16,7 @@ pub mod grader;
 pub mod inject;
 pub mod loopback;
 pub mod manifest;
+mod provider_probe;
 pub mod records;
 pub mod report;
 pub mod runner;
@@ -170,12 +171,6 @@ fn pending_report_path_for(opts: &Options, report_file: &str) -> String {
     repo_relative(&opts.out_root.join(report_file))
 }
 
-/// SHA-256 hex of a manifest file's bytes, for the run record's digest binding.
-fn manifest_file_digest(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    Ok(hex_digest(&sha2::Sha256::digest(&bytes)))
-}
-
 /// Load every scenario manifest under the eval root, schema-validated.
 pub fn load_scenarios(opts: &Options) -> Result<Vec<(PathBuf, Scenario)>, String> {
     let all = manifest::load_dir(&opts.scenario_dir(), &opts.fixtures_dir())?;
@@ -238,7 +233,7 @@ fn green_gate(
     }
     // The cited red must come from a manifest state other than this one, so a manifest
     // cannot cite a red driven from the very bytes that now declare themselves green.
-    let digest = manifest_file_digest(
+    let digest = provider_probe::manifest_file_digest(
         &all.iter()
             .find(|(_, s)| s.id == scen.id)
             .map(|(path, _)| path.clone())
@@ -389,7 +384,7 @@ fn run_one(
     };
     // The run record binds this observation to the source revision, the manifest bytes it
     // was driven from, and the digests of every expanded fixture round (#116.2).
-    let manifest_digest = manifest_file_digest(path)?;
+    let manifest_digest = provider_probe::manifest_file_digest(path)?;
     let dims = grader::dimension_results(scen, &evidence);
     let evidence_dimensions = dimensions_block(&dims);
     let request_observations = request_observations_block(&evidence);
@@ -609,6 +604,10 @@ fn drive_rust(scen: &Scenario, opts: &Options) -> Result<Drive, String> {
     server.stop();
     evidence_from_loopback(&mut evidence, &obs);
     evidence.session_dir = session_dir(&prepared);
+    if scen.id == "provider-crash-matrix" {
+        evidence.safe_provider_crash =
+            provider_probe::safe_unresolved(&prepared.config_home, &prepared.session);
+    }
     scan_drive_outputs(&mut evidence, &prepared, &out_dir, &turn_results);
     let graded = grader::grade(scen, &evidence);
     let verdict = grader::verdict(scen, &graded);
@@ -759,7 +758,7 @@ fn drive_cli_turns(
     if !killed_by_infra(&results) {
         evidence.harness_error = false;
     }
-    recovery_probe(prepared, out_dir, &mut evidence, &results)?;
+    provider_probe::recovery_probe(scen, prepared, out_dir, &mut evidence, &results)?;
     Ok((evidence, results))
 }
 
@@ -846,48 +845,6 @@ fn arm_mid_run_fault(
         Some(inject::ArmedFault { target, handle }) => (Some(target), Some(handle)),
         None => (None, None),
     })
-}
-
-/// Recovery probe after an executed fault: the killed process is gone, so the next
-/// invocation is a real process restart against the same session. A valid envelope of
-/// either kind (ok, or a clean typed error such as a context refusal) proves the
-/// persisted store reopened and replayed; no envelope means the restart path is broken.
-fn recovery_probe(
-    prepared: &runner::Prepared,
-    out_dir: &Path,
-    evidence: &mut Evidence,
-    results: &[BbResult],
-) -> Result<(), String> {
-    let probe_index = results.len();
-    let probe = InvocationSpec {
-        session: prepared.session.clone(),
-        cwd: prepared.workspace.clone(),
-        prompt:
-            "CTXEVAL-RESTART-PROBE: confirm this session reopened after the restart; reply briefly."
-                .to_string(),
-        turn: Some(probe_index as u32 + 1),
-        branch: None,
-        profile: Some(prepared.profile_name.clone()),
-        allow_insecure_http: true,
-        allow_shell: false,
-    };
-    let result = harness::run_cli(probe);
-    save_turn_artifacts(out_dir, probe_index, &result)?;
-    let restarted = result.status == "ok" || result.status == "error";
-    evidence.recovery_after_fault = restarted
-        && session_dir(prepared)
-            .map(|session| inject::store_shape_consistent(&session.join("context")))
-            .unwrap_or(false);
-    let probe_outcome = if restarted {
-        "session reopened with a valid envelope"
-    } else {
-        "no valid envelope (status mismatch)"
-    };
-    harness::eprint_status(&format!(
-        "context-evals recovery probe after {}: {probe_outcome}",
-        evidence.faults_executed.join(", ")
-    ));
-    Ok(())
 }
 
 fn session_dir(prepared: &runner::Prepared) -> Option<PathBuf> {

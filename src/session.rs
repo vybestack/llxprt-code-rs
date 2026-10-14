@@ -15,7 +15,7 @@ use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
 /// The one supported on-disk format.
-pub const STORE_VERSION: u32 = 6;
+pub const STORE_VERSION: u32 = 7;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
 pub const MAX_PROMPT_BYTES: usize = 512 * 1024;
@@ -39,6 +39,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) mod context_persist;
 pub(crate) mod context_publish;
 pub(crate) mod context_recover;
+mod management_gateway;
+mod provider_context;
+pub(crate) mod provider_turn;
+pub use management_gateway::SessionManagementGateway;
 pub(crate) mod records;
 mod stream_retry;
 mod telemetry;

@@ -142,6 +142,10 @@ pub struct BranchRecord {
 /// The versioned persistent payload stored inside each state slot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
+    /// Durable universal gateway protocol, replayed with the session transaction log.
+    pub provider_epoch: u64,
+    pub provider_turns: Vec<crate::context_gateway::TurnRecord>,
+    pub render_contracts: Vec<crate::context_gateway::RenderPublication>,
     pub version: u32,
     pub session_id: String,
     /// Canonical working directory pinned on the first turn.
@@ -162,6 +166,9 @@ impl SessionState {
     pub(crate) fn empty(session_id: &str) -> SessionState {
         SessionState {
             version: STORE_VERSION,
+            provider_epoch: 0,
+            provider_turns: Vec::new(),
+            render_contracts: Vec::new(),
             session_id: session_id.to_string(),
             cwd: None,
             cwd_dev: 0,
