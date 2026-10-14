@@ -183,7 +183,13 @@ fn evidence_failures(scen: &Scenario, ev: &Evidence) -> Vec<String> {
         match &ev.session_dir {
             None => out.push(format!("no persisted session to hold {rel}")),
             Some(dir) => {
-                if !dir.join(rel).exists() {
+                // Manifest context paths are logical names. Inspect the committed
+                // generation, never a stale flat context file after publication.
+                let path = match rel.strip_prefix("context/") {
+                    Some(name) => crate::session::context_artifact_dir(dir).join(name),
+                    None => dir.join(rel),
+                };
+                if !path.exists() {
                     out.push(format!("required context artifact absent: {rel}"));
                 }
             }

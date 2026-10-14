@@ -11,6 +11,8 @@
 //! failure (`HarnessError`) and from a red scenario that unexpectedly passed
 //! (`UnexpectedGreen`), which is exactly the false-success shape the harness must catch.
 
+mod cache_report;
+pub mod endurance;
 pub mod faults;
 pub mod grader;
 pub mod inject;
@@ -18,6 +20,7 @@ pub mod loopback;
 pub mod manifest;
 mod provider_probe;
 pub mod records;
+pub mod release;
 pub mod report;
 pub mod runner;
 pub mod secrets;
@@ -930,7 +933,8 @@ fn bounded(bytes: &[u8]) -> Vec<u8> {
     bytes[..bytes.len().min(ARTIFACT_STREAM_CAP)].to_vec()
 }
 
-fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
+/// Create-only bounded artifact publication shared by the eval and release drivers.
+pub fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
     match harness::publish_create_only_file(path, bytes) {
         Ok(()) => Ok(()),
         Err(e) => Err(format!("publish {}: {e:?}", path.display())),
@@ -959,3 +963,12 @@ fn git_revision(root: &Path) -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown".to_string())
 }
+
+#[cfg(test)]
+mod tests_endurance;
+
+#[cfg(test)]
+mod tests_release;
+
+#[cfg(test)]
+mod tests_cache;

@@ -354,7 +354,7 @@ fn adapter_command_construction_is_exact() {
 }
 
 /// The scenario-report shape this harness publishes, as a validation fixture.
-fn good_report() -> Value {
+pub(super) fn good_report() -> Value {
     json!({
         "id": "x", "schema_version": report::REPORT_SCHEMA_VERSION, "owner_phase": 7, "arm": "feature",
         "expected_status": "red", "runner": "rust", "runner_revision": "abc",
@@ -380,14 +380,14 @@ fn good_report() -> Value {
 }
 
 /// The aggregate-report shape this harness publishes, as a validation fixture.
-fn good_aggregate_report() -> Value {
+pub(super) fn good_aggregate_report() -> Value {
     json!({
         "tool": "llxprt-context-eval", "schema_version": report::REPORT_SCHEMA_VERSION, "run_id": "r",
         "runner": "rust", "runner_revision": "abc", "expected_status_mode": true,
         "phase0_baseline": {"all_red_baseline": true},
         "records_root": "evals/context-management/records",
         "cache": report::cache_block(),
-        "summary": {"total": 0, "expected_red": 0, "unexpected_green": 0,
+        "summary": {"total": 0, "passed": 0, "expected_red": 0, "unexpected_green": 0,
                     "unexpected_red": 0, "harness_error": 0},
         "scenarios": [],
     })

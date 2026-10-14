@@ -7,9 +7,9 @@ use std::path::Path;
 use crate::context_eval::REQUEST_SHAPE_DIGEST_KEY;
 
 /// Report schema version. Bumping it is a breaking eval change.
-pub const REPORT_SCHEMA_VERSION: u32 = 2;
+pub const REPORT_SCHEMA_VERSION: u32 = 3;
 /// Cost class recorded when cache telemetry is unavailable.
-pub const CACHE_UNKNOWN_CLASS: &str = "disarmed_unavailable";
+pub const CACHE_UNKNOWN_CLASS: &str = "unavailable";
 /// Every verdict name the schema accepts, exactly as [`crate::context_eval::grader::Verdict`]
 /// names them. A report carrying anything else is unpublishable.
 pub const VERDICT_NAMES: [&str; 5] = [
@@ -103,31 +103,27 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
     let Some(dir) = session_dir else {
         return cache_block();
     };
-    let Ok(bytes) = std::fs::read(crate::session::context_artifact_dir(dir).join("epochs.json"))
-    else {
-        return cache_block();
+    let bytes = match std::fs::read(crate::session::context_artifact_dir(dir).join("epochs.json")) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return cache_block(),
+        Err(e) => return json!({"class":"corrupt", "error": e.to_string()}),
     };
-    let Ok(cache) = serde_json::from_slice::<crate::context_policy::cache::EpochCache>(&bytes)
-    else {
-        return cache_block();
+    let cache = match serde_json::from_slice::<crate::context_policy::cache::EpochCache>(&bytes) {
+        Ok(cache) => cache,
+        Err(e) => return json!({"class":"corrupt", "error": e.to_string()}),
     };
-    if cache.validate().is_err() {
-        return cache_block();
+    if let Err(e) = cache.validate() {
+        return json!({"class":"corrupt", "error":e.to_string()});
     }
     let epochs: Vec<Value> = cache
         .records()
         .iter()
         .map(|record| {
-            json!({
-                "epoch": record.epoch, "head_digest": record.head_digest,
-                "trigger": record.trigger, "armed": record.armed,
-                "invalidations": record.invalidations, "bytes_reclaimed": record.bytes_reclaimed,
-                "bytes_invalidated": record.bytes_invalidated,
-                "tokens_invalidated": record.tokens_invalidated, "tokens_reclaimed": record.tokens_reclaimed,
-                "aggregate_valid": record.aggregate_valid, "calls": record.calls, "measured_calls": record.measured_calls,
-                "hit_rate": record.hit_rate(), "armed_hit_rate": record.armed_hit_rate(),
-                "disarmed_hit_rate": record.disarmed_hit_rate(),
-            })
+            let mut value = serde_json::to_value(record).expect("integer epoch record encodes");
+            value["hit_rate"] = json!(record.hit_rate());
+            value["armed_hit_rate"] = json!(record.armed_hit_rate());
+            value["disarmed_hit_rate"] = json!(record.disarmed_hit_rate());
+            value
         })
         .collect();
     json!({"class": "measured", "epochs": epochs, "source": "context/epochs.json"})
@@ -135,17 +131,16 @@ pub fn cache_block_from_session(session_dir: Option<&Path>) -> Value {
 
 /// Preserve epoch conditionals rather than averaging unrelated prefixes.
 pub fn aggregate_cache(scenarios: &[Value]) -> Value {
-    let reports: Vec<Value> = scenarios
-        .iter()
-        .filter_map(|s| s.get("cache"))
-        .filter(|c| c["class"] == "measured")
-        .cloned()
-        .collect();
-    if reports.is_empty() {
+    if scenarios.is_empty() {
         return cache_block();
     }
-    json!({"class": "measured_aggregate", "conditional_reports": reports,
-        "source": "scenario epochs"})
+    let reports: Vec<Value> = scenarios.iter().map(|s| s["cache"].clone()).collect();
+    let totals = match super::cache_report::totals(&reports) {
+        Ok(totals) => totals,
+        Err(error) => return json!({"class":"corrupt", "error":error}),
+    };
+    json!({"class": "aggregate", "totals":totals,"conditional_reports": reports,
+        "source": "scenario epochs; unknown terms excluded from economic claims"})
 }
 
 /// Validate a report value against the required schema. `aggregate` selects the field set.
@@ -174,9 +169,7 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
     if value["schema_version"].as_u64() != Some(REPORT_SCHEMA_VERSION.into()) {
         return Err("report schema_version does not match the harness".to_string());
     }
-    if value["cache"]["class"].is_null() {
-        return Err("report cache block has no cost class".to_string());
-    }
+    super::cache_report::validate(&value["cache"])?;
     if !aggregate {
         validate_nested_objects(value)?;
         let dims = value["evidence_dimensions"]
@@ -213,6 +206,7 @@ pub fn validate(value: &Value, aggregate: bool) -> Result<(), String> {
     }
     if aggregate {
         validate_summary(&value["summary"])?;
+        super::cache_report::validate_members(value)?;
     }
     Ok(())
 }
@@ -279,8 +273,8 @@ fn validate_nested_objects(value: &Value) -> Result<(), String> {
     let failures = result["failures"]
         .as_array()
         .ok_or("report result failures is not an array")?;
-    if accepted && !failures.is_empty() {
-        return Err("report result accepted a verdict that still carries failures".to_string());
+    if verdict == "pass" && !failures.is_empty() {
+        return Err("report result pass still carries failures".to_string());
     }
     // A pass has no failure to name; a green observation carrying a failure reason class
     // is a record contradiction, not a graded result.

@@ -218,6 +218,7 @@ fn run_context_evals(root: &Path, args: &[String]) -> Result<(), String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "--expected-status" => {}
             "--runner" => {
                 index += 1;
                 runner = args.get(index).ok_or("--runner needs a value")?.clone();
@@ -226,6 +227,10 @@ fn run_context_evals(root: &Path, args: &[String]) -> Result<(), String> {
         }
         index += 1;
     }
+    // Explicit output overrides the default; do not forward two clap --out values.
+    let explicit_out = forward
+        .iter()
+        .any(|arg| *arg == "--out" || arg.starts_with("--out="));
     let out = format!("tmp/issue37-context-evals/{runner}");
     run_command(
         root,
@@ -247,9 +252,10 @@ fn run_context_evals(root: &Path, args: &[String]) -> Result<(), String> {
         cli.display().to_string(),
         "--runner".into(),
         runner.clone(),
-        "--out".into(),
-        out,
     ];
+    if !explicit_out {
+        argv.extend(["--out".into(), out]);
+    }
     argv.extend(forward.into_iter().map(str::to_string));
     let printed: Vec<&str> = argv.iter().map(String::as_str).collect();
     let status = Command::new(driver)
