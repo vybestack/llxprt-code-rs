@@ -38,11 +38,11 @@ pub fn quote_requests(requests: &[ModelRequest]) -> Vec<ModelRequest> {
                 .unwrap_or_else(|| {
                     serde_json::to_string(&result.content).expect("typed tool content")
                 });
-            let envelope = EnvironmentEnvelope::new(&data).render();
+            let envelope = EnvironmentEnvelope::new(&data);
             result.content = if result.content.is_error() {
-                ToolReturnContent::error(envelope)
+                ToolReturnContent::error(envelope.render())
             } else {
-                ToolReturnContent::json(serde_json::from_str(&envelope).expect("typed envelope"))
+                ToolReturnContent::json(serde_json::to_value(envelope).expect("typed envelope"))
             };
         }
     }
