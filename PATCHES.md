@@ -128,7 +128,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `19719d8ecc055364c12be0bd8c3c95845dc677ce0f5f25bb56d01163824407ef`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `1675c657a14580ee8db01ffcf0d0d7709ba70fb20ba0df515405513abc7de347`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
@@ -369,6 +369,17 @@ versions or dependency edges change. The checksum-locked registry closure
 ships the new releases in place of the old ones; the aggregate patch and its
 verification pins are regenerated to retain exact vendor reconstruction.
 No audit ignores, compatibility shims, or gate changes are introduced.
+
+## Issue 392: rustls advances to 0.23.46 for RUSTSEC-2026-0346
+
+The root lockfile and the seven vendored lockfiles that contain `rustls` move it from 0.23.45 to
+0.23.46, which fixes RUSTSEC-2026-0346 (`Debug` implementations exposing TLS secrets). The exact
+`rustls` requirement in `vendor/serdes-ai-models/Cargo.toml` and `Cargo.toml.orig` moves from
+`=0.23.45` to `=0.23.46` so the vendored crate resolves against the new release. Cargo also
+reorders one dependency entry in `vendor/serdes-ai-models/Cargo.lock`. The checksum-locked registry
+closure ships `registry-vendor/rustls-0.23.46` in place of 0.23.45, and the aggregate patch and its
+verification pins are regenerated to retain exact vendor reconstruction. No other package versions
+change. No audit ignores, compatibility shims, or gate changes are introduced.
 
 ## Tests
 
