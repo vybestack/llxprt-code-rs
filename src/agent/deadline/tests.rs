@@ -335,3 +335,71 @@ fn truncated_tool_preamble_summary_cancels_on_the_shared_deadline() {
     assert!(!calls[1].ok);
     assert!(calls[1].refused);
 }
+
+#[test]
+fn timed_out_turn_teardown_cancels_spawned_transport_work() {
+    // Codex SSE drives its reader on a Tokio task. The turn executor must own
+    // that task even when dropping the outer request alone cannot cancel it.
+    // Its current-thread runtime drops async tasks synchronously during turn
+    // teardown: cancellation must be observable when run returns, not within
+    // a later wall-clock window. Non-cancellable blocking work remains covered by
+    // tests/turn_deadline.rs.
+    use std::sync::mpsc;
+    struct SpawnedReader(mpsc::Sender<()>);
+    struct Dropped(mpsc::Sender<()>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.send(()).unwrap();
+        }
+    }
+    impl ChatBackend for SpawnedReader {
+        fn request<'a>(
+            &'a self,
+            _: &'a [serdes_ai::core::ModelRequest],
+            _: &'a [crate::tools::ToolSpec],
+        ) -> ModelFuture<'a> {
+            Box::pin(async move {
+                // Own the signal before spawning so teardown is observed even
+                // if the reader is cancelled before its first poll.
+                let guard = Dropped(self.0.clone());
+                tokio::spawn(async move {
+                    let _guard = guard;
+                    std::future::pending::<()>().await;
+                });
+                // Only the turn deadline can end the outer request; scheduling
+                // contention must not make a competing sleep complete it first.
+                std::future::pending().await
+            })
+        }
+    }
+    let (sender, receiver) = mpsc::channel();
+    let root = tempfile::tempdir().unwrap();
+    let agent =
+        CodingAgent::with_backend(Box::new(SpawnedReader(sender)), root.path().into(), false)
+            .with_turn_time(Some(Duration::from_millis(100)));
+    let store =
+        SessionStore::load_at(&SessionId::parse("spawned-reader").unwrap(), root.path()).unwrap();
+    let mut reserved = store.start_request(None, None, "P", root.path()).unwrap();
+    let mut turn = Turn::new(&agent).unwrap();
+    // Pause before preflight so synchronous setup cannot exhaust the budget
+    // before the backend is polled. Tokio advances directly to the deadline
+    // once the spawned reader and outer request are both pending.
+    turn.started = turn.runtime.as_ref().unwrap().block_on(async {
+        tokio::time::pause();
+        Instant::now()
+    });
+    turn.deadline = Some(turn.started + Duration::from_millis(100));
+    {
+        let _entered = turn.runtime.as_ref().unwrap().enter();
+        assert_eq!(
+            turn.run_reserved(&store, &mut reserved).unwrap_err().key,
+            "turn-time-exhausted"
+        );
+    }
+    // CodingAgent::run owns this same Turn until its return boundary. Drop it
+    // explicitly here to assert the async-task guarantee without any wait.
+    drop(turn);
+    receiver
+        .try_recv()
+        .expect("spawned transport task must be dropped before run returns");
+}
