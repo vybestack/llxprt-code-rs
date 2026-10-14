@@ -149,9 +149,15 @@ fn issue36_aggregate_rejects_mixed_candidate_or_runner_evidence() {
     aggregate["summary"]["expected_red"] = json!(1);
     aggregate["cache"] = report::aggregate_cache(aggregate["scenarios"].as_array().unwrap());
     report::validate(&aggregate, true).unwrap();
-    for (field, foreign) in [("runner_revision", "other-head"), ("runner", "typescript-reference")] {
+    for (field, foreign) in [
+        ("runner_revision", "other-head"),
+        ("runner", "typescript-reference"),
+    ] {
         let mut mixed = aggregate.clone();
         mixed["scenarios"][0][field] = json!(foreign);
-        assert!(report::validate(&mixed, true).is_err(), "mixed {field} accepted");
+        assert!(
+            report::validate(&mixed, true).is_err(),
+            "mixed {field} accepted"
+        );
     }
 }

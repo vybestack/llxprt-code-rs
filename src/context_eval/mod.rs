@@ -11,6 +11,7 @@
 //! failure (`HarnessError`) and from a red scenario that unexpectedly passed
 //! (`UnexpectedGreen`), which is exactly the false-success shape the harness must catch.
 
+mod acceptance;
 mod cache_report;
 pub mod endurance;
 pub mod faults;
@@ -28,6 +29,8 @@ mod ts_drive;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_acceptance;
 #[cfg(test)]
 mod tests_etxtbsy;
 #[cfg(test)]

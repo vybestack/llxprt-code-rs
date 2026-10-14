@@ -51,6 +51,11 @@ pub fn validate_members(value: &Value) -> Result<(), String> {
     let mut counts = [0u64; 5];
     for scenario in scenarios {
         super::report::validate(scenario, false)?;
+        for field in ["runner", "runner_revision"] {
+            if scenario[field] != value[field] || !value[field].is_string() {
+                return Err(format!("aggregate member {field} differs from candidate"));
+            }
+        }
         let id = scenario["id"].as_str().ok_or("scenario has no id")?;
         if !ids.insert(id) {
             return Err(format!("duplicate scenario {id}"));

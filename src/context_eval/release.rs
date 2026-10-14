@@ -107,12 +107,14 @@ pub fn assemble(screen: &Value, cli: &Path, endurance: Option<&Path>) -> Result<
         "id":id,"boundary":boundary,"design":"section 18 / tab:invariants",
         "evidence":unavailable("composed live checkpoint product not attested by this screen"),
     })).collect();
+    let architecture_acceptance = super::acceptance::assemble(screen)?;
     let result = json!({
-        "schema_version":1,"tracker_issue":46,"candidate_sha":head,
+        "schema_version":2,"tracker_issue":46,"candidate_sha":head,
         "binary_sha256":super::hex_digest(&Sha256::digest(&binary)),"protocol_digest":protocol_digest(),
         "claim_status":"deterministic-screen-only; not architecture acceptance",
         "release_qualified":false,
         "review_cycle_result":"skipped per Andrew directive 2026-10-09 (no OCR)",
+        "architecture_acceptance":architecture_acceptance,
         "screen":screen,"operations":operations,"checkpoints":checkpoints,"arms":arms,
         "thresholds": {"out_of_branch_wall_hits":0,"unquiesced_armed_noops":0,
             "duration_ms":super::endurance::DURATION_FLOOR_MS,"minimum_restarts":super::endurance::MIN_RESTARTS,
@@ -137,6 +139,7 @@ pub fn validate(value: &Value) -> Result<(), String> {
         "release_qualified",
         "review_cycle_result",
         "screen",
+        "architecture_acceptance",
         "operations",
         "checkpoints",
         "arms",
@@ -150,7 +153,7 @@ pub fn validate(value: &Value) -> Result<(), String> {
             return Err(format!("release report missing {field}"));
         }
     }
-    if value["schema_version"] != 1
+    if value["schema_version"] != 2
         || value["tracker_issue"] != 46
         || !super::endurance::digest(value["candidate_sha"].as_str().unwrap_or(""), 40)
         || !super::endurance::digest(value["binary_sha256"].as_str().unwrap_or(""), 64)
@@ -167,6 +170,9 @@ pub fn validate(value: &Value) -> Result<(), String> {
     report::validate(&value["screen"], true)?;
     if value["candidate_sha"] != value["screen"]["runner_revision"] {
         return Err("release and screen revisions differ".into());
+    }
+    if value["architecture_acceptance"] != super::acceptance::assemble(&value["screen"])? {
+        return Err("architecture acceptance does not reconcile to screen".into());
     }
     inventory(value, "arms", "id", ARMS.iter().map(|(id, _)| *id))?;
     inventory(
