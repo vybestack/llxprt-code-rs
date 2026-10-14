@@ -67,3 +67,17 @@ fn release_fixture_rejects_threshold_drift_and_fabricated_qualification() {
     broken["arms"][0]["evidence"]["status"] = json!("passed");
     assert!(release::validate(&broken).is_err());
 }
+
+#[test]
+fn issue36_release_inventory_accounts_for_missing_feature_scenarios() {
+    let v = fixture();
+    let acceptance = &v["architecture_acceptance"];
+    assert_eq!(acceptance["tracker_issue"], 36);
+    assert_eq!(acceptance["all_features_green"], false);
+    assert_eq!(acceptance["baselines_retained"], false);
+    assert_eq!(acceptance["features"].as_array().unwrap().len(), 15);
+    assert_eq!(acceptance["baselines"].as_array().unwrap().len(), 2);
+    for row in acceptance["features"].as_array().unwrap() {
+        assert_eq!(row["status"], "missing");
+    }
+}
