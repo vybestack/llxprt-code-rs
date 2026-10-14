@@ -45,8 +45,11 @@ fn mixed_naming_and_bulk_read_keep_live_bytes_but_reopen_digest_only() {
         .to_string_content()
         .contains("available:"));
     let live = returns[1].content.to_string_content();
+    let envelope: crate::context_kernel::security::EnvironmentEnvelope =
+        serde_json::from_str(&live).unwrap();
+    assert!(envelope.valid());
     assert_eq!(
-        live,
+        envelope.quoted_data,
         format!("[0..{} of {} bytes]\n{body}", body.len(), body.len())
     );
     assert!(!live.contains("CTXDIGEST"));
@@ -57,7 +60,9 @@ fn mixed_naming_and_bulk_read_keep_live_bytes_but_reopen_digest_only() {
     assert!(!records[0].refused);
     assert!(records[1].ok);
     assert!(records[1].result.contains("CTXDIGEST"));
-    assert!(records[1].result.contains(&format!("bytes={}", live.len())));
+    assert!(records[1]
+        .result
+        .contains(&format!("bytes={}", envelope.quoted_data.len())));
     assert!(records.iter().all(|r| r.result_live.is_empty()));
     let durable = serde_json::to_string(&state).unwrap();
     assert!(!durable.contains("result_live"));

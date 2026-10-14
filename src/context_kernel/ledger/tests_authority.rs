@@ -70,3 +70,35 @@ fn normative_amendment_cannot_import_generated_authority_and_recomputes_conflict
         &BTreeSet::from([Conflict::Normative { left, right }])
     );
 }
+
+#[test]
+fn erasure_removes_direct_and_transitive_carrying_folds_without_authority_upgrade() {
+    let mut ledger = Ledger::default();
+    let base = empirical("private observation");
+    admit(&mut ledger, base.clone());
+    let mut decision = obligation("decision");
+    decision.premises.insert(base.id.clone());
+    admit(&mut ledger, decision.clone());
+    let mut second = obligation("derived decision");
+    second.premises.insert(decision.id.clone());
+    admit(&mut ledger, second.clone());
+    ledger
+        .apply(
+            &Command::Redact {
+                leaf: base.source.leaf.clone(),
+            },
+            4,
+            &scopes(),
+        )
+        .unwrap();
+    for id in [&base.id, &decision.id, &second.id] {
+        let entry = ledger.entry(id).unwrap();
+        assert_eq!(entry.evidence, EvidenceStatus::Unverified);
+        assert_eq!(entry.freshness, Freshness::Unknown);
+        assert_eq!(entry.fold.text, "[erased: unverified tombstone]");
+    }
+    assert_eq!(
+        ledger.entry(&decision.id).unwrap().source.authority,
+        Authority::User
+    );
+}

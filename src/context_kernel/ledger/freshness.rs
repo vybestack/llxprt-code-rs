@@ -101,9 +101,28 @@ impl Ledger {
         }
     }
     pub(super) fn redact(&mut self, leaf: &str) {
+        let mut dependent: BTreeSet<_> = self
+            .entries
+            .values()
+            .filter(|e| e.source.leaf == leaf || e.bindings.contains(leaf))
+            .map(|e| e.id.clone())
+            .collect();
+        loop {
+            let old = dependent.len();
+            for entry in self.entries.values() {
+                if entry.premises.iter().any(|p| dependent.contains(p)) {
+                    dependent.insert(entry.id.clone());
+                }
+            }
+            if dependent.len() == old {
+                break;
+            }
+        }
         for entry in self.entries.values_mut() {
-            if entry.source.leaf == leaf || entry.bindings.contains(leaf) {
+            if dependent.contains(&entry.id) {
                 entry.evidence = EvidenceStatus::Unverified;
+                entry.freshness = Freshness::Unknown;
+                entry.fold.text = "[erased: unverified tombstone]".into();
             }
         }
     }

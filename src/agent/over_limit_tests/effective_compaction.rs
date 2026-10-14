@@ -1,7 +1,6 @@
 //! Registered-tool reproduction of the unchanged current-turn compaction guard.
 
 use super::*;
-use crate::agent::over_limit::request_total_bytes;
 
 pub(super) fn read_reply(id: &str) -> LlmResult {
     LlmResult {
@@ -43,7 +42,12 @@ fn current_tool_history_compacts_at_the_owning_request_source() {
     assert_eq!(captured.len(), 4);
     let tools = crate::tools::tool_specs(false);
     for requests in captured.iter() {
-        assert!(request_total_bytes(requests, &tools) <= 48_000);
+        assert!(
+            crate::agent::estimate_request_bytes(requests)
+                .saturating_add(crate::adapter::estimate_tool_schema_bytes(&tools))
+                <= 48_000
+        );
+        crate::context_kernel::security::legal_quotes(requests).unwrap();
     }
     let last = serde_json::to_string(captured.last().unwrap()).unwrap();
     assert!(last.contains("CTXDIGEST v1"));

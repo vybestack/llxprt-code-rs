@@ -14,20 +14,17 @@ impl Turn<'_> {
         epoch: u64,
     ) -> Result<LlmResult, RoundFailure> {
         let (store, reserved) = context;
+        let quoted = crate::context_kernel::security::quote_requests(requests);
+        let requests = quoted.as_slice();
+        self.check_environment_projection(requests, tools)?;
         gateway::legal_requests(requests).map_err(|e| RoundFailure::Model(e.to_string()))?;
         let publication = self.render_publication(tools)?;
         let changed = store
             .publish_render_contract(reserved, publication.clone())
             .map_err(RoundFailure::RetryStore)?;
         if changed {
-            // Refit under the freshly published dependency version, never inherit a
-            // previous calibration. The complete final guard includes declarations.
             self.calibration.borrow_mut().clear();
-            if round_budget_exceeded(requests, tools, self.context_limit) {
-                return Err(RoundFailure::RequestBound {
-                    limit: self.context_limit.unwrap_or(0),
-                });
-            }
+            self.check_quoted_request(requests, tools)?;
         }
         store
             .record_provider_boundary()
@@ -54,6 +51,8 @@ impl Turn<'_> {
         let admitted = store
             .admit_send(reserved, permit)
             .map_err(RoundFailure::RetryStore)?;
+        crate::context_kernel::security::legal_quotes(requests)
+            .map_err(|e| RoundFailure::Model(e.to_string()))?;
         let reply = match self.round_once(requests, tools, reattempt) {
             Ok(reply) => reply,
             Err(error) => {
@@ -88,6 +87,39 @@ impl Turn<'_> {
         self.admit_reply(store, reserved, &admitted.identity, &reply)?;
         Ok(reply)
     }
+    fn check_environment_projection(
+        &self,
+        requests: &[serdes_ai::core::ModelRequest],
+        tools: &[crate::tools::ToolSpec],
+    ) -> Result<(), RoundFailure> {
+        crate::context_kernel::security::legal_quotes(requests)
+            .map_err(|e| RoundFailure::Model(e.to_string()))?;
+        if requests
+            .iter()
+            .flat_map(|r| &r.parts)
+            .any(|p| matches!(p, serdes_ai::core::ModelRequestPart::ToolReturn(_)))
+        {
+            self.check_quoted_request(requests, tools)?;
+        }
+        Ok(())
+    }
+    fn check_quoted_request(
+        &self,
+        requests: &[serdes_ai::core::ModelRequest],
+        tools: &[crate::tools::ToolSpec],
+    ) -> Result<(), RoundFailure> {
+        crate::context_kernel::security::legal_quotes(requests)
+            .map_err(|e| RoundFailure::Model(e.to_string()))?;
+        if estimate_request_bytes(requests)
+            .saturating_add(crate::adapter::estimate_tool_schema_bytes(tools))
+            > materialization_budget(self.context_limit)
+        {
+            return Err(RoundFailure::RequestBound {
+                limit: self.context_limit.unwrap_or(0),
+            });
+        }
+        Ok(())
+    }
     fn admit_reply(
         &self,
         store: &SessionStore,
@@ -103,10 +135,13 @@ impl Turn<'_> {
                 id: call.id.clone(),
                 tool: call.name.clone(),
                 args: call.args_json.clone(),
-                read_only: matches!(
-                    call.name.as_str(),
-                    "read_file" | "list_directory" | "search_file_content"
-                ),
+                read_only: crate::context_kernel::branch::ToolContract {
+                    name: call.name.clone(),
+                    read_only: true,
+                    reads: Default::default(),
+                    writes: Default::default(),
+                }
+                .permits_branch(),
                 completion: None,
             })
             .collect();

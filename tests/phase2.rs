@@ -25,6 +25,17 @@ struct MockBackend {
     observer: Option<Box<dyn Fn(usize)>>,
 }
 
+/// Assert the forward wire contract before checking the exact underlying tool bytes.
+fn environment_payload(content: &serdes_ai::core::messages::ToolReturnContent) -> String {
+    use llxprt_code_rs::context_kernel::security::EnvironmentEnvelope;
+    let envelope: EnvironmentEnvelope =
+        serde_json::from_value(content.as_json().expect("quoted JSON tool result").clone())
+            .expect("strict environment envelope");
+    assert!(envelope.valid(), "tool data retains environment provenance");
+    assert_eq!(content.to_string_content(), envelope.render());
+    envelope.quoted_data
+}
+
 fn result(text: &str) -> LlmResult {
     LlmResult {
         continuation: None,
@@ -1378,7 +1389,7 @@ fn admitted_live_bytes_are_digest_only_after_authenticated_reopen() {
         .iter()
         .find_map(|part| match part {
             serdes_ai::core::ModelRequestPart::ToolReturn(tr) => {
-                Some(tr.content.to_string_content())
+                Some(environment_payload(&tr.content))
             }
             _ => None,
         })
@@ -1778,7 +1789,9 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     // Measure the actual post-tool provider request, rather than reconstructing
     // its charge from fixture constants or from the store-side clone. Bulk reads
     // are compact only in the resident transcript; the provider sees all fifteen
-    // framed results. The below-threshold clipped tail is verbatim, not CTXDIGEST.
+    // framed results. The below-threshold clipped tail remains exact quoted data, not CTXDIGEST.
+    // The output cap governs tool payload bytes; the separate request bound also
+    // charges every environment envelope on the actual provider serialization.
     let batches = ok_captured.lock().unwrap();
     assert_eq!(batches.len(), 2, "opening and post-tool provider requests");
     let sent_results: Vec<String> = batches[1]
@@ -1786,7 +1799,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
         .flat_map(|request| request.parts.iter())
         .filter_map(|part| match part {
             serdes_ai::core::ModelRequestPart::ToolReturn(tool_return) => {
-                Some(tool_return.content.to_string_content())
+                Some(environment_payload(&tool_return.content))
             }
             _ => None,
         })
@@ -1805,7 +1818,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     }
     assert_eq!(
         sent_results[15], granted,
-        "the provider receives the granted write response verbatim"
+        "the provider receives the exact granted write response as quoted data"
     );
     assert_eq!(
         sent_results[16].len(),
@@ -1824,7 +1837,7 @@ fn output_budget_exhaustion_fails_the_next_call_before_execution() {
     let charged: usize = sent_results.iter().map(String::len).sum();
     assert_eq!(
         charged, turn_budget,
-        "the actual sent tool results fill the resolved turn cap"
+        "the exact quoted tool payloads fill the resolved turn output cap"
     );
     drop(batches);
 

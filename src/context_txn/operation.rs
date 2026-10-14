@@ -2,8 +2,8 @@
 //!
 //! One row per operation. Columns map onto [`Operation`] fields: proposer,
 //! reclamation class (`reclamation`), deterministic, rebase-safe, owner phase.
-//! Rows whose owner phase is not 3 are still registered; the executor answers
-//! them with a `capability_not_landed` result instead of executing them.
+//! Rows beyond the configured landed phase remain registered but answer
+//! `capability_not_landed`. The executor defaults to Phase 8.
 //!
 //! Unit B (#108): owner phases are generated from the single source table
 //! (`project-plans/issue36-context-mgmt/plan.md:377-384`) and the conformance

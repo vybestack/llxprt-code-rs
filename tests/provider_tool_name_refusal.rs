@@ -286,7 +286,12 @@ fn unknown_name_after_investigation_corrects_to_shell_without_losing_the_turn() 
     assert_eq!(failure["role"], "tool");
     assert_eq!(failure["tool_call_id"], "typo");
     let wire = failure["content"].as_str().unwrap();
-    let content = wire.strip_prefix("Error: ").unwrap();
+    let quoted = wire.strip_prefix("Error: ").unwrap();
+    let environment: llxprt_code_rs::context_kernel::security::EnvironmentEnvelope =
+        serde_json::from_str(quoted).expect("strict environment envelope");
+    assert!(environment.valid());
+    assert_eq!(quoted, environment.render());
+    let content = environment.quoted_data.as_str();
     assert!(content.contains("unknown or disabled tool run_socket_command"));
     assert!(content.contains("available:"));
     assert!(content.contains("run_shell_command"));
@@ -345,10 +350,16 @@ fn disabled_shell_returns_bounded_failure_and_cannot_execute_under_unlimited_bud
     assert_eq!(failure["role"], "tool");
     assert_eq!(failure["tool_call_id"], "disabled");
     let wire = failure["content"].as_str().unwrap();
-    let content = wire.strip_prefix("Error: ").unwrap();
+    let quoted = wire.strip_prefix("Error: ").unwrap();
+    let environment: llxprt_code_rs::context_kernel::security::EnvironmentEnvelope =
+        serde_json::from_str(quoted).expect("strict environment envelope");
+    assert!(environment.valid());
+    assert_eq!(quoted, environment.render());
+    let content = environment.quoted_data.as_str();
     assert!(content.contains("unknown or disabled tool run_shell_command"));
     assert!(content.len() <= 128);
-    assert!(wire.len() <= 128 + "Error: ".len());
+    assert!(format!("Error: {content}").len() <= 128 + "Error: ".len());
+    assert_eq!(wire, format!("Error: {}", environment.render()));
     assert!(!content.contains("touch"));
     assert!(!content
         .split("available: ")

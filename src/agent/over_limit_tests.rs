@@ -211,3 +211,15 @@ fn unchanged_provider_rejection_is_not_replayed() {
     assert_eq!(agent.model_calls(), 1);
     assert!(error.message.contains("no retry sent"));
 }
+
+fn quoted_payload(part: &serdes_ai::core::ToolReturnPart) -> String {
+    let envelope: crate::context_kernel::security::EnvironmentEnvelope = serde_json::from_value(
+        part.content
+            .as_json()
+            .expect("task returns must be quoted JSON")
+            .clone(),
+    )
+    .unwrap();
+    assert!(envelope.valid());
+    envelope.quoted_data
+}

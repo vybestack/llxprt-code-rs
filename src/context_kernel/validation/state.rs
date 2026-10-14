@@ -43,6 +43,7 @@ pub struct SemanticCommand {
     pub lane: u8,
     pub candidate: Candidate,
     pub store_handle: String,
+    pub authority: Option<crate::context_kernel::security::LaneAuthority>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticArtifact {
@@ -126,6 +127,27 @@ impl SemanticState {
         *self = next;
         Ok(())
     }
+    /// Erasure overlay removes every dependent derivative, including retired sources.
+    pub(crate) fn erase(&mut self, leaf: &str) {
+        for artifact in self.artifacts.values_mut() {
+            if artifact
+                .validation
+                .support
+                .values()
+                .any(|s| s.contains(leaf))
+            {
+                artifact.command.candidate.artifact = "[erased: unverified tombstone]".into();
+                artifact.command.candidate.rendered_text =
+                    artifact.command.candidate.artifact.clone();
+                artifact.command.candidate.rendered.clear();
+                artifact.validation.support.clear();
+                artifact.validation.candidate_digest =
+                    candidate_digest(&artifact.command.candidate);
+                artifact.validation.verdict =
+                    Verdict::FailProvenance(ProvenanceFailure::UngroundedRoot);
+            }
+        }
+    }
     fn put(
         &mut self,
         command: &SemanticCommand,
@@ -143,6 +165,7 @@ impl SemanticState {
         {
             return Err(GateError::Bounds);
         }
+        replay_authority(command, validation)?;
         let mut depth = 0;
         if command.operation.lossy() {
             if command.sources.is_empty() || command.lane == 1 {
@@ -229,4 +252,22 @@ pub fn lane_code(lane: Lane) -> u8 {
         Lane::Evidential => 3,
         Lane::Ephemeral => 4,
     }
+}
+
+fn replay_authority(
+    command: &SemanticCommand,
+    validation: &ValidationRecord,
+) -> Result<(), GateError> {
+    if command.lane <= 2
+        && !command.authority.as_ref().is_some_and(|a| {
+            a.replay_valid(
+                command.lane,
+                command.candidate.scope,
+                &validation.candidate_digest,
+            )
+        })
+    {
+        return Err(GateError::Bounds);
+    }
+    Ok(())
 }

@@ -3,6 +3,7 @@
 //! explicit store modes. Read-only and unavailable modes block state-advancing turns and
 //! side effects, which is the store side of the `quiesce-unwritable` outcome.
 
+mod erasure;
 pub mod ops;
 pub mod spine;
 pub mod store;
