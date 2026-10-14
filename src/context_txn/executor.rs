@@ -117,6 +117,8 @@ pub struct Txn {
 /// Verdicts and failures the executor can produce.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ExecutorError {
+    /// Shadow replay refused publication; no staged state is released.
+    Audit(super::audit::AuditError),
     /// The requested step is not part of the state machine.
     IllegalTransition {
         /// State the txn is in.
@@ -706,7 +708,19 @@ impl Executor {
         // folds it into the state the next commit is gated against, so the
         // legality gate sees the region it is actually admitting into (#105).
         if let Some(kind) = effect {
-            self.append_effect(kind);
+            let mut staged = self.clone();
+            if let Err(error) = staged.append_effect(kind) {
+                self.fail();
+                return Err(error);
+            }
+            if let Err(error) =
+                super::audit::audit_tip(&staged.log, &staged.typed, &staged.contract)
+            {
+                self.fail();
+                return Err(ExecutorError::Audit(error));
+            }
+            self.log = staged.log;
+            self.typed = staged.typed;
         }
         self.region_admitted = self.region_admitted.saturating_add(payload_bound);
         self.state = TxnState::Committed;
@@ -717,7 +731,10 @@ impl Executor {
     /// Appends the governed event an applied commit releases and folds it into
     /// the executor's own typed state, so the next commit is gated against the
     /// state this one produced (#105).
-    fn append_effect(&mut self, kind: crate::context_kernel::events::EventKind) {
+    fn append_effect(
+        &mut self,
+        kind: crate::context_kernel::events::EventKind,
+    ) -> Result<(), ExecutorError> {
         use crate::context_kernel::events::{EventKind, OperationClass, Sequencer};
         let mut sequencer = Sequencer::continuing(&self.log, self.epoch.0, 1_000);
         // A first ingress admission attributes to the session scope, which
@@ -733,7 +750,11 @@ impl Executor {
             let scope = SESSION_SCOPE;
             match self.typed.scope_registry.state(scope) {
                 Ok(state) if state.is_open() => {}
-                Ok(_) => panic!("the session scope is closed"),
+                Ok(_) => {
+                    return Err(ExecutorError::PreconditionFailed {
+                        which: "session-scope-closed",
+                    })
+                }
                 Err(_) => {
                     let scope_open = sequencer.append(
                         EventKind::OperationCommit {
@@ -745,15 +766,18 @@ impl Executor {
                     );
                     self.log
                         .append(scope_open)
-                        .expect("the commit log continues");
+                        .map_err(|e| ExecutorError::Audit(super::audit::AuditError::Log(e)))?;
                 }
             }
         }
         let event = sequencer.append(kind, self.log.store_version());
-        self.log.append(event).expect("the commit log continues");
+        self.log
+            .append(event)
+            .map_err(|e| ExecutorError::Audit(super::audit::AuditError::Log(e)))?;
         Reducer::new(IDLENESS_WINDOW)
             .fold_from(&mut self.typed, &self.log)
-            .expect("the commit log folds");
+            .map_err(|e| ExecutorError::Audit(super::audit::AuditError::Replay(e)))?;
+        Ok(())
     }
 
     /// Units already admitted into the region this session (#121-c). The
