@@ -93,7 +93,11 @@ constitutional put accepted). Producer and invariant checker are the same Rust
 process; retained log/status `tmp/i45/red/log`, `tmp/i45/red/exit`.
 Positive regressions retain both assertions and add attacks rather than weakening
 any assertions. Existing tests inspecting raw tool return representation now parse
-and validate the new envelope and retain exact payload assertions. The complete
+and validate the new envelope and retain exact payload assertions. Provider-name refusal and
+transcript regressions also require canonical environment envelopes while retaining
+exact admitted payload, error prefix, tool identity/order, raw output caps and
+durable look-back checks; envelope bytes are separately charged by the request
+materialization guard. The complete
 request-size assertion still uses the same 48,000-byte ceiling on actual sent
 bytes, instead of quoting already-quoted captured wire data twice.
 

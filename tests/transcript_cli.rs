@@ -3,6 +3,22 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::process::{Command, Output};
 
+/// The live/durable transcript is raw admitted data; the provider projection is
+/// a canonical quoted envelope. Check both identities without a raw-wire fallback.
+fn environment_result(message: &Value) -> String {
+    use llxprt_code_rs::context_kernel::security::EnvironmentEnvelope;
+    let wire = message["content"].as_str().unwrap();
+    let (prefix, quoted) = match wire.strip_prefix("Error: ") {
+        Some(quoted) => ("Error: ", quoted),
+        None => ("", wire),
+    };
+    let envelope: EnvironmentEnvelope =
+        serde_json::from_str(quoted).expect("strict environment envelope");
+    assert!(envelope.valid());
+    assert_eq!(quoted, envelope.render());
+    format!("{prefix}{}", envelope.quoted_data)
+}
+
 fn bin(root: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"));
     command.env("LLXPRT_CONFIG_HOME", root);
@@ -160,7 +176,7 @@ fn emission_matches_model_ingress_and_read_only_lookback() {
         .iter()
         .find(|message| message["role"] == "tool")
         .unwrap();
-    assert_eq!(model_result["content"], result);
+    assert_eq!(environment_result(model_result), result);
     let session_dir = temp.path().join("code-rs-sessions/demo");
     let before = snapshot(&session_dir);
     let lookback = bin(temp.path())
@@ -245,7 +261,7 @@ fn emission_matches_model_ingress_and_read_only_lookback() {
 }
 
 #[test]
-fn bulk_live_result_is_exact_wire_while_lookback_is_durable() {
+fn bulk_live_result_is_exact_quoted_payload_while_lookback_is_durable() {
     let root = tempfile::tempdir().unwrap();
     let (output, requests) = run_capped(
         root.path(),
@@ -265,7 +281,7 @@ fn bulk_live_result_is_exact_wire_while_lookback_is_durable() {
         .iter()
         .find(|m| m["role"] == "tool")
         .unwrap();
-    assert_eq!(event["result"], wire["content"]);
+    assert_eq!(event["result"], environment_result(wire));
     let live = event["result"].as_str().unwrap();
     assert!(!live.starts_with("CTXDIGEST"));
     assert!(live.contains("hello [redacted]"));
@@ -338,7 +354,7 @@ fn budget_and_unknown_refusals_match_wire_in_execution_order() {
     assert_eq!(wire.len(), results.len());
     for (result, message) in results.iter().zip(wire) {
         assert_eq!(result["id"], message["tool_call_id"]);
-        assert_eq!(result["result"], message["content"]);
+        assert_eq!(result["result"], environment_result(message));
     }
     assert_eq!(results[0]["refused"], false);
     assert_eq!(results[1]["refused"], true);
@@ -407,7 +423,7 @@ fn charged_naming_then_bulk_read_match_wire_and_durable_order() {
     assert_eq!(wire.len(), 2);
     for (event, message) in results.iter().zip(wire) {
         assert_eq!(event["id"], message["tool_call_id"]);
-        assert_eq!(event["result"], message["content"]);
+        assert_eq!(event["result"], environment_result(message));
     }
     let directory = root.path().join("code-rs-sessions/demo");
     let before = snapshot(&directory);
