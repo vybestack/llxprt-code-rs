@@ -139,3 +139,19 @@ fn grader_requires_current_committed_generation_not_stale_flat_artifacts() {
         "artifact existence does not prove task success"
     );
 }
+
+#[test]
+fn issue36_aggregate_rejects_mixed_candidate_or_runner_evidence() {
+    let scenario = good_report();
+    let mut aggregate = good_aggregate_report();
+    aggregate["scenarios"] = json!([scenario]);
+    aggregate["summary"]["total"] = json!(1);
+    aggregate["summary"]["expected_red"] = json!(1);
+    aggregate["cache"] = report::aggregate_cache(aggregate["scenarios"].as_array().unwrap());
+    report::validate(&aggregate, true).unwrap();
+    for (field, foreign) in [("runner_revision", "other-head"), ("runner", "typescript-reference")] {
+        let mut mixed = aggregate.clone();
+        mixed["scenarios"][0][field] = json!(foreign);
+        assert!(report::validate(&mixed, true).is_err(), "mixed {field} accepted");
+    }
+}
