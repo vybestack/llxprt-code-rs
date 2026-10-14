@@ -516,6 +516,7 @@ fn admit_ingress(
 
 /// Moves an item to the vault side: store-only and unpinned, byte provenance kept.
 fn redact_item(state: &mut TypedState, subject: u64) -> Result<(), ReducerError> {
+    state.security.revoke_item(subject);
     state.pins.retain(|pin| pin.value() != subject);
     state
         .conversation_ir

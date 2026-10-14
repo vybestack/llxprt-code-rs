@@ -59,6 +59,9 @@ pub struct SecurityState {
     erased: BTreeMap<String, Erasure>,
 }
 impl SecurityState {
+    pub(crate) fn revoke_item(&mut self, item: u64) {
+        self.pins.remove(&item);
+    }
     pub fn pins(&self) -> &BTreeMap<u64, Pin> {
         &self.pins
     }

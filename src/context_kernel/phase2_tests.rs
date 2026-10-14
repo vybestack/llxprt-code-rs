@@ -98,7 +98,24 @@ fn redact_log(redact: bool) -> (EventLog, u64) {
         &mut sequencer,
         &mut log,
     );
-    append(op(OperationClass::Pin, item, 0), &mut sequencer, &mut log);
+    append(
+        EventKind::Security {
+            event: Box::new(crate::context_kernel::security::SecurityEvent::Pin(
+                crate::context_kernel::security::Pin {
+                    item,
+                    owner: crate::context_kernel::ledger::Source {
+                        leaf: "authenticated-owner".into(),
+                        authority: crate::context_kernel::ledger::Authority::Operator,
+                        origin: crate::context_kernel::ledger::Origin::Ingress,
+                        scope: 1,
+                    },
+                    expires: 20,
+                },
+            )),
+        },
+        &mut sequencer,
+        &mut log,
+    );
     if redact {
         append(
             op(OperationClass::Redact, item, 0),
@@ -116,6 +133,10 @@ fn redact_unplaces_and_unpins_while_keeping_the_item() {
     let without = Reducer::new(IDLENESS_WINDOW).fold(&plain).unwrap();
     let with = Reducer::new(IDLENESS_WINDOW).fold(&redacted).unwrap();
     assert!(with.pins.is_empty(), "a vaulted item keeps no pin");
+    assert!(
+        with.security.pins().is_empty(),
+        "redaction revokes the authenticated pin too"
+    );
     assert!(with.conversation_ir.item(ItemId::new(item)).is_ok());
     assert_eq!(item, 0, "the first append mints the first append id");
     assert_ne!(
