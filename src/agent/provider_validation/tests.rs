@@ -218,11 +218,17 @@ fn correction_obeys_request_budget_and_original_turn_deadline() {
             Box::pin(async move {
                 let index = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if index == 0 {
+                    // Spend part of the original budget before requesting correction.
+                    tokio::time::advance(std::time::Duration::from_millis(20)).await;
                     Ok(reply(vec![call("bad", &"x".repeat(65))]))
                 } else {
                     std::future::pending().await
                 }
             })
+        }
+
+        fn request_calls(&self) -> usize {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
         }
     }
     let agent = CodingAgent::with_backend(
@@ -231,10 +237,26 @@ fn correction_obeys_request_budget_and_original_turn_deadline() {
         false,
     )
     .with_turn_time(Some(std::time::Duration::from_millis(30)));
-    let turn = Turn::new(&agent).unwrap();
+    let mut turn = Turn::new(&agent).unwrap();
+    let runtime = turn.runtime.as_ref().unwrap();
+    // Pause before anchoring the deadline so setup and machine load consume no
+    // budget. Both provider requests then share this one virtual turn clock.
+    turn.started = runtime.block_on(async {
+        tokio::time::pause();
+        tokio::time::Instant::now()
+    });
+    turn.deadline = Some(turn.started + std::time::Duration::from_millis(30));
+    let original_deadline = turn.deadline;
+    let _entered = runtime.enter();
     assert!(matches!(
         turn.round(&mut Vec::new(), &[], (&store, &reserved, 1)),
         Err(RoundFailure::TurnTime)
     ));
+    assert_eq!(agent.model_calls(), 2, "the corrective request was polled");
+    assert_eq!(turn.deadline, original_deadline);
+    assert!(tokio::time::Instant::now() >= original_deadline.unwrap());
+    // A fresh 30ms window for correction would finish at 50ms, not the
+    // original deadline. Keep the existing elapsed bound as well.
+    assert!(turn.started.elapsed() < std::time::Duration::from_millis(50));
     assert!(turn.started.elapsed() < std::time::Duration::from_secs(1));
 }
