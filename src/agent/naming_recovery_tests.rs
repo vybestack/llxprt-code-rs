@@ -259,6 +259,15 @@ fn naming_failures_obey_existing_round_and_time_limits() {
     )
     .with_turn_time(Some(std::time::Duration::from_secs(1)));
     let mut turn = Turn::new(&agent).unwrap();
+    // Freeze the turn's own executor before preflight: filesystem work and runner
+    // contention must not consume the one-second budget before the first failure.
+    turn.started = turn.runtime.as_ref().unwrap().block_on(async {
+        tokio::time::pause();
+        tokio::time::Instant::now()
+    });
+    turn.deadline = Some(turn.started + agent.turn_time_budget.unwrap());
+    let runtime = turn.runtime.as_ref().unwrap();
+    let entered = runtime.enter();
     let tools = crate::tools::tool_specs(false);
     let config = agent.tools_config(false).unwrap();
     let requests = agent.materialize_requests(&reserved);
@@ -268,8 +277,11 @@ fn naming_failures_obey_existing_round_and_time_limits() {
     turn.execute_tool_round(&store, &reserved, &config, &mut attempt)
         .unwrap();
     attempt.current = Some(reply(vec![call("two", "run_socket_command")]));
-    // Expire the shared turn deadline without sleeping or changing request timeouts.
-    turn.deadline = Some(tokio::time::Instant::now() - std::time::Duration::from_secs(2));
+    assert_eq!(turn.started.elapsed(), std::time::Duration::ZERO);
+    assert_eq!(attempt.usage.total_calls, 1);
+    // Reach the exact shared deadline without sleeping or replacing the deadline.
+    runtime.block_on(tokio::time::advance(std::time::Duration::from_secs(1)));
+    assert_eq!(tokio::time::Instant::now(), turn.deadline.unwrap());
     assert_eq!(
         turn.execute_tool_round(&store, &reserved, &config, &mut attempt)
             .unwrap_err()
@@ -278,6 +290,8 @@ fn naming_failures_obey_existing_round_and_time_limits() {
     );
     assert_eq!(attempt.usage.total_calls, 1);
     assert_eq!(store.snapshot().unwrap().branches[0].rounds.len(), 1);
+    assert_eq!(agent.model_calls(), 1);
+    drop(entered);
 
     let store = SessionStore::load(&SessionId::parse("naming-rounds").unwrap()).unwrap();
     let reserved = store.start_request(None, None, "P", cwd.path()).unwrap();
