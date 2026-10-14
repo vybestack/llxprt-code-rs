@@ -9,9 +9,21 @@ fn large_read(id: &str) -> LlmResult {
     reply
 }
 
+// Pin the fixture's root explicitly; other unit tests exercise process-global
+// config discovery in parallel, including while this longer turn is running.
+pub(super) fn isolated_store(name: &str) -> (tempfile::TempDir, SessionStore, ReservedRequest) {
+    let cwd = tempfile::tempdir().unwrap();
+    let store = SessionStore::load_at(&SessionId::parse(name).unwrap(), &cwd.path().join("config"))
+        .unwrap();
+    let reserved = store
+        .start_request(None, None, "current prompt verbatim", cwd.path())
+        .unwrap();
+    (cwd, store, reserved)
+}
+
 #[test]
 fn assistant_dominated_long_turn_compacts_under_guard_and_continues() {
-    let (cwd, store, reserved) = recovery_store("assistant-long-turn");
+    let (cwd, store, reserved) = isolated_store("assistant-long-turn");
     std::fs::write(cwd.path().join("evidence.txt"), "latest evidence bytes").unwrap();
     let mut replies = (0..24)
         .map(|i| Ok(large_read(&format!("long-{i}"))))
@@ -42,10 +54,15 @@ fn assistant_dominated_long_turn_compacts_under_guard_and_continues() {
     let last = last.clone();
     drop(captured);
     drop(store);
-    let reopened = SessionStore::load(&SessionId::parse("assistant-long-turn").unwrap()).unwrap();
+    let reopened = SessionStore::load_at(
+        &SessionId::parse("assistant-long-turn").unwrap(),
+        &cwd.path().join("config"),
+    )
+    .unwrap();
     let next = reopened
         .start_request(None, None, "next turn", cwd.path())
         .unwrap();
+    assert_eq!(next.turn, 2);
     let resumed = std::sync::Arc::new(RecoveryBackend::new(vec![Ok(stop_reply())]));
     CodingAgent::with_backend(Box::new(resumed.clone()), cwd.path().into(), false)
         .with_context_limit(Some(262_144))
@@ -56,7 +73,7 @@ fn assistant_dominated_long_turn_compacts_under_guard_and_continues() {
 
 #[test]
 fn signed_older_reasoning_is_elided_as_a_whole_pair_not_rewritten() {
-    let (cwd, _store, mut reserved) = recovery_store("assistant-reasoning");
+    let (cwd, _store, mut reserved) = isolated_store("assistant-reasoning");
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![])),
         cwd.path().into(),

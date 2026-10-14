@@ -1,4 +1,5 @@
 //! Pairing and oldest-first pressure boundaries for assistant reclamation.
+use super::assistant_framing::isolated_store;
 use super::*;
 use crate::agent::over_limit::request_total_bytes;
 
@@ -25,7 +26,7 @@ fn append_batch(requests: &mut Vec<serdes_ai::core::ModelRequest>, reply: &LlmRe
 
 #[test]
 fn one_recovery_keeps_reducing_oldest_batches_until_the_complete_guard_fits() {
-    let (cwd, _store, mut reserved) = recovery_store("assistant-batches");
+    let (cwd, _store, mut reserved) = isolated_store("assistant-batches");
     reserved.history.push(compactable_history());
     let agent = CodingAgent::with_backend(
         Box::new(RecoveryBackend::new(vec![])),
@@ -68,7 +69,7 @@ fn malformed_or_ambiguous_pairs_are_not_partially_elided() {
         "wrong-name",
         "mixed-return",
     ] {
-        let (cwd, _store, mut reserved) = recovery_store(&format!("assistant-{defect}"));
+        let (cwd, _store, mut reserved) = isolated_store(&format!("assistant-{defect}"));
         let agent = CodingAgent::with_backend(
             Box::new(RecoveryBackend::new(vec![])),
             cwd.path().into(),
