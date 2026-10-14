@@ -192,3 +192,5 @@ fn tool_call_record_debug_omits_live_payload_in_embedded_round() {
 }
 
 mod vault_entropy;
+
+mod telemetry_roundtrip;
