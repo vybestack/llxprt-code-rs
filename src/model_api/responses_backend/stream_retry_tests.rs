@@ -209,3 +209,61 @@ fn repeated_http_interruptions_exhaust_with_three_durable_retries_and_no_tools()
         .is_empty());
     assert!(!root.path().join("must-not-exist").exists());
 }
+
+#[test]
+fn sse_provider_categories_reach_terminal_json_without_replay() {
+    for (provider_code, expected) in [
+        ("server_is_overloaded", "model-transient-server"),
+        ("server_error", "model-transient-server"),
+        ("internal_error", "model-transient-server"),
+        ("rate_limit_exceeded", "model-rate-limit"),
+        ("rate_limit_error", "model-rate-limit"),
+        ("brand_new_code", "model"),
+    ] {
+        for failed_response in [false, true] {
+            let event = if failed_response {
+                json!({"type":"response.failed","sequence_number":0,"response":{
+                    "id":"failed","object":"response","created_at":1,"model":"fixture",
+                    "status":"failed","output":[],
+                    "error":{"code":provider_code,"message":"fixture-only-secret"}
+                }})
+            } else {
+                json!({"type":"error","error":{
+                    "code":provider_code,"message":"fixture-only-secret"
+                }})
+            };
+            let (result, requests, transcript, _) =
+                run_detailed(vec![(format!("data: {event}\n\n"), 0)]);
+            let Err(error) = result else {
+                panic!("provider failure must stay terminal")
+            };
+            assert_eq!(error.code as i32, 5);
+            assert_eq!(error.retry_attempts, Some(0));
+            // The same typed envelope/code selection used by the CLI producer.
+            let envelope = crate::envelope::Envelope::error(
+                "stream-retry",
+                error.envelope_code.unwrap_or(error.key),
+                &error.message,
+            );
+            let terminal: Value = serde_json::from_slice(&envelope.to_line()).unwrap();
+            assert_eq!(terminal["status"], "error");
+            assert_eq!(terminal["error"]["code"], expected, "{event}: {terminal}");
+            assert!(
+                error.message.contains("accumulated 0 stream events"),
+                "{}",
+                error.message
+            );
+            assert!(error.message.contains("request not replayed"));
+            assert!(!error.message.contains("fixture-only-secret"));
+            assert_eq!(requests.len(), 1);
+            assert!(transcript["turns"][0]["model_retries"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+            assert!(transcript["turns"][0]["rounds"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+        }
+    }
+}
