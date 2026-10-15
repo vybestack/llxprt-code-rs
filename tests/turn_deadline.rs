@@ -110,7 +110,7 @@ impl Fixture {
     }
 
     fn assert_failed(&self, output: Output, rounds: usize) {
-        assert_eq!(output.status.code(), Some(5), "{output:?}");
+        assert_eq!(output.status.code(), Some(6), "{output:?}");
         let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(envelope["error"]["code"], "turn-time-exhausted");
         let store = SessionStore::load_at(&SessionId::parse("deadline").unwrap(), self.root.path())

@@ -1120,6 +1120,8 @@ fn aggregate_assistant_bytes_across_rounds_rejected() {
         .run(&st, &r)
         .expect_err("the sum across rounds must be capped");
     assert_eq!(e.key, "turn-budget", "{e:?}");
+    assert_eq!(e.code, llxprt_code_rs::envelope::Code::Turn);
+    assert_eq!(e.code as i32, 6);
     assert!(cwd.join("agg-a.txt").exists());
     assert!(!cwd.join("agg-b.txt").exists());
     let snap = st.snapshot().unwrap();
@@ -1159,6 +1161,8 @@ fn aggregate_args_across_rounds_rejected() {
         .run(&st, &r)
         .expect_err("the sum of raw args across rounds must be capped");
     assert_eq!(e.key, "turn-budget", "{e:?}");
+    assert_eq!(e.code, llxprt_code_rs::envelope::Code::Turn);
+    assert_eq!(e.code as i32, 6);
     assert!(cwd.join("args-a.txt").exists());
     assert!(!cwd.join("args-b.txt").exists());
 }

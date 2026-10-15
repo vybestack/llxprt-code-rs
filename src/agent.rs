@@ -714,28 +714,14 @@ impl Turn<'_> {
         rounds: &[RoundRecord],
     ) -> Result<(), AgentError> {
         if rounds.len() + 1 > self.max_rounds {
-            return Err(self.dead(
+            return Err(self.dead_coded(
                 store,
                 reserved,
+                crate::envelope::Code::Turn,
                 "turn-budget",
                 &round_limit_message(self.max_rounds),
                 rounds,
             ));
-        }
-        Ok(())
-    }
-
-    fn check_time_limit(
-        &self,
-        store: &SessionStore,
-        reserved: &ReservedRequest,
-        rounds: &[RoundRecord],
-    ) -> Result<(), AgentError> {
-        if self
-            .deadline
-            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
-        {
-            return Err(self.time_exhausted(store, reserved, rounds));
         }
         Ok(())
     }
@@ -847,9 +833,10 @@ impl Turn<'_> {
         rounds: &[RoundRecord],
     ) -> Result<(), AgentError> {
         if assistant_bytes > MAX_TURN_ASSISTANT_BYTES {
-            return Err(self.dead(
+            return Err(self.dead_coded(
                 store,
                 reserved,
+                crate::envelope::Code::Turn,
                 "turn-budget",
                 &format!(
                     "turn assistant content would exceed the {MAX_TURN_ASSISTANT_BYTES} byte cap",
@@ -858,9 +845,10 @@ impl Turn<'_> {
             ));
         }
         if args_bytes > MAX_TURN_ARGS_BYTES {
-            return Err(self.dead(
+            return Err(self.dead_coded(
                 store,
                 reserved,
+                crate::envelope::Code::Turn,
                 "turn-budget",
                 &format!(
                     "turn tool-call arguments would exceed the {MAX_TURN_ARGS_BYTES} byte cap",
@@ -869,9 +857,10 @@ impl Turn<'_> {
             ));
         }
         if output_bytes > self.output_caps.turn {
-            return Err(self.dead(
+            return Err(self.dead_coded(
                 store,
                 reserved,
+                crate::envelope::Code::Turn,
                 "turn-budget",
                 &format!(
                     "turn tool output would exceed the {} byte cap",

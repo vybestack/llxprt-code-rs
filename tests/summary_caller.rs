@@ -108,6 +108,10 @@ struct Run {
 }
 
 fn run(replies: Vec<Value>, budget: u32, flags: &[&str]) -> Run {
+    run_with_round_limit(replies, budget, flags, -1)
+}
+
+fn run_with_round_limit(replies: Vec<Value>, budget: u32, flags: &[&str], rounds: i64) -> Run {
     // These compiled fixtures perform encrypted-store/fsync setup. Keep this owning binary's
     // cases serial so its absolute deadline assertion does not include competing fixture setup.
     static SERIAL: Mutex<()> = Mutex::new(());
@@ -119,7 +123,8 @@ fn run(replies: Vec<Value>, budget: u32, flags: &[&str]) -> Run {
         workspace.path().join("profiles/fixture.json"),
         json!({
         "provider":"openai","model":"fixture","ephemeralSettings":{
-            "base-url":format!("http://{}",fixture.address),"auth-key":"summary-fixture-only"
+            "base-url":format!("http://{}",fixture.address),"auth-key":"summary-fixture-only",
+            "maxTurnsPerPrompt":rounds
         }})
         .to_string(),
     )
@@ -397,7 +402,7 @@ fn budget_followup_shares_the_turn_deadline_and_preserves_prefix() {
         1,
         &["--turn-time", "1s"],
     );
-    assert_eq!(run.exit, 5);
+    assert_eq!(run.exit, 6);
     assert_eq!(run.output["error"]["code"], "turn-time-exhausted");
     assert_eq!(run.requests.len(), 2);
     assert!(run.elapsed < Duration::from_secs(3), "{:?}", run.elapsed);
@@ -411,4 +416,110 @@ fn budget_followup_shares_the_turn_deadline_and_preserves_prefix() {
         run.state["branches"][0]["rounds"].as_array().unwrap().len(),
         1
     );
+}
+
+#[test]
+fn assistant_byte_cap_is_a_turn_failure_in_the_cli() {
+    use llxprt_code_rs::agent::MAX_TURN_ASSISTANT_BYTES;
+    let run = run(
+        vec![reply(
+            &"x".repeat(MAX_TURN_ASSISTANT_BYTES + 1),
+            vec![],
+            "stop",
+        )],
+        10,
+        &[],
+    );
+    assert_eq!(run.exit, 6);
+    assert_eq!(run.output["error"]["code"], "turn-budget");
+    assert_eq!(
+        run.output["error"]["message"],
+        format!("turn assistant content would exceed the {MAX_TURN_ASSISTANT_BYTES} byte cap")
+    );
+    assert_eq!(run.requests.len(), 1);
+    assert_eq!(run.state["branches"][0]["lifecycle"], "failed");
+}
+
+#[test]
+fn tool_argument_cap_is_a_turn_failure_before_side_effects_in_the_cli() {
+    use llxprt_code_rs::agent::MAX_TURN_ARGS_BYTES;
+    let run = run(
+        vec![reply(
+            "Working",
+            vec![call(
+                "write",
+                "write_file",
+                json!({"path":"must-not-exist", "content":"x".repeat(MAX_TURN_ARGS_BYTES)}),
+            )],
+            "tool_calls",
+        )],
+        10,
+        &[],
+    );
+    assert_eq!(run.exit, 6);
+    assert_eq!(run.output["error"]["code"], "turn-budget");
+    assert_eq!(
+        run.output["error"]["message"],
+        format!("turn tool-call arguments would exceed the {MAX_TURN_ARGS_BYTES} byte cap")
+    );
+    assert_eq!(run.requests.len(), 1);
+    assert_eq!(run.state["branches"][0]["lifecycle"], "failed");
+    assert!(!run.workspace.path().join("must-not-exist").exists());
+}
+
+#[test]
+fn round_cap_is_a_turn_failure_in_the_cli() {
+    let run = run_with_round_limit(
+        vec![
+            reply(
+                "Listing",
+                vec![call("list", "list_directory", json!({"path":"."}))],
+                "tool_calls",
+            ),
+            reply("Done", vec![], "stop"),
+        ],
+        10,
+        &[],
+        1,
+    );
+    assert_eq!(run.exit, 6);
+    assert_eq!(run.output["error"]["code"], "turn-budget");
+    assert_eq!(
+        run.output["error"]["message"],
+        "turn would exceed the 1 round cap; give a final summary instead"
+    );
+    assert_eq!(run.requests.len(), 2);
+    assert_eq!(run.state["branches"][0]["lifecycle"], "failed");
+    assert_eq!(
+        run.state["branches"][0]["rounds"].as_array().unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn tool_output_cap_is_a_turn_failure_in_the_cli() {
+    let run = run(
+        vec![reply(
+            "Listing",
+            vec![call("list", "list_directory", json!({"path":"."}))],
+            "tool_calls",
+        )],
+        10,
+        &[
+            "--max-turn-output",
+            "1",
+            "--max-tool-output",
+            "1",
+            "--max-shell-output",
+            "1",
+        ],
+    );
+    assert_eq!(run.exit, 6);
+    assert_eq!(run.output["error"]["code"], "turn-budget");
+    assert_eq!(
+        run.output["error"]["message"],
+        "turn tool output would exceed the 1 byte cap"
+    );
+    assert_eq!(run.requests.len(), 1);
+    assert_eq!(run.state["branches"][0]["lifecycle"], "failed");
 }

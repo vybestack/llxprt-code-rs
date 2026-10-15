@@ -87,15 +87,31 @@ impl<'a> Turn<'a> {
         })
     }
 
+    pub(super) fn check_time_limit(
+        &self,
+        store: &SessionStore,
+        reserved: &ReservedRequest,
+        rounds: &[RoundRecord],
+    ) -> Result<(), AgentError> {
+        if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Err(self.time_exhausted(store, reserved, rounds));
+        }
+        Ok(())
+    }
+
     pub(super) fn time_exhausted(
         &self,
         store: &SessionStore,
         reserved: &ReservedRequest,
         rounds: &[RoundRecord],
     ) -> AgentError {
-        self.dead(
+        self.dead_coded(
             store,
             reserved,
+            crate::envelope::Code::Turn,
             "turn-time-exhausted",
             &format!(
                 "turn time budget ({}s) exceeded; raise --turn-time or pass 0 to disable",

@@ -251,14 +251,14 @@ fn quota_and_permanent_errors_do_not_retry() {
 }
 #[test]
 fn deadline_and_oversized_hint_stop_before_reissue() {
-    for (hint, budget, code, message) in [
-        (7, "1s", "turn-time-exhausted", "turn time budget"),
-        (31, "10s", "model-rate-limit", "0/3 used, 3 remaining"),
+    for (hint, budget, status, code, message) in [
+        (7, "1s", 6, "turn-time-exhausted", "turn time budget"),
+        (31, "10s", 5, "model-rate-limit", "0/3 used, 3 remaining"),
     ] {
         let f = Fixture::new();
         let child = f.spawn(budget);
         respond(&f.listener, throttle(Some(hint)));
-        let output = envelope(finish(child), 5);
+        let output = envelope(finish(child), status);
         assert_eq!(output["error"]["code"], code);
         assert_eq!(output["error"]["retry_attempts"], 0);
         assert!(output["error"]["message"]

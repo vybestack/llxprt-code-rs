@@ -230,12 +230,13 @@ fn timeout_failure_carries_wall_time_and_durable_cancelled_call() {
         .unwrap();
     assert_eq!(
         output.status.code(),
-        Some(5),
+        Some(6),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
     server.join().unwrap();
     let value = envelope(&output);
+    assert_eq!(value["error"]["code"], "turn-time-exhausted");
     let t = &value["telemetry"];
     assert!(t["turn_wall_ms"].as_u64().unwrap() >= 900);
     assert_eq!(t["rounds"][0]["outcome"], "cancelled");
