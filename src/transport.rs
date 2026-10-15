@@ -34,12 +34,12 @@ pub const MAX_TRANSPORT_DIAGNOSTIC_BYTES: usize = 1024;
 /// retry and backoff behavior is owned separately.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TransportKind {
-    /// A provider throttle: HTTP 429 without quota or billing wording. Retryable.
+    /// A provider throttle: HTTP 429 or a categorized SSE rate limit. Retryable.
     RateLimit,
     /// A quota or billing hard stop (a weekly usage cap, `insufficient_quota`). Not
     /// retryable: backoff cannot clear it.
     QuotaExhausted,
-    /// A transient provider-side failure (5xx). Retryable.
+    /// A transient provider-side failure (5xx or categorized SSE error). Retryable.
     TransientServer,
     /// A connection-level failure: connect, timeout, or a dropped body. Retryable.
     Connectivity,
@@ -143,12 +143,15 @@ pub fn context_length_400(
 }
 
 impl TransportFailure {
-    /// Extract the classification from a vendored model error. `None` when the error is
-    /// not a transport-layer failure.
+    /// Extract the classification from a vendored transport or categorized SSE
+    /// provider error. `None` when no known transport class is supplied.
     pub fn from_model_error(error: &serdes_ai::models::ModelError) -> Option<Self> {
         use serdes_ai::models::ModelError;
         let (kind, origin, url_class, status, body_prefix, body_bytes, retry_after) = match error {
             ModelError::Transport(detail) => return Some(Self::from_detail(detail)),
+            ModelError::Api { message, code } => {
+                return Self::from_sse_category(message, code.as_deref());
+            }
             ModelError::Timeout => (
                 TransportKind::Connectivity,
                 "timeout",
@@ -217,6 +220,26 @@ impl TransportFailure {
             body_prefix,
             body_bytes,
             retry_after,
+            observation: Box::default(),
+        })
+    }
+
+    /// Classify the decoder's structured SSE category, never provider prose.
+    /// No HTTP refusal is fabricated: stream failures cannot authorize replay.
+    fn from_sse_category(message: &str, code: Option<&str>) -> Option<Self> {
+        let kind = match code {
+            Some("sse_provider_server_error") => TransportKind::TransientServer,
+            Some("sse_provider_rate_limit_exceeded") => TransportKind::RateLimit,
+            _ => return None,
+        };
+        Some(Self {
+            kind,
+            origin: "sse-provider",
+            url_class: None,
+            status: None,
+            body_prefix: Some(bounded_prefix(message)),
+            body_bytes: message.len(),
+            retry_after: None,
             observation: Box::default(),
         })
     }
@@ -370,6 +393,44 @@ mod tests {
             retry_after: None,
             observation: Box::default(),
         }
+    }
+
+    #[test]
+    fn sse_categories_classify_without_authorizing_replay_or_parsing_prose() {
+        use serdes_ai::models::ModelError;
+        for (code, kind) in [
+            ("sse_provider_server_error", TransportKind::TransientServer),
+            ("sse_provider_rate_limit_exceeded", TransportKind::RateLimit),
+        ] {
+            let error = ModelError::api_with_code("sanitized stream diagnostic", code);
+            let failure = TransportFailure::from_model_error(&error).unwrap();
+            assert_eq!(failure.kind, kind);
+            assert_eq!(failure.origin, "sse-provider");
+            assert_eq!(failure.status, None);
+            assert_eq!(failure.retry_after, None);
+            assert!(!failure.permits_replay());
+            assert!(failure.diagnostic().contains("sanitized stream diagnostic"));
+        }
+        for code in [
+            "sse_provider_unclassified",
+            "sse_provider_model_error",
+            "sse_provider_server_error_extra",
+            "server_error",
+            "rate_limit_exceeded",
+        ] {
+            let error = ModelError::api_with_code(
+                "responses SSE: server_error; server_is_overloaded; status=503; rate_limit_exceeded",
+                code,
+            );
+            assert!(
+                TransportFailure::from_model_error(&error).is_none(),
+                "{code}"
+            );
+        }
+        assert!(
+            TransportFailure::from_model_error(&ModelError::api("sse_provider_server_error"))
+                .is_none()
+        );
     }
 
     /// The vendored status classification, driven through the host kinds: quota wording
