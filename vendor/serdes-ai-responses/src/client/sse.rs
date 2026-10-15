@@ -134,6 +134,25 @@ fn decode(name: Option<&str>, data: &str, has_data: bool) -> Result<Frame, Model
         }
         return Ok(Frame::Control);
     }
+    if kind == "response.metadata" {
+        // Informational provider annotation (moderation verdicts) that carries no
+        // response state. It is discarded unread, so its contents never reach
+        // diagnostics, and it cannot mutate the folded response or terminal state.
+        if object.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "type" | "sequence_number" | "response_id" | "metadata"
+            )
+        }) || !object.get("metadata").is_some_and(|v| v.is_object())
+            || object
+                .get("sequence_number")
+                .is_some_and(|v| v.as_u64().is_none())
+            || object.get("response_id").is_some_and(|v| !v.is_string())
+        {
+            return Err(invalid("ambiguous metadata event"));
+        }
+        return Ok(Frame::Control);
+    }
     if kind == "error" {
         object.remove("type");
         if let Some(sequence) = object.remove("sequence_number") {
@@ -512,6 +531,38 @@ mod tests {
         assert!(matches!(result[0], Frame::Control));
         assert!(matches!(result[1], Frame::Control));
         assert!(matches!(result[2], Frame::Done));
+    }
+
+    #[test]
+    fn response_metadata_is_discarded_like_a_control_frame() {
+        // Synthetic, redacted shape of the Codex moderation annotation.
+        let input = concat!(
+            "event: response.metadata\n",
+            "data: {\"type\":\"response.metadata\",\"sequence_number\":3,",
+            "\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":",
+            "{\"prompt\":{\"protection_type\":\"p\",\"omnimod\":{\"outputs\":[{\"is_blocked\":false,",
+            "\"results\":[{\"category_flags\":{\"A1\":false,\"REFUSED\":false}}]}]}},",
+            "\"generation\":{},\"tool_call\":{},\"tool_response\":{}}}}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":{}}\n\n",
+        );
+        let result = frames(input.as_bytes()).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|frame| matches!(frame, Frame::Control)));
+    }
+
+    #[test]
+    fn ambiguous_response_metadata_fails_closed() {
+        for input in [
+            "data: {\"type\":\"response.metadata\"}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":[]}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":{},\"error\":{}}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":{},\"response\":{}}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":{},\"sequence_number\":\"3\"}\n\n",
+            "data: {\"type\":\"response.metadata\",\"metadata\":{},\"response_id\":7}\n\n",
+            "event: response.created\ndata: {\"type\":\"response.metadata\",\"metadata\":{}}\n\n",
+        ] {
+            assert!(frames(input.as_bytes()).is_err(), "accepted {input}");
+        }
     }
 
     #[test]
