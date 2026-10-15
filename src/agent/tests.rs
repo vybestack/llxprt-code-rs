@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 mod issue243_digest_budget;
+mod turn_budget_classification;
 
 /// A scripted backend for the forced-summary accounting tests: each call pops the
 /// next canned reply, repeating the last when exhausted.
@@ -262,7 +263,8 @@ fn forced_response_at_remaining_cap_plus_one_fails_terminally() {
     let _ = rr;
     assert_eq!(e.key, "turn-budget");
     assert!(e.message.contains("assistant content"), "{}", e.message);
-    assert_eq!(e.code, crate::envelope::Code::Model);
+    assert_eq!(e.code, crate::envelope::Code::Turn);
+    assert_eq!(e.code as i32, 6);
     let snap = st.snapshot().unwrap();
     let b = snap.branches[0].clone();
     assert_eq!(b.lifecycle, Lifecycle::Failed);
@@ -485,6 +487,8 @@ fn normal_summary_after_maximum_tool_round_exceeds_cap() {
         .run(&store, &reserved)
         .expect_err("normal final response must exceed cap");
     assert_eq!(error.key, "turn-budget");
+    assert_eq!(error.code, crate::envelope::Code::Turn);
+    assert_eq!(error.code as i32, 6);
     assert_eq!(
         error.message,
         "turn would exceed the 1 round cap; give a final summary instead"
@@ -543,6 +547,8 @@ fn forced_summary_counts_already_persisted_rounds() {
         .run(&store, &reserved)
         .expect_err("forced round must exceed cap");
     assert_eq!(error.key, "turn-budget");
+    assert_eq!(error.code, crate::envelope::Code::Turn);
+    assert_eq!(error.code as i32, 6);
     assert_eq!(agent.model_calls(), 3);
 }
 

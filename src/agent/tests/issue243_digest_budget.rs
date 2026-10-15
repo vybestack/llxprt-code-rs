@@ -140,7 +140,8 @@ fn an_exhausted_turn_budget_fails_with_the_typed_output_cap_refusal() {
         .run
         .expect_err("a 1-byte turn budget must fail, not fake a completed run");
     assert_eq!(error.key, "turn-budget");
-    assert_eq!(error.code, crate::envelope::Code::Model);
+    assert_eq!(error.code, crate::envelope::Code::Turn);
+    assert_eq!(error.code as i32, 6);
     assert!(
         error
             .message

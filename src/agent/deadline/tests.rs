@@ -136,7 +136,8 @@ impl Fixture {
     fn assert_timeout(&mut self, calls: usize, rounds: usize) {
         let error = self.run().unwrap_err();
         assert_eq!(error.key, "turn-time-exhausted");
-        assert_eq!(error.code, crate::envelope::Code::Model);
+        assert_eq!(error.code, crate::envelope::Code::Turn);
+        assert_eq!(error.code as i32, 6);
         assert!(error
             .message
             .contains("raise --turn-time or pass 0 to disable"));
@@ -255,6 +256,8 @@ fn provider_timeout_keeps_its_own_failure_instead_of_turn_budget() {
     );
     let error = f.run().unwrap_err();
     assert_eq!(error.key, "model");
+    assert_eq!(error.code, crate::envelope::Code::Model);
+    assert_eq!(error.code as i32, 5);
     assert_eq!(f.active.get(), 0);
 }
 
@@ -295,6 +298,8 @@ fn provider_request_timeout_after_naming_failure_is_not_a_turn_timeout() {
     );
     let error = f.run().unwrap_err();
     assert_eq!(error.key, "model");
+    assert_eq!(error.code, crate::envelope::Code::Model);
+    assert_eq!(error.code as i32, 5);
     assert!(error.message.contains("configured timeout"));
     assert_eq!(f.agent.model_calls(), 2);
     assert_eq!(f.active.get(), 0);
