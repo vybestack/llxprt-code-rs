@@ -493,6 +493,9 @@ async fn valid_nonterminal_lifecycle_remains_supported_in_folded_and_streaming_c
         });
         // A nested error in opaque keepalive payload remains transport metadata.
         body += "data: {\"type\":\"keepalive\",\"payload\":{\"type\":\"error\",\"message\":\"SECRET\"}}\n\n";
+        // The Codex moderation annotation (synthetic, redacted) is informational and
+        // must not disturb the folded or streamed response.
+        body += "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":2,\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{\"protection_type\":\"p\",\"omnimod\":{\"outputs\":[{\"is_blocked\":false,\"results\":[{\"category_flags\":{\"A1\":false,\"REFUSED\":false}}]}]}},\"generation\":{},\"tool_call\":{},\"tool_response\":{}}}}\n\n";
         body += &terminal(false);
         let (model, server) = serve(body.clone().into_bytes());
         assert!(model

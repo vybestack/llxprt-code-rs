@@ -1,5 +1,19 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Codex `response.metadata` annotation
+
+The Codex backend began streaming a `response.metadata` event (keys `type`, `sequence_number`,
+`response_id`, `metadata`) whose payload is a moderation annotation. The closed `StreamEvent`
+enum rejected it, so every Codex turn failed within the first stream events. The SSE decoder now
+classifies it as an informational control frame next to `keepalive`: the payload is discarded
+unread, it never reaches diagnostics, and it cannot mutate the folded response, tool lifecycle or
+terminal state. The event is accepted only when `metadata` is an object, `sequence_number` is an
+unsigned integer and `response_id` is a string when present, no other top-level key is present, and
+any SSE event name agrees with the payload type; anything else is rejected as ambiguous. Other
+unknown event types remain rejected by the closed enum, and terminal and contradiction checks are
+unchanged. Decoder tests and a loopback stream test with a synthetic redacted fixture cover it. The
+aggregate patch and both strict digest pins are regenerated.
+
 ## Issue 78: checkpoint-epoch cache mapping
 
 OpenAI Chat, OpenAI Responses and Codex Responses derive routing keys from the
@@ -128,7 +142,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `1675c657a14580ee8db01ffcf0d0d7709ba70fb20ba0df515405513abc7de347`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `48028ba321ab80c1378316008d63aee4e82121a9f4b07dd8254bdc8be7202c07`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:
