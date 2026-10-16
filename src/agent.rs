@@ -897,6 +897,7 @@ enum RoundFailure {
     RetryTranscript(std::io::Error),
     TurnTime,
     Model(String),
+    ProtocolUnsupported(String),
     ToolCallRefusal(String),
     InvalidToolCall(String),
     FinishReason(String),

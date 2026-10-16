@@ -1,5 +1,39 @@
 # Vendored local patches on serdes-ai 0.2.6
 
+## Issue 404: Responses SSE protocol evolution
+
+Unknown informational event types are discarded as control frames and logged through
+`tracing::warn!` with the validated type name only, never their payload. The reserved
+semantic prefixes are `response.output_`, `response.function_call_`,
+`response.content_part`, `response.reasoning_`, `response.created`,
+`response.in_progress`, `response.queued`, `response.completed`, `response.failed`,
+`response.incomplete`, `response.cancelled`, and `error`. Unknown types under any
+reserved prefix remain fatal. All currently modeled `StreamEvent` types lie in
+these families; malformed known types never fall through to informational handling.
+The explicitly modeled `keepalive` and `response.metadata` controls retain their
+fail-closed shape checks.
+
+Every frame still passes the existing byte limit, UTF-8, unique-key JSON object,
+string type and SSE-name agreement checks. Type identifiers must be 1–128 ASCII
+letters, digits, underscores, dots or hyphens; unsafe names are rejected without
+echoing them. Unknown informational events also require an unsigned
+`sequence_number` when present; their remaining fields are opaque and discarded,
+not interpreted as output, tools, error or terminal authority. They do not count
+as response progress or replace a terminal event, and cannot bypass DONE ordering.
+This is the current wire-protocol rule, not an old-format reader or a fallback.
+
+The decoder now reports protocol/shape failures as the non-retryable
+`ModelError::ProtocolUnsupported`, retaining a validated `event_type` in its
+boundary-generated detail when available. The folded request preserves its
+progress count on this typed error. The adapter and agent carry the type (without
+message matching) to stdout `error.code = "model-protocol-unsupported"`, exit 5.
+No partial reply or tool runs, and no retry is issued. Provider-declared errors,
+tool-lifecycle contradictions and transport interruptions keep their existing behavior.
+Direct decoder tests, a diagnostic capture test and production agent loopback tests
+cover informational extensions, semantic drift, malformed known events, redaction,
+partial-tool discard and no replay. The retained aggregate patch and both strict
+digest pins are regenerated; no upstream identities or dependencies change.
+
 ## Codex `response.metadata` annotation
 
 The Codex backend began streaming a `response.metadata` event (keys `type`, `sequence_number`,
@@ -10,7 +44,7 @@ unread, it never reaches diagnostics, and it cannot mutate the folded response, 
 terminal state. The event is accepted only when `metadata` is an object, `sequence_number` is an
 unsigned integer and `response_id` is a string when present, no other top-level key is present, and
 any SSE event name agrees with the payload type; anything else is rejected as ambiguous. Other
-unknown event types remain rejected by the closed enum, and terminal and contradiction checks are
+unknown event types now follow the issue #404 rule below; terminal and contradiction checks are
 unchanged. Decoder tests and a loopback stream test with a synthetic redacted fixture cover it. The
 aggregate patch and both strict digest pins are regenerated.
 
@@ -142,7 +176,7 @@ Each vendored crate archive is SerdesAI 0.2.6 from crates.io. Every shipped
 | `serdes-ai-tools` | `ae4c635d97827560acaa8d3af32a78fc50fece538d1e4638c889c7588f490777` |
 | `serdes-ai-toolsets` | `85e7ab76a1546ce6aa858c7a0fd438dd4235b3927fcf5a907bec26bacb6f2588` |
 
-`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `48028ba321ab80c1378316008d63aee4e82121a9f4b07dd8254bdc8be7202c07`.
+`SERDES-AI-0.2.6.patch` is the complete diff from those extracted archives and the retained Responses Git snapshot to `vendor/`, including path-dependency rewrites, the bounded client-only Responses selection, and source compatibility changes. Its SHA-256 is `6225ab1208c046470a8b7141f27b19dec314e2a69ade295afee3962ea5bc7342`.
 `bash scripts/regenerate-serdes-patch.sh` recreates the patch from all 11 crates.io archives and the pinned Git snapshot in a temporary Git repository. It uses a committed archive baseline plus `git add -N` before the binary diff so
 new files, modifications, and deletions are all represented.
 The 11 exact crates.io archives and the Git archive of the Responses subtree are retained under `vendor-upstream/`. The snapshot identity and SHA-256 are recorded in `provenance/serdes-ai-responses-git.json`. To reproduce the vendored tree:

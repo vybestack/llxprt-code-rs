@@ -267,3 +267,68 @@ fn sse_provider_categories_reach_terminal_json_without_replay() {
         }
     }
 }
+
+#[test]
+fn informational_protocol_extensions_do_not_change_completion_or_tools() {
+    let baseline = healthy();
+    let annotation = json!({"type":"response.annotation.future","sequence_number":1,
+        "metadata":{"secret":"fixture-only-secret","type":"error"}});
+    let (result, requests, transcript, _) = run_detailed(vec![(
+        format!("data: {annotation}\n\n{baseline}data: {annotation}\n\n"),
+        0,
+    )]);
+    let result = result.unwrap();
+    assert_eq!(result.retry_attempts, 0);
+    assert_eq!(requests.len(), 1);
+    assert!(!transcript.to_string().contains("fixture-only-secret"));
+    assert!(transcript["turns"][0]["model_retries"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn semantic_protocol_drift_reaches_terminal_json_without_replay_or_partial_tools() {
+    for kind in [
+        "response.output_future.delta",
+        "response.function_call_future.delta",
+        "response.content_part.future",
+        "response.reasoning_future.delta",
+        "response.completed.future",
+        "response.failed.future",
+        "response.incomplete.future",
+        "response.created",
+        "response.metadata",
+    ] {
+        let event = json!({"type":kind,"payload":"fixture-only-secret"});
+        let (result, requests, transcript, root) = run_detailed(vec![(
+            format!("{}data: {event}\n\n{}", partial(), healthy()),
+            0,
+        )]);
+        let error = result.expect_err("semantic drift must fail closed");
+        assert_eq!(error.code as i32, 5);
+        assert_eq!(error.retry_attempts, Some(0));
+        let envelope = crate::envelope::Envelope::error(
+            "stream-retry",
+            error.envelope_code.unwrap_or(error.key),
+            &error.message,
+        );
+        let terminal: Value = serde_json::from_slice(&envelope.to_line()).unwrap();
+        assert_eq!(terminal["status"], "error");
+        assert_eq!(terminal["error"]["code"], "model-protocol-unsupported");
+        assert!(error.message.contains(kind), "{}", error.message);
+        assert!(error.message.contains("accumulated"), "{}", error.message);
+        assert!(!error.message.contains("fixture-only-secret"));
+        assert!(!error.message.contains("partial-secret"));
+        assert_eq!(requests.len(), 1);
+        assert!(!root.path().join("must-not-exist").exists());
+        assert!(transcript["turns"][0]["model_retries"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(transcript["turns"][0]["rounds"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+}

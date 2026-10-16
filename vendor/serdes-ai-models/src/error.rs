@@ -274,6 +274,10 @@ pub enum ModelError {
     Authentication(String),
     /// Invalid response from the API.
     InvalidResponse(String),
+    /// Unsupported or malformed provider protocol. Not retryable: the client needs
+    /// a protocol update, not a replay. Only boundary-sanitized details are retained;
+    /// public formatting never renders this field.
+    ProtocolUnsupported(String),
     /// SSE transport ended before a terminal event. No complete response was admitted.
     StreamInterrupted {
         /// Progress retained by the folded request API; never a completion.
@@ -331,6 +335,7 @@ impl std::fmt::Display for ModelError {
             }
             Self::Authentication(_) => f.write_str("Model authentication failed"),
             Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
+            Self::ProtocolUnsupported(_) => f.write_str("Model protocol is unsupported"),
             Self::StreamInterrupted { events } => write!(
                 f,
                 "Model response stream interrupted before terminal event ({events} events)"
@@ -549,6 +554,16 @@ pub type ModelResult<T> = Result<T, ModelError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_drift_is_nonretryable_and_public_formatting_hides_details() {
+        let error = ModelError::ProtocolUnsupported("SECRET".into());
+        assert!(!error.is_retryable());
+        assert!(error.transport_class().is_none());
+        assert_eq!(error.retry_after(), None);
+        assert_eq!(error.to_string(), "Model protocol is unsupported");
+        assert!(!format!("{error:?}").contains("SECRET"));
+    }
 
     #[test]
     fn test_is_retryable() {

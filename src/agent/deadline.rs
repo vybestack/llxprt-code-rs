@@ -187,6 +187,9 @@ impl<'a> Turn<'a> {
                         RoundFailure::ModelTransport(failure)
                     }
                     crate::adapter::BackendError::Message(message) => RoundFailure::Model(message),
+                    crate::adapter::BackendError::ProtocolUnsupported(message) => {
+                        RoundFailure::ProtocolUnsupported(message)
+                    }
                     crate::adapter::BackendError::RequestBound { limit } => {
                         RoundFailure::RequestBound { limit }
                     }

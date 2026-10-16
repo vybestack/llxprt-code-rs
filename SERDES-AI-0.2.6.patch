@@ -12750,7 +12750,7 @@ index ed106b6..9090fbc 100644
  }
  
 diff --git a/vendor/serdes-ai-models/src/error.rs b/vendor/serdes-ai-models/src/error.rs
-index 58b6fc1..31f7309 100644
+index 58b6fc1..f134821 100644
 --- a/vendor/serdes-ai-models/src/error.rs
 +++ b/vendor/serdes-ai-models/src/error.rs
 @@ -1,14 +1,247 @@
@@ -13013,7 +13013,7 @@ index 58b6fc1..31f7309 100644
      Api {
          /// Error message.
          message: String,
-@@ -27,69 +259,140 @@ pub enum ModelError {
+@@ -27,69 +259,145 @@ pub enum ModelError {
          code: Option<String>,
      },
  
@@ -13040,6 +13040,10 @@ index 58b6fc1..31f7309 100644
 -    #[error("Invalid response: {0}")]
      InvalidResponse(String),
 -
++    /// Unsupported or malformed provider protocol. Not retryable: the client needs
++    /// a protocol update, not a replay. Only boundary-sanitized details are retained;
++    /// public formatting never renders this field.
++    ProtocolUnsupported(String),
 +    /// SSE transport ended before a terminal event. No complete response was admitted.
 +    StreamInterrupted {
 +        /// Progress retained by the folded request API; never a completion.
@@ -13118,6 +13122,7 @@ index 58b6fc1..31f7309 100644
 +            }
 +            Self::Authentication(_) => f.write_str("Model authentication failed"),
 +            Self::InvalidResponse(_) => f.write_str("Model returned an invalid response"),
++            Self::ProtocolUnsupported(_) => f.write_str("Model protocol is unsupported"),
 +            Self::StreamInterrupted { events } => write!(
 +                f,
 +                "Model response stream interrupted before terminal event ({events} events)"
@@ -13183,7 +13188,7 @@ index 58b6fc1..31f7309 100644
  }
  
  impl ModelError {
-@@ -97,14 +400,34 @@ impl ModelError {
+@@ -97,14 +405,34 @@ impl ModelError {
      #[must_use]
      pub fn is_retryable(&self) -> bool {
          match self {
@@ -13219,7 +13224,7 @@ index 58b6fc1..31f7309 100644
      /// Get the retry-after duration if applicable.
      #[must_use]
      pub fn retry_after(&self) -> Option<Duration> {
-@@ -199,18 +522,23 @@ impl ModelError {
+@@ -199,18 +527,23 @@ impl ModelError {
  
  impl From<reqwest::Error> for ModelError {
      fn from(err: reqwest::Error) -> Self {
@@ -13247,8 +13252,20 @@ index 58b6fc1..31f7309 100644
          }
      }
  }
-@@ -224,7 +552,7 @@ mod tests {
+@@ -222,9 +555,19 @@ pub type ModelResult<T> = Result<T, ModelError>;
+ mod tests {
+     use super::*;
  
++    #[test]
++    fn protocol_drift_is_nonretryable_and_public_formatting_hides_details() {
++        let error = ModelError::ProtocolUnsupported("SECRET".into());
++        assert!(!error.is_retryable());
++        assert!(error.transport_class().is_none());
++        assert_eq!(error.retry_after(), None);
++        assert_eq!(error.to_string(), "Model protocol is unsupported");
++        assert!(!format!("{error:?}").contains("SECRET"));
++    }
++
      #[test]
      fn test_is_retryable() {
 -        assert!(ModelError::Timeout(Duration::from_secs(30)).is_retryable());
@@ -13256,7 +13273,7 @@ index 58b6fc1..31f7309 100644
          assert!(ModelError::rate_limited(None).is_retryable());
          assert!(ModelError::Connection("failed".into()).is_retryable());
          assert!(ModelError::http(500, "Server error").is_retryable());
-@@ -244,16 +572,249 @@ mod tests {
+@@ -244,16 +587,249 @@ mod tests {
          let err = ModelError::rate_limited(None);
          assert_eq!(err.retry_after(), None);
  
@@ -27393,7 +27410,7 @@ index 0000000..45d03c3
 +    }
 +}
 diff --git a/vendor/serdes-ai-responses/src/client/mod.rs b/vendor/serdes-ai-responses/src/client/mod.rs
-index f90cc22..fc5c0bc 100644
+index f90cc22..d8c2c95 100644
 --- a/vendor/serdes-ai-responses/src/client/mod.rs
 +++ b/vendor/serdes-ai-responses/src/client/mod.rs
 @@ -6,6 +6,9 @@
@@ -27923,7 +27940,7 @@ index f90cc22..fc5c0bc 100644
                      details: None,
                  }),
                  vendor_id: Some(object.id),
-@@ -759,22 +943,39 @@ impl OpenResponsesModel {
+@@ -759,22 +943,42 @@ impl OpenResponsesModel {
      }
  }
  
@@ -27934,6 +27951,9 @@ index f90cc22..fc5c0bc 100644
 +fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
 +    match error {
 +        ModelError::StreamInterrupted { .. } => ModelError::StreamInterrupted { events },
++        ModelError::ProtocolUnsupported(detail) => ModelError::ProtocolUnsupported(format!(
++            "{detail}; accumulated {events} stream events (partial response is not completion)"
++        )),
 +        ModelError::InvalidResponse(detail) => ModelError::InvalidResponse(format!(
 +            "{detail}; accumulated {events} stream events (partial response is not completion)"
 +        )),
@@ -27969,7 +27989,7 @@ index f90cc22..fc5c0bc 100644
      let mut session = inner.session.lock().await;
  
      let response = loop {
-@@ -788,20 +989,28 @@ async fn run_http_stream(
+@@ -788,20 +992,28 @@ async fn run_http_stream(
          let mut request = build_request(inner, messages, settings, params, skip, previous, true)?;
          request.stream = Some(true);
  
@@ -28006,7 +28026,7 @@ index f90cc22..fc5c0bc 100644
              .ok()
              .map(|envelope| envelope.error.code)
              .unwrap_or_default();
-@@ -810,32 +1019,79 @@ async fn run_http_stream(
+@@ -810,32 +1022,79 @@ async fn run_http_stream(
              session.sent_requests = 0;
              continue;
          }
@@ -28101,7 +28121,7 @@ index f90cc22..fc5c0bc 100644
                  match translated {
                      Ok(event) => {
                          tx.send(Ok(event))
-@@ -846,14 +1102,94 @@ async fn run_http_stream(
+@@ -846,14 +1105,95 @@ async fn run_http_stream(
                          // Error delivered as a stream item; returning Ok
                          // avoids the task re-sending it.
                          let _ = tx.send(Err(error)).await;
@@ -28141,10 +28161,11 @@ index f90cc22..fc5c0bc 100644
 +    use super::sse::{Decoder, Frame};
 +
 +    #[test]
-+    fn sse_keepalives_are_transport_only_and_other_types_remain_closed() {
++    fn sse_controls_and_annotations_are_transport_only_and_semantic_types_remain_closed() {
 +        for payload in [
 +            r#"{"type":"keepalive"}"#,
 +            r#"{"type":"keepalive","payload":{"tick":1}}"#,
++            r#"{"type":"response.not_a_real_event","payload":{"tick":1}}"#,
 +        ] {
 +            let mut decoder = Decoder::default();
 +            let mut controls = 0;
@@ -28158,7 +28179,7 @@ index f90cc22..fc5c0bc 100644
 +            decoder.finish().unwrap();
 +        }
 +        let mut decoder = Decoder::default();
-+        assert!("data: {\"type\":\"response.not_a_real_event\"}\n\n"
++        assert!("data: {\"type\":\"response.output_not_a_real_event\"}\n\n"
 +            .bytes()
 +            .try_for_each(|byte| decoder.byte(byte).map(|_| ()))
 +            .is_err());
@@ -28202,10 +28223,10 @@ index f90cc22..fc5c0bc 100644
  }
 diff --git a/vendor/serdes-ai-responses/src/client/sse.rs b/vendor/serdes-ai-responses/src/client/sse.rs
 new file mode 100644
-index 0000000..e60673a
+index 0000000..ed6286a
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/src/client/sse.rs
-@@ -0,0 +1,678 @@
+@@ -0,0 +1,888 @@
 +//! Strict Responses SSE transport boundary. No payload text enters diagnostics.
 +use crate::types::{ResponseStatus, StreamEvent};
 +use serde::Deserialize;
@@ -28220,7 +28241,7 @@ index 0000000..e60673a
 +}
 +
 +fn invalid(reason: &str) -> ModelError {
-+    ModelError::InvalidResponse(format!("responses SSE: {reason}"))
++    ModelError::ProtocolUnsupported(format!("responses SSE: {reason}"))
 +}
 +
 +#[derive(Default)]
@@ -28316,20 +28337,69 @@ index 0000000..e60673a
 +        }
 +        return Ok(Frame::Done);
 +    }
-+    let mut value: serde_json::Value = serde_json::from_str::<super::sse_json::Unique>(data)
++    let value: serde_json::Value = serde_json::from_str::<super::sse_json::Unique>(data)
 +        .map_err(|_| invalid("malformed or duplicate-key JSON payload"))?
 +        .0;
 +    let object = value
-+        .as_object_mut()
++        .as_object()
 +        .ok_or_else(|| invalid("payload is not an object"))?;
 +    let kind = object
 +        .get("type")
 +        .and_then(|v| v.as_str())
 +        .ok_or_else(|| invalid("missing or invalid event type"))?
 +        .to_string();
-+    if name.is_some_and(|name| name != kind) {
-+        return Err(invalid("event name disagrees with payload type"));
++    // Type names are untrusted input too. Never log arbitrary prose, URLs,
++    // control characters or an unbounded string from the provider.
++    if !valid_event_type(&kind) {
++        return Err(invalid("invalid event type identifier"));
 +    }
++    let result = if name.is_some_and(|name| name != kind) {
++        Err(invalid("event name disagrees with payload type"))
++    } else {
++        decode_event(&kind, value)
++    };
++    result.map_err(|error| match error {
++        ModelError::ProtocolUnsupported(detail) => {
++            ModelError::ProtocolUnsupported(format!("{detail}; event_type={kind}"))
++        }
++        other => other,
++    })
++}
++
++fn valid_event_type(kind: &str) -> bool {
++    !kind.is_empty()
++        && kind.len() <= 128
++        && kind
++            .bytes()
++            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
++}
++
++/// Names in semantic families can change response state, tool arguments or the
++/// terminal verdict. Unknown members must never disappear as annotations. The
++/// reasoning family is reserved as well: it carries private continuation state.
++fn semantic_event_type(kind: &str) -> bool {
++    [
++        "response.output_",
++        "response.function_call_",
++        "response.content_part",
++        "response.reasoning_",
++        "response.created",
++        "response.in_progress",
++        "response.queued",
++        "response.completed",
++        "response.failed",
++        "response.incomplete",
++        "response.cancelled",
++        "error",
++    ]
++    .iter()
++    .any(|prefix| kind.starts_with(prefix))
++}
++
++fn decode_event(kind: &str, mut value: serde_json::Value) -> Result<Frame, ModelError> {
++    let object = value
++        .as_object_mut()
++        .expect("object checked at envelope boundary");
 +    if kind == "keepalive" {
 +        if object
 +            .keys()
@@ -28407,8 +28477,23 @@ index 0000000..e60673a
 +        let code = response.error.map(|error| error.code);
 +        return Err(provider_failure(code.as_deref(), None, status));
 +    }
++    if !semantic_event_type(kind) {
++        // This rule is intentionally name-based, not a payload heuristic. An
++        // informational extension cannot supply lifecycle or terminal authority.
++        if object
++            .get("sequence_number")
++            .is_some_and(|v| v.as_u64().is_none())
++        {
++            return Err(invalid("invalid informational sequence number"));
++        }
++        tracing::warn!(
++            event_type = kind,
++            "ignoring informational Responses SSE event"
++        );
++        return Ok(Frame::Control);
++    }
 +    let event: StreamEvent = serde_json::from_value(value)
-+        .map_err(|_| invalid("unknown or malformed Responses event"))?;
++        .map_err(|_| invalid("unknown semantic or malformed known Responses event"))?;
 +    match &event {
 +        // These lifecycle objects are discarded by the assembler. Validate
 +        // their nonterminal status/error first so contradictions cannot vanish.
@@ -28520,6 +28605,152 @@ index 0000000..e60673a
 +        }
 +        decoder.finish()?;
 +        Ok(frames)
++    }
++
++    #[test]
++    fn ignored_event_diagnostic_contains_only_the_validated_type() {
++        use std::sync::{Arc, Mutex};
++        use tracing::{span, Event, Metadata, Subscriber};
++        struct Capture(Arc<Mutex<Vec<String>>>);
++        impl tracing::field::Visit for Capture {
++            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
++                self.0
++                    .lock()
++                    .unwrap()
++                    .push(format!("{}={value:?}", field.name()));
++            }
++        }
++        impl Subscriber for Capture {
++            fn register_callsite(
++                &self,
++                _: &'static Metadata<'static>,
++            ) -> tracing::subscriber::Interest {
++                tracing::subscriber::Interest::always()
++            }
++            fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
++                Some(tracing::metadata::LevelFilter::TRACE)
++            }
++            fn enabled(&self, _: &Metadata<'_>) -> bool {
++                true
++            }
++            fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
++                span::Id::from_u64(1)
++            }
++            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
++            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
++            fn event(&self, event: &Event<'_>) {
++                event.record(&mut Capture(self.0.clone()));
++            }
++            fn enter(&self, _: &span::Id) {}
++            fn exit(&self, _: &span::Id) {}
++        }
++        let captured = Arc::new(Mutex::new(Vec::new()));
++        tracing::subscriber::with_default(Capture(captured.clone()), || {
++            tracing::callsite::rebuild_interest_cache();
++            let data = r#"{"type":"response.annotation.future","payload":{"secret":"SECRET"}}"#;
++            assert!(matches!(decode(None, data, true).unwrap(), Frame::Control));
++        });
++        assert_eq!(
++            *captured.lock().unwrap(),
++            vec![
++                "message=ignoring informational Responses SSE event",
++                "event_type=\"response.annotation.future\"",
++            ]
++        );
++    }
++
++    #[test]
++    fn unknown_informational_types_are_control_frames_not_semantics() {
++        for kind in [
++            "response.annotation.future",
++            "response.telemetry",
++            "ping",
++            "mystery",
++        ] {
++            let value = serde_json::json!({"type":kind,"sequence_number":3,
++                "metadata":{"private":"SECRET"},"response":{"status":"failed"}});
++            for name in [None, Some(kind)] {
++                assert!(matches!(
++                    decode(name, &value.to_string(), true).unwrap(),
++                    Frame::Control
++                ));
++            }
++        }
++    }
++
++    #[test]
++    fn semantic_extensions_and_malformed_known_events_are_typed_and_named() {
++        for kind in [
++            "response.output_future.delta",
++            "response.function_call_future.delta",
++            "response.content_part.future",
++            "response.reasoning_future.delta",
++            "response.created.future",
++            "response.in_progress.future",
++            "response.queued",
++            "response.completed.future",
++            "response.failed.future",
++            "response.incomplete.future",
++            "response.cancelled",
++            "error.future",
++            "response.output_text.delta",
++            "response.created",
++            "response.in_progress",
++            "response.completed",
++            "response.failed",
++            "response.incomplete",
++            "response.metadata",
++            "error",
++            "keepalive",
++        ] {
++            let value = serde_json::json!({"type":kind,"unexpected":"SECRET"});
++            let error = decode(None, &value.to_string(), true).err().unwrap();
++            assert!(!error.is_retryable());
++            let ModelError::ProtocolUnsupported(detail) = error else {
++                panic!("expected protocol error for {kind}")
++            };
++            assert!(detail.contains(&format!("event_type={kind}")), "{detail}");
++            assert!(!detail.contains("SECRET"));
++        }
++    }
++
++    #[test]
++    fn unsafe_type_names_and_ambiguous_informational_frames_fail_without_echoing_payload() {
++        for kind in [
++            "",
++            "secret=SECRET",
++            "line\nbreak",
++            "caf\u{e9}",
++            &"a".repeat(129),
++        ] {
++            let value = serde_json::json!({"type":kind,"unexpected":"SECRET"});
++            let error = decode(None, &value.to_string(), true).err().unwrap();
++            let ModelError::ProtocolUnsupported(detail) = error else {
++                panic!("wrong error")
++            };
++            assert_eq!(detail, "responses SSE: invalid event type identifier");
++        }
++        for data in [
++            r#"{"type":"response.annotation","sequence_number":"SECRET"}"#,
++            r#"{"type":"response.annotation","type":"response.annotation"}"#,
++            r#"{"type":"response.annotation","metadata":{"x":1,"x":2}}"#,
++            r#"{"type":7,"payload":"SECRET"}"#,
++            r#"{"payload":"SECRET"}"#,
++        ] {
++            let error = decode(None, data, true).err().unwrap();
++            assert!(matches!(error, ModelError::ProtocolUnsupported(_)));
++            if let ModelError::ProtocolUnsupported(detail) = error {
++                assert!(!detail.contains("SECRET"));
++            }
++        }
++        let error = decode(Some("SECRET"), r#"{"type":"response.annotation"}"#, true)
++            .err()
++            .unwrap();
++        let ModelError::ProtocolUnsupported(detail) = error else {
++            panic!("wrong error")
++        };
++        assert!(detail.contains("event_type=response.annotation"));
++        assert!(!detail.contains("SECRET"));
 +    }
 +
 +    #[test]
@@ -28869,7 +29100,7 @@ index 0000000..e60673a
 +            "event: mystery\n\n",
 +            "data: {\n\n",
 +            "data: []\n\n",
-+            "data: {\"type\":\"mystery\"}\n\n",
++            "data: {\"type\":\"response.output_mystery.delta\"}\n\n",
 +            "data: {\"type\":\"error\"}\n\n",
 +            "event: keepalive\ndata: {\"type\":\"error\",\"message\":\"x\"}\n\n",
 +            "data: {\"type\":\"keepalive\",\"error\":{}}\n\n",
@@ -31642,10 +31873,10 @@ index 85b407e..0000000
 -}
 diff --git a/vendor/serdes-ai-responses/tests/client_sse.rs b/vendor/serdes-ai-responses/tests/client_sse.rs
 new file mode 100644
-index 0000000..d70c4c1
+index 0000000..97d706a
 --- /dev/null
 +++ b/vendor/serdes-ai-responses/tests/client_sse.rs
-@@ -0,0 +1,724 @@
+@@ -0,0 +1,726 @@
 +//! Owning transport regression: evidence escapes once; terminal errors never replay.
 +use futures::StreamExt;
 +use serdes_ai_core::messages::{ModelRequest, ModelResponseStreamEvent};
@@ -31761,7 +31992,7 @@ index 0000000..d70c4c1
 +        body.push_str(&format!("data: {{\"type\":\"response.output_text.delta\",\"sequence_number\":{index},\"item_id\":\"i\",\"output_index\":0,\"content_index\":0,\"delta\":\"x\"}}\n\n"));
 +    }
 +    body.push_str(&terminal(false));
-+    body.push_str("data: {\"type\":\"unknown\"}\n\n");
++    body.push_str("data: {\"type\":\"response.output_unknown.delta\"}\n\n");
 +    let (model, server) = serve(body.into_bytes());
 +    let mut stream = model
 +        .request_stream(
@@ -31783,7 +32014,7 @@ index 0000000..d70c4c1
 +                count += 1;
 +            }
 +            Err(error) => {
-+                assert!(matches!(error, ModelError::InvalidResponse(_)));
++                assert!(matches!(error, ModelError::ProtocolUnsupported(_)));
 +                assert!(count >= 80);
 +                assert!(stream.next().await.is_none());
 +                server.join().unwrap();
@@ -32007,7 +32238,7 @@ index 0000000..d70c4c1
 +            for suffix in [
 +                "data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"SECRET\"}\n\n"
 +                    .to_string(),
-+                "data: {\"type\":\"unknown\"}\n\n".to_string(),
++                "data: {\"type\":\"response.output_unknown.delta\"}\n\n".to_string(),
 +                terminal(incomplete),
 +                "data: [DONE]\n\ndata: [DONE]\n\n".to_string(),
 +                "data: [DONE]\n\ndata: {\"type\":\"keepalive\"}\n\n".to_string(),
@@ -32106,14 +32337,14 @@ index 0000000..d70c4c1
 +                .await
 +                .unwrap_err();
 +            assert!(
-+                matches!(error, ModelError::InvalidResponse(ref detail) if detail.contains("ambiguous") && detail.contains("accumulated 1"))
++                matches!(error, ModelError::ProtocolUnsupported(ref detail) if detail.contains("ambiguous") && detail.contains("accumulated 1"))
 +            );
 +            server.join().unwrap();
 +            for codex in [false, true] {
 +                let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
 +                let error = assert_progress_then_only_error(&model).await;
 +                assert!(
-+                    matches!(error, ModelError::InvalidResponse(ref detail) if detail.contains("ambiguous"))
++                    matches!(error, ModelError::ProtocolUnsupported(ref detail) if detail.contains("ambiguous"))
 +                );
 +                server.join().unwrap();
 +            }
@@ -32144,7 +32375,9 @@ index 0000000..d70c4c1
 +        // The Codex moderation annotation (synthetic, redacted) is informational and
 +        // must not disturb the folded or streamed response.
 +        body += "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":2,\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{\"protection_type\":\"p\",\"omnimod\":{\"outputs\":[{\"is_blocked\":false,\"results\":[{\"category_flags\":{\"A1\":false,\"REFUSED\":false}}]}]}},\"generation\":{},\"tool_call\":{},\"tool_response\":{}}}}\n\n";
++        body += "event: response.annotation.future\ndata: {\"type\":\"response.annotation.future\",\"metadata\":{\"private\":\"SECRET\"}}\n\n";
 +        body += &terminal(false);
++        body += "data: {\"type\":\"response.telemetry\",\"payload\":\"SECRET\"}\n\n";
 +        let (model, server) = serve(body.clone().into_bytes());
 +        assert!(model
 +            .request(

@@ -113,7 +113,7 @@ async fn saturated_event_channel_does_not_drop_terminal_error() {
         body.push_str(&format!("data: {{\"type\":\"response.output_text.delta\",\"sequence_number\":{index},\"item_id\":\"i\",\"output_index\":0,\"content_index\":0,\"delta\":\"x\"}}\n\n"));
     }
     body.push_str(&terminal(false));
-    body.push_str("data: {\"type\":\"unknown\"}\n\n");
+    body.push_str("data: {\"type\":\"response.output_unknown.delta\"}\n\n");
     let (model, server) = serve(body.into_bytes());
     let mut stream = model
         .request_stream(
@@ -135,7 +135,7 @@ async fn saturated_event_channel_does_not_drop_terminal_error() {
                 count += 1;
             }
             Err(error) => {
-                assert!(matches!(error, ModelError::InvalidResponse(_)));
+                assert!(matches!(error, ModelError::ProtocolUnsupported(_)));
                 assert!(count >= 80);
                 assert!(stream.next().await.is_none());
                 server.join().unwrap();
@@ -359,7 +359,7 @@ async fn public_stream_trailing_failures_never_publish_pending_completion() {
             for suffix in [
                 "data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"SECRET\"}\n\n"
                     .to_string(),
-                "data: {\"type\":\"unknown\"}\n\n".to_string(),
+                "data: {\"type\":\"response.output_unknown.delta\"}\n\n".to_string(),
                 terminal(incomplete),
                 "data: [DONE]\n\ndata: [DONE]\n\n".to_string(),
                 "data: [DONE]\n\ndata: {\"type\":\"keepalive\"}\n\n".to_string(),
@@ -458,14 +458,14 @@ async fn lifecycle_contradictions_fail_folded_and_public_stream_before_later_suc
                 .await
                 .unwrap_err();
             assert!(
-                matches!(error, ModelError::InvalidResponse(ref detail) if detail.contains("ambiguous") && detail.contains("accumulated 1"))
+                matches!(error, ModelError::ProtocolUnsupported(ref detail) if detail.contains("ambiguous") && detail.contains("accumulated 1"))
             );
             server.join().unwrap();
             for codex in [false, true] {
                 let (model, server) = serve_http(body.clone().into_bytes(), codex, 0);
                 let error = assert_progress_then_only_error(&model).await;
                 assert!(
-                    matches!(error, ModelError::InvalidResponse(ref detail) if detail.contains("ambiguous"))
+                    matches!(error, ModelError::ProtocolUnsupported(ref detail) if detail.contains("ambiguous"))
                 );
                 server.join().unwrap();
             }
@@ -496,7 +496,9 @@ async fn valid_nonterminal_lifecycle_remains_supported_in_folded_and_streaming_c
         // The Codex moderation annotation (synthetic, redacted) is informational and
         // must not disturb the folded or streamed response.
         body += "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":2,\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{\"protection_type\":\"p\",\"omnimod\":{\"outputs\":[{\"is_blocked\":false,\"results\":[{\"category_flags\":{\"A1\":false,\"REFUSED\":false}}]}]}},\"generation\":{},\"tool_call\":{},\"tool_response\":{}}}}\n\n";
+        body += "event: response.annotation.future\ndata: {\"type\":\"response.annotation.future\",\"metadata\":{\"private\":\"SECRET\"}}\n\n";
         body += &terminal(false);
+        body += "data: {\"type\":\"response.telemetry\",\"payload\":\"SECRET\"}\n\n";
         let (model, server) = serve(body.clone().into_bytes());
         assert!(model
             .request(

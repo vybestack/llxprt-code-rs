@@ -718,6 +718,19 @@ add neither a model reply nor a tool round to history. Quota/billing refusals,
 permanent errors, malformed protocol and unclassified errors are not retried.
 See [request retries](docs/request-retries.md) for telemetry and Retry-After semantics.
 
+### Responses SSE protocol drift
+
+Responses streams ignore unknown informational event types outside the reserved
+output, function-call, content, reasoning, lifecycle/terminal and error families.
+Only a bounded, validated type identifier is logged through tracing; annotation
+payloads never enter diagnostics, history, tools or completion state. Malformed
+known events and unknown semantic-family events fail closed without replay, using
+`error.code = "model-protocol-unsupported"` (exit 5), not the generic `model` code.
+The message names the validated event type when available, never its content, and
+retains the accumulated progress count without claiming a partial completion.
+The exact prefix, identifier and envelope rules are documented in
+[PATCHES.md](PATCHES.md#issue-404-responses-sse-protocol-evolution).
+
 ### Preterminal Responses SSE transport loss
 
 A folded Codex HTTP request whose body transfer fails (or cleanly ends) before a

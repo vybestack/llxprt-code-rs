@@ -12,7 +12,7 @@ pub(super) enum Frame {
 }
 
 fn invalid(reason: &str) -> ModelError {
-    ModelError::InvalidResponse(format!("responses SSE: {reason}"))
+    ModelError::ProtocolUnsupported(format!("responses SSE: {reason}"))
 }
 
 #[derive(Default)]
@@ -108,20 +108,69 @@ fn decode(name: Option<&str>, data: &str, has_data: bool) -> Result<Frame, Model
         }
         return Ok(Frame::Done);
     }
-    let mut value: serde_json::Value = serde_json::from_str::<super::sse_json::Unique>(data)
+    let value: serde_json::Value = serde_json::from_str::<super::sse_json::Unique>(data)
         .map_err(|_| invalid("malformed or duplicate-key JSON payload"))?
         .0;
     let object = value
-        .as_object_mut()
+        .as_object()
         .ok_or_else(|| invalid("payload is not an object"))?;
     let kind = object
         .get("type")
         .and_then(|v| v.as_str())
         .ok_or_else(|| invalid("missing or invalid event type"))?
         .to_string();
-    if name.is_some_and(|name| name != kind) {
-        return Err(invalid("event name disagrees with payload type"));
+    // Type names are untrusted input too. Never log arbitrary prose, URLs,
+    // control characters or an unbounded string from the provider.
+    if !valid_event_type(&kind) {
+        return Err(invalid("invalid event type identifier"));
     }
+    let result = if name.is_some_and(|name| name != kind) {
+        Err(invalid("event name disagrees with payload type"))
+    } else {
+        decode_event(&kind, value)
+    };
+    result.map_err(|error| match error {
+        ModelError::ProtocolUnsupported(detail) => {
+            ModelError::ProtocolUnsupported(format!("{detail}; event_type={kind}"))
+        }
+        other => other,
+    })
+}
+
+fn valid_event_type(kind: &str) -> bool {
+    !kind.is_empty()
+        && kind.len() <= 128
+        && kind
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+}
+
+/// Names in semantic families can change response state, tool arguments or the
+/// terminal verdict. Unknown members must never disappear as annotations. The
+/// reasoning family is reserved as well: it carries private continuation state.
+fn semantic_event_type(kind: &str) -> bool {
+    [
+        "response.output_",
+        "response.function_call_",
+        "response.content_part",
+        "response.reasoning_",
+        "response.created",
+        "response.in_progress",
+        "response.queued",
+        "response.completed",
+        "response.failed",
+        "response.incomplete",
+        "response.cancelled",
+        "error",
+    ]
+    .iter()
+    .any(|prefix| kind.starts_with(prefix))
+}
+
+fn decode_event(kind: &str, mut value: serde_json::Value) -> Result<Frame, ModelError> {
+    let object = value
+        .as_object_mut()
+        .expect("object checked at envelope boundary");
     if kind == "keepalive" {
         if object
             .keys()
@@ -199,8 +248,23 @@ fn decode(name: Option<&str>, data: &str, has_data: bool) -> Result<Frame, Model
         let code = response.error.map(|error| error.code);
         return Err(provider_failure(code.as_deref(), None, status));
     }
+    if !semantic_event_type(kind) {
+        // This rule is intentionally name-based, not a payload heuristic. An
+        // informational extension cannot supply lifecycle or terminal authority.
+        if object
+            .get("sequence_number")
+            .is_some_and(|v| v.as_u64().is_none())
+        {
+            return Err(invalid("invalid informational sequence number"));
+        }
+        tracing::warn!(
+            event_type = kind,
+            "ignoring informational Responses SSE event"
+        );
+        return Ok(Frame::Control);
+    }
     let event: StreamEvent = serde_json::from_value(value)
-        .map_err(|_| invalid("unknown or malformed Responses event"))?;
+        .map_err(|_| invalid("unknown semantic or malformed known Responses event"))?;
     match &event {
         // These lifecycle objects are discarded by the assembler. Validate
         // their nonterminal status/error first so contradictions cannot vanish.
@@ -312,6 +376,152 @@ mod tests {
         }
         decoder.finish()?;
         Ok(frames)
+    }
+
+    #[test]
+    fn ignored_event_diagnostic_contains_only_the_validated_type() {
+        use std::sync::{Arc, Mutex};
+        use tracing::{span, Event, Metadata, Subscriber};
+        struct Capture(Arc<Mutex<Vec<String>>>);
+        impl tracing::field::Visit for Capture {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("{}={value:?}", field.name()));
+            }
+        }
+        impl Subscriber for Capture {
+            fn register_callsite(
+                &self,
+                _: &'static Metadata<'static>,
+            ) -> tracing::subscriber::Interest {
+                tracing::subscriber::Interest::always()
+            }
+            fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
+                Some(tracing::metadata::LevelFilter::TRACE)
+            }
+            fn enabled(&self, _: &Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+                span::Id::from_u64(1)
+            }
+            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+            fn event(&self, event: &Event<'_>) {
+                event.record(&mut Capture(self.0.clone()));
+            }
+            fn enter(&self, _: &span::Id) {}
+            fn exit(&self, _: &span::Id) {}
+        }
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        tracing::subscriber::with_default(Capture(captured.clone()), || {
+            tracing::callsite::rebuild_interest_cache();
+            let data = r#"{"type":"response.annotation.future","payload":{"secret":"SECRET"}}"#;
+            assert!(matches!(decode(None, data, true).unwrap(), Frame::Control));
+        });
+        assert_eq!(
+            *captured.lock().unwrap(),
+            vec![
+                "message=ignoring informational Responses SSE event",
+                "event_type=\"response.annotation.future\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_informational_types_are_control_frames_not_semantics() {
+        for kind in [
+            "response.annotation.future",
+            "response.telemetry",
+            "ping",
+            "mystery",
+        ] {
+            let value = serde_json::json!({"type":kind,"sequence_number":3,
+                "metadata":{"private":"SECRET"},"response":{"status":"failed"}});
+            for name in [None, Some(kind)] {
+                assert!(matches!(
+                    decode(name, &value.to_string(), true).unwrap(),
+                    Frame::Control
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn semantic_extensions_and_malformed_known_events_are_typed_and_named() {
+        for kind in [
+            "response.output_future.delta",
+            "response.function_call_future.delta",
+            "response.content_part.future",
+            "response.reasoning_future.delta",
+            "response.created.future",
+            "response.in_progress.future",
+            "response.queued",
+            "response.completed.future",
+            "response.failed.future",
+            "response.incomplete.future",
+            "response.cancelled",
+            "error.future",
+            "response.output_text.delta",
+            "response.created",
+            "response.in_progress",
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+            "response.metadata",
+            "error",
+            "keepalive",
+        ] {
+            let value = serde_json::json!({"type":kind,"unexpected":"SECRET"});
+            let error = decode(None, &value.to_string(), true).err().unwrap();
+            assert!(!error.is_retryable());
+            let ModelError::ProtocolUnsupported(detail) = error else {
+                panic!("expected protocol error for {kind}")
+            };
+            assert!(detail.contains(&format!("event_type={kind}")), "{detail}");
+            assert!(!detail.contains("SECRET"));
+        }
+    }
+
+    #[test]
+    fn unsafe_type_names_and_ambiguous_informational_frames_fail_without_echoing_payload() {
+        for kind in [
+            "",
+            "secret=SECRET",
+            "line\nbreak",
+            "caf\u{e9}",
+            &"a".repeat(129),
+        ] {
+            let value = serde_json::json!({"type":kind,"unexpected":"SECRET"});
+            let error = decode(None, &value.to_string(), true).err().unwrap();
+            let ModelError::ProtocolUnsupported(detail) = error else {
+                panic!("wrong error")
+            };
+            assert_eq!(detail, "responses SSE: invalid event type identifier");
+        }
+        for data in [
+            r#"{"type":"response.annotation","sequence_number":"SECRET"}"#,
+            r#"{"type":"response.annotation","type":"response.annotation"}"#,
+            r#"{"type":"response.annotation","metadata":{"x":1,"x":2}}"#,
+            r#"{"type":7,"payload":"SECRET"}"#,
+            r#"{"payload":"SECRET"}"#,
+        ] {
+            let error = decode(None, data, true).err().unwrap();
+            assert!(matches!(error, ModelError::ProtocolUnsupported(_)));
+            if let ModelError::ProtocolUnsupported(detail) = error {
+                assert!(!detail.contains("SECRET"));
+            }
+        }
+        let error = decode(Some("SECRET"), r#"{"type":"response.annotation"}"#, true)
+            .err()
+            .unwrap();
+        let ModelError::ProtocolUnsupported(detail) = error else {
+            panic!("wrong error")
+        };
+        assert!(detail.contains("event_type=response.annotation"));
+        assert!(!detail.contains("SECRET"));
     }
 
     #[test]
@@ -661,7 +871,7 @@ mod tests {
             "event: mystery\n\n",
             "data: {\n\n",
             "data: []\n\n",
-            "data: {\"type\":\"mystery\"}\n\n",
+            "data: {\"type\":\"response.output_mystery.delta\"}\n\n",
             "data: {\"type\":\"error\"}\n\n",
             "event: keepalive\ndata: {\"type\":\"error\",\"message\":\"x\"}\n\n",
             "data: {\"type\":\"keepalive\",\"error\":{}}\n\n",

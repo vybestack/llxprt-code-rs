@@ -132,6 +132,9 @@ impl super::Turn<'_> {
                 self.dead(store, reserved, "finish-reason", &message, rounds)
             }
             RoundFailure::Model(message) => self.dead(store, reserved, "model", &message, rounds),
+            RoundFailure::ProtocolUnsupported(message) => {
+                self.dead(store, reserved, "model-protocol-unsupported", &message, rounds)
+            }
             RoundFailure::ModelTransport(failure) => {
                 let key = failure.transport_key();
                 self.dead(store, reserved, "model", &failure.diagnostic(), rounds)
