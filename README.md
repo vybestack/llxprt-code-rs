@@ -190,6 +190,36 @@ Example success object:
  "prompt_digest":"bfee86137d1c2b3e"}
 ```
 
+## Session-store capability query (worker repin)
+
+```sh
+llxprt-code-rs --session-state-versions < /dev/null
+# {"session_state_versions":[7]}
+```
+
+Use this flag **alone**. It exits 0 with exactly one JSON object, without reading
+stdin, profiles, credentials or sessions, creating files, or using the network.
+The list contains only formats this build can load; there is no legacy reader or
+migration. It is independent of the executable version and stdout schema version.
+
+Every successful turn (including a persisted replay) reports the integer
+`session_state_version` at the top level of its terminal envelope. Errors report
+it too when an existing current-format snapshot can be identified, including
+setup/usage/profiling failures and corrupt-log or busy-session errors. This is a
+bounded, no-follow, read-only metadata inspection; it never repairs the store or
+waits for its lock. Fresh setup failures and unidentifiable/corrupt snapshots omit
+the field rather than inventing a persisted format. Non-turn outputs such as
+`--print-config`, transcript rendering and the capability probe are not terminal
+turn envelopes.
+
+`session::STORE_VERSION` is the single persisted-format authority. Any
+incompatible layout change must bump it. `tests/session_format_guard.rs` pins the
+complete storage source trees (records, framed log/snapshot codecs, context
+artifacts, vault, reasoning and telemetry), not just an empty sample record.
+The guard is deliberately conservative: covered source edits require a version
+bump and a new versioned fingerprint even if their layout impact is compatible.
+This change only exposes the existing format **7**; it does not change disk bytes.
+
 ## `--session` and `--turn` semantics (documented current behavior)
 
 - `--session ID` is a directory name under `<config>/code-rs-sessions/`. Turn numbers
@@ -286,7 +316,7 @@ the harness consumer.
 
 - **Structural:** Exactly **one** JSON object on stdout, both on success and on error, for every
   invocation. stderr may carry logs; the parity harness and `cli_contract` tests assert this.
-- **Structural:** Success contains `session_id`, `session_dir`, `turn`, `attempt`, `branch_id`,
+- **Structural:** Success contains `session_id`, `session_state_version`, `session_dir`, `turn`, `attempt`, `branch_id`,
   `branch`, `replayed`, `status: "ok"`, `summary`, `tool_calls` (int),
   `declared_tool_calls` (`-1` means unlimited), `budget_exhausted`, and `prompt_digest`.
 - **Structural:** Error contains `session_id`, `status: "error"`, and

@@ -65,6 +65,8 @@ pub enum Envelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OkEnvelope {
+    /// Persisted session-store format, independent of the stdout schema version.
+    pub session_state_version: u32,
     /// Strict, versioned observations; setup failures may have none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
@@ -104,6 +106,9 @@ pub struct OkEnvelope {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorEnvelope {
+    /// Present when the session has an identifiable persisted current-format snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_state_version: Option<u32>,
     /// Strict, versioned observations; setup failures may have none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<Box<crate::telemetry::Telemetry>>,
@@ -154,6 +159,7 @@ impl Envelope {
         message: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            session_state_version: None,
             telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
@@ -175,6 +181,7 @@ impl Envelope {
         session_status: impl Into<String>,
     ) -> Self {
         Self::Error(ErrorEnvelope {
+            session_state_version: None,
             telemetry: None,
             session_id: session_id.into(),
             error: EnvelopeError {
@@ -193,9 +200,9 @@ impl Envelope {
     /// schema-valid error envelope.
     pub fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| {
-            let session_id = match self {
-                Self::Ok(envelope) => &envelope.session_id,
-                Self::Error(envelope) => &envelope.session_id,
+            let (session_id, version) = match self {
+                Self::Ok(envelope) => (&envelope.session_id, Some(envelope.session_state_version)),
+                Self::Error(envelope) => (&envelope.session_id, envelope.session_state_version),
             };
             let mut error = Map::new();
             error.insert("code".into(), Value::String("serialization".into()));
@@ -204,6 +211,9 @@ impl Envelope {
                 Value::String("envelope serialization failed".into()),
             );
             let mut fallback = Map::new();
+            if let Some(version) = version {
+                fallback.insert("session_state_version".into(), version.into());
+            }
             fallback.insert("error".into(), Value::Object(error));
             fallback.insert("session_id".into(), Value::String(session_id.clone()));
             fallback.insert("status".into(), Value::String("error".into()));

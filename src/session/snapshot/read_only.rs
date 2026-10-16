@@ -44,3 +44,24 @@ pub(in crate::session) fn read_transcript(
     }
     Ok(loaded.state)
 }
+
+/// Identify an already-published current-format snapshot for an error envelope.
+/// No creation, repair, lock acquisition or transcript replay: even a busy session or
+/// corrupt log can still declare its format. Unidentifiable state is not mislabeled.
+pub(crate) fn persisted_version(session_id: &str) -> Option<u32> {
+    let session = SessionId::parse(session_id).ok()?;
+    let root = crate::config::std_profile_dir().ok()?;
+    let config = crate::tools::open_root(&root).ok()?;
+    let sessions = config.sub_dir("code-rs-sessions").ok()?;
+    let dir = sessions.sub_dir(&session.id).ok()?;
+    let manifest = read_manifest(&dir).ok()??;
+    let bytes = read_artifact(&dir, &manifest.current.snapshot, MAX_SESSION_BYTES + 4096).ok()?;
+    if log::full_digest(&bytes) != manifest.current.snapshot_digest {
+        return None;
+    }
+    let snapshot: SnapshotFile = serde_json::from_slice(&bytes).ok()?;
+    (snapshot.format_version == log::FORMAT_VERSION
+        && snapshot.state.session_id == session.id
+        && snapshot.state.version == STORE_VERSION)
+        .then_some(snapshot.state.version)
+}

@@ -89,7 +89,7 @@ def envelope(tool_calls):
         "branch_id": "b1",
         "branch": False,
         "replayed": False,
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "summary": "done",
         "tool_calls": tool_calls,
         "declared_tool_calls": 16,

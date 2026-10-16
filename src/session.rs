@@ -14,7 +14,9 @@
 use fs2::FileExt;
 use std::io::{ErrorKind, Read as _};
 
-/// The one supported on-disk format.
+/// The one supported on-disk session format (including context artifacts).
+/// Bump on any incompatible persisted-layout change; update the versioned pin in
+/// `tests/session_format_guard.rs`. No legacy readers or migrations are implied.
 pub const STORE_VERSION: u32 = 7;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
@@ -58,6 +60,7 @@ mod replay;
 pub(crate) mod request_epoch;
 mod reserve;
 mod snapshot;
+pub(crate) use snapshot::persisted_version;
 mod validate;
 
 /// A turn's history materialized for a model request: the completed turn's prompt, full
