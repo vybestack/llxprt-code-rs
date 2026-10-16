@@ -39,7 +39,7 @@ fn codex_sse_errors_controls_and_ambiguity_are_not_replayed() {
     for payload in [
             "event: error\ndata: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"Bearer SECRET\"}\n\n",
             "data: {\"type\":\"error\",\"status_code\":500,\"error\":{\"code\":\"server_error\",\"message\":\"SECRET\"}}\n\n",
-            "data: {\"type\":\"unknown\"}\n\n", "data: {\n\n",
+            "data: {\"type\":\"response.output_unknown.delta\"}\n\n", "data: {\n\n",
             "event: keepalive\ndata: {\"type\":\"error\",\"message\":\"SECRET\"}\n\n",
             "data: [DONE]\n\n", "event: unknown\n\n",
             "data: {\"type\":\"keepalive\",\"error\":{}}\n\n",

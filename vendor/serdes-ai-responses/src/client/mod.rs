@@ -949,6 +949,9 @@ impl OpenResponsesModel {
 fn retain_sse_evidence(error: ModelError, events: usize) -> ModelError {
     match error {
         ModelError::StreamInterrupted { .. } => ModelError::StreamInterrupted { events },
+        ModelError::ProtocolUnsupported(detail) => ModelError::ProtocolUnsupported(format!(
+            "{detail}; accumulated {events} stream events (partial response is not completion)"
+        )),
         ModelError::InvalidResponse(detail) => ModelError::InvalidResponse(format!(
             "{detail}; accumulated {events} stream events (partial response is not completion)"
         )),
@@ -1134,10 +1137,11 @@ mod tests {
     use super::sse::{Decoder, Frame};
 
     #[test]
-    fn sse_keepalives_are_transport_only_and_other_types_remain_closed() {
+    fn sse_controls_and_annotations_are_transport_only_and_semantic_types_remain_closed() {
         for payload in [
             r#"{"type":"keepalive"}"#,
             r#"{"type":"keepalive","payload":{"tick":1}}"#,
+            r#"{"type":"response.not_a_real_event","payload":{"tick":1}}"#,
         ] {
             let mut decoder = Decoder::default();
             let mut controls = 0;
@@ -1151,7 +1155,7 @@ mod tests {
             decoder.finish().unwrap();
         }
         let mut decoder = Decoder::default();
-        assert!("data: {\"type\":\"response.not_a_real_event\"}\n\n"
+        assert!("data: {\"type\":\"response.output_not_a_real_event\"}\n\n"
             .bytes()
             .try_for_each(|byte| decoder.byte(byte).map(|_| ()))
             .is_err());
