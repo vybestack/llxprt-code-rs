@@ -380,6 +380,28 @@ mod tests {
 
     #[test]
     fn ignored_event_diagnostic_contains_only_the_validated_type() {
+        // tracing callsite interest is process-global. Isolate this subscriber
+        // from concurrent decoder tests that use the same callsite with no
+        // subscriber, while retaining the exact production-event assertion.
+        const CHILD: &str = "LLXPRT_RESPONSES_DIAGNOSTIC_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "client::sse::tests::ignored_event_diagnostic_contains_only_the_validated_type",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         use std::sync::{Arc, Mutex};
         use tracing::{span, Event, Metadata, Subscriber};
         struct Capture(Arc<Mutex<Vec<String>>>);
@@ -392,15 +414,6 @@ mod tests {
             }
         }
         impl Subscriber for Capture {
-            fn register_callsite(
-                &self,
-                _: &'static Metadata<'static>,
-            ) -> tracing::subscriber::Interest {
-                tracing::subscriber::Interest::always()
-            }
-            fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
-                Some(tracing::metadata::LevelFilter::TRACE)
-            }
             fn enabled(&self, _: &Metadata<'_>) -> bool {
                 true
             }
@@ -416,11 +429,9 @@ mod tests {
             fn exit(&self, _: &span::Id) {}
         }
         let captured = Arc::new(Mutex::new(Vec::new()));
-        tracing::subscriber::with_default(Capture(captured.clone()), || {
-            tracing::callsite::rebuild_interest_cache();
-            let data = r#"{"type":"response.annotation.future","payload":{"secret":"SECRET"}}"#;
-            assert!(matches!(decode(None, data, true).unwrap(), Frame::Control));
-        });
+        tracing::subscriber::set_global_default(Capture(captured.clone())).unwrap();
+        let data = r#"{"type":"response.annotation.future","payload":{"secret":"SECRET"}}"#;
+        assert!(matches!(decode(None, data, true).unwrap(), Frame::Control));
         assert_eq!(
             *captured.lock().unwrap(),
             vec![
