@@ -3,6 +3,7 @@
 use super::*;
 mod read_only;
 use log::{ReplayCursor, ReplayResult};
+pub(crate) use read_only::persisted_version;
 pub(super) use read_only::read_transcript;
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;

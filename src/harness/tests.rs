@@ -97,7 +97,7 @@ fn spec(session: &str) -> InvocationSpec {
 
 fn ok_env(success: &str) -> OkEnvelope {
     serde_json::from_value(serde_json::json!({
-        "session_id": success,
+        "session_id": success, "session_state_version": crate::session::STORE_VERSION,
         "session_dir": "/tmp/sessions/sess",
         "turn": 1,
         "attempt": 1,
@@ -125,7 +125,7 @@ fn ok_envelope_contract_passes() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -158,7 +158,7 @@ fn ok_envelope_contract_passes() {
 fn previous_adversarial_envelope_ok_false() {
     let json = serde_json::json!({
         "session_id": "sess",
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "turn": 1,
         "attempt": 0,
         "branch_id": "b1",
@@ -213,7 +213,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -233,7 +233,7 @@ fn ok_envelope_rejects_unknown_and_error_fields() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -526,7 +526,7 @@ fn trailing_or_multiple_json_is_rejected_by_parse() {
         "branch_id": "b1",
         "branch": false,
         "replayed": false,
-        "status": "ok",
+        "status": "ok", "session_state_version": 7,
         "summary": "done",
         "tool_calls": 3,
         "declared_tool_calls": 16,
@@ -787,7 +787,7 @@ fn cli_and_harness_share_one_prompt_digest() {
         let env: Envelope = serde_json::from_value(serde_json::json!({
             "session_id": "s", "session_dir": "/tmp/sessions/s",
             "turn": 1, "attempt": 1, "branch_id": "b1", "branch": false,
-            "replayed": false, "status": "ok", "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1, "retry_attempts": 0,
+            "replayed": false, "status": "ok", "session_state_version": 7, "summary": "done", "tool_calls": 3, "declared_tool_calls": 16, "budget_exhausted": false, "zero_call_tail": 1, "retry_attempts": 0,
             "prompt_digest": digest,
         }))
         .unwrap();

@@ -1,8 +1,12 @@
 //! Binary entry: explicit profile finalization precedes the single stdout envelope.
 
-use llxprt_code_rs::{cli, envelope::Envelope, memory_profile::Profiler};
+use llxprt_code_rs::{cli, memory_profile::Profiler};
 
 fn main() {
+    if std::env::args_os().skip(1).eq(["--session-state-versions"]) {
+        println!("{}", cli::session_state_versions());
+        return;
+    }
     let session_hint = cli::session_hint();
     let args = cli::parse_args_fallback(&session_hint);
     if let Err(message) = llxprt_code_rs::session::SessionId::parse(&args.session) {
@@ -135,7 +139,11 @@ fn exit_profile_error(
     error: llxprt_code_rs::memory_profile::ProfilingError,
     status: &str,
 ) -> ! {
-    let envelope = Envelope::profiling_error(session, error.message, error.stage, status);
-    print!("{}", String::from_utf8_lossy(&envelope.to_line()));
+    let mut app = cli::AppError::profiling(error);
+    app.session_status = Some(status.into());
+    print!(
+        "{}",
+        String::from_utf8_lossy(&cli::envelope(&Err(app), session).to_line())
+    );
     std::process::exit(cli::Code::Profiling as i32)
 }

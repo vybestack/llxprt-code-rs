@@ -21,6 +21,11 @@ use std::path::PathBuf;
 mod run;
 pub use run::run_profiled;
 
+/// Read-only capability document. This build loads only the current store format.
+pub fn session_state_versions() -> serde_json::Value {
+    serde_json::json!({"session_state_versions": [crate::session::STORE_VERSION]})
+}
+
 /// Re-exported exit code type (defined in the leaf `envelope` module).
 pub use crate::envelope::Code;
 
@@ -43,6 +48,10 @@ const MAX_STDIN_BYTES: usize = crate::session::MAX_PROMPT_BYTES;
     after_help = "Examples:\n  llxprt-code-rs --session demo --cwd ws -p 'fix the test' 2>thinking.jsonl\n  llxprt-code-rs --session demo -p 'now add coverage'\n  llxprt-code-rs --session demo --emit all -p 'inspect' 2>turn.jsonl\n  llxprt-code-rs transcript --session demo --turn 1 --json\n\nExit codes: 2 usage, 3 config, 4 session, 5 model, 6 turn.\nReturned readable thinking is emitted and persisted by default. Text/calls/results are optional.\nTranscript human output and --help/--version are stdout protocol exceptions."
 )]
 pub struct Args {
+    /// List loadable session-store versions and exit; must be used alone.
+    #[arg(long)]
+    pub session_state_versions: bool,
+
     /// Require an explicitly attested stateless or idempotent provider.
     #[arg(long)]
     pub unattended: bool,
@@ -168,6 +177,13 @@ pub struct Args {
 /// consuming stdin. Call this at the common CLI boundary before dispatching runtime
 /// or `--print-config`.
 pub fn validate_cli_limits(args: &Args) -> Result<(), AppError> {
+    if args.session_state_versions {
+        return Err(AppError::new(
+            Code::Usage,
+            "usage",
+            "--session-state-versions must be used alone",
+        ));
+    }
     if args.command.is_some() && args.telemetry_output.is_some() {
         return Err(AppError::new(
             Code::Usage,
@@ -387,7 +403,7 @@ fn context_declaration(session_dir: &std::path::Path) -> ContextDeclaration {
 /// `error_session_id` supplies identity only when `outcome` is an error. For successful
 /// outcomes a debug-only assertion checks that it agrees with [`RunOutcome`]'s validated session.
 pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) -> Envelope {
-    match outcome {
+    let mut envelope = match outcome {
         Ok(o) => {
             debug_assert_eq!(error_session_id, o.session.id);
             let declared = context_declaration(&o.session_dir);
@@ -400,6 +416,7 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
             Envelope::Ok(OkEnvelope {
                 telemetry: o.run.telemetry.clone(),
                 session_id: o.session.id.clone(),
+                session_state_version: crate::session::STORE_VERSION,
                 session_dir: o.session_dir.display().to_string(),
                 turn: u64::from(o.run.turn),
                 attempt: u64::from(o.run.attempt),
@@ -449,7 +466,11 @@ pub fn envelope(outcome: &Result<RunOutcome, AppError>, error_session_id: &str) 
             }
             envelope
         }
+    };
+    if let Envelope::Error(detail) = &mut envelope {
+        detail.session_state_version = crate::session::persisted_version(error_session_id);
     }
+    envelope
 }
 
 /// Serialize the typed outcome through `Value` to preserve historical sorted-key bytes.
@@ -526,7 +547,13 @@ pub fn parse_args_fallback(session_hint: &str) -> Args {
             let message = sanitized_clap_diagnostic(&e);
             print!(
                 "{}",
-                String::from_utf8_lossy(&Envelope::error(session_hint, "usage", message).to_line())
+                String::from_utf8_lossy(
+                    &envelope(
+                        &Err(AppError::new(Code::Usage, "usage", message)),
+                        session_hint
+                    )
+                    .to_line()
+                )
             );
             std::process::exit(2);
         }
