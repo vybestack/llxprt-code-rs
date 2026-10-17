@@ -1,10 +1,11 @@
 //! Real CLI + structured OpenAI replies: provider name fields, not assistant prose.
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
 use serde_json::{json, Value};
-use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
+
+#[path = "provider_tool_name_refusal/fixture.rs"]
+mod fixture;
 
 fn tool(id: &str, name: &str, args: &str) -> Value {
     json!({"id":id,"type":"function","function":{"name":name,"arguments":args}})
@@ -18,51 +19,6 @@ fn completion(text: &str, calls: Vec<Value>) -> Value {
     };
     json!({"id":"fixture","object":"chat.completion","created":1,"model":"loopback",
         "choices":[{"index":0,"message":{"role":"assistant","content":text,"tool_calls":calls},"finish_reason":finish}]})
-}
-
-fn serve(listener: TcpListener, replies: Vec<Value>) -> Vec<Value> {
-    listener.set_nonblocking(true).unwrap();
-    let mut captured = Vec::new();
-    for reply in replies {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "CLI never requested the expected reply"
-                    );
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept: {error}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-        let mut length = None;
-        loop {
-            let mut line = String::new();
-            assert!(reader.read_line(&mut line).unwrap() > 0);
-            if line == "\r\n" {
-                break;
-            }
-            if let Some((key, value)) = line.split_once(':') {
-                if key.eq_ignore_ascii_case("content-length") {
-                    length = Some(value.trim().parse::<usize>().unwrap());
-                }
-            }
-        }
-        let mut body = vec![0; length.unwrap()];
-        reader.read_exact(&mut body).unwrap();
-        captured.push(serde_json::from_slice(&body).unwrap());
-        let body = reply.to_string();
-        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
-    }
-    captured
 }
 
 fn run(replies: Vec<Value>, expected_code: i32) -> (Value, Vec<Value>, tempfile::TempDir) {
@@ -92,29 +48,32 @@ fn run_with_flags(
         .to_string(),
     )
     .unwrap();
-    let server = std::thread::spawn(move || serve(listener, replies));
-    let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
-        .env_clear()
-        .env("LLXPRT_CONFIG_HOME", root.path())
-        .env("NO_PROXY", "127.0.0.1,localhost")
-        .args([
-            "--profile",
-            "loopback",
-            "--session",
-            "name-refusal",
-            "--turn-time",
-            "5s",
-            "-p",
-            "Inspect the workspace, then summarize.",
-            "--cwd",
-        ])
-        .arg(root.path())
-        .args(flags)
-        .output()
-        .unwrap();
+    let (output, captured) = fixture::run(
+        listener,
+        replies,
+        Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
+            .env_clear()
+            .env("LLXPRT_CONFIG_HOME", root.path())
+            .env("NO_PROXY", "127.0.0.1,localhost")
+            .args([
+                "--profile",
+                "loopback",
+                "--session",
+                "name-refusal",
+                "--turn-time",
+                // These are refusal/budget tests, not wall-clock deadline tests.
+                // Paused-clock deadline coverage lives in src/agent/deadline/tests.rs.
+                "0",
+                "-p",
+                "Inspect the workspace, then summarize.",
+                "--cwd",
+            ])
+            .arg(root.path())
+            .args(flags),
+    )
+    .unwrap_or_else(|error| panic!("provider fixture: {error}"));
     assert_eq!(output.status.code(), Some(expected_code), "{output:?}");
     let envelope = serde_json::from_slice(&output.stdout).unwrap();
-    let captured = server.join().unwrap();
     (envelope, captured, root)
 }
 
