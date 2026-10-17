@@ -1,4 +1,4 @@
-//! Commit-derived source membership, deny policy, and vendor provenance floor.
+//! Commit-derived release selection, deny policy, and vendor provenance floor.
 use crate::release_support::{text, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -18,6 +18,10 @@ pub const FLOOR: &[&str] = &[
     "scripts/build-source-bundle.sh",
     "scripts/verify-source-bundle.sh",
     "scripts/source-bundle-validate.py",
+    "scripts/source_bundle_policy.py",
+    "scripts/source-bundle-policy.txt",
+    "scripts/materialize-git-tree.py",
+    "scripts/verify-source-inputs-git.sh",
     "xtask/Cargo.toml",
     "xtask/Cargo.lock",
     "xtask/src/main.rs",
@@ -57,6 +61,46 @@ pub fn members(root: &Path, commit: &str) -> Result<Vec<String>> {
         .collect()
 }
 
+/// Shared with the pre-extraction validator through the same checked-in rule file.
+/// No dependency on internal designs or proposals is compiled into release tooling.
+const POLICY: &str = include_str!("../../scripts/source-bundle-policy.txt");
+
+fn matches(path: &str, pattern: &str) -> bool {
+    if let Some(root) = pattern.strip_suffix("/**") {
+        path == root || path.strip_prefix(root).is_some_and(|p| p.starts_with('/'))
+    } else if let Some((before, after)) = pattern.split_once('*') {
+        !path.contains('/') && path.starts_with(before) && path.ends_with(after)
+    } else {
+        path == pattern
+    }
+}
+
+pub fn selected(path: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let mut included = false;
+    for line in POLICY
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let (action, pattern) = line.split_once(' ').expect("checked release policy syntax");
+        if matches(path, pattern) {
+            match action {
+                "exclude" => return false,
+                "include" => included = true,
+                _ => panic!("invalid release policy action: {action}"),
+            }
+        }
+    }
+    included
+}
+
+pub fn release_members(root: &Path, commit: &str) -> Result<Vec<String>> {
+    Ok(members(root, commit)?
+        .into_iter()
+        .filter(|p| selected(p))
+        .collect())
+}
+
 pub fn manifest(files: &[String]) -> String {
     let mut entries = files.to_vec();
     let mut directories = BTreeSet::new();
@@ -93,6 +137,9 @@ pub fn forbidden(path: &str) -> bool {
 }
 
 pub fn validate(files: &[String]) -> Result {
+    if let Some(path) = files.iter().find(|p| !selected(p)) {
+        return Err(format!("path excluded by source release policy: {path}"));
+    }
     if let Some(path) = files.iter().find(|p| forbidden(p)) {
         return Err(format!(
             "forbidden paths are not permitted in source-bundle inputs: {path}"
@@ -222,14 +269,53 @@ mod tests {
         assert!(validate(&files).is_err());
     }
     #[test]
-    fn member_set_is_commit_not_static_allowlist() {
-        let mut files = valid();
-        files.push("project-plans/new/file.md".into());
-        assert!(validate(&files).is_ok());
-        let listing = manifest(&files);
-        assert!(listing.contains("project-plans/new/\nproject-plans/new/file.md\n"));
-        files.retain(|p| p != "project-plans/new/file.md");
-        assert!(!manifest(&files).contains("project-plans/"));
+    fn recursive_release_policy_is_deliberate_not_all_tracked_files() {
+        for path in [
+            "src/new/module.rs",
+            "tests/new/case.rs",
+            "docs/new/guide.md",
+        ] {
+            assert!(selected(path), "{path}");
+            let mut files = valid();
+            files.push(path.into());
+            assert!(validate(&files).is_ok());
+            assert!(manifest(&files).contains(path));
+        }
+        for path in [
+            "project-plans/new/file.md",
+            "design-docs/new/file.md",
+            ".agents/skill.md",
+            "UNLISTED.md",
+            "unknown/src/lib.rs",
+        ] {
+            assert!(!selected(path), "{path}");
+            let mut files = valid();
+            files.push(path.into());
+            assert!(validate(&files)
+                .unwrap_err()
+                .contains("excluded by source release policy"));
+        }
+        assert!(selected("SERDES-AI-9.0.patch"));
+        assert!(!selected("SERDES-AI-a/b.patch"));
+        assert!(!selected("docs-other/file.md"));
+    }
+    #[test]
+    fn release_policy_syntax_is_unambiguous() {
+        for line in POLICY
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            assert_eq!(fields.len(), 2);
+            assert!(matches!(fields[0], "include" | "exclude"));
+            let pattern = fields[1];
+            let stars = pattern.chars().filter(|c| *c == '*').count();
+            assert!(
+                stars == 0
+                    || (stars == 2 && pattern.ends_with("/**"))
+                    || (stars == 1 && !pattern.contains('/'))
+            );
+        }
     }
     #[test]
     fn generated_manifest_collision_is_not_silently_collapsed() {

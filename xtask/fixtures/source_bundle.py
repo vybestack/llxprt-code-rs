@@ -168,33 +168,60 @@ def builder_cases(root, tmp):
     # cannot SIGPIPE a tar listing and silently make this assertion fail open.
     assert not any(member == 'bundle/tmp' or member.startswith('bundle/tmp/') for member in members)
     assert scratch.is_file(), 'the builder must tolerate scratch, not remove it'
-    for member in ['.gitattributes', 'project-plans', 'project-plans/issue1', 'project-plans/issue1/PLAN.md']:
+    for member in ['.gitattributes', 'docs', 'docs/release-provenance.md', 'src', 'src/lib.rs']:
         assert 'bundle/' + member in members
+    assert not any(member == 'bundle/' + tree or member.startswith('bundle/' + tree + '/')
+                   for member in members for tree in ['design-docs', 'project-plans', '.agents'])
     task(fixture, 'verify', output / 'source.tar.gz')
     second = tmp / 'published-two.tar.gz'
     task(fixture, 'build', second, env=pass_env)
     if b'GNU' in command(['tar', '--version']).stdout:
         assert (output / 'source.tar.gz').read_bytes() == second.read_bytes()
     baseline = git(fixture, 'rev-parse', 'HEAD').stdout.decode().strip()
+    # Committed internal document changes never become release inputs or manifests.
+    listing = task(fixture, 'list').stdout
+    for tree in ['project-plans', 'design-docs']:
+        internal = fixture / tree / 'issue12/new.md'
+        internal.parent.mkdir(parents=True)
+        for action in ['add', 'edit', 'delete']:
+            if action == 'delete': internal.unlink()
+            else: internal.write_text(action + ' internal document\n')
+            commit(fixture, f'{action}-{tree}-document')
+            assert task(fixture, 'list').stdout == listing
+            archive = tmp / f'{action}-{tree}.tar.gz'
+            task(fixture, 'build', archive, env=pass_env)
+            assert archive_members(archive) == members
+            task(fixture, 'verify', archive)
+        reset(fixture, baseline)
+    # Root Markdown is not implicitly a release input; eligible trees recurse.
+    for path, included in [('UNLISTED.md', False), ('docs/new/deep/guide.md', True),
+                            ('src/new/deep/module.rs', True), ('tests/new/deep/case.rs', True)]:
+        member = fixture / path
+        member.parent.mkdir(parents=True, exist_ok=True)
+        member.write_text('new committed member\n')
+        commit(fixture, 'deliberate-recursive-membership')
+        archive = tmp / ('new-' + member.name + '.tar.gz')
+        task(fixture, 'build', archive, env=pass_env)
+        assert ('bundle/' + path in archive_members(archive)) == included
+        assert (path.encode() + b'\n' in task(fixture, 'list').stdout) == included
+        task(fixture, 'verify', archive)
+        reset(fixture, baseline)
+    # Required build, license and provenance deletions remain actionable failures.
+    for path, diagnostic in [('scripts/source-bundle-validate.py', 'missing load-bearing member'),
+                             ('src/lib.rs', 'required regular file missing'),
+                             ('LICENSE', 'missing load-bearing member'),
+                             ('vendor/serdes-ai/.cargo_vcs_info.json', 'missing provenance members'),
+                             ('provenance/serdes-ai-responses-git.json', 'required regular file missing')]:
+        (fixture / path).unlink()
+        commit(fixture, 'omitted-required-input')
+        task(fixture, 'build', tmp / 'omitted-input.tar.gz', env=pass_env,
+             accepted=False, contains=diagnostic)
+        reset(fixture, baseline)
+    # Non-regular committed entries still fail, even when under an excluded tree.
     plan = fixture / 'project-plans/issue1/PLAN.md'
-    plan.unlink(); commit(fixture, 'omitted-plan-fixture')
-    omitted = tmp / 'omitted-plan.tar.gz'
-    task(fixture, 'build', omitted, env=pass_env)
-    assert 'bundle/project-plans/issue1/PLAN.md' not in archive_members(omitted)
-    reset(fixture, baseline)
-    (fixture / 'scripts/source-bundle-validate.py').unlink()
-    commit(fixture, 'omitted-validator-fixture')
-    task(fixture, 'build', tmp / 'omitted-validator.tar.gz', env=pass_env, accepted=False, contains='missing load-bearing member')
-    reset(fixture, baseline)
     plan.unlink(); plan.symlink_to(tmp)
     commit(fixture, 'symlink-plan-fixture')
     task(fixture, 'build', tmp / 'symlink-plan.tar.gz', env=pass_env, accepted=False, contains='non-regular tree entries')
-    reset(fixture, baseline)
-    unlisted = fixture / 'project-plans/issue1/UNLISTED.md'
-    unlisted.write_text('unlisted issue plan\n'); commit(fixture, 'unlisted-plan-fixture')
-    archive = tmp / 'unlisted-plan.tar.gz'
-    task(fixture, 'build', archive, env=pass_env)
-    assert 'bundle/project-plans/issue1/UNLISTED.md' in archive_members(archive)
     reset(fixture, baseline)
     # Explicit committed deny and vendor pair cases augment the original helper unit tests.
     for path in ['src/forbidden.log', 'vendor/serdes-ai/Cargo.toml.orig']:
@@ -257,6 +284,10 @@ def main():
         malformed(tmp, marker)
         for name, message in [('concatenated-gzip-expansion', 'expanded tar-stream'), ('unsorted-manifest', 'manifest entries are not byte-sorted')]:
             command(['python3', ROOT / 'scripts/source-bundle-validate.py', tmp / f'{name}.tar.gz'], accepted=False, contains=message)
+        for archive in sorted(tmp.glob('excluded-*.tar.gz')):
+            command(['python3', ROOT / 'scripts/source-bundle-validate.py', archive],
+                    accepted=False, contains='excluded by source release policy')
+            task(ROOT, 'verify', archive, accepted=False, contains='excluded by source release policy')
         task(ROOT, 'verify', tmp / 'oversize-archive.tar.gz', accepted=False, contains='compressed-size cap')
         # Prove the lockfile boundary itself, not an earlier omitted required file.
         command(['python3', ROOT / 'scripts/source-bundle-validate.py', tmp / 'missing-models-lockfile.tar.gz'])
@@ -266,6 +297,16 @@ def main():
             task(ROOT, 'verify', archive, accepted=False)
             print('rejected archive:', archive.name, flush=True)
         listing = task(ROOT, 'list').stdout
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from source_bundle_policy import selected
+        tracked = git(ROOT, 'ls-tree', '-r', '--name-only', 'HEAD').stdout.decode().splitlines()
+        expected = {path for path in tracked if selected(path)}
+        actual = {path for path in listing.decode().splitlines() if not path.endswith('/')} - {
+            'THIRD_PARTY_LICENSES/source-bundle.txt', 'THIRD_PARTY_LICENSES/source-bundle.sha256'}
+        assert expected == actual, ('Rust/Python release-policy drift', expected ^ actual)
+        for tree in ['project-plans', 'design-docs']:
+            assert not selected(tree) and not selected(tree + '/issue/new.md')
+
         matching(ROOT, tmp, listing, marker)
         task(ROOT, 'verify', tmp / 'bash-env-candidate.bundle', cwd=tmp, env={'BASH_ENV': 'Cargo.toml'}, accepted=False, contains='bundle content does not match')
         assert not marker.exists() and not marker.is_symlink()

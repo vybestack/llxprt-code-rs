@@ -1,0 +1,32 @@
+# Source release membership (issue #12).
+# Default: omit. Rules operate on repository-relative, committed paths.
+# Supported patterns: exact path, recursive tree/**, or one root-level * glob.
+# Exclusions win. Generated manifests are added by the builder, not tracked inputs.
+include Cargo.toml
+include Cargo.lock
+include build.rs
+include rust-toolchain.toml
+include LICENSE
+include README.md
+include PATCHES.md
+include .gitignore
+include .gitattributes
+include SERDES-AI-*.patch
+include .cargo/**
+include .github/**
+include THIRD_PARTY_LICENSES/**
+include docs/**
+include src/**
+include tests/**
+include scripts/**
+include xtask/**
+include examples/**
+include evals/**
+include evalwork/**
+include provenance/**
+include vendor/**
+include vendor-upstream/**
+include registry-vendor/**
+exclude design-docs/**
+exclude project-plans/**
+exclude .agents/**

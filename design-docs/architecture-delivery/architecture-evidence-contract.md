@@ -35,7 +35,7 @@ Each claim is evaluated at all three levels, and every level entry either names 
 | `production integrated` | A non-test caller in a path the shipped binary reaches invokes the code, and that caller needs no worker-added instrumentation. | Caller path and symbol, plus the observed terminal effect. |
 | `workload demonstrated` | The stock binary, rebuilt from the candidate SHA with a clean tree and no instrumentation, shows the effect under a real workload. | Attempt directory containing invocation, CLI and invariant-check statuses, raw stdout/stderr, terminal record, binary SHA-256, recorded initial inputs and resolved workload settings. |
 
-For workload evidence, follow the attempt procedure in `docs/architecture-evidence-handoff-template.md`. A fresh session does not prepare a workspace. Preserve separate worker and driver attempts from matching recorded initial state, including stateful inputs. Retain production workload permissions and budgets while removing actual instrumentation. Put input preparation, resolved settings and attempt paths in `exact commands/statuses`; put recovered starting state in `lifetime/recovered state` and instrumentation removal in `binary hash/dirty delta/instrumentation`. These remain parts of the fourteen fields. Dispatch stdout is raw JSON; the separately extracted `summary` is the Markdown report.
+For workload evidence, follow the attempt procedure in `design-docs/architecture-delivery/architecture-evidence-handoff-template.md`. A fresh session does not prepare a workspace. Preserve separate worker and driver attempts from matching recorded initial state, including stateful inputs. Retain production workload permissions and budgets while removing actual instrumentation. Put input preparation, resolved settings and attempt paths in `exact commands/statuses`; put recovered starting state in `lifetime/recovered state` and instrumentation removal in `binary hash/dirty delta/instrumentation`. These remain parts of the fourteen fields. Dispatch stdout is raw JSON; the separately extracted `summary` is the Markdown report.
 
 ## Worked example
 
@@ -143,7 +143,7 @@ Review directive. OCR/open-code-review and every external reviewer are disabled 
 
 ## Handoff
 
-The driver assembles the worker prompt from `docs/architecture-evidence-handoff-template.md` and passes the requirements, the absolute evidence directory, and every dependency SHA explicitly on the command line. The driver never assumes the worker discovers this contract, the template, or any skill on its own. The project-local driver procedure lives in `.agents/skills/rs-architecture-delivery/SKILL.md`.
+The driver assembles the worker prompt from `design-docs/architecture-delivery/architecture-evidence-handoff-template.md` and passes the requirements, the absolute evidence directory, and every dependency SHA explicitly on the command line. The driver never assumes the worker discovers this contract, the template, or any skill on its own. The project-local driver procedure lives in `.agents/skills/rs-architecture-delivery/SKILL.md`.
 
 Master issue #169 routing, source limitations and the exact-head gate inventory are in
 [the integration evidence index](architecture-integration-evidence-index.md). This contract

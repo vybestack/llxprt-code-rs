@@ -24,42 +24,86 @@ fn names() -> Vec<&'static str> {
         .collect()
 }
 
-/// Issue DoD: the registry must cover every row of the design's tab:ops.
+/// The closed operation vocabulary is a test contract, not a build dependency on
+/// an internal proposal or TeX design. Exact equality also catches unexpected or
+/// duplicate registrations; the former document parser checked only a subset.
 #[test]
-fn registry_covers_design_table_rows() {
-    let tex = include_str!("../../design-docs/context-management/design.tex");
-    let have = names();
-    let mut table_rows = 0;
-    // Row coverage is defined by the tab:ops longtable only. Split the
-    // document on table starts, keep the first table whose body (the part
-    // before \end{longtable}) carries the tab:ops label, and parse just its
-    // rows: prose and unrelated tables must never inflate the count.
-    let block = tex
-        .split("\\begin{longtable}")
-        .skip(1)
-        .filter_map(|table| table.split_once("\\end{longtable}"))
-        .map(|(body, _)| body)
-        .find(|body| body.contains("\\label{tab:ops}"))
-        .unwrap_or("");
-    for line in block.lines() {
-        let trimmed = line.trim();
-        let split = trimmed.split_once(" & ");
-        let pair = match split {
-            Some(p) => p,
-            None => continue,
-        };
-        let (name, rest) = pair;
-        let body = name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-');
-        let is_row = !name.is_empty() && body && !rest.starts_with('}');
-        if !is_row {
-            continue;
-        }
-        table_rows += 1;
-        let found = have.contains(&name);
-        assert!(found, "design row {name} missing from registry");
-    }
-    assert!(table_rows >= 55);
-    assert!(table_rows <= 70, "parsed {table_rows} rows - over-matched");
+fn registry_matches_closed_operation_contract() {
+    let expected = [
+        "admit-as-handle",
+        "admit-convenience",
+        "admit-feedback",
+        "admit-ingress",
+        "admit-obligation",
+        "admit-observation",
+        "admit-response",
+        "amend",
+        "arm",
+        "branch-abort",
+        "branch-open",
+        "branch-return",
+        "calibration-update",
+        "checkpoint",
+        "compact",
+        "condense",
+        "consolidate-head",
+        "consolidate-notes",
+        "consolidate-obligations",
+        "decay",
+        "demote",
+        "disarm",
+        "discharge",
+        "drop-with-handle",
+        "escalate-complete",
+        "escalate-pending",
+        "expire-pin",
+        "fact-invalidate",
+        "flush-notes",
+        "fold",
+        "fold-away-ephemeral",
+        "import",
+        "index-rebuild",
+        "journal-append",
+        "lane-policy-update",
+        "lease-acquire",
+        "margin-recalibrate",
+        "migration-select",
+        "note",
+        "pending-response-stage",
+        "pin",
+        "pin-override-collapse",
+        "place",
+        "placeholder-collapse",
+        "promote",
+        "queue-service",
+        "quiesce-unwritable",
+        "re-promote",
+        "read-back",
+        "reclassify",
+        "redact",
+        "regenerate",
+        "render-contract-observed",
+        "reopen",
+        "repair-result",
+        "resegment",
+        "retract",
+        "revalidate",
+        "rule-update",
+        "sanitize",
+        "scope-close-by-declaration",
+        "scope-close-by-event",
+        "scope-open",
+        "spend-account",
+        "stale-demote",
+        "store-mode",
+        "unpin",
+        "unplace",
+        "vocabulary-update",
+        "wrap-up",
+    ];
+    let mut have = names();
+    have.sort_unstable();
+    assert_eq!(have, expected);
 }
 
 /// F9: a carried typed predicate is a predicate `validate` runs. The bound

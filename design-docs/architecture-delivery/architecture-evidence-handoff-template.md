@@ -1,6 +1,6 @@
 # Issue 170 architecture evidence handoff template
 
-This is the fill-in prompt a driver assembles for one architecture worker. Every slot below maps to a field in `docs/architecture-evidence-contract.md`, which the driver quotes in the prompt rather than assuming the worker has read it. The driver procedure is `.agents/skills/rs-architecture-delivery/SKILL.md`. Generated evidence stays outside tracked source inputs, under a worktree-local ignored absolute evidence directory the driver passes on the command line (for example `<absolute worktree>/tmp/llxprt-evidence/`). Keep build/temp artifacts in the worktree and use short or relative Unix-socket fixture paths.
+This is the fill-in prompt a driver assembles for one architecture worker. Every slot below maps to a field in `design-docs/architecture-delivery/architecture-evidence-contract.md`, which the driver quotes in the prompt rather than assuming the worker has read it. The driver procedure is `.agents/skills/rs-architecture-delivery/SKILL.md`. Generated evidence stays outside tracked source inputs, under a worktree-local ignored absolute evidence directory the driver passes on the command line (for example `<absolute worktree>/tmp/llxprt-evidence/`). Keep build/temp artifacts in the worktree and use short or relative Unix-socket fixture paths.
 
 `EVIDENCE_DIR` is the absolute `<ABS_EVIDENCE_DIR>/issue<N>` directory. Each dispatch and each worker or driver workload attempt reserves a new directory with `mktemp -d`. Keep every attempt, including failed setup, failed CLI runs, and failed validation. Never reuse a run directory or truncate another attempt's artifacts. Reports identify the concrete paths returned by `mktemp`, not the patterns below. Each level names one artifact, which may be a run directory containing its raw records.
 
@@ -42,7 +42,7 @@ review cycle/result:      skipped per Andrew directive 2026-10-09 (no OCR)
 
 ## Directional rules carried inside the prompt
 
-The four directional rules from `docs/architecture-evidence-contract.md` ride inside the
+The four directional rules from `design-docs/architecture-delivery/architecture-evidence-contract.md` ride inside the
 worker prompt heredoc, after the lease and dependency lines and before the reporting
 instruction. They are reproduced verbatim in the heredoc below so a driver copying the
 template carries them without reconstructing them from the contract: one direction, exactly
@@ -96,8 +96,8 @@ Rules:
    Andrew directive 2026-10-09. Do not run them. Record `review cycle/result` as
    `skipped per Andrew directive 2026-10-09 (no OCR)`. All other gates remain required.
    The handoff is an open PR; do not merge or close the issue.
-Read docs/architecture-evidence-contract.md and report all fourteen fields.
-Read docs/architecture-evidence-handoff-template.md and use its claim attempt procedure
+Read design-docs/architecture-delivery/architecture-evidence-contract.md and report all fourteen fields.
+Read design-docs/architecture-delivery/architecture-evidence-handoff-template.md and use its claim attempt procedure
 for workload evidence. Return the report as your
 final message. Do not write the dispatch artifacts yourself.
 PROMPT

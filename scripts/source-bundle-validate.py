@@ -21,6 +21,8 @@ import sys
 import tarfile
 import zlib
 
+from source_bundle_policy import selected
+
 # Hard caps so a hostile archive cannot force unbounded buffering of the embedded
 # manifest or an unbounded member count.
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
@@ -241,6 +243,8 @@ def main():
                     % member.name
                 )
             rel = "/".join(parts[1:])
+            if not selected(rel):
+                fail("archive path excluded by source release policy: %r" % rel)
             key = (rel, kind)
             if rel in arch_names:
                 fail("duplicate archive member (multiplicity != 1): %r" % rel)
@@ -324,6 +328,8 @@ def main():
                 )
             parts = normalize_parts(line, "manifest entry")
             rel = "/".join(parts)
+            if not selected(rel):
+                fail("manifest path excluded by source release policy: %r" % rel)
             kind = "d" if line.endswith("/") else "f"
             key = (rel, kind)
             if rel in expected_names:

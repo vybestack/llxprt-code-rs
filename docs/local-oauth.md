@@ -30,3 +30,13 @@ Device login releases the lock while waiting for browser authorization. On compl
 Publication writes a create-only private staging file in the same directory, syncs the file, atomically renames it over the validated destination and syncs the directory. Readers cannot observe a partially written token. A crash can leave an unreferenced private staging file; it is not a credential source. A post-rename directory-sync failure is reported even though the new file may already be installed.
 
 Tokens are loaded and, if needed, refreshed when a backend is constructed. This does not refresh an already constructed backend in the middle of a turn or replay a failed model request. Filesystem permissions protect against other users, not programs running as the same user. The advisory lock coordinates participating LLxprt instances; unrelated programs must not modify the store during use.
+
+## Login failure diagnostics
+
+Failures identify one of four stages: `device-code request`, `device authorization polling`,
+`authorization-code exchange`, or `token refresh`, together with the HTTP status or a bounded
+read/JSON/size diagnostic. Response bodies, tokens and reqwest details are never printed.
+HTTP 503 is terminal; it does not trigger exchange replay, credential import, Keychain access,
+or an automatic provider/storage switch. A failed explicit login emits a typed `local-oauth`
+error with exit 3 and does not publish a credential. After resolving provider availability,
+start a fresh explicit login rather than treating failed polling as authorization success.

@@ -13,7 +13,7 @@ PR head: `luthor/task-db710e70c7ae3e358fcc435c4ed64bdd`; base: `main`.
 This slice owns this index and documentation alignment in the existing
 [evidence contract](architecture-evidence-contract.md),
 [handoff template](architecture-evidence-handoff-template.md),
-[driver skill](../.agents/skills/rs-architecture-delivery/SKILL.md), and README.
+[driver skill](../../.agents/skills/rs-architecture-delivery/SKILL.md), and README.
 It leaves `src/`, `tests/`, `xtask/`, `scripts/`, vendor trees, debt ledgers and CI untouched.
 
 Before editing, issue #169 and its comments were read and the full open-PR enumeration
@@ -118,7 +118,7 @@ composed CLI milestone or full endurance/security acceptance.
 ### #78 checkpoint-epoch cache controller
 
 - Owned lease: October 13 issue-78 handoff; open-PR overlap refresh `[]`.
-- Evidence: [epoch cache handoff](architecture-issue78-epoch-cache-evidence.md).
+- Evidence: [epoch cache handoff](../../project-plans/issue78/architecture-issue78-epoch-cache-evidence.md).
 - Shared APIs: policy epoch accounting, session encrypted request-prefix
   authority, existing agent compactor, provider epoch-routing projection.
 - Falsifiers: intra-epoch wire rewrite, ungated/timer cut, invented hit metrics,
@@ -129,7 +129,7 @@ composed CLI milestone or full endurance/security acceptance.
 
 ## Issue 46 Phase 9 checkpoint (not architecture acceptance)
 
-[Issue 46 verification evidence](issue46-phase9-verification.md) records the
+[Issue 46 verification evidence](../../project-plans/issue46/issue46-phase9-verification.md) records the
 commit-boundary shadow replay, strict epoch/aggregate accounting, reachable
 component sequences, report-completeness fixtures and explicit endurance-evidence
 validator. The release inventory keeps unexecuted ablations, composed mode-product
