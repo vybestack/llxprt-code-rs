@@ -25,9 +25,24 @@ it does not change the publisher's caller-relative `dist/`. Fixtures invoke the 
 xtask executable, so a deliberately failing Cargo peer cannot accidentally bypass the builder
 or verifier by intercepting wrapper startup. Python fixture suites live in `xtask/fixtures/`.
 The existing Python archive parser, Git blob materializer, output policy, descriptor publisher,
-and OCI helpers are unchanged.
+and OCI helpers retain their security boundaries.
 
-The bundle member set remains the captured commit plus generated member and content manifests.
+The bundle member set is the captured commit filtered through
+[`scripts/source-bundle-policy.txt`](../scripts/source-bundle-policy.txt), plus generated member
+and content manifests. The default is omission: explicit root build/license/patch inputs and
+recursive source, test, build-support, provenance and user-documentation trees are included.
+`docs/**` ships; `design-docs/**`, `project-plans/**` and `.agents/**` never ship. Tracking an
+arbitrary new root Markdown file does not make it a release input. New committed user guides
+or source files under included trees require no policy edit.
+
+The Rust enumerator and Python pre-extraction validator use the same checked-in rules.
+The builder verifies the full Git snapshot is clean, then materializes only selected blobs
+from that captured commit (without checkout filters). The verifier derives its trusted selected
+manifest from its matching commit; an archive cannot expand membership with its own manifest.
+Self-consistent archives containing excluded directories, files or manifest entries fail before
+extraction. Internal-document add/edit/delete commits leave the selected member set unchanged.
+Required build/license/provenance omissions still fail with a named missing input. Offline tests
+use an independent closed-operation contract rather than embedding the internal TeX design.
 Rust enforces regular Git blob modes, deny rules, the load-bearing floor, registry scratch
 rejection, and paired vendor provenance files. Standalone verification never runs extracted
 code. It validates a bounded private snapshot, extracts it, and compares member names and

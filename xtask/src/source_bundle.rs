@@ -17,7 +17,7 @@ pub fn run(root: &Path, args: &[String]) -> Result {
         Some((op, rest)) if op == "build" => build(root, rest),
         Some((op, rest)) if op == "verify" => verify(root, rest),
         Some((op, rest)) if op == "list" && rest.is_empty() => {
-            print!("{}", policy::manifest(&policy::members(root, &policy::commit(root)?)?));
+            print!("{}", policy::manifest(&policy::release_members(root, &policy::commit(root)?)?));
             Ok(())
         }
         _ => Err("usage: cargo xtask source-bundle <build [OUT]|list|verify [--run-local-source-code] [BUNDLE]|test>".into()),
@@ -115,12 +115,17 @@ fn build(root: &Path, args: &[String]) -> Result {
     handshake(&mut reader, "PARENT_READY\n")?;
     let stage = Temp::new(root, "llxprt-bundle-build")?;
     let archive = Temp::new(root, "llxprt-source")?;
-    let files = policy::members(root, &commit)?;
+    let tracked_files = policy::members(root, &commit)?;
+    let files: Vec<_> = tracked_files
+        .iter()
+        .filter(|p| policy::selected(p))
+        .cloned()
+        .collect();
     policy::validate(&files)?;
     checked(&mut python(root, "verify-registry-vendor.py"))?;
     hygiene(root, &files)?;
     let tracked = stage.0.join("tracked");
-    fs::write(&tracked, files.join("\n") + "\n").map_err(|e| e.to_string())?;
+    fs::write(&tracked, tracked_files.join("\n") + "\n").map_err(|e| e.to_string())?;
     checked(
         Command::new("bash")
             .current_dir(root)
@@ -129,12 +134,16 @@ fn build(root: &Path, args: &[String]) -> Result {
             .arg(&commit)
             .stdin(File::open(&tracked).map_err(|e| e.to_string())?),
     )?;
+    let selected = stage.0.join("selected");
+    fs::write(&selected, files.join("\n") + "\n").map_err(|e| e.to_string())?;
     let bundle = stage.0.join("bundle");
     checked(
         python(root, "materialize-git-tree.py")
             .arg(root)
             .arg(&commit)
-            .arg(&bundle),
+            .arg(&bundle)
+            .args(["--members"])
+            .arg(&selected),
     )?;
     let listing = policy::manifest(&files);
     fs::write(bundle.join(MANIFEST), &listing).map_err(|e| e.to_string())?;
@@ -364,7 +373,13 @@ fn verify(root: &Path, args: &[String]) -> Result {
             ));
         }
     }
-    let trusted = policy::manifest(&policy::members(root, &policy::commit(root)?)?);
+    let actual_files: Vec<_> = actual
+        .iter()
+        .filter(|p| !p.ends_with('/'))
+        .cloned()
+        .collect();
+    policy::validate(&actual_files)?;
+    let trusted = policy::manifest(&policy::release_members(root, &policy::commit(root)?)?);
     equal_bytes(
         trusted.as_bytes(),
         &extracted.join(MANIFEST),

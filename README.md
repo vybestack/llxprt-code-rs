@@ -466,17 +466,28 @@ errors fail the gate.
 
 CI checks out full history and runs `cargo xtask coupling-check --base-ref <base-commit> --owner-check`. It compares the checked-in ledger with the merged base ledger, permits ordinary shrinkage, rejects same-PR ledger growth, and fail-closed verifies every distinct owner as an open issue in `vybestack/llxprt-code-rs`. A valid base commit with no ledger permits this gate's one-time initial seed. An exceptional, pre-committed addition may be validated locally with `cargo xtask coupling-check --base-ref <REF> --owner-check --accept-new-coupling`; the explicit flag requires the same open-owner boundary and never edits the ledger. Plain local checks, Cargo tests/clippy, and release gates stay offline and never contact GitHub or honor acceptance.
 
-The [module boundary audit](docs/module-boundary-audit.md) records issue #67's
+The [module boundary audit](design-docs/module-boundary-audit.md) records issue #67's
 landed modularity seams, public-boundary test evidence, and follow-up findings;
 it distinguishes the existing acyclic/debt enforcement from a fixed layer policy.
 
+## Documentation layout
+
+- `docs/` is user/operator documentation: configuration, commands, supported behavior,
+  troubleshooting and release verification. Its eligible committed contents ship recursively.
+- `design-docs/` is repository-only system/architecture design and cross-delivery coordination.
+- `project-plans/` is repository-only spec proposals, implementation plans and issue-specific
+  investigation/acceptance evidence. It is distinct from the broader architecture designs.
+
+The internal links in the following development section refer to the full Git repository;
+those documents are intentionally absent from distributed source archives.
+
 ## Architecture delivery evidence
 
-The [issue #169 integration evidence index](docs/architecture-integration-evidence-index.md)
+The [issue #169 integration evidence index](design-docs/architecture-delivery/architecture-integration-evidence-index.md)
 routes the assessment recommendations through their existing owners and distinguishes
 source inventory, production integration and independently demonstrated workloads. Use the
-[completion contract](docs/architecture-evidence-contract.md),
-[explicit worker handoff](docs/architecture-evidence-handoff-template.md) and
+[completion contract](design-docs/architecture-delivery/architecture-evidence-contract.md),
+[explicit worker handoff](design-docs/architecture-delivery/architecture-evidence-handoff-template.md) and
 [driver skill](.agents/skills/rs-architecture-delivery/SKILL.md) together. Helper coverage
 or a clean tree does not prove composed acceptance or transfer an API lease. OCR/external
 review is disabled per Andrew directive 2026-10-09; all other gates remain required and the
@@ -485,9 +496,11 @@ handoff is an open PR, not a merge.
 ## Source release bundle
 
 Because there is no `cargo package` (see above), the distributable source artifact is a tarball
-archived from one clean committed Git snapshot. The fixed allow-list is asserted in both directions
-against that commit rather than used as a mutable-tree copy filter. Publication fails when `HEAD` is
-absent, when tracked changes exist, or when the allow-listed member set differs from the committed tree.
+archived from one clean committed Git snapshot. Membership is selected by the explicit
+[directory/glob release policy](scripts/source-bundle-policy.txt), not by tracking alone or a
+hand-maintained inventory of source files. The generated manifest inventories that selection.
+Publication fails when `HEAD` is absent, tracked changes or untracked inputs exist, required
+inputs are missing, or the archive differs from the policy-selected committed member set.
 Build and verify it with:
 
 ```bash
@@ -496,12 +509,15 @@ bash scripts/verify-source-bundle.sh         # verify the existing dist/... tarb
 bash scripts/build-source-bundle.sh --list   # print the exact member list, no build
 ```
 
-What it contains: the crate files (`Cargo.toml`, `Cargo.lock`,
-`LICENSE`, `README.md`, `PATCHES.md`, `SERDES-AI-0.2.6.patch`, `.gitignore`),
-the whole `src/`, `tests/`, `scripts/`, `.github/`, `THIRD_PARTY_LICENSES/`,
-`vendor-upstream/`, and `registry-vendor/`, `.cargo/config.toml`, the xtask manifest, lockfile,
-and source, and the required vendored serdes-ai crates'
-`Cargo.toml`/`Cargo.toml.orig`/`README.md`/`.cargo_vcs_info.json`/`Cargo.lock`/`src`. Retaining
+What it contains: explicitly selected root build metadata, license, README, patch notes and
+`SERDES-AI-*.patch`; eligible committed contents recursively under `src/`, `tests/`, `scripts/`,
+`xtask/`, `.cargo/`, `.github/`, `docs/`, `examples/`, `evals/`, `evalwork/`, `provenance/`,
+`THIRD_PARTY_LICENSES/`, `vendor/`, `vendor-upstream/` and `registry-vendor/`.
+New source files and user guides under those trees ship without a packaging-list edit.
+Unknown root files do not automatically ship. `design-docs/`, `project-plans/` and `.agents/`
+are repository-only and excluded entirely, including their directory entries and manifest
+members. Internal documents are neither embedded in executables nor needed by offline tests.
+The required-input floor, vendor provenance pairing and integrity checks still apply. Retaining
 all vendor lockfiles permits byte-for-byte reconstruction from the upstream archives and patch;
 the models lockfile is also required by its direct locked provider tests. The bundle includes the
 generated member manifest `THIRD_PARTY_LICENSES/source-bundle.txt` and the per-file content
@@ -519,7 +535,7 @@ validation, validates all member names and types before extraction, rejects path
 of 128 MiB compressed input, 16 MiB per regular member, less than 384 MiB aggregate
 regular-member bytes, and 448 MiB for the complete expanded tar stream, including concatenated
 gzip members, headers, and metadata. It requires the byte-sorted embedded manifest to match the
-trusted verifier tree's allow-list, generated from the same fixed build policy rather than from
+trusted verifier tree's selected member set, generated from the same directory/glob policy rather than from
 archive-authored data, checks the extraction in both directions, and compares every regular source
 file digest with the verifier's checked tree. Release verification must use
 `verify-source-bundle.sh` from the matching reviewed tag so that this content comparison binds the

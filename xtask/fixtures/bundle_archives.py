@@ -27,27 +27,28 @@ def malformed(tmp, marker):
         return tarfile.open(tmp / (name + '.tar.gz'), 'w:gz')
     def manifest(tf, data):
         directory(tf, 'bundle/THIRD_PARTY_LICENSES/')
+        directory(tf, 'bundle/tests/')
         regular(tf, 'bundle/THIRD_PARTY_LICENSES/source-bundle.txt', data)
-    minimal = b'THIRD_PARTY_LICENSES/\nTHIRD_PARTY_LICENSES/source-bundle.txt\n'
+    minimal = b'THIRD_PARTY_LICENSES/\nTHIRD_PARTY_LICENSES/source-bundle.txt\ntests/\n'
     with archive('duplicate-kind') as tf:
         directory(tf, 'bundle/')
-        directory(tf, 'bundle/clash/')
-        regular(tf, 'bundle/clash', b'not a directory')
+        directory(tf, 'bundle/tests/clash/')
+        regular(tf, 'bundle/tests/clash', b'not a directory')
     with archive('manifest-duplicate-kind') as tf:
         directory(tf, 'bundle/')
-        directory(tf, 'bundle/clash/')
-        manifest(tf, minimal + b'clash/\nclash\n')
+        directory(tf, 'bundle/tests/clash/')
+        manifest(tf, minimal + b'tests/clash/\ntests/clash\n')
     with archive('missing-parent') as tf:
         directory(tf, 'bundle/')
-        regular(tf, 'bundle/nested/file.txt', b'x')
-        manifest(tf, minimal + b'nested/file.txt\n')
+        regular(tf, 'bundle/tests/nested/file.txt', b'x')
+        manifest(tf, minimal + b'tests/nested/file.txt\n')
     with archive('duplicate') as tf:
         directory(tf, 'bundle/')
         regular(tf, 'bundle/Cargo.toml', b'one')
         regular(tf, 'bundle/Cargo.toml', b'two')
     with archive('control') as tf:
         directory(tf, 'bundle/')
-        for name in ['.line\nbreak', '.tab\tname', '.del\x7fname']:
+        for name in ['tests/.line\nbreak', 'tests/.tab\tname', 'tests/.del\x7fname']:
             regular(tf, 'bundle/' + name, b'x')
     for name, member in [('absolute', str(marker)), ('traversal', 'bundle/../../outside-marker')]:
         with archive(name) as tf:
@@ -56,11 +57,11 @@ def malformed(tmp, marker):
     for name, kind, link in [('symlink', tarfile.SYMTYPE, '../../outside'), ('hardlink', tarfile.LNKTYPE, 'bundle/Cargo.toml'), ('fifo', tarfile.FIFOTYPE, ''), ('char', tarfile.CHRTYPE, '')]:
         with archive(name) as tf:
             directory(tf, 'bundle/')
-            info = tarfile.TarInfo('bundle/link')
+            info = tarfile.TarInfo('bundle/tests/link')
             info.type, info.linkname = kind, link
             info.devmajor, info.devminor = 1, 3
             tf.addfile(info)
-    for name, extra in [('hidden-empty-dir', '.hidden/'), ('unmanifested-dir', 'tmp/'), ('unmanifested-file', 'extra.toml')]:
+    for name, extra in [('hidden-empty-dir', 'tests/.hidden/'), ('unmanifested-dir', 'tests/tmp/'), ('unmanifested-file', 'tests/extra.toml')]:
         with archive(name) as tf:
             directory(tf, 'bundle/')
             manifest(tf, minimal)
@@ -68,22 +69,22 @@ def malformed(tmp, marker):
             else: regular(tf, 'bundle/' + extra, b'extra')
     with archive('missing-member') as tf:
         directory(tf, 'bundle/')
-        manifest(tf, minimal + b'missing.txt\n')
+        manifest(tf, minimal + b'tests/missing.txt\n')
     with archive('huge-manifest') as tf:
         directory(tf, 'bundle/')
         manifest(tf, b'x' * (16 * 1024 * 1024) + b'\n')
     with archive('oversize-member') as tf:
         directory(tf, 'bundle/')
-        regular(tf, 'bundle/huge.bin', bytes(20 * 1024 * 1024))
+        regular(tf, 'bundle/tests/huge.bin', bytes(20 * 1024 * 1024))
     with archive('aggregate-overflow') as tf:
         directory(tf, 'bundle/')
-        for index in range(49): regular(tf, f'bundle/blob-{index:02}.bin', bytes(8 * 1024 * 1024))
+        for index in range(49): regular(tf, f'bundle/tests/blob-{index:02}.bin', bytes(8 * 1024 * 1024))
     with archive('oversize-archive') as tf:
         directory(tf, 'bundle/')
-        for index in range(17): regular(tf, f'bundle/entropy-{index:02}.bin', os.urandom(8 * 1024 * 1024))
+        for index in range(17): regular(tf, f'bundle/tests/entropy-{index:02}.bin', os.urandom(8 * 1024 * 1024))
     with archive('directory-payload') as tf:
         directory(tf, 'bundle/')
-        info = tarfile.TarInfo('bundle/payload/')
+        info = tarfile.TarInfo('bundle/tests/payload/')
         info.type, info.mode, info.size = tarfile.DIRTYPE, 0o755, 20 * 1024 * 1024
         tf.addfile(info, io.BytesIO(bytes(info.size)))
     with archive('concatenated-gzip-expansion') as tf:
@@ -94,8 +95,19 @@ def malformed(tmp, marker):
             for _ in range(450): tail.write(bytes(1024 * 1024))
     with archive('unsorted-manifest') as tf:
         directory(tf, 'bundle/')
-        regular(tf, 'bundle/a.txt', b'a')
-        manifest(tf, b'a.txt\n' + minimal)
+        directory(tf, 'bundle/docs/')
+        regular(tf, 'bundle/docs/a.txt', b'a')
+        manifest(tf, b'docs/\ndocs/a.txt\n' + minimal)
+    for tree in ['design-docs', 'project-plans']:
+        for kind in ['file', 'directory', 'manifest-only']:
+            with archive(f'excluded-{tree}-{kind}') as tf:
+                directory(tf, 'bundle/')
+                listing = minimal + f'{tree}/\n'.encode()
+                if kind != 'manifest-only': directory(tf, 'bundle/' + tree + '/')
+                if kind == 'file':
+                    regular(tf, f'bundle/{tree}/internal.md', b'internal design')
+                    listing += f'{tree}/internal.md\n'.encode()
+                manifest(tf, b'\n'.join(sorted(listing.splitlines())) + b'\n')
     # Self-consistent required-file fixture missing the direct models lockfile.
     files = ['Cargo.toml', 'Cargo.lock', 'LICENSE', 'README.md', 'PATCHES.md', 'SERDES-AI-0.2.6.patch', '.gitignore', 'src/lib.rs', 'src/bin/llxprt-parity.rs', '.cargo/config.toml', 'xtask/Cargo.toml', 'xtask/Cargo.lock', 'xtask/src/main.rs', 'xtask/src/lib.rs', 'vendor/serdes-ai/Cargo.toml', 'vendor/serdes-ai/.cargo_vcs_info.json', 'vendor/serdes-ai/src/lib.rs', 'vendor/serdes-ai-core/Cargo.toml', 'vendor/serdes-ai-core/src/lib.rs', 'vendor/serdes-ai-models/Cargo.toml', 'vendor/serdes-ai-models/src/openai/chat.rs', 'THIRD_PARTY_LICENSES/README.md', 'THIRD_PARTY_LICENSES/SERDES-AI-MIT.txt', '.github/workflows/ci.yml']
     files += ['xtask/src/release.rs', 'vendor/serdes-ai-responses/Cargo.toml', 'vendor/serdes-ai-responses/src/client/mod.rs', 'provenance/serdes-ai-responses-git.json', 'scripts/verify-serdes-responses-evidence.py', 'vendor-upstream/serdes-ai-responses-bd6aefc96f699276afb6384257b101039a663b5f.tar.gz', 'THIRD_PARTY_LICENSES/source-bundle.sha256']

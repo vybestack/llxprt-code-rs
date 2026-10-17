@@ -7,10 +7,10 @@ description: Orchestrate an llxprt-code-rs delivery with ownership refresh, expl
 
 This skill is the operating procedure for a TypeScript driver orchestrating one delivery in
 `llxprt-code-rs`. It produces no code and adds no framework. The evidence definitions live in
-`docs/architecture-evidence-contract.md` and the prompt slots live in
-`docs/architecture-evidence-handoff-template.md`. The driver reads both before starting.
+`design-docs/architecture-delivery/architecture-evidence-contract.md` and the prompt slots live in
+`design-docs/architecture-delivery/architecture-evidence-handoff-template.md`. The driver reads both before starting.
 Issue #169 routing and current integration limitations are indexed in
-`docs/architecture-integration-evidence-index.md`; refresh its source/ownership observations
+`design-docs/architecture-delivery/architecture-integration-evidence-index.md`; refresh its source/ownership observations
 at the delivery head rather than treating the historical inventory as a lease.
 
 ## 1. Refresh ownership
@@ -37,7 +37,7 @@ contract, or the template. Pass each input as an explicit argument:
   each claim under `$EVIDENCE_DIR/claim-<k>/`;
 - every dependency SHA, one per dependency, with the symbol or file each one supplies;
 - the exclusions and the names of the issues that own the excluded paths;
-- the contract path `docs/architecture-evidence-contract.md`, quoted in the prompt, so the
+- the contract path `design-docs/architecture-delivery/architecture-evidence-contract.md`, quoted in the prompt, so the
   worker reports against its fourteen fields.
 
 ## 3. Verify at the exact commit
@@ -50,7 +50,7 @@ contract, or the template. Pass each input as an explicit argument:
    clean tree.
    Also run the MSRV and stable CI-equivalent fmt, strict Clippy, xtask quality/tests,
    direct-vendor suites, MSRV rustdoc and strict release/extracted-source gates recorded
-   in `.github/workflows/ci.yml` and `docs/architecture-integration-evidence-index.md`.
+   in `.github/workflows/ci.yml` and `design-docs/architecture-delivery/architecture-integration-evidence-index.md`.
    Keep Cargo home, targets and temporary directories in the worktree, retaining any
    ancestor-workspace sandbox workaround; use short/relative Unix-socket fixture paths.
 3. Recompute the binary hash: `shasum -a 256 target/release/llxprt-code-rs` or
@@ -68,7 +68,7 @@ contract, or the template. Pass each input as an explicit argument:
    relative. A gate the driver did not run counts as not run.
 5. Run the stock binary for every `workload demonstrated` claim with no worker-added
    instrumentation, using the driver-side invocation in
-   `docs/architecture-evidence-handoff-template.md`: a fresh unused `--session` id plus a
+   `design-docs/architecture-delivery/architecture-evidence-handoff-template.md`: a fresh unused `--session` id plus a
    separately prepared workload workspace from the retained initial inputs. Record and
    reproduce required external or persisted starting state independently of session identity.
    Match the claim's production permissions, budgets and resolved settings, with explicit
@@ -81,7 +81,7 @@ contract, or the template. Pass each input as an explicit argument:
 
 ## 4. Classify the evidence
 
-Apply `docs/architecture-evidence-contract.md` level by level: `primitive implemented`,
+Apply `design-docs/architecture-delivery/architecture-evidence-contract.md` level by level: `primitive implemented`,
 `production integrated`, `workload demonstrated`. Every claim is evaluated at all three
 levels; each entry either names its own artifact under `$EVIDENCE_DIR/claim-<k>/` or is
 recorded `unavailable` with one sentence why. One artifact never serves two claims.

@@ -21,8 +21,8 @@ def read_exact(stream: object, size: int) -> bytes:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        fail("usage: materialize-git-tree.py ROOT COMMIT DESTINATION")
+    if len(sys.argv) not in (4, 6) or (len(sys.argv) == 6 and sys.argv[4] != "--members"):
+        fail("usage: materialize-git-tree.py ROOT COMMIT DESTINATION [--members FILE]")
     root = Path(sys.argv[1]).resolve(strict=True)
     commit = sys.argv[2]
     destination = Path(sys.argv[3])
@@ -35,6 +35,7 @@ def main() -> None:
         check=True,
         stdout=subprocess.PIPE,
     ).stdout
+    selected = None if len(sys.argv) == 4 else set(Path(sys.argv[5]).read_bytes().splitlines())
     entries: list[tuple[str, str, bytes]] = []
     seen: set[bytes] = set()
     for record in listing.split(b"\0"):
@@ -53,7 +54,10 @@ def main() -> None:
         if raw_path in seen:
             fail(f"duplicate tree path: {os.fsdecode(raw_path)!r}")
         seen.add(raw_path)
-        entries.append((mode.decode("ascii"), object_id.decode("ascii"), raw_path))
+        if selected is None or raw_path in selected:
+            entries.append((mode.decode("ascii"), object_id.decode("ascii"), raw_path))
+    if selected is not None and selected - seen:
+        fail(f"selected members absent from commit: {sorted(selected - seen)!r}")
 
     process = subprocess.Popen(
         ["git", "-C", os.fspath(root), "cat-file", "--batch"],

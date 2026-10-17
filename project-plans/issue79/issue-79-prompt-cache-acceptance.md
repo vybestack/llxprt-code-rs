@@ -30,7 +30,7 @@ all four requirements:
    `src/model_api/responses_backend/cache_tests.rs` independently exercises the
    fixed-endpoint Codex backend without adding a production endpoint override.
 
-See [prompt-caching.md](prompt-caching.md) for the settings, accounting and output
+See [prompt-caching.md](../../docs/prompt-caching.md) for the settings, accounting and output
 contract. This delivery does not replace those implementations or add a second
 telemetry mechanism.
 

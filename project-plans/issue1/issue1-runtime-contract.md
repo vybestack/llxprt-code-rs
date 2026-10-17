@@ -88,4 +88,4 @@ Before Phase 8, both of these results are expected:
 1. A plain source-bundle materialization omits `project-plans/issue1/PLAN.md`.
 2. Adding the plan without updating the approved source manifest causes source verification to fail because of an unexpected member.
 
-Phase 8 changes only the source manifest: it adds exact top file `project-plans/issue1/PLAN.md` and explicit directory members `project-plans/` and `project-plans/issue1/`. Publication scripts must not change before Phase 8.
+**Historical Phase 8 requirement (superseded by issue #12 release-content policy):** Phase 8 changed only the source manifest: it adds exact top file `project-plans/issue1/PLAN.md` and explicit directory members `project-plans/` and `project-plans/issue1/`. Publication scripts must not change before Phase 8.
