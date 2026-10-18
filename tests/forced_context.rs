@@ -1,6 +1,8 @@
 //! F2 registered native tools with a real HTTP explicit-context verdict below guard.
 //! Test-only public backend uses the existing Responses HTTP/typed error mapping;
 //! no credentials, profile switches, or production transport changes.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::adapter::{ChatBackend, LlmResult, ModelFuture};
 use llxprt_code_rs::agent::CodingAgent;
 use llxprt_code_rs::session::{SessionId, SessionStore};
@@ -83,12 +85,9 @@ fn response(index: usize, reject_twice: bool) -> (u16, Value) {
     )
 }
 
-fn server(listener: TcpListener, captured: Arc<Mutex<Vec<Value>>>, reject_twice: bool) {
+fn server(listener: loopback::Listener, captured: Arc<Mutex<Vec<Value>>>, reject_twice: bool) {
     for index in 1..=6 {
         let (mut socket, _) = listener.accept().unwrap();
-        socket
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
         let mut header = Vec::new();
         while !header.ends_with(b"\r\n\r\n") {
             let mut byte = [0];
@@ -161,7 +160,9 @@ fn run(reject_twice: bool) {
     let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
     let captured = Arc::new(Mutex::new(Vec::new()));
     let recorded = captured.clone();
-    let thread = std::thread::spawn(move || server(listener, recorded, reject_twice));
+    let thread = loopback::spawn(listener, move |listener| {
+        server(listener, recorded, reject_twice)
+    });
     let agent = CodingAgent::with_backend(
         Box::new(Backend {
             endpoint,
@@ -169,8 +170,7 @@ fn run(reject_twice: bool) {
         }),
         work.path().into(),
         false,
-    )
-    .with_turn_time(Some(std::time::Duration::from_secs(20)));
+    );
     let result = agent.run(&store, &reserved);
     assert_eq!(agent.model_calls(), 6, "run result: {result:?}");
     if reject_twice {

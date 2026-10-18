@@ -1,7 +1,10 @@
 //! Stock compiled CLI telemetry, persistence, replay, retries and private JSONL ownership.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
+use loopback::Connection as TcpStream;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -33,9 +36,6 @@ fn profile(root: &Path, address: std::net::SocketAddr, provider: &str) {
 }
 
 fn read_request(stream: &mut TcpStream) -> Value {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = 0;
     loop {
@@ -115,7 +115,7 @@ fn compiled_provider_calls_tools_persist_and_replay_without_fabricated_generatio
         let work = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         profile(work.path(), listener.local_addr().unwrap(), provider);
-        let server = std::thread::spawn(move || {
+        let server = loopback::spawn(listener, move |listener| {
             for tool in [true, false] {
                 let (mut stream, _) = listener.accept().unwrap();
                 read_request(&mut stream);
@@ -184,7 +184,7 @@ fn retry_attempts_keep_class_status_hint_actual_wait_and_success() {
     let work = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     profile(work.path(), listener.local_addr().unwrap(), "openai");
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         let first = read_request(&mut stream);
         write!(stream,"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 10\r\nConnection: close\r\n\r\nrate limit").unwrap();
@@ -219,7 +219,7 @@ fn timeout_failure_carries_wall_time_and_durable_cancelled_call() {
     let work = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     profile(work.path(), listener.local_addr().unwrap(), "openai");
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         read_request(&mut stream);
         std::thread::sleep(Duration::from_millis(1400));
@@ -280,7 +280,7 @@ fn missing_and_inconsistent_provider_counters_remain_unknown_and_finite() {
         let work = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         profile(work.path(), listener.local_addr().unwrap(), "openai");
-        let server = std::thread::spawn(move || {
+        let server = loopback::spawn(listener, move |listener| {
             let (mut stream, _) = listener.accept().unwrap();
             read_request(&mut stream);
             let mut response = reply("openai", false);
@@ -324,7 +324,7 @@ fn tool_refusal_and_truncation_are_counted_without_executing_refused_calls() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         profile(work.path(), listener.local_addr().unwrap(), "openai");
         std::fs::write(work.path().join("input"), "x".repeat(4096)).unwrap();
-        let server = std::thread::spawn(move || {
+        let server = loopback::spawn(listener, move |listener| {
             for tool in [true, false] {
                 let (mut stream, _) = listener.accept().unwrap();
                 read_request(&mut stream);
@@ -367,7 +367,7 @@ fn partial_tail_recovery_is_visible_and_store_reads_are_not_old_prefix_estimates
     let work = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     profile(work.path(), listener.local_addr().unwrap(), "openai");
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         read_request(&mut stream);
         send(&mut stream, &reply("openai", false));

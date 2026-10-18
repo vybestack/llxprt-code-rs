@@ -107,7 +107,7 @@ fn issue33_anthropic_top_k_reaches_wire_in_every_mode() {
             "{}",
             String::from_utf8_lossy(&output.stdout)
         );
-        let body = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let body = rx.recv().unwrap();
         server.join().unwrap();
         for (key, value) in params.as_object().unwrap() {
             assert_eq!(&body[key], value, "anthropic/{mode}/{key}");
@@ -133,7 +133,7 @@ fn issue33_chat_known_keys_and_loose_extensions_reach_wire() {
                 "{}",
                 String::from_utf8_lossy(&output.stdout)
             );
-            let body = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let body = rx.recv().unwrap();
             server.join().unwrap();
             for (key, value) in params.as_object().unwrap() {
                 assert_eq!(&body[key], value, "{provider}/{mode}/{key}");

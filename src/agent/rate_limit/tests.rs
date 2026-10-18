@@ -329,3 +329,22 @@ fn accepted_or_ambiguous_transport_loss_is_terminal_without_backoff() {
         assert_eq!(elapsed, Duration::ZERO);
     }
 }
+
+#[test]
+fn one_second_hint_keeps_the_backoff_bounds() {
+    let (result, inputs, lifecycle, elapsed) = run(
+        vec![
+            Err(failure(429, crate::transport::TransportKind::RateLimit, 1)),
+            Ok(healthy()),
+        ],
+        None,
+    );
+    assert_eq!(result.unwrap().retry_attempts, 1);
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0], inputs[1]);
+    assert_eq!(lifecycle, Lifecycle::Completed);
+    // Moved unchanged from the compiled loopback test: OS scheduling is not
+    // backoff. This measures the actual Turn retry executor's virtual clock.
+    assert!(elapsed >= Duration::from_secs(1));
+    assert!(elapsed < Duration::from_secs(5));
+}

@@ -2,6 +2,7 @@
 use super::*;
 use crate::adapter::{user_request, ChatBackend};
 use crate::session::{SessionId, SessionStore};
+use crate::test_loopback as loopback;
 use std::io::Write as _;
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ fn delayed_sse_reports_first_body_generation_reasoning_and_exact_usage() {
     let root = tempfile::tempdir().unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         let _ = tests::read_codex_request(&mut stream);
         write!(

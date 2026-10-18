@@ -1,4 +1,6 @@
 //! R327-1 deterministic future store publications must never own a diagnostic file.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -19,6 +21,7 @@ fn invoke(config: &Path, cwd: &Path, destination: &Path) -> Output {
 fn endpoint(root: &Path) -> std::net::TcpListener {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
+
     std::fs::create_dir_all(root.join("profiles")).unwrap();
     std::fs::write(root.join("profiles/reviewer.json"), json!({"provider":"openai","model":"fixture","ephemeralSettings":{"auth-key":"reviewer-secret","base-url":format!("http://{}",listener.local_addr().unwrap())}}).to_string()).unwrap();
     std::fs::write(root.join("input.txt"), "own bounded tool data").unwrap();
@@ -199,22 +202,9 @@ fn external_aliased_output_and_absent_config_with_explicit_profile_complete_norm
     std::fs::create_dir(output_dir.join("child")).unwrap();
     std::os::unix::fs::symlink(&output_dir, work.path().join("output-alias")).unwrap();
     let destination = work.path().join("output-alias/child/../cache.jsonl");
-    let server = std::thread::spawn(move || {
-        let start = std::time::Instant::now();
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(start.elapsed() < std::time::Duration::from_secs(10));
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept: {error}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
+    let server = loopback::spawn(listener, move |listener| {
+        let mut stream = listener.accept().unwrap().0;
+
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = None;
         loop {
@@ -235,7 +225,7 @@ fn external_aliased_output_and_absent_config_with_explicit_profile_complete_norm
         assert_eq!(request["prompt_cache_key"], "probe");
         let response=json!({"id":"ok","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":"natural summary"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101,"prompt_tokens_details":{"cached_tokens":60}}}).to_string();
         write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
-        assert!(matches!(listener.accept(),Err(e) if e.kind()==std::io::ErrorKind::WouldBlock));
+        listener.expect_no_more_requests();
     });
     let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
         .env("LLXPRT_CONFIG_HOME", &config)

@@ -1,4 +1,6 @@
 //! Issue 89: hostile model replies must not spend prohibited exploratory calls.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
@@ -16,35 +18,17 @@ fn call(name: &str, args: Value, id: &str) -> Value {
     json!({"id":id,"type":"function","function":{"name":name,"arguments":args.to_string()}})
 }
 
-fn serve(
-    listener: TcpListener,
-    replies: Vec<Value>,
-    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> Vec<Value> {
+fn serve(listener: loopback::Listener, replies: Vec<Value>) -> Vec<Value> {
     // Extra replies let the unfixed loop finish, so the regression fails on the
     // invariant rather than on a hung fixture. Capture the actual request count.
-    listener.set_nonblocking(true).unwrap();
+
     let mut requests = Vec::new();
     for reply in replies {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if done.load(std::sync::atomic::Ordering::SeqCst)
-                        || std::time::Instant::now() >= deadline
-                    {
-                        return requests;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept: {error}"),
-            }
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionAborted => return requests,
+            Err(error) => panic!("accept: {error}"),
         };
-        stream.set_nonblocking(false).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-            .unwrap();
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = None;
         loop {
@@ -96,10 +80,9 @@ fn run_with_inputs(
     std::fs::write(root.path().join("tmp/finisher.py"), script).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     std::fs::write(root.path().join("profiles/loopback.json"), json!({"provider":"openai","model":"loopback","ephemeralSettings":{"base-url":format!("http://{}", listener.local_addr().unwrap()),"auth-key":"fixture"}}).to_string()).unwrap();
-    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let server_done = done.clone();
-    let server =
-        std::thread::spawn(move || serve(listener, vec![first, response(vec![])], server_done));
+    let server = loopback::spawn(listener, move |listener| {
+        serve(listener, vec![first, response(vec![])])
+    });
     let mut cli = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"));
     cli.env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap())
@@ -120,7 +103,6 @@ fn run_with_inputs(
         cli.arg("--allow-shell");
     }
     let output = cli.output().unwrap();
-    done.store(true, std::sync::atomic::Ordering::SeqCst);
     let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
     let store = llxprt_code_rs::session::SessionStore::load_at(
         &llxprt_code_rs::session::SessionId::parse("one-command").unwrap(),

@@ -1,10 +1,11 @@
+#[path = "../../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use serdes_ai_responses::types::{
     CreateResponseRequest, ResponseObject, ResponseStatus, StreamEvent,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::time::Duration;
 fn event(value: Value) -> StreamEvent {
     serde_json::from_value(value).expect("payload must satisfy the current owning wire type")
 }
@@ -72,7 +73,7 @@ pub fn payload(deltas: &[Vec<&str>], reasoning: bool) -> String {
         })
         .collect()
 }
-fn read_request(socket: &mut std::net::TcpStream) -> Value {
+fn read_request(socket: &mut loopback::Connection) -> Value {
     let mut bytes = Vec::new();
     loop {
         let mut chunk = [0; 4096];
@@ -99,20 +100,17 @@ pub fn serve(
     fragments: bool,
 ) -> (
     serdes_ai_responses::client::OpenResponsesModel,
-    std::thread::JoinHandle<()>,
+    loopback::Server<()>,
 ) {
     use serdes_ai_responses::client::OpenResponsesModel;
     let turns = bodies.len();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
 
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for body in bodies {
             let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
             requests.push(read_request(&mut socket));
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).unwrap();
             if fragments {
@@ -123,12 +121,8 @@ pub fn serve(
                 socket.write_all(body.as_bytes()).unwrap();
             }
         }
-        listener.set_nonblocking(true).unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(
-            matches!(listener.accept(),Err(e) if e.kind()==std::io::ErrorKind::WouldBlock),
-            "request replay"
-        );
+
+        listener.expect_no_more_requests();
         assert_eq!(requests.len(), turns);
         for request in requests {
             assert_eq!(request["stream"], true);

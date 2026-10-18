@@ -1,6 +1,7 @@
 //! HTTP status/hint facts survive both retained Responses transports.
 use super::*;
 use crate::adapter::ChatBackend;
+use crate::test_loopback as loopback;
 use crate::transport::TransportKind;
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
@@ -27,16 +28,13 @@ fn codex_http_status_facts_survive_diagnostic_body_timeout_and_quota() {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             let (done, release) = std::sync::mpsc::channel();
-            let server = std::thread::spawn(move || {
+            let server = loopback::spawn(listener, move |listener| {
                 let (mut stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
                 drain_request(&stream);
                 let declared_length = body.len() + if incomplete { 100 } else { 0 };
                 write!(stream, "HTTP/1.1 {status} Fixture\r\nRetry-After: 7\r\nContent-Length: {declared_length}\r\nConnection: close\r\n\r\n{body}").unwrap();
                 if incomplete {
-                    release.recv_timeout(Duration::from_secs(5)).unwrap();
+                    release.recv().unwrap();
                 }
             });
             let mut model =
@@ -48,7 +46,7 @@ fn codex_http_status_facts_survive_diagnostic_body_timeout_and_quota() {
             let backend = ResponsesBackend::new(
                 model,
                 ModelSettings {
-                    timeout: Some(Duration::from_millis(100)),
+                    timeout: incomplete.then_some(Duration::from_millis(100)),
                     ..Default::default()
                 },
             );
@@ -75,7 +73,7 @@ fn codex_http_status_facts_survive_diagnostic_body_timeout_and_quota() {
     }
 }
 
-fn drain_request(stream: &std::net::TcpStream) {
+fn drain_request(stream: &loopback::Connection) {
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = 0;
     loop {

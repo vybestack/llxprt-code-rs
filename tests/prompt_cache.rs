@@ -1,9 +1,10 @@
 //! Exact HTTP-byte prefix invariants through the compiled process-per-turn CLI.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 fn field<'a>(body: &'a str, key: &str) -> &'a str {
     let start = body.find(&format!("\"{key}\":")).unwrap() + key.len() + 3;
@@ -64,26 +65,13 @@ fn run_wire_case(
     std::fs::create_dir(work.path().join("profiles")).unwrap();
     std::fs::write(work.path().join("fixture.txt"), "stable evidence").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let addr = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut bodies = Vec::new();
         for round in 0..4 {
-            let deadline = Instant::now() + Duration::from_secs(30);
-            let mut socket = loop {
-                match listener.accept() {
-                    Ok((socket, _)) => break socket,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline, "missing request {round}");
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(e) => panic!("{e}"),
-                }
-            };
-            socket.set_nonblocking(false).unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(20)))
-                .unwrap();
+            let mut socket = listener.accept().unwrap().0;
+
             let mut reader = std::io::BufReader::new(&mut socket);
             let mut length = None;
             loop {

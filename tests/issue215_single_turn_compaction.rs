@@ -1,32 +1,20 @@
 //! Issue #215: single-turn recovery at the reported 393216-token guard.
 //! Exercise the stock CLI, registered reads, actual wire requests and durable failure.
 
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 const TOKENS: usize = 393_216;
 const GUARD: usize = TOKENS * 3;
 
-fn serve_read(listener: &TcpListener, index: usize, latest_over: bool) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let mut socket = loop {
-        match listener.accept() {
-            Ok((socket, _)) => break socket,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "missing request {index}");
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => panic!("accept: {error}"),
-        }
-    };
-    socket.set_nonblocking(false).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
+fn serve_read(listener: &loopback::Listener, index: usize, latest_over: bool) -> Value {
+    let mut socket = listener.accept().unwrap().0;
+
     let mut reader = std::io::BufReader::new(socket.try_clone().unwrap());
     let mut length = None;
     loop {
@@ -76,7 +64,7 @@ fn run(evidence_bytes: usize, replies: usize) -> (Value, Vec<Value>, tempfile::T
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("evidence.txt"), "x".repeat(evidence_bytes)).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let profile = root.path().join("fixture.json");
     std::fs::write(
         &profile,
@@ -86,11 +74,12 @@ fn run(evidence_bytes: usize, replies: usize) -> (Value, Vec<Value>, tempfile::T
         .to_string(),
     )
     .unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let requests: Vec<_> = (1..=replies)
             .map(|i| serve_read(&listener, i, replies == 1))
             .collect();
-        (listener, requests)
+        listener.expect_no_more_requests();
+        requests
     });
     let output = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
         .env("LLXPRT_CONFIG_HOME", root.path())
@@ -104,7 +93,7 @@ fn run(evidence_bytes: usize, replies: usize) -> (Value, Vec<Value>, tempfile::T
             "--max-tool-calls",
             "8",
             "--turn-time",
-            "15s",
+            "0",
             "-p",
             "Inspect evidence.txt; preserve these current instructions verbatim.",
         ])
@@ -116,12 +105,7 @@ fn run(evidence_bytes: usize, replies: usize) -> (Value, Vec<Value>, tempfile::T
         "{output:?}"
     );
     let terminal: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let (listener, requests) = server.join().unwrap();
-    assert_eq!(
-        listener.accept().unwrap_err().kind(),
-        std::io::ErrorKind::WouldBlock,
-        "the CLI must not send another request after its terminal outcome"
-    );
+    let requests = server.join().unwrap();
     (terminal, requests, root)
 }
 

@@ -1,4 +1,6 @@
 //! Stock process-per-turn provider contracts: forced summary, restart and retained recovery.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
@@ -33,30 +35,11 @@ fn reply(provider: &str, index: usize) -> Value {
     }
 }
 
-fn accept(listener: &std::net::TcpListener) -> std::net::TcpStream {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        match listener.accept() {
-            Ok((s, _)) => {
-                s.set_nonblocking(false).unwrap();
-                return s;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "missing provider request"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(e) => panic!("{e}"),
-        }
-    }
+fn accept(listener: &loopback::Listener) -> loopback::Connection {
+    listener.accept().unwrap().0
 }
 
-fn body(socket: &mut std::net::TcpStream) -> Value {
-    socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-        .unwrap();
+fn body(socket: &mut loopback::Connection) -> Value {
     let mut reader = std::io::BufReader::new(socket);
     let mut length = 0;
     loop {
@@ -116,10 +99,10 @@ fn run(provider: &'static str) {
     std::fs::create_dir(root.path().join("profiles")).unwrap();
     std::fs::write(root.path().join("input.txt"), "admitted evidence").unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let addr = listener.local_addr().unwrap();
     std::fs::write(root.path().join("profiles/fixture.json"), json!({"provider":provider,"model":"fixture", "ephemeralSettings":{"base-url":format!("http://{addr}/v1"),"auth-key":"fixture-configured-key"}}).to_string()).unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for i in 0..5 {
             let mut socket = accept(&listener);
@@ -312,14 +295,14 @@ fn changed_model_refuses_private_history_before_any_transport_request() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("profiles")).unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let addr = listener.local_addr().unwrap();
     let profile = root.path().join("profiles/fixture.json");
     let config = |model| {
         json!({"provider":"openai","model":model,"ephemeralSettings":{"base-url":format!("http://{addr}/v1"),"auth-key":"key"}}).to_string()
     };
     std::fs::write(&profile, config("first-model")).unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut socket = accept(&listener);
         let _ = body(&mut socket);
         let response = reply("openai", 1).to_string();

@@ -1,10 +1,11 @@
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::cli::Code;
 use serde::Deserialize;
 use serde_json::Value;
 use std::io::{BufRead, Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Command, Output, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
@@ -47,8 +48,7 @@ fn profile(root: &std::path::Path, endpoint: std::net::SocketAddr) {
 
 struct ErrorServer {
     address: SocketAddr,
-    shutdown: Option<mpsc::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<loopback::Server<()>>,
 }
 
 impl ErrorServer {
@@ -59,9 +59,6 @@ impl ErrorServer {
 
 impl Drop for ErrorServer {
     fn drop(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
         if let Some(thread) = self.thread.take() {
             thread.join().unwrap();
         }
@@ -70,13 +67,8 @@ impl Drop for ErrorServer {
 
 fn error_server() -> ErrorServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
-    let (shutdown, shutdown_rx) = mpsc::channel();
-    let thread = std::thread::spawn(move || loop {
-        if shutdown_rx.try_recv().is_ok() {
-            break;
-        }
+    let thread = loopback::spawn(listener, move |listener| loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let reader_stream = match stream.try_clone() {
@@ -116,15 +108,12 @@ fn error_server() -> ErrorServer {
                     );
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionAborted => break,
             Err(error) => eprintln!("error fixture server accept failed: {error}"),
         }
     });
     ErrorServer {
         address,
-        shutdown: Some(shutdown),
         thread: Some(thread),
     }
 }

@@ -233,7 +233,7 @@ pub(super) mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let port = listener.local_addr().unwrap().port();
         let (bodies_tx, bodies_rx) = std::sync::mpsc::channel::<serde_json::Value>();
-        let server = std::thread::spawn(move || {
+        let server = crate::test_loopback::spawn(listener, move |listener| {
             use std::io::Write as _;
             for round in 0..2 {
                 let (mut stream, _) = listener.accept().expect("accept codex turn");
@@ -346,11 +346,9 @@ pub(super) mod tests {
 
     /// Reads one full HTTP request (headers plus a content-length body) off
     /// the accepted codex connection.
-    pub(crate) fn read_codex_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    pub(crate) fn read_codex_request(stream: &mut crate::test_loopback::Connection) -> Vec<u8> {
         use std::io::Read as _;
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
+
         let mut request = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
@@ -520,7 +518,7 @@ pub(super) mod tests {
     fn codex_http_rejects_non_sse_success_body() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
+        let server = crate::test_loopback::spawn(listener, move |listener| {
             use std::io::{Read as _, Write as _};
             let (mut stream, _) = listener.accept().expect("accept");
             let mut buf = [0u8; 4096];

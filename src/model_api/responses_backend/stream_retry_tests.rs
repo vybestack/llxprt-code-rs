@@ -2,12 +2,12 @@
 use super::*;
 use crate::agent::CodingAgent;
 use crate::session::{SessionId, SessionStore};
+use crate::test_loopback as loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
-use std::time::{Duration, Instant};
 
-fn read_request(stream: &mut std::net::TcpStream) -> Value {
+fn read_request(stream: &mut loopback::Connection) -> Value {
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = None;
     loop {
@@ -48,31 +48,15 @@ fn run_detailed(
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
-        listener.set_nonblocking(true).unwrap();
+    let server = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for (body, missing) in bodies {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline, "missing request");
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(e) => panic!("{e}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+            let mut stream = listener.accept().unwrap().0;
+
             requests.push(read_request(&mut stream));
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()+missing).unwrap();
         }
-        std::thread::sleep(Duration::from_millis(100));
-        let error = listener.accept().expect_err("unexpected retry");
-        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        listener.expect_no_more_requests();
         requests
     });
     let model = OpenResponsesModel::new("fixture", format!("http://{address}/responses"))
@@ -85,9 +69,12 @@ fn run_detailed(
         ),
         crate::model_api::cache_observation::InputAccounting::Inclusive,
     );
-    let agent = CodingAgent::with_backend(Box::new(backend), root.path().into(), false)
-        .with_turn_time(Some(Duration::from_secs(8)))
-        .with_max_tool_calls(Some(4));
+    let agent = CodingAgent::with_backend(
+        Box::new(crate::test_retry_clock::RetryClock::new(backend)),
+        root.path().into(),
+        false,
+    )
+    .with_max_tool_calls(Some(4));
     let id = SessionId::parse("stream-retry").unwrap();
     let store = SessionStore::load_at(&id, root.path()).unwrap();
     let reserved = store

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::net::TcpListener;
 use std::process::Command;
 
-#[path = "provider_tool_name_refusal/fixture.rs"]
+#[path = "../src/test_loopback.rs"]
 mod fixture;
 
 fn tool(id: &str, name: &str, args: &str) -> Value {

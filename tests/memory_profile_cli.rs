@@ -1,3 +1,5 @@
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::Value;
 use std::process::Command;
 
@@ -94,7 +96,7 @@ fn loopback_success_profiles_paired_model_call_and_counter_agreement() {
     use std::io::{BufRead as _, Read as _, Write as _};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = 0usize;

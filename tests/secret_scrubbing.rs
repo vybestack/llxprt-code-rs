@@ -10,6 +10,8 @@
 //!
 //! Markers are generated per test run and are never printed on an assertion failure.
 
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::Value;
 use std::io::{BufRead, Read, Write};
 use std::net::{SocketAddr, TcpListener};
@@ -57,20 +59,21 @@ fn spawn_reflecting_error_server(
     expected_key: String,
     keyfile_path: String,
     verified: Arc<AtomicUsize>,
-) -> SocketAddr {
+) -> (SocketAddr, loopback::Server<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
-        for stream in listener.incoming().take(8) {
-            let Ok(mut stream) = stream else {
-                continue;
+    let server = loopback::spawn(listener, move |listener| {
+        for _ in 0..8 {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionAborted => break,
+                Err(error) => panic!("accept: {error}"),
             };
-            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(20)));
             // Read the request head + body from a shared reader, keeping `stream` for the
             // response write below.
             let mut auth = String::new();
             let mut body = Vec::new();
-            let mut parsed = std::io::BufReader::new(&stream);
+            let mut parsed = std::io::BufReader::new(stream.try_clone().unwrap());
             let mut length = 0usize;
             loop {
                 let mut line = String::new();
@@ -114,7 +117,7 @@ fn spawn_reflecting_error_server(
             let _ = stream.write_all(resp.as_bytes());
         }
     });
-    addr
+    (addr, server)
 }
 
 /// One focused end-to-end regression at the real transport: the provider reflects both
@@ -137,7 +140,7 @@ fn provider_reflected_credentials_are_scrubbed_end_to_end() {
         .to_string();
 
     let verified = Arc::new(AtomicUsize::new(0));
-    let addr = spawn_reflecting_error_server(
+    let (addr, _server) = spawn_reflecting_error_server(
         inline_key.clone(),
         keyfile_path.clone(),
         Arc::clone(&verified),

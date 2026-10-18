@@ -1,4 +1,6 @@
 //! Unsafe/oversized private reasoning is refused, not display-truncated into replay.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::process::Command;
@@ -27,11 +29,8 @@ fn reasoning_secret_crossing_adapter_cap_has_no_visible_prefix() {
 fn run_reasoning(thinking: String, forbidden: Option<&str>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-            .unwrap();
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = 0;
         loop {

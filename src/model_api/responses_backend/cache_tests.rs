@@ -1,6 +1,7 @@
 //! Codex's fixed production endpoint cannot be redirected by a CLI profile.
 //! Exercise its real HTTP backend and assembler, without adding a production override.
 use super::*;
+use crate::test_loopback as loopback;
 use serdes_ai::core::messages::ModelRequestPart;
 use std::io::Write;
 
@@ -17,7 +18,7 @@ fn codex_exact_http_head_rounds_turns_off_and_missing_cache_usage() {
     for enabled in [false, true] {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
+        let server = loopback::spawn(listener, move |listener| {
             let mut bodies = Vec::new();
             for round in 0..4 {
                 let (mut socket, _) = listener.accept().unwrap();

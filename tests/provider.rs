@@ -4,6 +4,8 @@
 //! malformed raw arguments must surface exactly as the module contract states. Nothing here reaches the
 //! network outside the loopback server.
 
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::adapter::{make_adapter, ChatBackend, LlmResult};
 use llxprt_code_rs::model::ModelConfig;
 use serdes_ai::core::FinishReason;
@@ -16,52 +18,48 @@ use std::net::TcpListener;
 fn serve_with_headers(
     body: String,
     seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-) -> std::net::SocketAddr {
+) -> (std::net::SocketAddr, loopback::Server<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
-        for stream in listener.incoming().take(1) {
-            let Ok(mut stream) = stream else {
-                continue;
-            };
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            let _ = reader.read_line(&mut line);
-            let mut len = 0usize;
-            loop {
-                let mut h = String::new();
-                if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" || h == "\n" {
-                    break;
-                }
-                if let Some(rest) = h.split_once(':') {
-                    if rest.0.trim().eq_ignore_ascii_case("authorization") {
-                        seen.lock().unwrap().push(rest.1.trim().to_string());
-                    }
-                }
-                if let Some(rest) = h.split_once(':') {
-                    if rest.0.trim().eq_ignore_ascii_case("content-length") {
-                        len = rest.1.trim().parse().unwrap_or(0);
-                    }
+    let _server = loopback::spawn(listener, move |listener| {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let mut len = 0usize;
+        loop {
+            let mut h = String::new();
+            if reader.read_line(&mut h).unwrap_or(0) == 0 || h == "\r\n" || h == "\n" {
+                break;
+            }
+            if let Some(rest) = h.split_once(':') {
+                if rest.0.trim().eq_ignore_ascii_case("authorization") {
+                    seen.lock().unwrap().push(rest.1.trim().to_string());
                 }
             }
-            if len > 0 {
-                let mut buf = vec![0u8; len];
-                let _ = reader.read_exact(&mut buf);
+            if let Some(rest) = h.split_once(':') {
+                if rest.0.trim().eq_ignore_ascii_case("content-length") {
+                    len = rest.1.trim().parse().unwrap_or(0);
+                }
             }
-            let resp = format!(
+        }
+        if len > 0 {
+            let mut buf = vec![0u8; len];
+            let _ = reader.read_exact(&mut buf);
+        }
+        let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
-            let _ = stream.write_all(resp.as_bytes());
-        }
+        let _ = stream.write_all(resp.as_bytes());
     });
-    addr
+    (addr, _server)
 }
 
 /// A thread that answers one chat/completions request with `body`; the Authorization
 /// header is discarded.
-fn serve(body: String) -> std::net::SocketAddr {
+fn serve(body: String) -> (std::net::SocketAddr, loopback::Server<()>) {
     serve_with_headers(body, std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
 }
 
@@ -73,7 +71,7 @@ fn config(addr: std::net::SocketAddr) -> ModelConfig {
         api_key: "loopback-key".into(),
         keyfile_path: None,
         max_output_tokens: None,
-        timeout: Some(std::time::Duration::from_secs(30)),
+        timeout: None,
         model_params: None,
         context_limit: None,
     }
@@ -119,7 +117,7 @@ fn unknown_finish_reason_fails() {
         ("stop_sequence", None),
         ("tool_call", Some(tool_call)),
     ] {
-        let addr = serve(chat_body(reason, calls));
+        let (addr, _server) = serve(chat_body(reason, calls));
         let got = request_one(&config(addr)).expect("transport ok");
         assert_eq!(
             got.finish_reason,
@@ -134,7 +132,7 @@ fn unknown_finish_reason_fails() {
 /// `stop` with a tool call is internally inconsistent and must fail before any tool runs.
 #[test]
 fn stop_with_tool_call_fails() {
-    let addr = serve(chat_body(
+    let (addr, _server) = serve(chat_body(
         "stop",
         Some(
             r#"{"id":"c1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"x\"}"}}"#,
@@ -164,7 +162,7 @@ fn invalid_response_role_and_tool_type_fail_before_execution() {
     );
 
     for body in [invalid_role, invalid_type] {
-        let addr = serve(body);
+        let (addr, _server) = serve(body);
         assert!(
             request_one(&config(addr)).is_err(),
             "invalid provider envelope reached the host"
@@ -175,7 +173,7 @@ fn invalid_response_role_and_tool_type_fail_before_execution() {
 /// `tool_call` with zero calls must fail.
 #[test]
 fn tool_call_with_no_calls_fails() {
-    let addr = serve(chat_body("tool_call", None));
+    let (addr, _server) = serve(chat_body("tool_call", None));
     let got = request_one(&config(addr)).expect("transport ok");
     let err =
         llxprt_code_rs::agent::finish_check(&got).expect_err("tool_call with no calls must fail");
@@ -186,7 +184,7 @@ fn tool_call_with_no_calls_fails() {
 /// transport and must not parse into a normalized `{}` that could round-trip as success.
 #[test]
 fn malformed_raw_args_are_preserved() {
-    let addr = serve(chat_body(
+    let (addr, _server) = serve(chat_body(
         "tool_call",
         Some(
             r#"{"id":"c1","type":"function","function":{"name":"read_file","arguments":"{bad json"}}"#,
@@ -216,7 +214,7 @@ fn credential_less_loopback_profile_sends_no_authorization_header() {
 
     for (auth_key, expect_header) in [(None, false), (Some("local-key"), true)] {
         let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> = Default::default();
-        let addr = serve_with_headers(chat_body("stop", None), seen.clone());
+        let (addr, _server) = serve_with_headers(chat_body("stop", None), seen.clone());
         let mut ephemeral = json!({"base-url": format!("http://{addr}/v1")});
         if let Some(key) = auth_key {
             ephemeral["auth-key"] = json!(key);
@@ -249,7 +247,7 @@ fn credential_less_loopback_profile_sends_no_authorization_header() {
 /// A missing finish_reason must fail.
 #[test]
 fn missing_finish_reason_fails() {
-    let addr = serve(chat_body("null", None));
+    let (addr, _server) = serve(chat_body("null", None));
     let got = request_one(&config(addr)).expect("transport ok");
     assert!(got.finish_reason.is_none());
     let err = llxprt_code_rs::agent::finish_check(&got).expect_err("missing reason must fail");
@@ -323,7 +321,7 @@ fn endpoint_route_matrix_and_loopback_requests() {
         "/chat/completions",
         "/v1/chat/completions",
     ] {
-        let addr = serve(chat_body("stop", None));
+        let (addr, _server) = serve(chat_body("stop", None));
         let base = format!("http://{addr}{host_path}");
         let p = parse_profile_value(
             &json!({
@@ -387,10 +385,12 @@ fn timed_out_transport_reports_no_duration() {
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else {
-                continue;
+    let _server = loopback::spawn(listener, move |listener| {
+        loop {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionAborted => break,
+                Err(error) => panic!("accept: {error}"),
             };
             // Read the request, then never answer, so the configured request timeout fires.
             let mut buffer = [0u8; 8192];
