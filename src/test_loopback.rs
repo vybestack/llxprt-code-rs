@@ -558,6 +558,12 @@ mod tests {
         let _peer = TcpStream::connect(address).unwrap();
         // Polling a returned listener must still detect a real unexpected send,
         // not mistake its disconnected cancellation owner for an empty queue.
-        assert!(listener.accept().is_ok());
+        let accepted = loop {
+            match listener.accept() {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => std::thread::yield_now(),
+                result => break result,
+            }
+        };
+        assert!(accepted.is_ok());
     }
 }

@@ -67,7 +67,10 @@ run also exposed an incorrect retained listener clone; it was removed, and the
 focused proxy test passed. The full development suite also found a returned
 listener incorrectly using cancelled blocking mode for a no-send assertion;
 explicit polling mode was restored without changing the assertion, and a
-queue-detection regression was added. Development logs are retained, not relabeled as clean
+queue-detection regression was added. Its positive control polls OS accept
+readiness rather than assuming `connect` returning means the listening queue is
+already visible on Darwin; the accepted-connection assertion is unchanged.
+Development logs are retained, not relabeled as clean
 exact-head gate passes.
 
 ## 6. Loopback audit and exceptions
