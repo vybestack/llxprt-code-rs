@@ -37,24 +37,26 @@ fn interrupted_shell(signal: i32) {
     )
     .unwrap();
     let command = "echo $$ > shell.pid; echo https://user:password-412@example.com/path?token=hidden-412; sleep 60";
-    let mut child = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
-        .env_clear()
-        .env("LLXPRT_CONFIG_HOME", root.path())
-        .args([
-            "--profile",
-            "fixture",
-            "--session",
-            "interrupted",
-            "--allow-shell",
-            "-p",
-            "Run the tool",
-        ])
-        .arg("--cwd")
-        .arg(root.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = Worker(Some(
+        Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
+            .env_clear()
+            .env("LLXPRT_CONFIG_HOME", root.path())
+            .args([
+                "--profile",
+                "fixture",
+                "--session",
+                "interrupted",
+                "--allow-shell",
+                "-p",
+                "Run the tool",
+            ])
+            .arg("--cwd")
+            .arg(root.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    ));
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut stream = loop {
         match listener.accept() {
@@ -66,6 +68,7 @@ fn interrupted_shell(signal: i32) {
             Err(error) => panic!("{error}"),
         }
     };
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
@@ -176,6 +179,35 @@ fn interrupted_shell(signal: i32) {
             assert!(text.contains("cancelled"));
             assert!(text.contains("run_shell_command"));
             assert!(text.contains("sleep 60"));
+        }
+    }
+}
+
+// A failed fixture assertion must never leave a worker (or its shell) behind.
+struct Worker(Option<std::process::Child>);
+impl std::ops::Deref for Worker {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().unwrap()
+    }
+}
+impl std::ops::DerefMut for Worker {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut().unwrap()
+    }
+}
+impl Worker {
+    fn wait_with_output(mut self) -> std::io::Result<std::process::Output> {
+        self.0.take().unwrap().wait_with_output()
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
     }
 }
