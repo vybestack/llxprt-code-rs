@@ -17,7 +17,7 @@ use std::io::{ErrorKind, Read as _};
 /// The one supported on-disk session format (including context artifacts).
 /// Bump on any incompatible persisted-layout change; update the versioned pin in
 /// `tests/session_format_guard.rs`. No legacy readers or migrations are implied.
-pub const STORE_VERSION: u32 = 7;
+pub const STORE_VERSION: u32 = 8;
 /// Upper bound on one prompt (bytes). A prompt over this is rejected up front so the
 /// persisted transcript and the model request stay bounded.
 pub const MAX_PROMPT_BYTES: usize = 512 * 1024;
@@ -53,6 +53,7 @@ pub use context_persist::ToolResultProjection;
 pub use records::{
     BranchRecord, Lifecycle, RoundRecord, SessionState, StreamRetryRecord, ToolCallRecord,
 };
+pub(crate) mod interruption;
 mod log;
 mod output_ownership;
 pub(crate) use output_ownership::validate_diagnostic_destination;

@@ -20,7 +20,9 @@ process-group supervision. Synchronous local tool execution and session I/O are
 not made preemptible by the provider deadline; elapsed local work counts against
 the remaining turn time, and no provider call starts after that time expires.
 External SIGINT/SIGTERM keeps the existing immediate exit and active-tool-group
-kill behavior, rather than becoming a budget failure.
+kill behavior, rather than becoming a budget failure. A separate
+[interruption marker](interrupted-workers.md) records the signal and in-flight
+tool for transcript look-back.
 
 ## Initialization boundary (#93)
 

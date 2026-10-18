@@ -560,7 +560,7 @@ impl Turn<'_> {
     fn execute_one_call(
         &self,
         config: &crate::tools::ToolConfig,
-        store: &SessionStore,
+        session: (&SessionStore, &ReservedRequest),
         attempt: &mut AttemptState,
         round: &mut RoundRecord,
         call: &ToolCall,
@@ -569,6 +569,7 @@ impl Turn<'_> {
         // `position` is `(index, total)` packed into one argument so the call site and
         // the signature stay inside clippy's argument budget now that the session store
         // handle is threaded in for pre-entry compaction.
+        let (store, reserved) = session;
         let (index, total) = position;
         let remaining_output = self
             .output_caps
@@ -595,23 +596,13 @@ impl Turn<'_> {
             remaining_output.saturating_sub(notice.len().saturating_add(2))
         };
         let tool_started = std::time::Instant::now();
-        let (ok, raw_text) = if known_tool(&call.name, self.allow_shell) {
-            crate::tools::execute_tool_with_limit(
-                &self.cwd,
-                &call.name,
-                parsed,
-                config,
-                body_budget,
-            )
-        } else {
-            (
-                false,
-                crate::redact::truncate_utf8(
-                    helpers::naming_failure(self.allow_shell, &call.name),
-                    config.max_output_bytes.min(body_budget),
-                ),
-            )
-        };
+        let (ok, raw_text) = self.dispatch_recorded(
+            config,
+            (store, reserved, attempt.rounds.len() + 1),
+            call,
+            parsed,
+            body_budget,
+        )?;
         self.observe_tool(
             attempt.rounds.len() + 1,
             call,
