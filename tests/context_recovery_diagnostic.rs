@@ -26,7 +26,7 @@ fn unchanged_oversized_cli_request_explains_retained_mass_without_sending() {
         .arg(profile)
         .args(["--session", "diagnostic-cli", "--cwd"])
         .arg(root.path())
-        .args(["--turn-time", "2s", "-p"])
+        .args(["--turn-time", "0", "-p"])
         .arg(&prompt)
         .output()
         .unwrap();

@@ -1,10 +1,11 @@
 //! Owned, bounded HTTP fixture and file-backed CLI capture for issue #32.
+#[path = "../../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::session::{RoundRecord, SessionId, SessionState, SessionStore};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 pub const GUARD: usize = 262_144 * 3;
 const SESSION: &str = "task-ae84342303192f1edb23fae74512cf66";
@@ -31,6 +32,7 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
+
         std::fs::write(root.path().join("work.txt"), "initial\n").unwrap();
         std::fs::write(
             root.path().join("profile.json"),
@@ -47,27 +49,14 @@ impl Fixture {
         &self,
         replies: Vec<Value>,
         live_before: Option<usize>,
-    ) -> std::thread::JoinHandle<Vec<Value>> {
+    ) -> loopback::Server<Vec<Value>> {
         let listener = self.listener.try_clone().unwrap();
         let progress = self.root.path().join("large.stderr");
-        std::thread::spawn(move || {
+        loopback::spawn(listener, move |listener| {
             let mut requests = Vec::new();
             for (index, message) in replies.into_iter().enumerate() {
-                let deadline = Instant::now() + Duration::from_secs(30);
-                let mut socket = loop {
-                    match listener.accept() {
-                        Ok((socket, _)) => break socket,
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            assert!(Instant::now() < deadline, "missing request {index}");
-                            std::thread::sleep(Duration::from_millis(5));
-                        }
-                        Err(e) => panic!("accept: {e}"),
-                    }
-                };
-                socket.set_nonblocking(false).unwrap();
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .unwrap();
+                let mut socket = listener.accept().unwrap().0;
+
                 let mut reader = std::io::BufReader::new(socket.try_clone().unwrap());
                 let mut length = None;
                 let mut header_bytes = 0;
@@ -136,7 +125,7 @@ impl Fixture {
                 "--max-tool-output",
                 "450000",
                 "--turn-time",
-                "25s",
+                "0",
                 "-p",
                 prompt,
             ]);

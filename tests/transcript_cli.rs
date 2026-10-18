@@ -1,4 +1,6 @@
 //! Real CLI and HTTP boundary coverage for opt-in transcript emission.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::process::{Command, Output};
@@ -46,28 +48,11 @@ fn run_capped(
 ) -> (Output, Vec<Value>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for round in 0..2 {
-            listener.set_nonblocking(true).unwrap();
-            let started = std::time::Instant::now();
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(connection) => break connection,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            started.elapsed().as_secs() < 20,
-                            "CLI did not send round {round}"
-                        );
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("accept: {error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-                .unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
             let mut length = 0;
             loop {

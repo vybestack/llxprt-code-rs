@@ -1,4 +1,6 @@
 //! Captured HTTP requests from the compiled CLI: summary ownership at the tool-budget seam.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -19,7 +21,7 @@ fn reply(text: &str, calls: Vec<Value>, finish: &str) -> Value {
 struct Fixture {
     requests: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<loopback::Server<()>>,
     address: std::net::SocketAddr,
 }
 
@@ -27,19 +29,16 @@ impl Fixture {
     fn new(replies: Vec<Value>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        listener.set_nonblocking(true).unwrap();
+
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let recorded = requests.clone();
         let stopping = stop.clone();
-        let thread = std::thread::spawn(move || {
+        let thread = loopback::spawn(listener, move |listener| {
+            listener.set_nonblocking(true).unwrap();
             while !stopping.load(std::sync::atomic::Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        stream.set_nonblocking(false).unwrap();
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(5)))
-                            .unwrap();
                         let mut header = Vec::new();
                         while !header.ends_with(b"\r\n\r\n") {
                             let mut byte = [0];

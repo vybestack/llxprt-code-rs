@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_loopback as loopback;
 
 #[test]
 fn non_codex_profile_request_budgets_reach_backend_configuration() {
@@ -59,14 +60,11 @@ fn non_codex_profile_request_budgets_reach_backend_configuration() {
 }
 
 fn capture_request_then_stall(
-    listener: std::net::TcpListener,
+    listener: loopback::Listener,
     tx: std::sync::mpsc::Sender<serde_json::Value>,
 ) {
     use std::io::Read as _;
     let (mut stream, _) = listener.accept().unwrap();
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .unwrap();
     let mut bytes = Vec::new();
     let mut buf = [0_u8; 4096];
     loop {
@@ -105,7 +103,9 @@ fn responses_profile_request_budget_bounds_a_stalled_loopback_request() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || capture_request_then_stall(listener, tx));
+    let server = loopback::spawn(listener, move |listener| {
+        capture_request_then_stall(listener, tx)
+    });
     let input = serde_json::json!({
         "provider":"openai", "model":"test", "ephemeralSettings": {
             "apiMode":"responses", "base-url":format!("http://127.0.0.1:{port}"),
@@ -145,7 +145,7 @@ fn responses_profile_request_budget_bounds_a_stalled_loopback_request() {
     assert_eq!(failure.kind, crate::transport::TransportKind::Connectivity);
     assert_eq!(failure.origin, "timeout");
     assert_eq!(constructed.backend.request_calls(), 1);
-    let body = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    let body = rx.recv().unwrap();
     for key in [
         "image-resize.maxLongEdge",
         "image-resize.maxPixels",

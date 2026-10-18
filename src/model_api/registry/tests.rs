@@ -1,3 +1,4 @@
+use crate::test_loopback as loopback;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -201,11 +202,8 @@ fn anthropic_messages_wire_uses_expected_route_and_headers() {
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
         let mut request = Vec::new();
         let mut buffer = [0_u8; 4096];
         loop {
@@ -226,13 +224,7 @@ fn anthropic_messages_wire_uses_expected_route_and_headers() {
 
     let model = serdes_ai::models::anthropic::AnthropicModel::new("glm-5.3", "wire-key")
         .with_base_url(format!("http://127.0.0.1:{port}/api/anthropic"));
-    let backend = AnthropicBackend::new(
-        model,
-        serdes_ai::ModelSettings {
-            timeout: Some(std::time::Duration::from_secs(5)),
-            ..Default::default()
-        },
-    );
+    let backend = AnthropicBackend::new(model, serdes_ai::ModelSettings::default());
     let request_message = serdes_ai::core::ModelRequest::with_parts(vec![
         serdes_ai::core::messages::ModelRequestPart::UserPrompt(
             serdes_ai::core::messages::UserPromptPart::new("hello"),

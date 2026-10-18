@@ -1,9 +1,10 @@
 //! Stock CLI request/timeout evidence; scripted replies do not prove live-model compliance.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 fn reply(id: &str, command: Option<&str>) -> Value {
     let calls = command.map(|command| {
@@ -18,22 +19,10 @@ fn reply(id: &str, command: Option<&str>) -> Value {
                 "tool_calls":calls.unwrap_or_default()}}]})
 }
 
-fn serve(listener: TcpListener, replies: Vec<Value>) -> Vec<Value> {
-    listener.set_nonblocking(true).unwrap();
+fn serve(listener: loopback::Listener, replies: Vec<Value>) -> Vec<Value> {
     replies.into_iter().map(|reply| {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline, "CLI never connected");
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept: {error}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        let mut stream = listener.accept().unwrap().0;
+
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = None;
         loop {
@@ -71,7 +60,7 @@ fn compiled_cli_sends_worktree_safety_prompt_and_retains_timeout_and_refusal() {
         .to_string(),
     )
     .unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         serve(
             listener,
             vec![
@@ -99,7 +88,7 @@ fn compiled_cli_sends_worktree_safety_prompt_and_retains_timeout_and_refusal() {
             "worktree-safety",
             "--allow-shell",
             "--turn-time",
-            "15s",
+            "0",
             "--max-tool-calls",
             "4",
             "--cwd",

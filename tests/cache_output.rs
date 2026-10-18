@@ -1,9 +1,10 @@
 //! Compiled provider/cache/transcript ownership regressions. No stderr filtering.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::process::{Command, Output};
-use std::time::{Duration, Instant};
 
 fn cli(root: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"));
@@ -15,10 +16,7 @@ fn cli(root: &Path) -> Command {
     c
 }
 
-fn read_body(stream: &mut std::net::TcpStream) -> Value {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
+fn read_body(stream: &mut loopback::Connection) -> Value {
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = None;
     loop {
@@ -38,22 +36,11 @@ fn read_body(stream: &mut std::net::TcpStream) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-fn serve(listener: std::net::TcpListener, unknown: bool, fail: bool) -> Vec<Value> {
-    listener.set_nonblocking(true).unwrap();
+fn serve(listener: loopback::Listener, unknown: bool, fail: bool) -> Vec<Value> {
     let mut requests = Vec::new();
     for round in 0..if fail { 5 } else { 2 } {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline, "missing round {round}");
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(e) => panic!("accept: {e}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
+        let mut stream = listener.accept().unwrap().0;
+
         requests.push(read_body(&mut stream));
         if fail && round >= 1 {
             let body = "private-owner-key provider failure";
@@ -86,7 +73,7 @@ fn run(root: &Path, emit: bool, observations: bool, unknown: bool) -> Output {
     std::fs::create_dir(root.join("profiles")).unwrap();
     std::fs::write(root.join("profiles/owner.json"), json!({"provider":"openai","model":"fixture","ephemeralSettings":{"base-url":format!("http://{address}"),"auth-key":"private-owner-key"}}).to_string()).unwrap();
     std::fs::write(root.join("input.txt"), "bounded private-owner-key evidence").unwrap();
-    let server = std::thread::spawn(move || serve(listener, unknown, false));
+    let server = loopback::spawn(listener, move |listener| serve(listener, unknown, false));
     let mut c = cli(root);
     if emit {
         c.args(["--emit", "all"]);
@@ -257,7 +244,7 @@ fn later_provider_failure_retains_completed_call_usage_and_bounded_scrubbed_erro
     std::fs::create_dir(work.path().join("profiles")).unwrap();
     std::fs::write(work.path().join("profiles/owner.json"), json!({"provider":"openai","model":"fixture","ephemeralSettings":{"base-url":format!("http://{address}"),"auth-key":"private-owner-key"}}).to_string()).unwrap();
     std::fs::write(work.path().join("input.txt"), "bounded evidence").unwrap();
-    let server = std::thread::spawn(move || serve(listener, false, true));
+    let server = loopback::spawn(listener, move |listener| serve(listener, false, true));
     let output = cli(work.path())
         .args(["--emit", "all", "--cache-observations"])
         .arg(work.path().join("cache.jsonl"))

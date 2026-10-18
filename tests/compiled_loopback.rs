@@ -4,13 +4,15 @@
 //! session, and no pending branch; a prompt one byte over 512 KiB or an over-cap request
 //! never triggers a provider call and carries no pending branch. Credential markers
 //! reflected near the truncation boundary are scrubbed first so no marker survives.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use serde_json::Value;
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
@@ -52,18 +54,22 @@ fn read_all_session_bytes(config_root: &std::path::Path, session: &str) -> Vec<u
 
 /// A server that answers a bound number of POSTs by returning an HTTP error body with
 /// `body` for every request; it returns the number of accepted connections.
-fn spawn_body_server(body: String, accepted: Arc<AtomicUsize>) -> std::net::SocketAddr {
+fn spawn_body_server(
+    body: String,
+    accepted: Arc<AtomicUsize>,
+) -> (std::net::SocketAddr, loopback::Server<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn({
+    let server = loopback::spawn(listener, {
         let accepted = accepted.clone();
-        move || {
-            for stream in listener.incoming().take(8) {
-                let Ok(mut stream) = stream else {
-                    continue;
+        move |listener| {
+            for _ in 0..8 {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionAborted => break,
+                    Err(error) => panic!("accept: {error}"),
                 };
                 accepted.fetch_add(1, Ordering::SeqCst);
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(20)));
                 let mut parsed = std::io::BufReader::new(stream.try_clone().unwrap());
                 let mut len = 0usize;
                 loop {
@@ -94,19 +100,23 @@ fn spawn_body_server(body: String, accepted: Arc<AtomicUsize>) -> std::net::Sock
             }
         }
     });
-    addr
+    (addr, server)
 }
 
-fn write_chunk(stream: &mut std::net::TcpStream, bytes: &[u8]) {
+fn write_chunk(stream: &mut loopback::Connection, bytes: &[u8]) {
     write!(stream, "{:x}\r\n", bytes.len()).unwrap();
     stream.write_all(bytes).unwrap();
     stream.write_all(b"\r\n").unwrap();
 }
 
-fn spawn_success_server(total: usize, chunked: bool, marker: String) -> std::net::SocketAddr {
+fn spawn_success_server(
+    total: usize,
+    chunked: bool,
+    marker: String,
+) -> (std::net::SocketAddr, loopback::Server<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind success server");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut request_len = 0usize;
@@ -156,12 +166,12 @@ fn spawn_success_server(total: usize, chunked: bool, marker: String) -> std::net
             stream.write_all(suffix).unwrap();
         }
     });
-    addr
+    (addr, server)
 }
 
 fn run_success_cap_case(total: usize, chunked: bool, suffix: &str) -> (Output, Value) {
     let marker = format!("sk-success-body-{}-{suffix}", uniq());
-    let addr = spawn_success_server(total, chunked, marker.clone());
+    let (addr, _server) = spawn_success_server(total, chunked, marker.clone());
     let workspace = tempfile::tempdir().unwrap();
     let profiles = workspace.path().join("profiles");
     std::fs::create_dir_all(&profiles).unwrap();
@@ -217,14 +227,16 @@ fn successful_response_body_exact_cap_and_chunked_cap_plus_one() {
     assert!(over.stdout.len() <= llxprt_code_rs::redact::MAX_DIAGNOSTIC_BYTES + 256);
 }
 
-fn spawn_redirect_server(status: u16, location: String) -> std::net::SocketAddr {
+fn spawn_redirect_server(
+    status: u16,
+    location: String,
+) -> (std::net::SocketAddr, loopback::Server<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind redirect source");
     let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let Ok((mut stream, _)) = listener.accept() else {
             return;
         };
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(20)));
         let mut parsed = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut len = 0usize;
         loop {
@@ -249,37 +261,18 @@ fn spawn_redirect_server(status: u16, location: String) -> std::net::SocketAddr 
             "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
     });
-    addr
+    (addr, server)
 }
 
-fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
+fn read_http_request(stream: &mut loopback::Connection) -> std::io::Result<Vec<u8>> {
     const MAX_HEADER_BYTES: usize = 64 * 1024;
     const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
-    // Loaded runners can starve the loopback reader long enough for EAGAIN
-    // (WouldBlock), so keep retrying past the per-call socket read timeouts
-    // before surfacing a clear timeout error.
-    let deadline = Instant::now() + Duration::from_secs(60);
-
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut request = Vec::new();
     let mut content_length = 0usize;
     loop {
         let mut line = Vec::new();
-        let read = loop {
-            match reader.read_until(b'\n', &mut line) {
-                Ok(read) => break read,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "timed out reading loopback request headers",
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let read = reader.read_until(b'\n', &mut line)?;
         if read == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -326,15 +319,6 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8
                 ));
             }
             Ok(count) => filled += count,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "timed out reading loopback request body",
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
             Err(error) => return Err(error),
         }
     }
@@ -347,44 +331,47 @@ type RecordingServer = (
     Arc<std::sync::Mutex<Vec<u8>>>,
     Arc<std::sync::atomic::AtomicUsize>,
     Arc<std::sync::atomic::AtomicBool>,
-    std::thread::JoinHandle<()>,
+    loopback::Server<()>,
 );
 
 fn spawn_recording_error_server(listener: TcpListener) -> RecordingServer {
     let address = listener.local_addr().unwrap();
-    listener.set_nonblocking(true).unwrap();
+    // The recording server polls an explicit stop flag between clients.
+
     let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
     let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let thread = std::thread::spawn({
+    let thread = loopback::spawn(listener, {
         let recorded = recorded.clone();
         let connections = connections.clone();
         let stop = stop.clone();
-        move || loop {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    stream.set_nonblocking(false).unwrap();
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
-                    match read_http_request(&mut stream) {
-                        Ok(request) => *recorded.lock().unwrap() = request,
-                        Err(error) => {
-                            *recorded.lock().unwrap() =
-                                format!("request read failed: {error}").into_bytes()
+        move |listener| {
+            listener.set_nonblocking(true).unwrap();
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                        match read_http_request(&mut stream) {
+                            Ok(request) => *recorded.lock().unwrap() = request,
+                            Err(error) => {
+                                *recorded.lock().unwrap() =
+                                    format!("request read failed: {error}").into_bytes()
+                            }
                         }
-                    }
-                    let _ = stream.write_all(
-                        b"HTTP/1.1 500 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    );
-                    return;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 500 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
                         return;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => return,
                 }
-                Err(_) => return,
             }
         }
     });
@@ -524,7 +511,7 @@ fn openai_redirects_never_reach_the_redirect_target() {
         target.set_nonblocking(true).unwrap();
         let marker = format!("sk-redirect-{status}-{}", uniq());
         let target_url = format!("http://{}/stolen", target.local_addr().unwrap());
-        let source = spawn_redirect_server(status, target_url);
+        let (source, _server) = spawn_redirect_server(status, target_url);
         let workspace = tempfile::tempdir().unwrap();
         let profiles = workspace.path().join("profiles");
         std::fs::create_dir_all(&profiles).unwrap();
@@ -574,7 +561,7 @@ fn openai_redirects_never_reach_the_redirect_target() {
 fn omitted_session_is_fresh_and_matches_its_directory() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         for _ in 0..8 {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
@@ -629,7 +616,7 @@ fn omitted_session_is_fresh_and_matches_its_directory() {
 fn explicit_default_session_resumes() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         for _ in 0..8 {
             let (mut stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
@@ -686,7 +673,7 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
     // 1. A prompt one byte over the 512KiB session cap makes zero provider calls.
     {
         let acc = Arc::new(AtomicUsize::new(0));
-        let addr = spawn_body_server("x".into(), Arc::clone(&acc));
+        let (addr, _server) = spawn_body_server("x".into(), Arc::clone(&acc));
         let uid = uniq();
         let workspace = tempfile::tempdir().unwrap();
         let ws = workspace.path().to_path_buf();
@@ -737,7 +724,7 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
     //    pending branch.
     {
         let acc = Arc::new(AtomicUsize::new(0));
-        let addr = spawn_body_server("x".into(), Arc::clone(&acc));
+        let (addr, _server) = spawn_body_server("x".into(), Arc::clone(&acc));
         let uid = uniq();
         let workspace = tempfile::tempdir().unwrap();
         let ws = workspace.path().to_path_buf();
@@ -808,7 +795,7 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
         full.push_str(&marker);
         full.push_str(&"x".repeat(33 * 1024 * 1024 - full.len()));
         let acc = Arc::new(AtomicUsize::new(0));
-        let addr = spawn_body_server(full.clone(), Arc::clone(&acc));
+        let (addr, _server) = spawn_body_server(full.clone(), Arc::clone(&acc));
         let workspace = tempfile::tempdir().unwrap();
         let ws = workspace.path().to_path_buf();
         let profiles = ws.join("profiles");
@@ -882,7 +869,7 @@ fn compiled_loopback_overcap_zero_calls_and_33mib_provider_error() {
 fn invalid_model_identifier_fails_before_provider_connection() {
     for (suffix, model) in [("empty", ""), ("space", " \t ")] {
         let accepted = Arc::new(AtomicUsize::new(0));
-        let addr = spawn_body_server("unexpected".into(), Arc::clone(&accepted));
+        let (addr, _server) = spawn_body_server("unexpected".into(), Arc::clone(&accepted));
         let workspace = tempfile::tempdir().unwrap();
         let profiles = workspace.path().join("profiles");
         std::fs::create_dir_all(&profiles).unwrap();
@@ -927,36 +914,17 @@ fn spawn_responses_tool_server(
 ) -> (
     std::net::SocketAddr,
     std::sync::mpsc::Receiver<Vec<Value>>,
-    std::thread::JoinHandle<()>,
+    loopback::Server<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind Responses server");
     let address = listener.local_addr().unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let (sender, receiver) = std::sync::mpsc::channel();
-    let thread = std::thread::spawn(move || {
+    let thread = loopback::spawn(listener, move |listener| {
         let mut bodies = Vec::new();
         for round in 0..2 {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(connection) => break connection,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            std::time::Instant::now() < deadline,
-                            "missing Responses request"
-                        );
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    Err(error) => panic!("accept Responses request: {error}"),
-                }
-            };
-            // Accepted sockets inherit the listener's nonblocking flag on darwin,
-            // so reads race EAGAIN; the read timeout only means anything on a
-            // blocking socket.
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-                .unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+
             let request = read_http_request(&mut stream).unwrap();
             let separator = request
                 .windows(4)
@@ -1096,34 +1064,15 @@ fn openai_responses_replays_function_history_to_final_completion() {
 fn spawn_anthropic_request_server() -> (
     String,
     std::sync::mpsc::Receiver<Value>,
-    std::thread::JoinHandle<()>,
+    loopback::Server<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind Anthropic server");
-    listener.set_nonblocking(true).unwrap();
+
     let address = listener.local_addr().unwrap();
     let (sender, receiver) = std::sync::mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let (mut stream, _) = loop {
-            match listener.accept() {
-                Ok(connection) => break connection,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "timed out waiting for Anthropic request"
-                    );
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("accept Anthropic request: {error}"),
-            }
-        };
-        // Accepted sockets inherit the listener's nonblocking flag on darwin,
-        // so reads race EAGAIN under scheduler contention; the read timeout
-        // only means anything on a blocking socket.
-        stream.set_nonblocking(false).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(20)))
-            .unwrap();
+    let thread = loopback::spawn(listener, move |listener| {
+        let (mut stream, _) = listener.accept().unwrap();
+
         let request = read_http_request(&mut stream).expect("read Anthropic request");
         assert!(request.starts_with(b"POST /v1/messages HTTP/1.1\r\n"));
         let body_start = request
@@ -1201,9 +1150,7 @@ fn anthropic_prompt_caching_default_and_off_shape_compiled_requests() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let request = request_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("receive Anthropic request");
+        let request = request_rx.recv().expect("receive Anthropic request");
         server.join().unwrap();
 
         if prompt_caching.is_none() {
@@ -1223,31 +1170,15 @@ fn contains(h: &[u8], needle: &[u8]) -> bool {
 fn spawn_openai_request_server() -> (
     String,
     std::sync::mpsc::Receiver<Value>,
-    std::thread::JoinHandle<()>,
+    loopback::Server<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind OpenAI server");
-    listener.set_nonblocking(true).unwrap();
+
     let address = listener.local_addr().unwrap();
     let (sender, receiver) = std::sync::mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let (mut stream, _) = loop {
-            match listener.accept() {
-                Ok(connection) => break connection,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "timed out waiting for OpenAI request"
-                    );
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("accept OpenAI request: {error}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(20)))
-            .unwrap();
+    let thread = loopback::spawn(listener, move |listener| {
+        let (mut stream, _) = listener.accept().unwrap();
+
         let request = read_http_request(&mut stream).expect("read OpenAI request");
         let body_start = request
             .windows(4)
@@ -1283,7 +1214,7 @@ fn compiled_loopback_known_model_override_changes_wire_body_per_provider() {
                 as fn() -> (
                     String,
                     std::sync::mpsc::Receiver<Value>,
-                    std::thread::JoinHandle<()>,
+                    loopback::Server<()>,
                 ),
             "stop_sequences",
             serde_json::json!(["END"]),
@@ -1296,7 +1227,7 @@ fn compiled_loopback_known_model_override_changes_wire_body_per_provider() {
                 as fn() -> (
                     String,
                     std::sync::mpsc::Receiver<Value>,
-                    std::thread::JoinHandle<()>,
+                    loopback::Server<()>,
                 ),
             "top_logprobs",
             serde_json::json!(2),
@@ -1343,9 +1274,7 @@ fn compiled_loopback_known_model_override_changes_wire_body_per_provider() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let request = request_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("receive request body");
+        let request = request_rx.recv().expect("receive request body");
         server.join().unwrap();
         assert_eq!(
             request[expect], forwarded,
@@ -1369,7 +1298,7 @@ fn compiled_loopback_provider_refusal_of_forwarded_unknown_key_surfaces_in_envel
     let profiles = ws.join("profiles");
     std::fs::create_dir_all(&profiles).unwrap();
     let acc = Arc::new(AtomicUsize::new(0));
-    let addr = spawn_body_server(
+    let (addr, _server) = spawn_body_server(
         r#"{"error":{"message":"Unknown parameter: 'custom_wire_param' is not a valid parameter"}}"#
             .to_string(),
         Arc::clone(&acc),

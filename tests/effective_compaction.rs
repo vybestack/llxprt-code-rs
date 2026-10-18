@@ -2,17 +2,18 @@
 //! Real registered reads, edit and shell test; loopback source controls model replies.
 
 mod compaction_output;
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 struct Fixture {
     root: tempfile::TempDir,
-    server: std::thread::JoinHandle<Vec<Vec<u8>>>,
+    server: loopback::Server<Vec<Vec<u8>>>,
     address: std::net::SocketAddr,
 }
 
@@ -53,25 +54,11 @@ fn replies() -> Vec<Value> {
     messages
 }
 
-fn serve(listener: TcpListener) -> Vec<Vec<u8>> {
-    listener.set_nonblocking(true).unwrap();
+fn serve(listener: loopback::Listener) -> Vec<Vec<u8>> {
     let mut bodies = Vec::new();
     for (round, message) in replies().into_iter().enumerate() {
-        let deadline = Instant::now() + Duration::from_secs(45);
-        let mut socket = loop {
-            match listener.accept() {
-                Ok((socket, _)) => break socket,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline, "missing native request {round}");
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(e) => panic!("{e}"),
-            }
-        };
-        socket.set_nonblocking(false).unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(20)))
-            .unwrap();
+        let mut socket = listener.accept().unwrap().0;
+
         let mut reader = std::io::BufReader::new(&mut socket);
         let mut length = None;
         loop {
@@ -123,7 +110,7 @@ impl Fixture {
         .unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || serve(listener));
+        let server = loopback::spawn(listener, serve);
         Self {
             root,
             server,
@@ -157,7 +144,7 @@ impl Fixture {
                 "--max-tool-calls",
                 "8",
                 "--turn-time",
-                "40s",
+                "0",
                 "-p",
                 prompt,
             ])

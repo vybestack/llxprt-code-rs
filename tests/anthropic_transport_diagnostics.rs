@@ -1,38 +1,19 @@
 //! Issue 191: controlled failures through the stock CLI, not evidence of Z.ai cause.
 
+#[path = "../src/test_loopback.rs"]
+mod loopback;
+use loopback::Connection as TcpStream;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
 
-fn accept(listener: &TcpListener) -> (TcpStream, std::net::SocketAddr) {
-    listener.set_nonblocking(true).unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match listener.accept() {
-            Ok(connection) => {
-                // macOS may inherit the listener's nonblocking mode. Fixture reads
-                // use bounded blocking I/O, independent of accept polling.
-                connection.0.set_nonblocking(false).unwrap();
-                return connection;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "CLI never reached provider"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => panic!("accept: {error}"),
-        }
-    }
+fn accept(listener: &loopback::Listener) -> (TcpStream, std::net::SocketAddr) {
+    listener.accept().unwrap()
 }
 
 fn read_request(stream: &TcpStream) -> Value {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
@@ -76,7 +57,7 @@ fn invoke(
         .env_remove("LLXPRT_CONFIG_OVERRIDES").env_remove("LLXPRT_CODE_RS_BIN")
         .args(["--profile-load"]).arg(profile)
         .args(["--session",session,"--cwd"]).arg(root)
-        .args(["--allow-shell","--max-tool-calls","8","--turn-time","30s","-p",
+        .args(["--allow-shell","--max-tool-calls","8","--turn-time","0","-p",
             "Implement add(a,b) in arithmetic.py, write test_arithmetic.py with an assertion, run python3 test_arithmetic.py, then summarize."])
         .output().unwrap()
 }
@@ -113,7 +94,7 @@ fn truncated_body_after_implementation_edit_is_not_replayed() {
 fn accepted_loss(head: &'static [u8], origin: &str, cause: &str, session_id: &str) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut first, _) = accept(&listener);
         let request = read_request(&first);
         assert!(request["tools"].as_array().unwrap().len() >= 6);
@@ -132,8 +113,9 @@ fn accepted_loss(head: &'static [u8], origin: &str, cause: &str, session_id: &st
         std::thread::sleep(Duration::from_millis(60));
         second.write_all(head).unwrap();
         drop(second);
-        listener.set_nonblocking(true).unwrap();
+
         std::thread::sleep(Duration::from_millis(800));
+        listener.set_nonblocking(true).unwrap();
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
@@ -195,12 +177,13 @@ fn accepted_loss(head: &'static [u8], origin: &str, cause: &str, session_id: &st
 fn local_request_timeout_is_not_classified_as_incomplete_message() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (stream, _) = accept(&listener);
         read_request(&stream);
         // No response is not proof that the accepted request produced no output.
         std::thread::sleep(Duration::from_millis(1800));
         drop(stream);
+
         listener.set_nonblocking(true).unwrap();
         assert_eq!(
             listener.accept().unwrap_err().kind(),
@@ -229,7 +212,7 @@ fn local_request_timeout_is_not_classified_as_incomplete_message() {
 fn controlled_implementation_mission_completes_and_its_edits_and_tests_are_inspected() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let actions = [
             (
                 "write_file",

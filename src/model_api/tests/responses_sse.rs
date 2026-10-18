@@ -3,13 +3,14 @@ use crate::model_api::responses_backend::tests::{
     codex_turn_sse_payload, read_codex_request, test_runtime,
 };
 use crate::model_api::responses_backend::ResponsesBackend;
+use crate::test_loopback as loopback;
 use serdes_ai::core::{ModelRequest, ModelSettings};
 use serdes_ai_responses::client::OpenResponsesModel;
 
-fn loopback_sse(payload: String) -> (ResponsesBackend, std::thread::JoinHandle<()>) {
+fn loopback_sse(payload: String) -> (ResponsesBackend, loopback::Server<()>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         use std::io::Write as _;
         let (mut stream, _) = listener.accept().unwrap();
         read_codex_request(&mut stream);

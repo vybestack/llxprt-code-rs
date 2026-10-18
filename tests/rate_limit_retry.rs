@@ -1,9 +1,12 @@
 //! Stock CLI + real loopback transient failures; no provider credentials or external network.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::session::{Lifecycle, SessionId, SessionStore};
+use loopback::Connection as TcpStream;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::process::{Child, Command, Output, Stdio};
+use std::net::TcpListener;
+use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 struct Response {
@@ -34,28 +37,11 @@ fn completion(calls: Vec<Value>) -> Response {
         }),
     }
 }
-fn accept(listener: &TcpListener) -> TcpStream {
-    let deadline = Instant::now() + Duration::from_secs(12);
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .unwrap();
-                return stream;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "missing expected retry");
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => panic!("accept: {error}"),
-        }
-    }
+fn accept(listener: &loopback::Listener) -> TcpStream {
+    listener.accept().unwrap().0
 }
-fn respond(listener: &TcpListener, response: Response) -> (Value, Instant) {
+fn respond(listener: &loopback::Listener, response: Response) -> Value {
     let mut stream = accept(listener);
-    let now = Instant::now();
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = None;
     loop {
@@ -78,7 +64,7 @@ fn respond(listener: &TcpListener, response: Response) -> (Value, Instant) {
         .unwrap_or_default();
     let payload = response.body.to_string();
     write!(stream, "HTTP/1.1 {} Fixture\r\nContent-Type: application/json\r\n{hint}Content-Length: {}\r\nConnection: close\r\n\r\n{payload}", response.status, payload.len()).unwrap();
-    (serde_json::from_slice(&body).unwrap(), now)
+    serde_json::from_slice(&body).unwrap()
 }
 struct Fixture {
     root: tempfile::TempDir,
@@ -103,11 +89,12 @@ impl Fixture {
         .unwrap();
         Self { root, listener }
     }
-    fn spawn(&self, budget: &str) -> Child {
-        self.spawn_with_request_timeout(budget, "900s")
+    fn command(&self, budget: &str) -> Command {
+        self.command_with_request_timeout(budget, "900s")
     }
-    fn spawn_with_request_timeout(&self, budget: &str, timeout: &str) -> Child {
-        Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"))
+    fn command_with_request_timeout(&self, budget: &str, timeout: &str) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_llxprt-code-rs"));
+        command
             .env_clear()
             .env("LLXPRT_CONFIG_HOME", self.root.path())
             .env("NO_PROXY", "127.0.0.1,localhost")
@@ -126,11 +113,8 @@ impl Fixture {
                 "Inspect then summarize.",
                 "--cwd",
             ])
-            .arg(self.root.path())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
+            .arg(self.root.path());
+        command
     }
     fn state(&self) -> llxprt_code_rs::session::SessionStore {
         SessionStore::load_at(&SessionId::parse("rate-limit").unwrap(), self.root.path()).unwrap()
@@ -141,22 +125,6 @@ impl Fixture {
         );
     }
 }
-fn finish(mut child: Child) -> Output {
-    let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
-        if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
-        }
-        if Instant::now() >= deadline {
-            child.kill().unwrap();
-            panic!(
-                "CLI did not terminate: {:?}",
-                child.wait_with_output().unwrap()
-            );
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
 fn envelope(output: Output, code: i32) -> Value {
     assert_eq!(output.status.code(), Some(code), "{output:?}");
     serde_json::from_slice(&output.stdout).unwrap()
@@ -164,22 +132,24 @@ fn envelope(output: Output, code: i32) -> Value {
 #[test]
 fn retry_after_recovers_after_tool_progress_without_reexecuting_tools() {
     let f = Fixture::new();
-    let child = f.spawn("10s");
+    let (raw, (first, second)) = loopback::run_listener(f.listener.try_clone().unwrap(), &mut f.command("0"), |listener, _| {
     respond(
-        &f.listener,
+        &listener,
         completion(vec![json!({"id":"write","type":"function",
         "function":{"name":"write_file","arguments":r#"{"path":"once","content":"checkpointed"}"#}})]),
     );
-    let (first, failed_at) = respond(&f.listener, throttle(Some(1)));
-    let (second, retried_at) = respond(&f.listener, completion(vec![]));
-    let output = envelope(finish(child), 0);
+    let first = respond(&listener, throttle(Some(1)));
+    let second = respond(&listener, completion(vec![]));
+    (first, second)
+    }).unwrap();
+    let output = envelope(raw, 0);
     assert_eq!(output["status"], "ok");
     assert_eq!(output["summary"], "Recovered.");
     assert_eq!(output["tool_calls"], 1);
     assert_eq!(output["retry_attempts"], 1);
     assert_eq!(first, second);
-    assert!(retried_at.duration_since(failed_at) >= Duration::from_secs(1));
-    assert!(retried_at.duration_since(failed_at) < Duration::from_secs(5));
+    // The same backoff bounds are asserted with a paused clock in
+    // agent::rate_limit::tests::one_second_hint_keeps_the_backoff_bounds.
     assert!(second.to_string().contains("checkpointed"));
     let state = f.state().snapshot().unwrap();
     assert_eq!(state.branches[0].lifecycle, Lifecycle::Completed);
@@ -202,11 +172,17 @@ fn retry_after_recovers_after_tool_progress_without_reexecuting_tools() {
 #[test]
 fn repeated_429_exhausts_three_retries_and_exposes_budget_in_envelope() {
     let f = Fixture::new();
-    let child = f.spawn("10s");
-    let requests = (0..4)
-        .map(|_| respond(&f.listener, throttle(None)).0)
-        .collect::<Vec<_>>();
-    let output = envelope(finish(child), 5);
+    let (raw, requests) = loopback::run_listener(
+        f.listener.try_clone().unwrap(),
+        &mut f.command("0"),
+        |listener, _| {
+            (0..4)
+                .map(|_| respond(&listener, throttle(None)))
+                .collect::<Vec<_>>()
+        },
+    )
+    .unwrap();
+    let output = envelope(raw, 5);
     assert_eq!(output["error"]["code"], "model-rate-limit");
     assert_eq!(output["error"]["retry_attempts"], 3);
     let message = output["error"]["message"].as_str().unwrap();
@@ -234,16 +210,22 @@ fn quota_and_permanent_errors_do_not_retry() {
         ),
     ] {
         let f = Fixture::new();
-        let child = f.spawn("10s");
-        respond(
-            &f.listener,
-            Response {
-                status,
-                hint: Some(1),
-                body,
+        let (raw, ()) = loopback::run_listener(
+            f.listener.try_clone().unwrap(),
+            &mut f.command("0"),
+            |listener, _| {
+                respond(
+                    &listener,
+                    Response {
+                        status,
+                        hint: Some(1),
+                        body,
+                    },
+                );
             },
-        );
-        let output = envelope(finish(child), 5);
+        )
+        .unwrap();
+        let output = envelope(raw, 5);
         assert_eq!(output["error"]["code"], code);
         assert_eq!(output["error"]["retry_attempts"], 0);
         f.no_more_requests();
@@ -253,12 +235,18 @@ fn quota_and_permanent_errors_do_not_retry() {
 fn deadline_and_oversized_hint_stop_before_reissue() {
     for (hint, budget, status, code, message) in [
         (7, "1s", 6, "turn-time-exhausted", "turn time budget"),
-        (31, "10s", 5, "model-rate-limit", "0/3 used, 3 remaining"),
+        (31, "0", 5, "model-rate-limit", "0/3 used, 3 remaining"),
     ] {
         let f = Fixture::new();
-        let child = f.spawn(budget);
-        respond(&f.listener, throttle(Some(hint)));
-        let output = envelope(finish(child), status);
+        let (raw, ()) = loopback::run_listener(
+            f.listener.try_clone().unwrap(),
+            &mut f.command(budget),
+            |listener, _| {
+                respond(&listener, throttle(Some(hint)));
+            },
+        )
+        .unwrap();
+        let output = envelope(raw, status);
         assert_eq!(output["error"]["code"], code);
         assert_eq!(output["error"]["retry_attempts"], 0);
         assert!(output["error"]["message"]
@@ -275,14 +263,21 @@ fn deadline_and_oversized_hint_stop_before_reissue() {
 #[test]
 fn sigterm_interrupts_retry_after_immediately() {
     let f = Fixture::new();
-    let child = f.spawn("0");
-    respond(&f.listener, throttle(Some(30)));
-    std::thread::sleep(Duration::from_millis(100));
-    let start = Instant::now();
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
-    let output = finish(child);
+    let (output, elapsed) = loopback::run_listener(
+        f.listener.try_clone().unwrap(),
+        &mut f.command("0"),
+        |listener, pid| {
+            respond(&listener, throttle(Some(30)));
+            std::thread::sleep(Duration::from_millis(100));
+            let start = Instant::now();
+            assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGTERM) }, 0);
+            // Keep the signal-latency assertion at the child completion boundary.
+            start
+        },
+    )
+    .unwrap();
     assert_eq!(output.status.code(), Some(128 + libc::SIGTERM));
-    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(elapsed.elapsed() < Duration::from_secs(2));
     f.no_more_requests();
     assert_eq!(
         f.state().snapshot().unwrap().branches[0].lifecycle,
@@ -293,17 +288,24 @@ fn sigterm_interrupts_retry_after_immediately() {
 #[test]
 fn transient_server_recovers_without_changing_the_request() {
     let f = Fixture::new();
-    let child = f.spawn("10s");
-    let (first, _) = respond(
-        &f.listener,
-        Response {
-            status: 503,
-            hint: None,
-            body: json!({"error":{"message":"temporarily unavailable"}}),
+    let (raw, (first, last)) = loopback::run_listener(
+        f.listener.try_clone().unwrap(),
+        &mut f.command("0"),
+        |listener, _| {
+            let first = respond(
+                &listener,
+                Response {
+                    status: 503,
+                    hint: None,
+                    body: json!({"error":{"message":"temporarily unavailable"}}),
+                },
+            );
+            let last = respond(&listener, completion(vec![]));
+            (first, last)
         },
-    );
-    let (last, _) = respond(&f.listener, completion(vec![]));
-    let output = envelope(finish(child), 0);
+    )
+    .unwrap();
+    let output = envelope(raw, 0);
     assert_eq!(first, last);
     assert_eq!(output["retry_attempts"], 1);
     f.no_more_requests();
@@ -312,27 +314,33 @@ fn transient_server_recovers_without_changing_the_request() {
 #[test]
 fn connection_loss_after_request_send_is_not_replayed() {
     let f = Fixture::new();
-    let child = f.spawn("10s");
-    let stream = accept(&f.listener);
-    // Ensure the peer has received the entire request before dropping it.
-    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-    let mut length = 0;
-    loop {
-        let mut line = String::new();
-        assert!(reader.read_line(&mut line).unwrap() > 0);
-        if line == "\r\n" {
-            break;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            if key.eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse().unwrap();
+    let (raw, ()) = loopback::run_listener(
+        f.listener.try_clone().unwrap(),
+        &mut f.command("0"),
+        |listener, _| {
+            let stream = accept(&listener);
+            // Ensure the peer has received the entire request before dropping it.
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some((key, value)) = line.split_once(':') {
+                    if key.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
             }
-        }
-    }
-    reader.read_exact(&mut vec![0; length]).unwrap();
-    drop(reader);
-    drop(stream);
-    let output = envelope(finish(child), 5);
+            reader.read_exact(&mut vec![0; length]).unwrap();
+            drop(reader);
+            drop(stream);
+        },
+    )
+    .unwrap();
+    let output = envelope(raw, 5);
     assert_eq!(output["error"]["code"], "model-connectivity");
     assert_eq!(output["error"]["retry_attempts"], 0);
     assert!(output["error"]["message"]
@@ -357,9 +365,9 @@ fn anthropic_quota_refusals_and_throttles_keep_typed_retry_policy() {
             .to_string(),
         )
         .unwrap();
-        let child = f.spawn("10s");
+        let (raw, ()) = loopback::run_listener(f.listener.try_clone().unwrap(), &mut f.command("0"), |listener, _| {
         respond(
-            &f.listener,
+            &listener,
             Response {
                 status: 429,
                 hint: Some(1),
@@ -369,13 +377,9 @@ fn anthropic_quota_refusals_and_throttles_keep_typed_retry_policy() {
                 }}),
             },
         );
-        if quota {
-            let output = envelope(finish(child), 5);
-            assert_eq!(output["error"]["code"], "model-quota-exhausted");
-            assert_eq!(output["error"]["retry_attempts"], 0);
-        } else {
+        if !quota {
             respond(
-                &f.listener,
+                &listener,
                 Response {
                     status: 200,
                     hint: None,
@@ -387,7 +391,13 @@ fn anthropic_quota_refusals_and_throttles_keep_typed_retry_policy() {
                     }),
                 },
             );
-            let output = envelope(finish(child), 0);
+        }
+        }).unwrap();
+        let output = envelope(raw, 5 * i32::from(quota));
+        if quota {
+            assert_eq!(output["error"]["code"], "model-quota-exhausted");
+            assert_eq!(output["error"]["retry_attempts"], 0);
+        } else {
             assert_eq!(output["retry_attempts"], 1);
             assert_eq!(output["summary"], "Recovered.");
         }
@@ -410,8 +420,8 @@ fn received_401_with_diagnostic_body_timeout_never_retries() {
             .to_string(),
         )
         .unwrap();
-        let child = f.spawn_with_request_timeout("10s", "200ms");
-        let mut stream = accept(&f.listener);
+        let (raw, ()) = loopback::run_listener(f.listener.try_clone().unwrap(), &mut f.command_with_request_timeout("0", "200ms"), |listener, _| {
+        let mut stream = accept(&listener);
         // Read all request headers/body before supplying an incomplete error body.
         let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
         let mut length = 0;
@@ -430,9 +440,10 @@ fn received_401_with_diagnostic_body_timeout_never_retries() {
         reader.read_exact(&mut vec![0; length]).unwrap();
         stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial").unwrap();
         // Hold the socket open: the diagnostic-body deadline, not peer EOF, fires.
-        let output = envelope(finish(child), 5);
         drop(reader);
-        drop(stream);
+        listener.until_client_exits();
+        }).unwrap();
+        let output = envelope(raw, 5);
         assert_eq!(output["error"]["code"], "model-permanent");
         assert_eq!(output["error"]["retry_attempts"], 0);
         assert!(output["error"]["message"]
@@ -457,10 +468,10 @@ fn responses_http_retains_retry_after_and_reissues_identical_bytes() {
         .to_string(),
     )
     .unwrap();
-    let child = f.spawn("10s");
-    let (first, at) = respond(&f.listener, throttle(Some(1)));
-    let (last, next) = respond(
-        &f.listener,
+    let (raw, (first, last)) = loopback::run_listener(f.listener.try_clone().unwrap(), &mut f.command("0"), |listener, _| {
+    let first = respond(&listener, throttle(Some(1)));
+    let last = respond(
+        &listener,
         Response {
             status: 200,
             hint: None,
@@ -472,9 +483,11 @@ fn responses_http_retains_retry_after_and_reissues_identical_bytes() {
             }),
         },
     );
-    let output = envelope(finish(child), 0);
+    (first, last)
+    }).unwrap();
+    let output = envelope(raw, 0);
     assert_eq!(first, last);
-    assert!(next.duration_since(at) >= Duration::from_secs(1));
+    // Retry-After timing is pinned by the paused-clock backoff test.
     assert_eq!(output["retry_attempts"], 1);
     assert_eq!(output["summary"], "Recovered.");
     f.no_more_requests();

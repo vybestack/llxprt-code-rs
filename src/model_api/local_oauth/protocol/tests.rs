@@ -1,6 +1,5 @@
-fn scripted_login(
-    responses: Vec<(u16, Value)>,
-) -> (Protocol, std::thread::JoinHandle<Vec<String>>) {
+use crate::test_loopback as loopback;
+fn scripted_login(responses: Vec<(u16, Value)>) -> (Protocol, loopback::Server<Vec<String>>) {
     scripted_http(
         responses
             .into_iter()
@@ -13,16 +12,13 @@ fn http_response(status: u16, body: &str) -> String {
     format!("HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
 }
 
-fn scripted_http(responses: Vec<String>) -> (Protocol, std::thread::JoinHandle<Vec<String>>) {
+fn scripted_http(responses: Vec<String>) -> (Protocol, loopback::Server<Vec<String>>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let protocol = Protocol::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
-    let handle = std::thread::spawn(move || {
+    let handle = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
             let mut bytes = Vec::new();
             loop {
                 let mut buffer = [0u8; 1024];
@@ -193,14 +189,13 @@ fn http_errors_identify_only_stage_and_status() {
 fn loopback_device_login_acquires_and_validates_fresh_token() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let protocol = Protocol::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         for (route, body, expected) in [
             ("/api/accounts/deviceauth/usercode", json!({"device_auth_id":"device-id", "user_code":"TEST-CODE", "interval":"1"}).to_string(), CLIENT_ID),
             ("/api/accounts/deviceauth/token", json!({"authorization_code":"auth-code", "code_verifier":"verifier", "code_challenge":"challenge"}).to_string(), "device-id"),
             ("/oauth/token", response().to_string(), "grant_type=authorization_code"),
         ] {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
             let mut bytes = Vec::new();
             loop {
                 let mut buffer = [0u8; 1024];
@@ -293,14 +288,11 @@ fn server(
     status: u16,
     body: String,
     assert_request: impl Fn(&str) + Send + 'static,
-) -> (Protocol, std::thread::JoinHandle<()>) {
+) -> (Protocol, loopback::Server<()>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let protocol = Protocol::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
-    let handle = std::thread::spawn(move || {
+    let handle = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
         let mut bytes = Vec::new();
         loop {
             let mut buffer = [0u8; 1024];

@@ -1,15 +1,15 @@
 //! Stock CLI exact-wire measurement, normalized usage, restart and contract invalidation.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
+use loopback::Connection as TcpStream;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Output};
 
 fn request(stream: &mut TcpStream) -> Vec<u8> {
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-        .unwrap();
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut length = 0;
     loop {
@@ -96,7 +96,7 @@ fn exact_wire_usage_and_restart_margin_are_bound_to_route_model() {
             provider,
             None,
         );
-        let server = std::thread::spawn(move || {
+        let server = loopback::spawn(listener, move |listener| {
             let mut wires = vec![];
             for _ in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
@@ -163,16 +163,17 @@ fn calibrated_admission_refuses_before_send_after_restart() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     profile(work.path(), address, "fixture", "openai", Some(30000));
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         request(&mut stream);
         send(&mut stream, &reply("openai", 50000));
-        listener.set_nonblocking(true).unwrap();
+
         listener
     });
     let first = bound(&run(work.path(), "first"));
     assert!(first["margin"].is_null());
     let listener = server.join().unwrap();
+    listener.set_nonblocking(true).unwrap();
     let refused = run(work.path(), "second unchanged mandatory prompt");
     assert_eq!(refused.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&refused.stdout).unwrap();
@@ -204,7 +205,7 @@ fn observed_margin_failure_is_typed_not_silently_accepted() {
         "openai",
         None,
     );
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         for input in [10000, 50000] {
             let (mut stream, _) = listener.accept().unwrap();
             request(&mut stream);
@@ -235,7 +236,7 @@ fn missing_tokenizer_keeps_recognized_overflow_one_shot_and_new_prompt() {
         "openai",
         None,
     );
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
         request(&mut stream);
         let tool = json!({"id":"chat","object":"chat.completion","created":1,"model":"fixture",
@@ -264,12 +265,13 @@ fn missing_tokenizer_keeps_recognized_overflow_one_shot_and_new_prompt() {
                 .any(|m| m["role"] == "user" && m["content"] == "NEW mandatory 中文 unchanged"));
         }
         send(&mut stream, &reply("openai", 100));
-        listener.set_nonblocking(true).unwrap();
+
         listener
     });
     bound(&run(work.path(), "initial read input"));
     let output = run(work.path(), "NEW mandatory 中文 unchanged");
     let listener = server.join().unwrap();
+    listener.set_nonblocking(true).unwrap();
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(output.status.success(), "{value}");
     assert_eq!(value["telemetry"]["model_calls"], 2);

@@ -1,4 +1,6 @@
 //! Selected stateless Codex HTTP SSE mapping through the stock agent and session store.
+#[path = "../src/test_loopback.rs"]
+mod loopback;
 use llxprt_code_rs::adapter::{ChatBackend, LlmResult};
 use llxprt_code_rs::agent::CodingAgent;
 use llxprt_code_rs::session::{SessionId, SessionStore};
@@ -42,22 +44,9 @@ fn backend(url: &str) -> Backend {
         calls: AtomicUsize::new(0),
     }
 }
-fn request(listener: &std::net::TcpListener) -> (std::net::TcpStream, Value) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let mut socket = loop {
-        match listener.accept() {
-            Ok((s, _)) => break s,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(std::time::Instant::now() < deadline);
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(e) => panic!("{e}"),
-        }
-    };
-    socket.set_nonblocking(false).unwrap();
-    socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
-        .unwrap();
+fn request(listener: &loopback::Listener) -> (loopback::Connection, Value) {
+    let mut socket = listener.accept().unwrap().0;
+
     let mut reader = std::io::BufReader::new(&mut socket);
     let mut length = 0;
     loop {
@@ -135,9 +124,9 @@ fn codex_completed_items_keep_encryption_ids_order_and_phase_across_restart() {
     std::env::set_var("LLXPRT_CONFIG_HOME", root.path());
     std::fs::write(root.path().join("input.txt"), "evidence").unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
+
     let url = format!("http://{}/responses", listener.local_addr().unwrap());
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let mut requests = Vec::new();
         for i in 0..5 {
             let (mut socket, body) = request(&listener);

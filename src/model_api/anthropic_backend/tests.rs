@@ -1,7 +1,7 @@
 use super::*;
+use crate::test_loopback as loopback;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
-use std::time::Duration;
 
 /// This bypasses no provider code: only the loopback peer is controlled. A short
 /// body exercises reqwest's response-transfer failure, distinct from send/head.
@@ -9,11 +9,8 @@ use std::time::Duration;
 fn truncated_body_has_typed_cause_and_never_becomes_completion() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    let server = loopback::spawn(listener, move |listener| {
         let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
@@ -36,7 +33,7 @@ fn truncated_body_has_typed_cause_and_never_becomes_completion() {
     let backend = AnthropicBackend::new(
         serdes_ai::models::anthropic::AnthropicModel::new("fixture", "key-marker")
             .with_base_url(format!("http://{address}")),
-        ModelSettings::new().timeout(Duration::from_secs(2)),
+        ModelSettings::default(),
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
