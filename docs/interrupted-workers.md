@@ -65,3 +65,7 @@ dispatch rather than silently running without evidence. The signal handler's
 write remains best-effort: a failing disk must never prevent tool-group cleanup
 or change the signal exit status. This does not change shell permissions, hide
 worker PIDs, or identify the process that sent a signal.
+
+The new session artifacts advance the supported store format to **version 8**,
+as required by the storage-codec guard. Older stores are rejected; use a fresh
+session. No migration or legacy-format reader is provided.
