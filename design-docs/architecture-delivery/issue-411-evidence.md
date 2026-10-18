@@ -70,6 +70,12 @@ explicit polling mode was restored without changing the assertion, and a
 queue-detection regression was added. Its positive control polls OS accept
 readiness rather than assuming `connect` returning means the listening queue is
 already visible on Darwin; the accepted-connection assertion is unchanged.
+An independent negative probe also found that cancellation could hide a queued
+unexpected request in `expect_no_more_requests`. The helper now checks the raw
+socket queue after observing cancellation; a connected positive-control regression
+uses blocking OS readiness synchronization, not a timing threshold. Its original
+probe failed with `cancellation hid an unexpected queued request` (exit 101),
+and the strengthened check passes.
 Development logs are retained, not relabeled as clean
 exact-head gate passes.
 
@@ -133,7 +139,8 @@ retained in the local gate scripts/logs rather than editing another workspace.
 
 ## 11. Gate plan and receipts
 
-MSRV is **1.88.0** (`Cargo.toml` and current CI); installed stable is **1.96.0**.
+MSRV is **1.88.0** (`Cargo.toml` and current CI); the resumed installed stable
+is **1.98.0** (recorded from `rustc +stable --version`).
 Required exact-committed-head receipts are recorded in the PR and
 `tmp/issue-411/` (including command logs and exit files):
 

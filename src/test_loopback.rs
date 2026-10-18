@@ -226,6 +226,13 @@ impl Listener {
             .accept()
             .expect_err("unexpected request after scripted replies");
         assert_eq!(error.kind(), io::ErrorKind::ConnectionAborted);
+        // Cancellation is not evidence that the socket queue is empty. The
+        // client can finish before this worker is scheduled after its last reply.
+        let error = self
+            .socket
+            .accept()
+            .expect_err("unexpected request after scripted replies");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
     }
     pub fn until_client_exits(&self) {
         let _ = self.stop.lock().unwrap().recv();
@@ -565,5 +572,23 @@ mod tests {
             }
         };
         assert!(accepted.is_ok());
+    }
+
+    #[test]
+    fn cancelled_no_more_requests_check_rejects_a_queued_request() {
+        let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = socket.local_addr().unwrap();
+        let listener = spawn(socket, |listener| listener).join().unwrap();
+        // This known-connected positive control uses blocking OS accept to
+        // synchronize readiness, not an elapsed-time bound or scheduler guess.
+        listener.socket.set_nonblocking(false).unwrap();
+        let _peer = TcpStream::connect(address).unwrap();
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            listener.expect_no_more_requests();
+        }));
+        assert!(
+            rejected.is_err(),
+            "cancellation hid an unexpected queued request"
+        );
     }
 }
