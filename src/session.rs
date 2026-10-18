@@ -53,6 +53,7 @@ pub use context_persist::ToolResultProjection;
 pub use records::{
     BranchRecord, Lifecycle, RoundRecord, SessionState, StreamRetryRecord, ToolCallRecord,
 };
+pub(crate) mod interruption;
 mod log;
 mod output_ownership;
 pub(crate) use output_ownership::validate_diagnostic_destination;

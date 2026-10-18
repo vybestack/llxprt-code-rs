@@ -772,6 +772,14 @@ or migration path is provided. Invocation retry counts are separately carried in
 the stdout envelope; they do not change the session store format.
 
 
+### Interrupted worker evidence
+
+A worker interrupted during a tool call retains bounded, redacted arguments,
+round and start time in `tool-in-flight.json`. `transcript --session TASK_ID --json`
+reports SIGINT/SIGTERM as a typed cancellation with the in-flight tool, without
+inventing a completed round. See [operator recovery details](docs/interrupted-workers.md)
+for locations, limits, signal semantics and preserving evidence before retry.
+
 ### Turn telemetry
 
 Agent success and terminal failure envelopes include a strict `telemetry` object

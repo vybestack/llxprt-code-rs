@@ -30,6 +30,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+mod cancellation_record;
+pub(crate) use cancellation_record::CancellationRecord;
 mod ownership;
 #[cfg(test)]
 pub(crate) use ownership::Scope as TestScope;
@@ -156,7 +158,8 @@ pub fn kill_active_group(signal: i32) {
 /// Cancellation handler: `SIGKILL` the active tool's whole process group, then exit without
 /// unwinding. `SIGKILL` rather than `SIGTERM` because the operator already chose to cancel, so the
 /// orphan must not be able to ignore it or outlive a graceful TERM escalation. Async-signal-safe:
-/// one sequentially consistent atomic load, `kill`, `_exit`. The registration store uses the same
+/// lock-free atomics, `kill`, and a one-byte `pwrite` to a pre-opened evidence file,
+/// then `_exit`. No session locks or serialization run on the signal stack. The group registration uses the same
 /// ordering, so a cancellation observed after a caller has observed a published group cannot read
 /// the earlier empty slot.
 extern "C" fn cancellation_handler(signal: libc::c_int) {
@@ -165,6 +168,7 @@ extern "C" fn cancellation_handler(signal: libc::c_int) {
         // Safety: `pgid` is the retained scope group, published before command exec.
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
     }
+    cancellation_record::record(signal);
     // Safety: `_exit` is async-signal-safe and never returns. 128+signal is the conventional
     // status a cancelling operator expects to observe.
     unsafe { libc::_exit(if signal == libc::SIGINT { 130 } else { 143 }) };

@@ -1,34 +1,83 @@
-//! In-flight tool marker sidecar (issue #165).
-//!
-//! The segment log only appends per completed turn, so a headless run parked inside
-//! a long local tool call (a cold `cargo test`, say) is indistinguishable from a
-//! dead one: operators have nothing to stat and end up killing live sessions.
-//! While a tool call executes, `tool-in-flight.json` in the session directory names
-//! the tool and when it started, giving the watchdog a machine-readable busy
-//! signal; it is removed the moment the call resolves, success or failure, so an
-//! absent sidecar means the turn is free.
-//!
-//! Marker IO is best-effort like the `context-quiesce.json` precedent: a sidecar
-//! failure must never fail the run, so every result is discarded.
+//! Persist validated call evidence before dispatch; normal completion clears it.
 use super::*;
+use crate::session::interruption::{self, InFlight, MAX_ARGS_BYTES};
 
-/// Best-effort write of the currently executing tool and its start time.
-pub(crate) fn mark(store: &SessionStore, tool: &str) {
+pub(crate) fn mark(
+    store: &SessionStore,
+    reserved: &ReservedRequest,
+    call: &ToolCall,
+    round: usize,
+    secrets: &[String],
+) -> std::io::Result<()> {
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
-    let payload = serde_json::json!({ "tool": tool, "started": started });
-    let _ = std::fs::create_dir_all(store.session_dir());
-    let _ = std::fs::write(
-        store.session_dir().join("tool-in-flight.json"),
-        serde_json::to_vec(&payload).unwrap_or_default(),
-    );
+    interruption::mark(
+        store,
+        reserved,
+        &InFlight {
+            tool: call.name.clone(),
+            id: call.id.clone(),
+            turn: reserved.turn,
+            round,
+            started,
+            args: crate::redact::truncate_utf8(
+                crate::redact::scrub_secrets(&call.args_json, secrets),
+                MAX_ARGS_BYTES,
+            ),
+        },
+    )
 }
 
-/// Best-effort removal once the call resolves; a missing marker is already clear.
-pub(crate) fn clear(store: &SessionStore) {
-    let _ = std::fs::remove_file(store.session_dir().join("tool-in-flight.json"));
+pub(crate) fn clear(store: &SessionStore, reserved: &ReservedRequest) -> std::io::Result<()> {
+    interruption::clear(store, reserved)
+}
+
+impl Turn<'_> {
+    pub(super) fn dispatch_recorded(
+        &self,
+        config: &crate::tools::ToolConfig,
+        session: (&SessionStore, &ReservedRequest, usize),
+        call: &ToolCall,
+        parsed: JsonValue,
+        body_budget: usize,
+    ) -> Result<(bool, String), ToolCallFailure> {
+        let (store, reserved, round) = session;
+        if known_tool(&call.name, self.allow_shell) {
+            in_flight::mark(store, reserved, call, round, &self.secrets).map_err(|error| {
+                ToolCallFailure::Session(crate::session::StoreError::Io(error.to_string()))
+            })?;
+        }
+        Ok(if known_tool(&call.name, self.allow_shell) {
+            crate::tools::execute_tool_with_limit(
+                &self.cwd,
+                &call.name,
+                parsed,
+                config,
+                body_budget,
+            )
+        } else {
+            (
+                false,
+                crate::redact::truncate_utf8(
+                    helpers::naming_failure(self.allow_shell, &call.name),
+                    config.max_output_bytes.min(body_budget),
+                ),
+            )
+        })
+    }
+}
+
+pub(super) fn finish(
+    store: &SessionStore,
+    reserved: &ReservedRequest,
+    outcome: Result<(), ToolCallFailure>,
+) -> Result<(), ToolCallFailure> {
+    clear(store, reserved).map_err(|error| {
+        ToolCallFailure::Session(crate::session::StoreError::Io(error.to_string()))
+    })?;
+    outcome
 }
 
 #[cfg(test)]

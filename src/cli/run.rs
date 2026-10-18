@@ -95,7 +95,10 @@ pub fn run_profiled(
         },
     )?;
     let output_caps = agent.output_caps();
+    let cancellation = crate::session::interruption::arm(&store, &reserved)
+        .map_err(|error| AppError::new(Code::Session, "cancellation-record", error))?;
     let result = agent.run(&store, &reserved).map_err(agent_error);
+    drop(cancellation);
     let run = publish_telemetry(telemetry_output, result)?;
     Ok(RunOutcome {
         session: session_id,

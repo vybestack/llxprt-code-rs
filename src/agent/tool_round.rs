@@ -84,7 +84,9 @@ impl super::Turn<'_> {
         store: &SessionStore,
         reserved: &ReservedRequest,
     ) -> Result<(), AgentError> {
+        let session = (store, reserved);
         for (index, call) in calls.iter().enumerate() {
+            let position = (index, calls.len());
             self.update_profile_usage(&attempt.usage);
             let round_index = attempt.rounds.len() + 1;
             self.profile(
@@ -95,15 +97,12 @@ impl super::Turn<'_> {
                     ..Default::default()
                 },
             )?;
-            if known_tool(&call.name, self.allow_shell) {
-                in_flight::mark(store, &call.name);
-            }
             let outcome = store
                 .with_tool_lease(reserved, || {
-                    self.execute_one_call(config, store, attempt, round, call, (index, calls.len()))
+                    self.execute_one_call(config, session, attempt, round, call, position)
                 })
                 .unwrap_or_else(|error| Err(ToolCallFailure::Session(error)));
-            in_flight::clear(store);
+            let outcome = in_flight::finish(store, reserved, outcome);
             if let Err(failure) = outcome {
                 // Calls enter the round only after execution and result admission.
                 // Publish that prefix on failure too, never the unexecuted suffix.
