@@ -194,7 +194,7 @@ Example success object:
 
 ```sh
 llxprt-code-rs --session-state-versions < /dev/null
-# {"session_state_versions":[7]}
+# {"session_state_versions":[8]}
 ```
 
 Use this flag **alone**. It exits 0 with exactly one JSON object, without reading

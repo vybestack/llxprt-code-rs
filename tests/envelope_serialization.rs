@@ -34,11 +34,11 @@ fn success_envelope_bytes_are_pinned() {
     let line = cli::envelope(&outcome, "sess_1").to_line();
     assert_eq!(
         String::from_utf8_lossy(&line),
-        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"retry_attempts\":0,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"session_state_version\":7,\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
+        "{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-雪\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"retry_attempts\":0,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"session_state_version\":8,\"status\":\"ok\",\"summary\":\"done\\n雪\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
     assert_eq!(
         line,
-        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"retry_attempts\":0,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"session_state_version\":7,\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
+        b"{\"attempt\":1,\"branch\":false,\"branch_id\":\"branch-\\\"snow-\xe9\x9b\xaa\",\"budget_exhausted\":false,\"declared_tool_calls\":-1,\"output_caps\":{\"shell\":32768,\"tool\":16777216,\"turn\":16777216},\"prompt_digest\":\"0123456789abcdef\",\"replayed\":true,\"retry_attempts\":0,\"session_dir\":\"/sessions/sess_1\",\"session_id\":\"sess_1\",\"session_state_version\":8,\"status\":\"ok\",\"summary\":\"done\\n\xe9\x9b\xaa\",\"tool_calls\":3,\"turn\":2,\"zero_call_tail\":2}\n"
     );
 }
 
