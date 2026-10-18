@@ -545,4 +545,19 @@ mod tests {
         server.join().unwrap();
         drop(peer);
     }
+    #[test]
+    fn returned_listener_can_check_the_socket_queue_after_cancellation() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let listener = spawn(listener, |listener| listener).join().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        let _peer = TcpStream::connect(address).unwrap();
+        // Polling a returned listener must still detect a real unexpected send,
+        // not mistake its disconnected cancellation owner for an empty queue.
+        assert!(listener.accept().is_ok());
+    }
 }

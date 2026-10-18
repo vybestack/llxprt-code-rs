@@ -64,7 +64,10 @@ Baseline evidence is the original fixed deadlines and sleeping no-replay checks
 at the starting commit. No reproducible red wall-clock run is claimed: the defect
 is dependence on scheduler speed, not a deterministic failure at idle. A development
 run also exposed an incorrect retained listener clone; it was removed, and the
-focused proxy test passed. Development logs are retained, not relabeled as clean
+focused proxy test passed. The full development suite also found a returned
+listener incorrectly using cancelled blocking mode for a no-send assertion;
+explicit polling mode was restored without changing the assertion, and a
+queue-detection regression was added. Development logs are retained, not relabeled as clean
 exact-head gate passes.
 
 ## 6. Loopback audit and exceptions

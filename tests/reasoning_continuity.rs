@@ -316,6 +316,7 @@ fn changed_model_refuses_private_history_before_any_transport_request() {
         .unwrap();
     assert!(output.status.success());
     let listener = server.join().unwrap();
+    listener.set_nonblocking(true).unwrap();
     std::fs::write(profile, config("second-model")).unwrap();
     let output = cli(root.path())
         .args([

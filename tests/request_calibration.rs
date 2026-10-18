@@ -173,6 +173,7 @@ fn calibrated_admission_refuses_before_send_after_restart() {
     let first = bound(&run(work.path(), "first"));
     assert!(first["margin"].is_null());
     let listener = server.join().unwrap();
+    listener.set_nonblocking(true).unwrap();
     let refused = run(work.path(), "second unchanged mandatory prompt");
     assert_eq!(refused.status.code(), Some(5));
     let envelope: Value = serde_json::from_slice(&refused.stdout).unwrap();
@@ -270,6 +271,7 @@ fn missing_tokenizer_keeps_recognized_overflow_one_shot_and_new_prompt() {
     bound(&run(work.path(), "initial read input"));
     let output = run(work.path(), "NEW mandatory 中文 unchanged");
     let listener = server.join().unwrap();
+    listener.set_nonblocking(true).unwrap();
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(output.status.success(), "{value}");
     assert_eq!(value["telemetry"]["model_calls"], 2);
