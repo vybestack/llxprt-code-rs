@@ -9,8 +9,8 @@ use llxprt_code_rs::session::STORE_VERSION;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const PINNED_VERSION: u32 = 8;
-const PINNED_SHA256: &str = "c9a51a15965675d3ff373eb8cd758c62e1536402c75cd71b6542f4499488f84e";
+const PINNED_VERSION: u32 = 9;
+const PINNED_SHA256: &str = "6f7667a9e06956b7e2e452214173924b0a37acab70ee38a06230474b0435110c";
 
 fn storage_sources(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_dir() {

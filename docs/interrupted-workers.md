@@ -37,7 +37,10 @@ During execution, the same tool evidence is atomically published as
 `<config-home>/code-rs-sessions/TASK_ID/tool-in-flight.json`. This is independent
 of `--emit`; a worker killed even by SIGKILL leaves the last published call
 available there. Ordinary completion (including a tool failure) removes this
-watchdog sidecar. A turn interrupted between tools or during a provider call
+watchdog sidecar. The projection also records the reservation `owner`. Each new
+non-replay invocation retires a dead predecessor's projection before running,
+even if the new turn makes no tool calls. It does not delete the predecessor's
+owner-scoped evidence. A turn interrupted between tools or during a provider call
 has `cancellation.in_flight: null`, not the last completed tool.
 
 The persistent cancellation evidence uses private, owner-scoped
@@ -48,7 +51,7 @@ or `null` once the call resolves; it may be absent before the first tool.
 These files survive process exit. The transcript joins them to the matching
 pending reservation, never another owner or a completed/failed branch. Preserve
 the session directory **before retry/reclaim or further work**: reclaim replaces
-the reservation owner, and a subsequent tool replaces the watchdog sidecar.
+the reservation owner, and a subsequent invocation can retire the watchdog sidecar.
 The owner-scoped files remain available for operator forensics after reclaim.
 
 The handler does not acquire the session lock, serialize history, or invent a
@@ -60,12 +63,23 @@ marker, not a manufactured completed round. SIGKILL, machine power loss, or
 storage write failures cannot produce a signal marker; an in-flight sidecar
 alone is not proof of which signal or sender killed the worker.
 
+Projection reconciliation, dispatch publication and completion clearing run under
+the session lock and validate the caller's reservation. The signal descriptor
+holds an advisory lifetime lock until the invocation ends (also released by
+SIGKILL); a new invocation preserves a projection whose publisher still holds
+that lock. A concurrent tool cannot overwrite another live owner's projection,
+and a tool's completion clears only its own projection. Malformed, oversized,
+symlinked or unreadable projection/evidence files fail closed as typed session
+errors, not as proof that a publisher has exited. Transcript reads never repair
+or remove these artifacts.
+
 Evidence setup/publication failures are typed session errors and prevent tool
 dispatch rather than silently running without evidence. The signal handler's
 write remains best-effort: a failing disk must never prevent tool-group cleanup
 or change the signal exit status. This does not change shell permissions, hide
 worker PIDs, or identify the process that sent a signal.
 
-The new session artifacts advance the supported store format to **version 8**,
+The owner-aware projection and its lifetime-lock contract advance the supported
+store format to **version 9**,
 as required by the storage-codec guard. Older stores are rejected; use a fresh
 session. No migration or legacy-format reader is provided.

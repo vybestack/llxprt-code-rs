@@ -1,10 +1,13 @@
 //! Typed, owner-scoped interruption evidence, separate from the transactional history.
 //! Signal handlers cannot safely acquire the session lock or serialize a turn.
-use super::{BranchRecord, ReservedRequest, SessionStore};
+use super::{BranchRecord, ReservedRequest, SessionStore, StoreError};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+
+mod projection;
 
 pub(crate) const MAX_ARGS_BYTES: usize = 8192;
 const MAX_RECORD_BYTES: usize = MAX_ARGS_BYTES * 8 + 1024;
@@ -43,19 +46,28 @@ pub(crate) fn tool_path(dir: &Path, owner: &str) -> PathBuf {
 pub(crate) fn arm(
     store: &SessionStore,
     reserved: &ReservedRequest,
-) -> Result<Option<crate::process::CancellationRecord>, String> {
+) -> Result<Option<crate::process::CancellationRecord>, StoreError> {
     if reserved.replay {
         return Ok(None);
     }
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(store.session_dir().join(name(&reserved.owner, "signal")))
-        .map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
-    crate::process::CancellationRecord::install(file).map(Some)
+    crate::process::CancellationRecord::install(prepare(store, reserved)?)
+        .map(Some)
+        .map_err(StoreError::Io)
+}
+
+fn prepare(store: &SessionStore, reserved: &ReservedRequest) -> Result<std::fs::File, StoreError> {
+    owned(store, reserved, || {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(store.session_dir().join(name(&reserved.owner, "signal")))?;
+        file.try_lock_exclusive()?;
+        file.sync_all()?;
+        projection::retire_inactive(store.session_dir())?;
+        Ok(file)
+    })
 }
 
 pub(crate) fn publish(dir: &Path, filename: &str, bytes: &[u8]) -> std::io::Result<()> {
@@ -69,28 +81,40 @@ pub(crate) fn mark(
     store: &SessionStore,
     reserved: &ReservedRequest,
     flight: &InFlight,
-) -> std::io::Result<()> {
-    let bytes = serde_json::to_vec(flight)?;
-    publish(
-        store.session_dir(),
-        &name(&reserved.owner, "tool.json"),
-        &bytes,
-    )?;
-    publish(store.session_dir(), "tool-in-flight.json", &bytes)
+) -> Result<(), StoreError> {
+    owned(store, reserved, || {
+        let bytes = serde_json::to_vec(flight)?;
+        publish(
+            store.session_dir(),
+            &name(&reserved.owner, "tool.json"),
+            &bytes,
+        )?;
+        projection::mark(store.session_dir(), &reserved.owner, flight)
+    })
 }
 
-pub(crate) fn clear(store: &SessionStore, reserved: &ReservedRequest) -> std::io::Result<()> {
-    // Publish null before removing the watchdog sidecar: a signal between calls must
-    // not attribute cancellation to the previous (already completed) tool.
-    publish(
-        store.session_dir(),
-        &name(&reserved.owner, "tool.json"),
-        b"null",
-    )?;
-    match std::fs::remove_file(store.session_dir().join("tool-in-flight.json")) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
+pub(crate) fn clear(store: &SessionStore, reserved: &ReservedRequest) -> Result<(), StoreError> {
+    owned(store, reserved, || {
+        // A signal between calls must not attribute cancellation to a completed tool.
+        publish(
+            store.session_dir(),
+            &name(&reserved.owner, "tool.json"),
+            b"null",
+        )?;
+        projection::clear_owned(store.session_dir(), &reserved.owner)
+    })
+}
+
+fn owned<T>(
+    store: &SessionStore,
+    reserved: &ReservedRequest,
+    operation: impl FnOnce() -> std::io::Result<T>,
+) -> Result<T, StoreError> {
+    store.locked(|| {
+        let state = store.read()?;
+        store.live_branch(&state, reserved)?;
+        operation().map_err(|error| StoreError::Io(error.to_string()))
+    })
 }
 
 /// Read without repairing the session. Owner hashing prevents reclaimed reservations
