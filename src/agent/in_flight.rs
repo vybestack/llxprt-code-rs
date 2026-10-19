@@ -8,7 +8,7 @@ pub(crate) fn mark(
     call: &ToolCall,
     round: usize,
     secrets: &[String],
-) -> std::io::Result<()> {
+) -> Result<(), crate::session::StoreError> {
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -30,7 +30,10 @@ pub(crate) fn mark(
     )
 }
 
-pub(crate) fn clear(store: &SessionStore, reserved: &ReservedRequest) -> std::io::Result<()> {
+pub(crate) fn clear(
+    store: &SessionStore,
+    reserved: &ReservedRequest,
+) -> Result<(), crate::session::StoreError> {
     interruption::clear(store, reserved)
 }
 
@@ -45,9 +48,8 @@ impl Turn<'_> {
     ) -> Result<(bool, String), ToolCallFailure> {
         let (store, reserved, round) = session;
         if known_tool(&call.name, self.allow_shell) {
-            in_flight::mark(store, reserved, call, round, &self.secrets).map_err(|error| {
-                ToolCallFailure::Session(crate::session::StoreError::Io(error.to_string()))
-            })?;
+            in_flight::mark(store, reserved, call, round, &self.secrets)
+                .map_err(ToolCallFailure::Session)?;
         }
         Ok(if known_tool(&call.name, self.allow_shell) {
             crate::tools::execute_tool_with_limit(
@@ -74,9 +76,7 @@ pub(super) fn finish(
     reserved: &ReservedRequest,
     outcome: Result<(), ToolCallFailure>,
 ) -> Result<(), ToolCallFailure> {
-    clear(store, reserved).map_err(|error| {
-        ToolCallFailure::Session(crate::session::StoreError::Io(error.to_string()))
-    })?;
+    clear(store, reserved).map_err(ToolCallFailure::Session)?;
     outcome
 }
 
